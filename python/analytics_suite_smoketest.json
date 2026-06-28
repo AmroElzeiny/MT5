@@ -1,0 +1,85 @@
+{
+  "generated_at": 1776569535,
+  "report": {
+    "overall": {
+      "count": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "avg_effective_rr2": 0.0,
+      "avg_expected_value_r": 0.0,
+      "avg_pnl": 0.0,
+      "sum_pnl": 0.0,
+      "profit_factor": 0.0,
+      "avg_fill_slippage_r": 0.0,
+      "avg_stop_quality": 0.0,
+      "r_ci_low": 0.0,
+      "r_ci_high": 0.0,
+      "bootstrap_positive_rate": 0.0
+    },
+    "grouped": {
+      "symbol": [],
+      "session_name": [],
+      "in_killzone": [],
+      "po3_subtype": [],
+      "fvg_subtype": [],
+      "regime_bucket": [],
+      "volatility_profile": [],
+      "setup_class": [],
+      "ai_decision_source": []
+    },
+    "walk_forward": []
+  },
+  "context_policy": [],
+  "subtype_policy": [],
+  "target_efficiency": [],
+  "snapshot_feature_report": [],
+  "overfitting_diagnostics": {
+    "global_walk_forward": {
+      "folds": 0,
+      "positive_fold_rate": 0.0,
+      "avg_train_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_train_ev": 0.0,
+      "avg_test_ev": 0.0,
+      "avg_gap": 0.0
+    },
+    "unstable_bucket_count": 0,
+    "unstable_buckets": [],
+    "max_avg_gap": 0.0,
+    "avg_bucket_gap": 0.0
+  },
+  "active_policy": {
+    "policy_id": "policy_1776569535_v1",
+    "version": 1,
+    "activated_at": 0,
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "soft_setup_floor": 35.0,
+    "hard_setup_floor": 29.0,
+    "setup_floor_penalty_mult": 0.75,
+    "ote_softness_frac": 0.08,
+    "default_risk_multiplier": 0.9,
+    "runner_sequence_floor": 6.6,
+    "runner_liquidity_rr_floor": 2.1,
+    "runner_cost_r_ceiling": 0.22,
+    "runner_alignment_floor": 6.1,
+    "runner_adverse_ceiling": 3.2,
+    "runner_ev_floor": 0.0
+  },
+  "governance": {
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "change_count": 0,
+    "changed_fields": [],
+    "activate_ok": false,
+    "subtype_policy_count": 0
+  },
+  "snapshot_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\logs\\policies\\snapshots\\policy_1776569535_v1.json",
+  "activation": null
+}

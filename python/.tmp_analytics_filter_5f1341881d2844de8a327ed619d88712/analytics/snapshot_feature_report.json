@@ -1,0 +1,13 @@
+{
+  "rows": [
+    {
+      "snapshot_state": "no_snapshots",
+      "setup_class": "micro_continuation_fvg..virgin_fvg",
+      "count": 236,
+      "avg_r": 0.0,
+      "avg_expected_value_r": -0.8499999999999965,
+      "avg_stop_quality": 0.0,
+      "win_rate": 0.0
+    }
+  ]
+}

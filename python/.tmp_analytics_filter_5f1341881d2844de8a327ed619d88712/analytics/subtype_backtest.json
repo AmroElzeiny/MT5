@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "subtype_key": "institutional_po3+closed_sweep|fvg+virgin_fvg|micro_continuation_fvg..virgin_fvg|weak_trend",
+      "action": "downrank",
+      "score_penalty": 6.0,
+      "risk_multiplier": 0.55,
+      "shrunk_win_rate": 0.0,
+      "avg_r": 0.0,
+      "evidence_score": 2.0,
+      "sample_count": 236,
+      "stats": {
+        "count": 236,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0.0,
+        "avg_r": 0.0,
+        "avg_effective_rr2": 0.0,
+        "avg_expected_value_r": -0.8499999999999965,
+        "avg_net_expected_r": -0.8499999999999965,
+        "avg_gross_expected_r": -0.8499999999999965,
+        "avg_execution_cost_r": 0.0,
+        "avg_slippage_r": 0.0,
+        "avg_commission_r": 0.0,
+        "avg_pnl": 139.7308474576271,
+        "sum_pnl": 32976.479999999996,
+        "profit_factor": 2.221884667415883,
+        "max_drawdown_r": 0.0,
+        "avg_fill_slippage_r": 0.0,
+        "avg_mfe_r": 0.0,
+        "avg_mae_r": 0.0,
+        "avg_duration_minutes": 76.77401129943495,
+        "avg_stop_quality": 0.0,
+        "r_ci_low": 0.0,
+        "r_ci_high": 0.0,
+        "bootstrap_positive_rate": 0.0
+      }
+    }
+  ]
+}

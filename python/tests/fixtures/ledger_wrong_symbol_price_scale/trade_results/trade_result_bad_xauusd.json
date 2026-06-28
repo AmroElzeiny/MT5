@@ -1,0 +1,25 @@
+{
+  "trade_key": "XAUUSD|fixture|bad-exit",
+  "broker_comment": "MPC-LON-K-XAUUSD-18432",
+  "position_id": "990001",
+  "symbol": "XAUUSD",
+  "is_buy": true,
+  "direction": "buy",
+  "magic_number": 5303001,
+  "planned_entry": 2350.0,
+  "filled_entry": 2350.2,
+  "planned_sl": 2344.0,
+  "planned_tp2": 2362.0,
+  "initial_volume": 0.1,
+  "realized_pnl": 75.0,
+  "partials": [
+    {
+      "symbol": "EURUSD",
+      "price": 1.0842,
+      "volume": 0.1,
+      "pnl": 75.0,
+      "magic_number": 5303001,
+      "comment": "MPC-LON-K-XAUUSD-18432"
+    }
+  ]
+}

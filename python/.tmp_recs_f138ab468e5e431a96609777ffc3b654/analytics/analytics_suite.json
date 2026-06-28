@@ -1,0 +1,536 @@
+{
+  "generated_at": 1781809415,
+  "report": {
+    "overall": {
+      "count": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "avg_effective_rr2": 0.0,
+      "avg_expected_value_r": 0.0,
+      "avg_net_expected_r": 0.0,
+      "avg_gross_expected_r": 0.0,
+      "avg_execution_cost_r": 0.0,
+      "avg_slippage_r": 0.0,
+      "avg_commission_r": 0.0,
+      "avg_pnl": 0.0,
+      "sum_pnl": 0.0,
+      "profit_factor": 0.0,
+      "max_drawdown_r": 0.0,
+      "avg_fill_slippage_r": 0.0,
+      "avg_mfe_r": 0.0,
+      "avg_mae_r": 0.0,
+      "avg_duration_minutes": 0.0,
+      "avg_stop_quality": 0.0,
+      "r_ci_low": 0.0,
+      "r_ci_high": 0.0,
+      "bootstrap_positive_rate": 0.0
+    },
+    "grouped": {
+      "symbol": [],
+      "session_name": [],
+      "in_killzone": [],
+      "setup_family": [],
+      "entry_branch": [],
+      "po3_subtype": [],
+      "fvg_subtype": [],
+      "regime_bucket": [],
+      "volatility_profile": [],
+      "setup_class": [],
+      "ai_score_bucket": [],
+      "execution_cost_bucket": [],
+      "ai_decision_source": []
+    },
+    "family_expectancy_policy": [],
+    "symbol_expectancy_policy": [],
+    "adaptive_policy_readiness": {
+      "activate_adaptive_policy": false,
+      "checks": {
+        "total_trades_ge_500": false,
+        "family_trades_ge_50": false,
+        "symbol_trades_ge_30": false,
+        "profit_factor_after_costs_gt_1_10": false,
+        "walk_forward_positive_fold_rate_ge_60pct": false
+      },
+      "walk_forward_summary": {
+        "folds": 0,
+        "positive_fold_rate": 0.0,
+        "avg_train_r": 0.0,
+        "avg_test_r": 0.0,
+        "avg_train_ev": 0.0,
+        "avg_test_ev": 0.0,
+        "avg_gap": 0.0
+      }
+    },
+    "walk_forward": [],
+    "data_quality": {
+      "loaded_files": 636,
+      "used_records": 0,
+      "ignored_records": 636,
+      "ignored_reasons": {
+        "missing_entry_branch": 282,
+        "missing_planned_entry": 282,
+        "missing_planned_sl": 282,
+        "missing_trade_id": 400,
+        "zero_realized_r_with_nonzero_pnl": 282
+      },
+      "ignored_examples": [
+        {
+          "file": "trade_result_[sl 0.58076].json",
+          "reasons": [
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 0.58076]",
+          "position_id": "",
+          "symbol": "NZDUSD",
+          "realized_pnl": -206.68,
+          "realized_r": -0.400512
+        },
+        {
+          "file": "trade_result_[sl 0.58145].json",
+          "reasons": [
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 0.58145]",
+          "position_id": "",
+          "symbol": "NZDUSD",
+          "realized_pnl": -422.2,
+          "realized_r": -0.624556
+        },
+        {
+          "file": "trade_result_[sl 0.58180].json",
+          "reasons": [
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 0.58180]",
+          "position_id": "",
+          "symbol": "NZDUSD",
+          "realized_pnl": -690.0,
+          "realized_r": -0.333333
+        },
+        {
+          "file": "trade_result_[sl 0.58376].json",
+          "reasons": [
+            "missing_planned_entry",
+            "missing_planned_sl",
+            "zero_realized_r_with_nonzero_pnl",
+            "missing_entry_branch"
+          ],
+          "trade_key": "[sl 0.58376]",
+          "position_id": "1388317604",
+          "symbol": "NZDUSD",
+          "realized_pnl": -340.78,
+          "realized_r": 0.0
+        },
+        {
+          "file": "trade_result_[sl 0.70654].json",
+          "reasons": [
+            "missing_planned_entry",
+            "missing_planned_sl",
+            "zero_realized_r_with_nonzero_pnl",
+            "missing_entry_branch"
+          ],
+          "trade_key": "[sl 0.70654]",
+          "position_id": "1386534287",
+          "symbol": "AUDUSD",
+          "realized_pnl": -230.72,
+          "realized_r": 0.0
+        },
+        {
+          "file": "trade_result_[sl 0.70698].json",
+          "reasons": [
+            "missing_planned_entry",
+            "missing_planned_sl",
+            "zero_realized_r_with_nonzero_pnl",
+            "missing_entry_branch"
+          ],
+          "trade_key": "[sl 0.70698]",
+          "position_id": "1384240290",
+          "symbol": "AUDUSD",
+          "realized_pnl": -91.22,
+          "realized_r": 0.0
+        },
+        {
+          "file": "trade_result_[sl 0.70730].json",
+          "reasons": [
+            "missing_planned_entry",
+            "missing_planned_sl",
+            "zero_realized_r_with_nonzero_pnl",
+            "missing_entry_branch"
+          ],
+          "trade_key": "[sl 0.70730]",
+          "position_id": "1385901336",
+          "symbol": "AUDUSD",
+          "realized_pnl": -451.23,
+          "realized_r": 0.0
+        },
+        {
+          "file": "trade_result_[sl 0.79169].json",
+          "reasons": [
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 0.79169]",
+          "position_id": "",
+          "symbol": "USDCHF",
+          "realized_pnl": -609.2,
+          "realized_r": -1.203691
+        },
+        {
+          "file": "trade_result_[sl 0.79248].json",
+          "reasons": [
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 0.79248]",
+          "position_id": "",
+          "symbol": "USDCHF",
+          "realized_pnl": -343.78,
+          "realized_r": -0.653947
+        },
+        {
+          "file": "trade_result_[sl 0.79397].json",
+          "reasons": [
+            "missing_planned_entry",
+            "missing_planned_sl",
+            "zero_realized_r_with_nonzero_pnl",
+            "missing_entry_branch"
+          ],
+          "trade_key": "[sl 0.79397]",
+          "position_id": "1388178536",
+          "symbol": "USDCHF",
+          "realized_pnl": -510.15,
+          "realized_r": 0.0
+        },
+        {
+          "file": "trade_result_[sl 0.86447].json",
+          "reasons": [
+            "missing_planned_entry",
+            "missing_planned_sl",
+            "zero_realized_r_with_nonzero_pnl",
+            "missing_entry_branch"
+          ],
+          "trade_key": "[sl 0.86447]",
+          "position_id": "1388672742",
+          "symbol": "EURGBP",
+          "realized_pnl": -543.75,
+          "realized_r": 0.0
+        },
+        {
+          "file": "trade_result_[sl 0.86570].json",
+          "reasons": [
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 0.86570]",
+          "position_id": "",
+          "symbol": "EURGBP",
+          "realized_pnl": -699.64,
+          "realized_r": -1.000243
+        }
+      ],
+      "parse_failures": 0,
+      "identity_meta_keys": 640,
+      "identity_enriched_from_trade_key_meta": 236,
+      "source_filter_excluded": 0,
+      "analyzed_records": 0
+    }
+  },
+  "context_policy": [],
+  "subtype_policy": [],
+  "symbol_expectancy_policy": [],
+  "family_expectancy_policy": [],
+  "adaptive_policy_readiness": {
+    "activate_adaptive_policy": false,
+    "checks": {
+      "total_trades_ge_500": false,
+      "family_trades_ge_50": false,
+      "symbol_trades_ge_30": false,
+      "profit_factor_after_costs_gt_1_10": false,
+      "walk_forward_positive_fold_rate_ge_60pct": false
+    },
+    "walk_forward_summary": {
+      "folds": 0,
+      "positive_fold_rate": 0.0,
+      "avg_train_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_train_ev": 0.0,
+      "avg_test_ev": 0.0,
+      "avg_gap": 0.0
+    }
+  },
+  "target_efficiency": [],
+  "snapshot_feature_report": [],
+  "overfitting_diagnostics": {
+    "global_walk_forward": {
+      "folds": 0,
+      "positive_fold_rate": 0.0,
+      "avg_train_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_train_ev": 0.0,
+      "avg_test_ev": 0.0,
+      "avg_gap": 0.0
+    },
+    "unstable_bucket_count": 0,
+    "unstable_buckets": [],
+    "max_avg_gap": 0.0,
+    "avg_bucket_gap": 0.0
+  },
+  "active_policy": {
+    "policy_id": "policy_1781809415_v1",
+    "version": 1,
+    "activated_at": 0,
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "soft_setup_floor": 35.0,
+    "hard_setup_floor": 29.0,
+    "setup_floor_penalty_mult": 0.75,
+    "ote_softness_frac": 0.08,
+    "default_risk_multiplier": 0.9,
+    "runner_sequence_floor": 6.6,
+    "runner_liquidity_rr_floor": 2.1,
+    "runner_cost_r_ceiling": 0.22,
+    "runner_alignment_floor": 6.1,
+    "runner_adverse_ceiling": 3.2,
+    "runner_ev_floor": 0.0,
+    "shadow_mode": true,
+    "activation_state": "shadow"
+  },
+  "governance": {
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "min_total_trades": 200,
+    "min_bucket_trades": 50,
+    "max_relevant_bucket": 0,
+    "r_ci_low": 0.0,
+    "profit_factor_after_costs": 0.0,
+    "max_drawdown_r": 0.0,
+    "min_profit_factor_after_costs": 1.15,
+    "max_allowed_drawdown_r": 12.0,
+    "min_positive_fold_rate": 0.6,
+    "max_train_test_gap_r": 0.25,
+    "change_count": 0,
+    "changed_fields": [],
+    "activate_ok": false,
+    "subtype_policy_count": 0,
+    "shadow_mode": true,
+    "governance_passed": false
+  },
+  "data_quality": {
+    "loaded_files": 636,
+    "used_records": 0,
+    "ignored_records": 636,
+    "ignored_reasons": {
+      "missing_entry_branch": 282,
+      "missing_planned_entry": 282,
+      "missing_planned_sl": 282,
+      "missing_trade_id": 400,
+      "zero_realized_r_with_nonzero_pnl": 282
+    },
+    "ignored_examples": [
+      {
+        "file": "trade_result_[sl 0.58076].json",
+        "reasons": [
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 0.58076]",
+        "position_id": "",
+        "symbol": "NZDUSD",
+        "realized_pnl": -206.68,
+        "realized_r": -0.400512
+      },
+      {
+        "file": "trade_result_[sl 0.58145].json",
+        "reasons": [
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 0.58145]",
+        "position_id": "",
+        "symbol": "NZDUSD",
+        "realized_pnl": -422.2,
+        "realized_r": -0.624556
+      },
+      {
+        "file": "trade_result_[sl 0.58180].json",
+        "reasons": [
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 0.58180]",
+        "position_id": "",
+        "symbol": "NZDUSD",
+        "realized_pnl": -690.0,
+        "realized_r": -0.333333
+      },
+      {
+        "file": "trade_result_[sl 0.58376].json",
+        "reasons": [
+          "missing_planned_entry",
+          "missing_planned_sl",
+          "zero_realized_r_with_nonzero_pnl",
+          "missing_entry_branch"
+        ],
+        "trade_key": "[sl 0.58376]",
+        "position_id": "1388317604",
+        "symbol": "NZDUSD",
+        "realized_pnl": -340.78,
+        "realized_r": 0.0
+      },
+      {
+        "file": "trade_result_[sl 0.70654].json",
+        "reasons": [
+          "missing_planned_entry",
+          "missing_planned_sl",
+          "zero_realized_r_with_nonzero_pnl",
+          "missing_entry_branch"
+        ],
+        "trade_key": "[sl 0.70654]",
+        "position_id": "1386534287",
+        "symbol": "AUDUSD",
+        "realized_pnl": -230.72,
+        "realized_r": 0.0
+      },
+      {
+        "file": "trade_result_[sl 0.70698].json",
+        "reasons": [
+          "missing_planned_entry",
+          "missing_planned_sl",
+          "zero_realized_r_with_nonzero_pnl",
+          "missing_entry_branch"
+        ],
+        "trade_key": "[sl 0.70698]",
+        "position_id": "1384240290",
+        "symbol": "AUDUSD",
+        "realized_pnl": -91.22,
+        "realized_r": 0.0
+      },
+      {
+        "file": "trade_result_[sl 0.70730].json",
+        "reasons": [
+          "missing_planned_entry",
+          "missing_planned_sl",
+          "zero_realized_r_with_nonzero_pnl",
+          "missing_entry_branch"
+        ],
+        "trade_key": "[sl 0.70730]",
+        "position_id": "1385901336",
+        "symbol": "AUDUSD",
+        "realized_pnl": -451.23,
+        "realized_r": 0.0
+      },
+      {
+        "file": "trade_result_[sl 0.79169].json",
+        "reasons": [
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 0.79169]",
+        "position_id": "",
+        "symbol": "USDCHF",
+        "realized_pnl": -609.2,
+        "realized_r": -1.203691
+      },
+      {
+        "file": "trade_result_[sl 0.79248].json",
+        "reasons": [
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 0.79248]",
+        "position_id": "",
+        "symbol": "USDCHF",
+        "realized_pnl": -343.78,
+        "realized_r": -0.653947
+      },
+      {
+        "file": "trade_result_[sl 0.79397].json",
+        "reasons": [
+          "missing_planned_entry",
+          "missing_planned_sl",
+          "zero_realized_r_with_nonzero_pnl",
+          "missing_entry_branch"
+        ],
+        "trade_key": "[sl 0.79397]",
+        "position_id": "1388178536",
+        "symbol": "USDCHF",
+        "realized_pnl": -510.15,
+        "realized_r": 0.0
+      },
+      {
+        "file": "trade_result_[sl 0.86447].json",
+        "reasons": [
+          "missing_planned_entry",
+          "missing_planned_sl",
+          "zero_realized_r_with_nonzero_pnl",
+          "missing_entry_branch"
+        ],
+        "trade_key": "[sl 0.86447]",
+        "position_id": "1388672742",
+        "symbol": "EURGBP",
+        "realized_pnl": -543.75,
+        "realized_r": 0.0
+      },
+      {
+        "file": "trade_result_[sl 0.86570].json",
+        "reasons": [
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 0.86570]",
+        "position_id": "",
+        "symbol": "EURGBP",
+        "realized_pnl": -699.64,
+        "realized_r": -1.000243
+      }
+    ],
+    "parse_failures": 0,
+    "identity_meta_keys": 640,
+    "identity_enriched_from_trade_key_meta": 236,
+    "source_filter_excluded": 0,
+    "analyzed_records": 0
+  },
+  "input_recommendations": {
+    "mode": "advisory_only",
+    "auto_apply": false,
+    "valid_trades": 0,
+    "recommendation_count": 1,
+    "recommendations": [
+      {
+        "category": "data_quality",
+        "severity": "critical",
+        "action": "block_input_optimization",
+        "inputs": [
+          "trade_result_*.json",
+          "position_id",
+          "planned_entry",
+          "planned_sl",
+          "entry_branch",
+          "realized_r"
+        ],
+        "suggested_change": "Do not tune performance inputs from this sample. Collect fresh closed trades after the analytics metadata fix.",
+        "reason": "All loaded trade-result records were rejected by the quality gate.",
+        "evidence": {
+          "loaded_files": 636,
+          "ignored_records": 636,
+          "ignored_reasons": {
+            "missing_entry_branch": 282,
+            "missing_planned_entry": 282,
+            "missing_planned_sl": 282,
+            "missing_trade_id": 400,
+            "zero_realized_r_with_nonzero_pnl": 282
+          }
+        },
+        "min_valid_trades": 30,
+        "auto_apply": false
+      }
+    ],
+    "notes": [
+      "Recommendations are generated from valid closed-trade evidence only.",
+      "The report never lowers governance safety gates just to force activation.",
+      "Apply input changes manually or through a separately governed change workflow."
+    ],
+    "active_policy_reference": {
+      "policy_id": "policy_1781809415_v1",
+      "activation_state": "shadow",
+      "shadow_mode": true
+    }
+  }
+}

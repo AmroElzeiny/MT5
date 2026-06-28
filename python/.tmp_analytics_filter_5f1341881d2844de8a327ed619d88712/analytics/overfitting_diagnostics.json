@@ -1,0 +1,26 @@
+{
+  "global_walk_forward": {
+    "folds": 1,
+    "positive_fold_rate": 0.0,
+    "avg_train_r": 0.0,
+    "avg_test_r": 0.0,
+    "avg_train_ev": -0.9499999999999996,
+    "avg_test_ev": -0.950000000000001,
+    "avg_gap": 0.0
+  },
+  "unstable_bucket_count": 1,
+  "unstable_buckets": [
+    {
+      "policy_bucket": "weak_trend||micro_continuation_fvg..virgin_fvg|balanced",
+      "sample_count": 236,
+      "action": "allow",
+      "avg_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_gap": 0.0,
+      "positive_fold_rate": 0.0,
+      "feature_count": 0
+    }
+  ],
+  "max_avg_gap": 0.0,
+  "avg_bucket_gap": 0.0
+}

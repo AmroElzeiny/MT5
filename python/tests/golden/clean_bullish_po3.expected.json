@@ -1,0 +1,17 @@
+[
+  {
+    "time": "2026-01-01T01:45:00",
+    "po3_state": "PO3_CONFIRMED",
+    "sweep_side": "sell_side",
+    "sweep_candle": "2026-01-01T00:45:00",
+    "displacement_candle": "2026-01-01T01:00:00",
+    "bos_mss_candle": "2026-01-01T01:15:00",
+    "structure_type": "reversal_mss",
+    "fvg_bounds": [101.0, 101.4],
+    "fvg_state": "mid_mitigated",
+    "entry_zone": "fvg_mid",
+    "invalidation_reason": "ok",
+    "target_source": "prior_high",
+    "final_setup_class": "bullish_confirmed"
+  }
+]

@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "count": 236,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "avg_effective_rr2": 0.0,
+      "avg_expected_value_r": -0.8499999999999965,
+      "avg_net_expected_r": -0.8499999999999965,
+      "avg_gross_expected_r": -0.8499999999999965,
+      "avg_execution_cost_r": 0.0,
+      "avg_slippage_r": 0.0,
+      "avg_commission_r": 0.0,
+      "avg_pnl": 139.7308474576271,
+      "sum_pnl": 32976.479999999996,
+      "profit_factor": 2.221884667415883,
+      "max_drawdown_r": 0.0,
+      "avg_fill_slippage_r": 0.0,
+      "avg_mfe_r": 0.0,
+      "avg_mae_r": 0.0,
+      "avg_duration_minutes": 76.77401129943495,
+      "avg_stop_quality": 0.0,
+      "r_ci_low": 0.0,
+      "r_ci_high": 0.0,
+      "bootstrap_positive_rate": 0.0,
+      "setup_family": "micro_continuation_fvg",
+      "family_policy_action": "reduce_risk",
+      "family_policy_reason": "weak_expectancy_after_30",
+      "risk_multiplier": 0.5
+    }
+  ]
+}

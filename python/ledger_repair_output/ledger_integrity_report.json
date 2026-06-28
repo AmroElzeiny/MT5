@@ -1,0 +1,168 @@
+{
+  "logs_dir": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\logs\\trade_results",
+  "output_dir": "ledger_repair_output",
+  "files_scanned": 489,
+  "meta_identities_loaded": 1546,
+  "clean_records": 158,
+  "rejected_records": 331,
+  "reason_counts": {
+    "position_id_reused": 184,
+    "price_scale_mismatch": 209,
+    "sell_stop_not_above_entry": 4,
+    "sell_target_not_below_entry": 4,
+    "volume_overmatched": 258
+  },
+  "repair_counts": {},
+  "examples": [
+    {
+      "file": "trade_result_100GBP_6466878.json",
+      "symbol": "100GBP",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_100GBP_6474129.json",
+      "symbol": "100GBP",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_100GBP_6552926.json",
+      "symbol": "100GBP",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_100GBP_6566488.json",
+      "symbol": "100GBP",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_100GBP_6682606.json",
+      "symbol": "100GBP",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_225JPY_6470280.json",
+      "symbol": "225JPY",
+      "reasons": [
+        "price_scale_mismatch"
+      ]
+    },
+    {
+      "file": "trade_result_225JPY_6539570.json",
+      "symbol": "225JPY",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_225JPY_6561604.json",
+      "symbol": "225JPY",
+      "reasons": [
+        "price_scale_mismatch",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 0.70142].json",
+      "symbol": "AUDUSD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 1.33228].json",
+      "symbol": "GBPUSD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 1.63567].json",
+      "symbol": "EURAUD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 1.99285].json",
+      "symbol": "EURNZD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 10408.5].json",
+      "symbol": "100GBP",
+      "reasons": [
+        "position_id_reused"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 161.136].json",
+      "symbol": "USDJPY",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 184.977].json",
+      "symbol": "EURJPY",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 185.158].json",
+      "symbol": "EURJPY",
+      "reasons": [
+        "sell_stop_not_above_entry",
+        "sell_target_not_below_entry",
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 2.29602].json",
+      "symbol": "GBPNZD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 2.29946].json",
+      "symbol": "GBPNZD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 51435].json",
+      "symbol": "U30USD",
+      "reasons": [
+        "volume_overmatched"
+      ]
+    },
+    {
+      "file": "trade_result_[sl 71525].json",
+      "symbol": "225JPY",
+      "reasons": [
+        "position_id_reused"
+      ]
+    }
+  ],
+  "analytics_default": "exclude suspicious/rejected rows; use --include-suspicious only for forensic analysis"
+}

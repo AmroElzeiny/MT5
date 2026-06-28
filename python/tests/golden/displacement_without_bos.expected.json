@@ -1,0 +1,16 @@
+[
+  {
+    "time": "2026-01-03T01:30:00",
+    "po3_state": "PO3_INVALIDATED",
+    "sweep_side": "sell_side",
+    "sweep_candle": "2026-01-03T00:45:00",
+    "displacement_candle": "2026-01-03T01:00:00",
+    "bos_mss_candle": "none",
+    "fvg_bounds": "none",
+    "fvg_state": "none",
+    "entry_zone": "none",
+    "invalidation_reason": "bos_missing",
+    "target_source": "prior_high",
+    "final_setup_class": "rejected_bos_missing"
+  }
+]

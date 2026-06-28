@@ -1,0 +1,13 @@
+{
+  "rows": [
+    {
+      "target_source": "unknown",
+      "obstacle_kind": "unknown",
+      "count": 236,
+      "avg_r": 0.0,
+      "avg_capture_ratio": 0.0,
+      "win_rate": 0.0,
+      "avg_effective_rr2": 0.0
+    }
+  ]
+}
