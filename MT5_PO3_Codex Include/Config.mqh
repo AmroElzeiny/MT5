@@ -5,7 +5,9 @@
 #define __PO3_AIGATE_CONFIG_MQH__
 
 const string ENGINE_VERSION = "5.4-rollover-recovery-penalty-time-exclusive-model-vnext-safety";
-const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-risk-lineage-20260628-vnext-safety";
+const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-risk-lineage-20260629-ai-freshness-v2";
+const string AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260629_target_rebuild_v2";
+const string AI_PROMPT_CONTRACT_VERSION = "20260629_target_arbitration_explain_v2";
 const string RISK_MODEL_VERSION = "risk-v2-percent-sanity-20260504";
 
 enum ENUM_PO3_STOP_MODEL
@@ -40,6 +42,9 @@ input int   InpAiWaitPollMs          = 250;
 input int   InpAiWaitSliceSeconds    = 15;
 input int   InpAiWaitTimeoutRealMin  = 2;
 input int   InpTesterPersistIntervalMin = 15;
+input bool  InpTesterRejectStaleAiResults = true;
+input int   InpTesterMaxAiResultAgeSimMinutes = 15;
+input bool  InpTesterFreezeAiExecutionSnapshot = true;
 input bool  InpVerboseJournal        = true;
 input bool   InpJournalTesterOnly     = false;
 input bool   InpRolloverProtectionEnable = true;
@@ -212,10 +217,18 @@ input bool   InpRejectAgainstHtfImbalance = false;
 input bool   InpBlockSyntheticTargetThroughOpposingImbalance = false;
 input bool   InpAllowSyntheticRRTarget = true;
 input bool   InpRejectSyntheticFallbackAfterCrossedObstacle = true;
+input bool   InpRequireAITargetArbitrationOnObstacle = true;
+input bool   InpHardRejectCrossedObstacleTarget = false;
+input bool   InpAllowAIToUseLiquidityTargetBehindMinorBlocker = true;
+input bool   InpAllowPartialBeforeObstacle = true;
+input double InpBlockerKillSeverity = 8.0;
+input double InpBlockerMajorSeverity = 6.5;
+input double InpBlockerMinorMaxSeverity = 3.5;
 input double InpSyntheticFallbackMinCleanCaptureRatio = 0.10;
 input int    InpSyntheticFallbackMinStatsCount = 50;
 input double InpObstacleRejectR = 0.70;
 input double InpFallbackRR2          = 1.05;
+input double InpFallbackRRBufferR     = 0.05;
 input bool   InpMaxPortfolioClusterEnable = false;
 input double InpMaxCorrelatedRiskFrac = 0.45;
 input double InpMaxUsdConcentrationFrac = 0.55;
@@ -311,11 +324,12 @@ input double InpSetupFloorTierBExtra = 0.5;
 input double InpSetupFloorTierCExtra = 99.0;
 
 // --- Family-specific gates ---
-input double InpAiScoreFullPO3 = 5.2;
-input double InpAiScoreMicroPO3 = 5.2;
-input double InpAiScoreContinuation = 5.2;
-input double InpAiScoreRange = 5.2;
-input double InpAiScoreFailedBreakout = 5.2;
+input double InpAiScoreFullPO3 = 6.8;
+input double InpAiScoreMicroPO3 = 7.2;
+input double InpAiScoreContinuation = 7.3;
+input double InpAiScoreRange = 7.0;
+input double InpAiScoreFailedBreakout = 7.2;
+input bool   InpGlobalAiScoreAsHardFloor = false;
 
 input double InpSetupFloorFullPO3 = 30.0;
 input double InpSetupFloorMicroPO3 = 30.0;

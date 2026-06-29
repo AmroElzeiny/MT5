@@ -11,6 +11,11 @@ Use `.env.example` as the template. Do not put secrets in committed files.
 - `AI_USE_FLEX=false`
 - `AI_ALLOW_FLEX_FOR_LIVE=false`
 - `AI_FLEX_LIVE_ACK=false`
+- `AI_OPENAI_TIMEOUT_SEC=180`
+- `AI_OPENAI_FLEX_TIMEOUT_SEC=600`
+- `AI_FLEX_UNAVAILABLE_RETRY_ENABLE=true`
+- `AI_FLEX_UNAVAILABLE_MAX_RETRIES=20`
+- `AI_FLEX_UNAVAILABLE_COOLDOWN_SEC=30`
 - `AI_ENABLE_SNAPSHOTS=false`
 - `AI_HARD_PRE_GATE_BEFORE_OPENAI=true`
 - `AI_REQUIRE_RUNTIME_INPUTS_LIVE=true`
@@ -39,6 +44,21 @@ Live Flex requires all three:
 Without all three, live requests log `flex_disabled_for_live` and use
 `service_tier=auto`.
 
+`AI_OPENAI_TIMEOUT_SEC` controls the normal synchronous Responses API timeout.
+`AI_OPENAI_FLEX_TIMEOUT_SEC` controls the timeout when the request is actually
+sent with Flex. The default Flex timeout is `600` seconds so slow Flex responses
+have room to finish without allowing an infinite hang.
+
+When Flex returns a transient/unavailable failure, the bridge retries the same
+OpenAI call when `AI_FLEX_UNAVAILABLE_RETRY_ENABLE=true`. The defaults are
+`AI_FLEX_UNAVAILABLE_MAX_RETRIES=20` and
+`AI_FLEX_UNAVAILABLE_COOLDOWN_SEC=30`, meaning the bridge can wait about 10
+minutes after repeated Flex unavailability before exhausting retries. The retry
+loop applies only to Flex requests and only to transient status/error classes
+such as 408, 409, 429 rate-limit, 500, 502, 503, 504, connection errors, and
+timeouts. It does not retry invalid keys, permission errors, bad requests, or
+quota/billing failures.
+
 ## Prompt Cache
 
 When `AI_PROMPT_CACHE_ENABLE=true`, OpenAI calls receive:
@@ -55,6 +75,13 @@ When `AI_DECISION_CACHE_ENABLE=true`, repeated identical setup signatures reuse
 the prior decision within `AI_DECISION_CACHE_TTL_SEC` and log `ai_cache_hit`.
 Material changes to target, obstacle, cost, spread, or runtime hash miss or
 invalidate the cache.
+
+Cached AI decisions are still rechecked against the current runtime family AI
+threshold before being returned. Because the EA includes all family threshold
+inputs in `runtime_input_hash`, changing `InpAiScoreFullPO3`,
+`InpAiScoreMicroPO3`, `InpAiScoreContinuation`, `InpAiScoreRange`,
+`InpAiScoreFailedBreakout`, `InpMinAiScoreTrend`, or
+`InpGlobalAiScoreAsHardFloor` changes the signature and forces a cache miss.
 
 ## Cost Report
 

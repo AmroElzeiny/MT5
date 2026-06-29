@@ -96,6 +96,11 @@ bool _JsonLocateKeyValue(const string json, const string key, int &value_pos) {
    return false;
 }
 
+bool JsonHasKey(const string json, const string key) {
+   int pos = -1;
+   return _JsonLocateKeyValue(json, key, pos);
+}
+
 bool _JsonReadComposite(const string json, const int start_pos, const ushort open_ch, const ushort close_ch,
                         string &out, int &end_pos) {
    int len = (int)StringLen(json);

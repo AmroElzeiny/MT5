@@ -33,6 +33,106 @@ private:
       return "structural_sweep";
    }
 
+   string _TargetCandidatesJson(const TradePlan &p) const {
+      double risk_dist = MathAbs(p.entry_est - p.sl);
+      double liquidity_tp = (p.liquidity_target_preserved > 0.0 ? p.liquidity_target_preserved : p.po3.liquidity_target);
+      string liquidity_model = (StringLen(p.liquidity_target_model) > 0 ? p.liquidity_target_model :
+                                (StringLen(p.target_model) > 0 ? p.target_model :
+                                 (StringLen(p.po3.liquidity_kind) > 0 ? p.po3.liquidity_kind : "liquidity_target")));
+      double liquidity_rr = p.liquidity_rr;
+      if(liquidity_rr <= 0.0 && risk_dist > 0.0 && liquidity_tp > 0.0){
+         double reward = (p.is_buy ? liquidity_tp - p.entry_est : p.entry_est - liquidity_tp);
+         if(reward > 0.0) liquidity_rr = reward / risk_dist;
+      }
+      double capped_tp = p.capped_before_obstacle_tp;
+      double capped_rr = p.capped_before_obstacle_rr;
+      if(capped_rr <= 0.0 && risk_dist > 0.0 && capped_tp > 0.0){
+         double reward = (p.is_buy ? capped_tp - p.entry_est : p.entry_est - capped_tp);
+         if(reward > 0.0) capped_rr = reward / risk_dist;
+      }
+      double fallback_tp = p.fallback_tp;
+      double fallback_rr = p.fallback_rr;
+      if(fallback_rr <= 0.0 && risk_dist > 0.0 && fallback_tp > 0.0){
+         double reward = (p.is_buy ? fallback_tp - p.entry_est : p.entry_est - fallback_tp);
+         if(reward > 0.0) fallback_rr = reward / risk_dist;
+      }
+      double effective_fallback_rr = MathMax(InpFallbackRR2, InpMinLiveRR2 + MathMax(0.0, InpFallbackRRBufferR));
+      double obstacle_to_liquidity_r = 0.0;
+      if(risk_dist > 0.0 && p.obstacle_price > 0.0 && liquidity_tp > 0.0)
+         obstacle_to_liquidity_r = MathAbs(liquidity_tp - p.obstacle_price) / risk_dist;
+      double fvg_width = MathAbs(p.fvg.upper - p.fvg.lower);
+      double fvg_width_atr = (p.fvg.gap_width_atr_score > 0.0 ? p.fvg.gap_width_atr_score : 0.0);
+      bool tp1_before_obstacle_possible = (InpAllowPartialBeforeObstacle && capped_tp > 0.0 && capped_rr > 0.0);
+
+      string j = "{";
+      j += JsonKVBool("arbitration_required", p.target_arbitration_required) + ",";
+      j += JsonKVNum("entry", p.entry_est, 8) + ",";
+      j += JsonKVNum("sl", p.sl, 8) + ",";
+      j += JsonKVNum("risk_distance", risk_dist, 8) + ",";
+      j += JsonKVStr("current_target_source", p.target_source) + ",";
+      j += JsonKVStr("current_tp_model", p.tp_model) + ",";
+      j += JsonKVNum("current_tp2", p.tp2, 8) + ",";
+      j += JsonKVNum("current_rr2", p.effective_rr2, 4) + ",";
+      j += JsonKVStr("obstacle_kind", p.obstacle_kind) + ",";
+      j += JsonKVNum("obstacle_price", p.obstacle_price, 8) + ",";
+      j += JsonKVNum("obstacle_r", p.obstacle_r, 4) + ",";
+      j += JsonKVNum("obstacle_distance_r", p.obstacle_distance_r, 4) + ",";
+      j += JsonKVStr("obstacle_tf", p.obstacle_tf) + ",";
+      j += JsonKVStr("obstacle_strength_features", p.obstacle_strength_features) + ",";
+      j += JsonKVNum("effective_fallback_rr", effective_fallback_rr, 4) + ",";
+      j += "\"blocker_features\":{";
+      j += JsonKVStr("obstacle_kind", p.obstacle_kind) + ",";
+      j += JsonKVStr("obstacle_tf", p.obstacle_tf) + ",";
+      j += JsonKVNum("obstacle_price", p.obstacle_price, 8) + ",";
+      j += JsonKVNum("obstacle_distance_r", p.obstacle_distance_r, 4) + ",";
+      j += JsonKVNum("obstacle_width_price", fvg_width, 8) + ",";
+      j += JsonKVNum("obstacle_width_atr", fvg_width_atr, 4) + ",";
+      j += JsonKVInt("obstacle_age_bars", p.fvg.age_bars) + ",";
+      j += JsonKVStr("obstacle_freshness", (p.fvg.age_bars <= 0 ? "unknown" : (p.fvg.age_bars <= PO3EffectiveMaxContextAgeBars() ? "fresh" : "stale"))) + ",";
+      j += JsonKVStr("obstacle_mitigation_state", p.fvg.mitigation_state) + ",";
+      j += JsonKVNum("obstacle_mitigated_percent", MathMax(0.0, p.fvg.mitigation_depth_frac) * 100.0, 2) + ",";
+      j += JsonKVBool("obstacle_retested", (p.fvg.touched || p.fvg.mid_mitigated)) + ",";
+      j += JsonKVNum("distance_from_obstacle_to_liquidity_target_r", obstacle_to_liquidity_r, 4) + ",";
+      j += JsonKVBool("tp1_before_obstacle_possible", tp1_before_obstacle_possible) + ",";
+      j += JsonKVNum("capped_rr", capped_rr, 4) + ",";
+      j += JsonKVNum("liquidity_rr", liquidity_rr, 4) + ",";
+      j += JsonKVNum("fallback_rr", fallback_rr, 4) + ",";
+      j += JsonKVNum("effective_fallback_rr", effective_fallback_rr, 4) + ",";
+      j += JsonKVNum("displacement_quality", p.po3.displacement_score, 4) + ",";
+      j += JsonKVNum("setup_quality", p.setup_score, 4) + ",";
+      j += JsonKVNum("htf_alignment_score", p.htf_alignment_score, 4) + ",";
+      j += JsonKVStr("session", p.po3.session_name) + ",";
+      j += JsonKVStr("killzone", p.killzone_code) + ",";
+      j += JsonKVBool("is_htf_obstacle", StringFind(p.obstacle_tf, "htf") >= 0) + ",";
+      j += JsonKVBool("is_ltf_obstacle", (StringFind(p.obstacle_tf, "ltf") >= 0 || p.obstacle_tf == "entry_tf"));
+      j += "},";
+      j += "\"liquidity_target\":{";
+      j += JsonKVBool("available", liquidity_tp > 0.0) + ",";
+      j += JsonKVStr("model", liquidity_model) + ",";
+      j += JsonKVNum("tp2", liquidity_tp, 8) + ",";
+      j += JsonKVNum("rr2", liquidity_rr, 4) + ",";
+      j += JsonKVBool("valid_structurally", p.liquidity_target_valid_structurally) + ",";
+      j += JsonKVBool("blocked_by_obstacle", p.liquidity_target_blocked_by_obstacle);
+      j += "},";
+      j += "\"capped_before_obstacle\":{";
+      j += JsonKVBool("available", capped_tp > 0.0) + ",";
+      j += JsonKVStr("model", (StringLen(p.capped_before_obstacle_source) > 0 ? p.capped_before_obstacle_source : "capped_before_obstacle")) + ",";
+      j += JsonKVNum("tp2", capped_tp, 8) + ",";
+      j += JsonKVNum("rr2", capped_rr, 4) + ",";
+      j += JsonKVBool("partial_allowed", InpAllowPartialBeforeObstacle);
+      j += "},";
+      j += "\"synthetic_rr_fallback\":{";
+      j += JsonKVBool("available", fallback_tp > 0.0) + ",";
+      j += JsonKVStr("model", (StringLen(p.fallback_source) > 0 ? p.fallback_source : "synthetic_rr_fallback")) + ",";
+      j += JsonKVNum("tp2", fallback_tp, 8) + ",";
+      j += JsonKVNum("rr2", fallback_rr, 4) + ",";
+      j += JsonKVNum("effective_rr2", effective_fallback_rr, 4) + ",";
+      j += JsonKVBool("crosses_obstacle", StringFind(p.obstacle_kind, "crossed") >= 0);
+      j += "}";
+      j += "}";
+      return j;
+   }
+
    uint _Fnv1a(const string value) const {
       uint h = 2166136261;
       for(int i=0; i<StringLen(value); i++){
@@ -51,9 +151,13 @@ private:
       s += (InpSuppressMicroBisiSibiEdge ? "1" : "0") + "|" + (InpSuppressStaleFvgBranches ? "1" : "0") + "|";
       s += (InpSuppressTouchedContinuationUnlessRetested ? "1" : "0") + "|" + (InpSuppressContinuationTouchedFvg ? "1" : "0") + "|" + (InpSuppressContinuationStaleFvg ? "1" : "0") + "|";
       s += DoubleToString(InpExecutionRejectCostR, 4) + "|" + DoubleToString(InpExecutionReduceRiskCostR, 4) + "|" + DoubleToString(InpMicroScalpMaxCostFracOfPlannedR, 4) + "|";
-      s += (InpRejectSyntheticFallbackAfterCrossedObstacle ? "1" : "0") + "|" + DoubleToString(InpStandardTradeLiquidityRRFloor, 4) + "|" + DoubleToString(InpMaxTargetAdrFrac, 4) + "|" + DoubleToString(InpMaxTargetAtrMult, 4) + "|";
-      s += (InpRequireDisplacement ? "1" : "0") + "|" + (InpAllowSyntheticRRTarget ? "1" : "0") + "|" + DoubleToString(InpMinLiveRR2, 4) + "|" + DoubleToString(InpObstacleRejectR, 4) + "|";
+      s += (InpRejectSyntheticFallbackAfterCrossedObstacle ? "1" : "0") + "|";
+      s += (InpRequireAITargetArbitrationOnObstacle ? "1" : "0") + "|" + (InpHardRejectCrossedObstacleTarget ? "1" : "0") + "|" + (InpAllowAIToUseLiquidityTargetBehindMinorBlocker ? "1" : "0") + "|" + (InpAllowPartialBeforeObstacle ? "1" : "0") + "|";
+      s += DoubleToString(InpBlockerKillSeverity, 4) + "|" + DoubleToString(InpBlockerMajorSeverity, 4) + "|" + DoubleToString(InpBlockerMinorMaxSeverity, 4) + "|";
+      s += DoubleToString(InpStandardTradeLiquidityRRFloor, 4) + "|" + DoubleToString(InpMaxTargetAdrFrac, 4) + "|" + DoubleToString(InpMaxTargetAtrMult, 4) + "|";
+      s += (InpRequireDisplacement ? "1" : "0") + "|" + (InpAllowSyntheticRRTarget ? "1" : "0") + "|" + DoubleToString(InpMinLiveRR2, 4) + "|" + DoubleToString(InpFallbackRR2, 4) + "|" + DoubleToString(InpFallbackRRBufferR, 4) + "|" + DoubleToString(InpObstacleRejectR, 4) + "|";
       s += (InpUseAI ? "1" : "0") + "|" + (InpAiStrict ? "1" : "0") + "|" + DoubleToString(InpMinAiScoreTrend, 4) + "|" + DoubleToString(InpMinAiConfidence, 4) + "|";
+      s += DoubleToString(InpAiScoreFullPO3, 4) + "|" + DoubleToString(InpAiScoreMicroPO3, 4) + "|" + DoubleToString(InpAiScoreContinuation, 4) + "|" + DoubleToString(InpAiScoreRange, 4) + "|" + DoubleToString(InpAiScoreFailedBreakout, 4) + "|" + (InpGlobalAiScoreAsHardFloor ? "1" : "0") + "|";
       s += (InpUseSnapshotAI ? "1" : "0") + "|" + (InpRequireSnapshots ? "1" : "0") + "|" + (InpOnlyBreakerRetestVirginStrongOrigin ? "1" : "0") + "|";
       s += DoubleToString(InpRiskPerTradePct, 4) + "|" + DoubleToString(InpRiskPerTradeMoney, 4) + "|" + IntegerToString(InpMaxOpenPositions) + "|" + IntegerToString(InpMaxTradesPerScan) + "|" + IntegerToString(InpMaxTradesPerSweep);
       return IntegerToString((int)(_Fnv1a(s) % 2147483647));
@@ -63,6 +167,8 @@ private:
       string j = "{";
       j += JsonKVStr("engine_version", ENGINE_VERSION) + ",";
       j += JsonKVStr("engine_input_schema", ENGINE_INPUT_SCHEMA) + ",";
+      j += JsonKVStr("ai_target_arbitration_schema_version", AI_TARGET_ARBITRATION_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("ai_prompt_contract_version", AI_PROMPT_CONTRACT_VERSION) + ",";
       j += JsonKVStr("runtime_input_hash", RuntimeInputHash()) + ",";
       j += JsonKVInt("strategy_mode", (int)InpStrategyMode) + ",";
       j += JsonKVStr("strategy_preset", InpStrategyPreset) + ",";
@@ -90,6 +196,13 @@ private:
       j += JsonKVBool("suppress_continuation_touched_fvg", InpSuppressContinuationTouchedFvg) + ",";
       j += JsonKVBool("suppress_continuation_stale_fvg", InpSuppressContinuationStaleFvg) + ",";
       j += JsonKVBool("reject_synthetic_fallback_after_crossed_obstacle", InpRejectSyntheticFallbackAfterCrossedObstacle) + ",";
+      j += JsonKVBool("require_ai_target_arbitration_on_obstacle", InpRequireAITargetArbitrationOnObstacle) + ",";
+      j += JsonKVBool("hard_reject_crossed_obstacle_target", InpHardRejectCrossedObstacleTarget) + ",";
+      j += JsonKVBool("allow_ai_to_use_liquidity_target_behind_minor_blocker", InpAllowAIToUseLiquidityTargetBehindMinorBlocker) + ",";
+      j += JsonKVBool("allow_partial_before_obstacle", InpAllowPartialBeforeObstacle) + ",";
+      j += JsonKVNum("blocker_kill_severity", InpBlockerKillSeverity, 4) + ",";
+      j += JsonKVNum("blocker_major_severity", InpBlockerMajorSeverity, 4) + ",";
+      j += JsonKVNum("blocker_minor_max_severity", InpBlockerMinorMaxSeverity, 4) + ",";
       j += JsonKVNum("synthetic_fallback_min_clean_capture_ratio", InpSyntheticFallbackMinCleanCaptureRatio, 4) + ",";
       j += JsonKVInt("synthetic_fallback_min_stats_count", InpSyntheticFallbackMinStatsCount) + ",";
       j += JsonKVNum("obstacle_reject_r", InpObstacleRejectR, 4) + ",";
@@ -102,9 +215,20 @@ private:
       j += JsonKVBool("require_displacement", InpRequireDisplacement) + ",";
       j += JsonKVBool("allow_synthetic_rr_target", InpAllowSyntheticRRTarget) + ",";
       j += JsonKVNum("min_live_rr2", InpMinLiveRR2, 4) + ",";
+      j += JsonKVNum("fallback_rr2", InpFallbackRR2, 4) + ",";
+      j += JsonKVNum("fallback_rr_buffer_r", InpFallbackRRBufferR, 4) + ",";
+      j += JsonKVBool("tester_reject_stale_ai_results", InpTesterRejectStaleAiResults) + ",";
+      j += JsonKVInt("tester_max_ai_result_age_sim_minutes", InpTesterMaxAiResultAgeSimMinutes) + ",";
+      j += JsonKVBool("tester_freeze_ai_execution_snapshot", InpTesterFreezeAiExecutionSnapshot) + ",";
       j += JsonKVBool("use_ai", InpUseAI) + ",";
       j += JsonKVBool("ai_strict", InpAiStrict) + ",";
       j += JsonKVNum("min_ai_score_trend", InpMinAiScoreTrend, 4) + ",";
+      j += JsonKVNum("ai_score_full_po3", InpAiScoreFullPO3, 4) + ",";
+      j += JsonKVNum("ai_score_micro_po3", InpAiScoreMicroPO3, 4) + ",";
+      j += JsonKVNum("ai_score_continuation", InpAiScoreContinuation, 4) + ",";
+      j += JsonKVNum("ai_score_range", InpAiScoreRange, 4) + ",";
+      j += JsonKVNum("ai_score_failed_breakout", InpAiScoreFailedBreakout, 4) + ",";
+      j += JsonKVBool("global_ai_score_as_hard_floor", InpGlobalAiScoreAsHardFloor) + ",";
       j += JsonKVNum("min_ai_confidence", InpMinAiConfidence, 4) + ",";
       j += JsonKVBool("use_snapshot_ai", InpUseSnapshotAI) + ",";
       j += JsonKVBool("require_snapshots", InpRequireSnapshots) + ",";
@@ -182,6 +306,8 @@ public:
        j += JsonKVInt("timeframe", (int)p.ltf) + ",";
        j += JsonKVInt("server_time", (int)server_time) + ",";
        j += JsonKVInt("candle_time", (int)(p.last_confirm_bar_time > 0 ? p.last_confirm_bar_time : p.fvg.t_form)) + ",";
+       j += JsonKVInt("setup_snapshot_time", (int)p.setup_snapshot_time) + ",";
+       j += JsonKVInt("ai_request_time", (int)p.ai_request_time) + ",";
        j += JsonKVNum("bid", tick.bid, 8) + ",";
        j += JsonKVNum("ask", tick.ask, 8) + ",";
        j += JsonKVStr("setup_id", p.setup_id) + ",";
@@ -356,11 +482,27 @@ public:
        j += JsonKVStr("obstacle_kind", p.obstacle_kind) + ",";
        j += JsonKVNum("obstacle_price", p.obstacle_price, 8) + ",";
        j += JsonKVNum("obstacle_r", p.obstacle_r, 4) + ",";
+       j += JsonKVNum("obstacle_distance_r", p.obstacle_distance_r, 4) + ",";
+       j += JsonKVBool("target_arbitration_required", p.target_arbitration_required) + ",";
+       j += JsonKVNum("liquidity_target_preserved", p.liquidity_target_preserved, 8) + ",";
+       j += JsonKVStr("liquidity_target_model", p.liquidity_target_model) + ",";
+       j += JsonKVBool("liquidity_target_valid_structurally", p.liquidity_target_valid_structurally) + ",";
+       j += JsonKVBool("liquidity_target_blocked_by_obstacle", p.liquidity_target_blocked_by_obstacle) + ",";
+       j += JsonKVNum("fallback_tp", p.fallback_tp, 8) + ",";
+       j += JsonKVNum("fallback_rr", p.fallback_rr, 4) + ",";
+       j += JsonKVStr("fallback_source", p.fallback_source) + ",";
+       j += JsonKVNum("capped_before_obstacle_tp", p.capped_before_obstacle_tp, 8) + ",";
+       j += JsonKVNum("capped_before_obstacle_rr", p.capped_before_obstacle_rr, 4) + ",";
+       j += JsonKVStr("capped_before_obstacle_source", p.capped_before_obstacle_source) + ",";
+       j += JsonKVNum("original_planned_tp_before_ai", p.original_planned_tp_before_ai, 8) + ",";
+       j += JsonKVNum("original_planned_rr_before_ai", p.original_planned_rr_before_ai, 4) + ",";
        j += JsonKVNum("tp1_r_multiple", p.tp1_r_multiple, 4) + ",";
        j += JsonKVNum("tp1_partial_pct", p.tp1_partial_pct, 4) + ",";
        j += JsonKVStr("be_rule", p.be_rule) + ",";
        j += JsonKVNum("be_trigger_r", p.be_trigger_r, 4);
        j += "},";
+
+       j += "\"target_candidates\":" + _TargetCandidatesJson(p) + ",";
 
        j += "\"watchlist\":{";
        j += JsonKVBool("armed", p.armed) + ",";
@@ -485,6 +627,8 @@ public:
           j += JsonKVStr("fvg_id", c.fvg_id) + ",";
           j += JsonKVStr("candidate_id", c.candidate_id) + ",";
           j += JsonKVStr("trade_key", c.trade_key) + ",";
+          j += JsonKVInt("setup_snapshot_time", (int)c.setup_snapshot_time) + ",";
+          j += JsonKVInt("ai_request_time", (int)c.ai_request_time) + ",";
           j += JsonKVStr("broker_comment", c.broker_comment) + ",";
           j += JsonKVStr("model_code", c.model_code) + ",";
           j += JsonKVStr("session_code", c.session_code) + ",";
@@ -556,6 +700,24 @@ public:
           j += JsonKVNum("stop_floor_distance", c.stop_floor_distance, 8) + ",";
           j += JsonKVNum("stop_noise_band", c.stop_noise_band, 8) + ",";
           j += JsonKVNum("stop_quality_score", c.stop_quality_score, 4) + ",";
+          j += JsonKVStr("obstacle_kind", c.obstacle_kind) + ",";
+          j += JsonKVNum("obstacle_price", c.obstacle_price, 8) + ",";
+          j += JsonKVNum("obstacle_r", c.obstacle_r, 4) + ",";
+          j += JsonKVNum("obstacle_distance_r", c.obstacle_distance_r, 4) + ",";
+          j += JsonKVBool("target_arbitration_required", c.target_arbitration_required) + ",";
+          j += JsonKVNum("liquidity_target_preserved", c.liquidity_target_preserved, 8) + ",";
+          j += JsonKVStr("liquidity_target_model", c.liquidity_target_model) + ",";
+          j += JsonKVBool("liquidity_target_valid_structurally", c.liquidity_target_valid_structurally) + ",";
+          j += JsonKVBool("liquidity_target_blocked_by_obstacle", c.liquidity_target_blocked_by_obstacle) + ",";
+          j += JsonKVNum("fallback_tp", c.fallback_tp, 8) + ",";
+          j += JsonKVNum("fallback_rr", c.fallback_rr, 4) + ",";
+          j += JsonKVStr("fallback_source", c.fallback_source) + ",";
+          j += JsonKVNum("capped_before_obstacle_tp", c.capped_before_obstacle_tp, 8) + ",";
+          j += JsonKVNum("capped_before_obstacle_rr", c.capped_before_obstacle_rr, 4) + ",";
+          j += JsonKVStr("capped_before_obstacle_source", c.capped_before_obstacle_source) + ",";
+          j += JsonKVNum("original_planned_tp_before_ai", c.original_planned_tp_before_ai, 8) + ",";
+          j += JsonKVNum("original_planned_rr_before_ai", c.original_planned_rr_before_ai, 4) + ",";
+          j += "\"target_candidates\":" + _TargetCandidatesJson(c) + ",";
           j += JsonKVNum("fvg_lower", c.fvg.lower, 8) + ",";
           j += JsonKVNum("fvg_upper", c.fvg.upper, 8) + ",";
           j += JsonKVNum("fvg_mid", c.fvg.mid, 8) + ",";
@@ -741,6 +903,33 @@ public:
       out.missing_confirmations_json = JsonGetArray(txt, "missing_confirmations", "[]");
       out.suggested_risk_multiplier = JsonGetNumber(txt, "suggested_risk_multiplier", 1.0);
       out.model_version = JsonGetString(txt, "model_version", "");
+      out.score_threshold = JsonGetNumber(txt, "ai_score_threshold", 0.0);
+      out.threshold_source = JsonGetString(txt, "ai_threshold_source", "");
+      out.threshold_passed = JsonGetBool(txt, "ai_threshold_passed", true);
+      out.reject_reason = JsonGetString(txt, "ai_reject_reason", "");
+      out.global_score_as_hard_floor = JsonGetBool(txt, "global_ai_score_as_hard_floor", false);
+      out.chosen_target_model = JsonGetString(txt, "chosen_target_model", "");
+      out.chosen_tp1 = JsonGetNumber(txt, "chosen_tp1", 0.0);
+      out.chosen_tp2 = JsonGetNumber(txt, "chosen_tp2", 0.0);
+      out.chosen_rr1 = JsonGetNumber(txt, "chosen_rr1", 0.0);
+      out.chosen_rr2 = JsonGetNumber(txt, "chosen_rr2", 0.0);
+      out.rejected_target_models_json = JsonGetArray(txt, "rejected_target_models", "[]");
+      out.target_blocker_kind = JsonGetString(txt, "target_blocker_kind", "");
+      out.target_blocker_severity_present = JsonGetBool(txt, "target_blocker_severity_present", JsonHasKey(txt, "target_blocker_severity"));
+      out.target_blocker_class_present = JsonGetBool(txt, "target_blocker_class_present", JsonHasKey(txt, "target_blocker_class"));
+      out.target_blocker_is_trade_killer_present = JsonGetBool(txt, "target_blocker_is_trade_killer_present", JsonHasKey(txt, "target_blocker_is_trade_killer"));
+      out.target_decision_reason_present = JsonGetBool(txt, "target_decision_reason_present", JsonHasKey(txt, "target_decision_reason"));
+      out.target_blocker_severity = JsonGetNumber(txt, "target_blocker_severity", -1.0);
+      out.target_blocker_class = JsonGetString(txt, "target_blocker_class", "");
+      out.target_blocker_is_trade_killer = JsonGetBool(txt, "target_blocker_is_trade_killer", false);
+      out.target_decision_reason = JsonGetString(txt, "target_decision_reason", "");
+      out.why_not_liquidity_target = JsonGetString(txt, "why_not_liquidity_target", "");
+      out.why_not_partial_before_obstacle = JsonGetString(txt, "why_not_partial_before_obstacle", "");
+      out.why_not_capped_before_obstacle = JsonGetString(txt, "why_not_capped_before_obstacle", "");
+      out.why_not_synthetic_fallback = JsonGetString(txt, "why_not_synthetic_fallback", "");
+      out.target_arbitration_schema_version = JsonGetString(txt, "target_arbitration_schema_version", "");
+      out.prompt_contract_version = JsonGetString(txt, "prompt_contract_version", "");
+      out.target_comparison_json = JsonGetObject(txt, "target_comparison", "{}");
 
       out.ok = true;
 

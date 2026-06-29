@@ -31,9 +31,18 @@ void _JournalEA(const string msg) {
    Print("[PO3_AIGate] ", msg);
 }
 
+bool _TesterLiveAiWaitMode() {
+   return (MQLInfoInteger(MQL_TESTER) && InpUseAI && InpAiWaitInTester);
+}
+
+bool _EffectivePauseScanWhilePendingAI() {
+   if(_TesterLiveAiWaitMode()) return true;
+   return InpPauseScanWhilePendingAI;
+}
+
 bool _ShouldPauseScanForAI() {
    if(!g_engine.HasPendingAI()) return false;
-   if(InpPauseScanWhilePendingAI) return true;
+   if(_EffectivePauseScanWhilePendingAI()) return true;
    int cap = MathMax(0, InpMaxPendingAiRequests);
    return (cap > 0 && g_engine.PendingAIRequestCount() >= cap);
 }
@@ -43,13 +52,20 @@ bool _WaitForPendingAIInTester() {
    if(!InpAiWaitInTester) return false;
    if(!g_engine.HasPendingAI()) return false;
 
+   string req_ids = g_engine.PendingAIRequestIds();
+   bool snapshot_saved = g_engine.PendingAISnapshotSaved();
    int poll_ms = MathMax(50, InpAiWaitPollMs);
    int progress_ms = MathMax(1000, InpAiWaitSliceSeconds * 1000);
    int timeout_ms = MathMax(1000, InpAiWaitTimeoutRealMin * 60 * 1000);
    ulong started_ms = (ulong)GetTickCount();
    ulong next_progress_ms = (ulong)progress_ms;
+   int timeout_total_before = g_engine.TesterAiWaitTimeoutTotal();
 
-   _JournalEA("tester wait started pending_candidates=" + IntegerToString(g_engine.PendingAICount())
+   g_engine.NoteTesterAiWaitStarted();
+   _JournalEA("[tester_ai_wait] started req_id=" + req_ids
+              + " pause_scan=true"
+              + " snapshot_saved=" + (snapshot_saved ? "true" : "false")
+              + " pending_candidates=" + IntegerToString(g_engine.PendingAICount())
               + " requests=" + IntegerToString(g_engine.PendingAIRequestCount())
               + " poll_ms=" + IntegerToString(poll_ms)
               + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin));
@@ -59,9 +75,11 @@ bool _WaitForPendingAIInTester() {
       ulong elapsed_ms = (now_ms >= started_ms ? now_ms - started_ms : 0);
       if(elapsed_ms >= (ulong)timeout_ms) break;
       if(elapsed_ms >= next_progress_ms){
-         _JournalEA("tester wait progress pending_candidates=" + IntegerToString(g_engine.PendingAICount())
+         _JournalEA("[tester_ai_wait] poll req_id=" + req_ids
+                    + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_ms / 1000))
+                    + " pending_candidates=" + IntegerToString(g_engine.PendingAICount())
                     + " requests=" + IntegerToString(g_engine.PendingAIRequestCount())
-                    + " elapsed_s=" + IntegerToString((int)(elapsed_ms / 1000)));
+                    + " pause_scan=true");
          next_progress_ms += (ulong)progress_ms;
       }
       int sleep_ms = (int)MathMin((long)poll_ms, (long)((ulong)timeout_ms - elapsed_ms));
@@ -70,12 +88,28 @@ bool _WaitForPendingAIInTester() {
    }
    g_engine.ProcessPendingAI();
 
+   ulong finished_ms = (ulong)GetTickCount();
+   ulong elapsed_final_ms = (finished_ms >= started_ms ? finished_ms - started_ms : 0);
+   bool engine_timed_out = (g_engine.TesterAiWaitTimeoutTotal() > timeout_total_before);
    if(g_engine.HasPendingAI()){
-      _JournalEA("tester wait timeout pending_candidates=" + IntegerToString(g_engine.PendingAICount())
+      g_engine.NoteTesterAiWaitTimeout();
+      _JournalEA("[tester_ai_wait] timeout req_id=" + req_ids
+                 + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_final_ms / 1000))
                  + " requests=" + IntegerToString(g_engine.PendingAIRequestCount())
-                 + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin));
+                 + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin)
+                 + " action=fail_closed");
+   } else if(engine_timed_out){
+      _JournalEA("[tester_ai_wait] timeout req_id=" + req_ids
+                 + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_final_ms / 1000))
+                 + " requests=0"
+                 + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin)
+                 + " action=fail_closed");
    } else {
-      _JournalEA("tester wait finished: AI replied, resuming scan");
+      g_engine.NoteTesterAiWaitCompleted();
+      _JournalEA("[tester_ai_wait] completed req_id=" + req_ids
+                 + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_final_ms / 1000))
+                 + " applying_response_before_resuming_scan=true");
+      _JournalEA("[tester_ai_wait] scan_resumed req_id=" + req_ids);
    }
    return !g_engine.HasPendingAI();
 }
@@ -92,6 +126,14 @@ int OnInit() {
    g_next_scan_time = TimeLocal(); // start immediately
    g_last_persist_time = TimeLocal();
    g_scan_active = false;
+   bool effective_pause = _EffectivePauseScanWhilePendingAI();
+   if(_TesterLiveAiWaitMode() && !InpPauseScanWhilePendingAI){
+      _JournalEA("[tester_ai_wait] forcing_pause_scan_while_pending_ai=true"
+                 + " reason=tester_live_ai_sync raw_input_pause=false effective_pause=true");
+   }
+   _JournalEA("[ai_mode] tester=" + (MQLInfoInteger(MQL_TESTER) ? "true" : "false")
+              + " live_ai_wait=" + (_TesterLiveAiWaitMode() ? "true" : "false")
+              + " effective_pause_scan_while_pending_ai=" + (effective_pause ? "true" : "false"));
    _JournalEA("EA initialized timer=" + IntegerToString(InpTimerTickSeconds)
               + "s scan_interval=" + IntegerToString(InpScanIntervalMinutes)
               + "m scan_all=" + (InpScanAllMarketWatch ? "true" : "false")
@@ -99,7 +141,8 @@ int OnInit() {
               + " effective_entry_tf=" + EnumToString(PO3EffectiveEntryTF())
               + " effective_confirm_tf=" + EnumToString(PO3EffectiveConfirmTF())
               + " preset_tf_override=" + (InpPresetOverridesTimeframes ? "true" : "false")
-              + " pause_for_ai=" + (InpPauseScanWhilePendingAI ? "true" : "false")
+              + " pause_for_ai=" + (effective_pause ? "true" : "false")
+              + " raw_pause_for_ai=" + (InpPauseScanWhilePendingAI ? "true" : "false")
               + " pending_ai_cap=" + IntegerToString(InpMaxPendingAiRequests));
 
    return INIT_SUCCEEDED;
@@ -122,6 +165,14 @@ void _EndScan() {
    g_scan_active = false;
    g_next_scan_time = TimeLocal() + InpScanIntervalMinutes * 60;
    g_engine.FinalizeScan();
+   if(_TesterLiveAiWaitMode() && g_engine.HasPendingAI()){
+      bool resolved = _WaitForPendingAIInTester();
+      if(resolved){
+         g_engine.MaintainWatchlist();
+         g_engine.MaintainOrders();
+         g_engine.MaintainPositions();
+      }
+   }
    bool persist_now = !MQLInfoInteger(MQL_TESTER) || InpTesterPersistIntervalMin <= 0 ||
                       g_last_persist_time <= 0 ||
                       (TimeLocal() - g_last_persist_time) >= InpTesterPersistIntervalMin * 60;
@@ -192,6 +243,16 @@ void OnTimer() {
 
       // Evaluate symbol and let the engine rank candidates across the full scan.
       g_engine.EvaluateSymbol(sym);
+      if(_TesterLiveAiWaitMode() && g_engine.HasPendingAI()){
+         bool resolved = _WaitForPendingAIInTester();
+         if(resolved){
+            g_engine.MaintainWatchlist();
+            g_engine.MaintainOrders();
+            g_engine.MaintainPositions();
+         } else {
+            return;
+         }
+      }
 
       processed++;
    }

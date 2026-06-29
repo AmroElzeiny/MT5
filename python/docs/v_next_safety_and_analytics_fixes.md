@@ -37,6 +37,13 @@
 - `InpAsiaKillzoneEndHour`
 - `InpAsiaKillzoneEndMinute`
 - `InpRejectSyntheticFallbackAfterCrossedObstacle`
+- `InpRequireAITargetArbitrationOnObstacle`
+- `InpHardRejectCrossedObstacleTarget`
+- `InpAllowAIToUseLiquidityTargetBehindMinorBlocker`
+- `InpAllowPartialBeforeObstacle`
+- `InpBlockerKillSeverity`
+- `InpBlockerMajorSeverity`
+- `InpBlockerMinorMaxSeverity`
 - `InpExecutionRejectCostR`
 - `InpExecutionReduceRiskCostR`
 - `InpMicroScalpMaxCostFracOfPlannedR`
@@ -64,8 +71,27 @@
 - Flex uses `service_tier="flex"` only for live requests when `AI_USE_FLEX=true`, `AI_ALLOW_FLEX_FOR_LIVE=true`, and `AI_FLEX_LIVE_ACK=true`; otherwise it logs `flex_disabled_for_live`.
 - Prompt caching is controlled by `AI_PROMPT_CACHE_ENABLE`, `AI_PROMPT_CACHE_KEY`, and `AI_PROMPT_CACHE_RETENTION`; these kwargs are passed to OpenAI calls when supported.
 - Setup-signature cache uses `AI_DECISION_CACHE_*` and includes symbol, direction, setup family/class/branch, source sweep/disp/BOS times, FVG, entry/SL/TP2, target/obstacle, session/killzone, runtime hash, execution-cost bucket, and spread bucket.
+- Target arbitration is wired end-to-end: MQL preserves real liquidity, capped-before-obstacle, and synthetic fallback target candidates; Python sends them to AI in one request; MT5 applies `chosen_target_model/chosen_tp2` before watchlist/order placement.
+- The hard pre-gate still blocks final synthetic fallback through crossed opposing imbalance, but it does not skip AI for explicit target-arbitration payloads with a real liquidity candidate.
 - Runtime inputs are enforced from the EA payload, not `.mqh` defaults. Live payloads missing the critical runtime-input contract are rejected before OpenAI.
 - Hard pre-gate rejects objective blocks before OpenAI and writes skipped-call cost rows with `openai_called=false`.
 - MQL now calls `CanPlaceOrderHardSafety()` immediately before market orders, pending limit orders, and pending-entry relaxation modifies.
 - Ledger repair now writes `repaired_system_trade_history.json`, `rejected_deals.json`, `ledger_integrity_report.md`, and `ledger_integrity_report.json`.
 - Verify skipped AI calls in `logs/ai_cost_report.jsonl` where `openai_called=false` and `skip_reason` is a hard-gate or cache reason.
+
+## Family-specific AI thresholds
+
+- `InpMinAiScoreTrend` is fallback-only by default.
+- Known setup families use their category inputs:
+  `InpAiScoreFullPO3`, `InpAiScoreMicroPO3`, `InpAiScoreContinuation`,
+  `InpAiScoreRange`, and `InpAiScoreFailedBreakout`.
+- `InpGlobalAiScoreAsHardFloor=false` by default, so the family threshold is
+  final.
+- If `InpGlobalAiScoreAsHardFloor=true`, the effective threshold is
+  `MathMax(InpMinAiScoreTrend, family_threshold)`.
+- MQL enforces the threshold after the AI response and again before execution.
+- Python mirrors the same runtime-input threshold selection and can reject with
+  `ai_score_below_family_threshold`.
+- Logs/responses include `ai_score_threshold`, `ai_threshold_source`,
+  `global_ai_score_as_hard_floor`, `ai_threshold_passed`, and
+  `ai_reject_reason`.

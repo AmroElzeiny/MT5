@@ -148,6 +148,11 @@ class AIGateRuntimeConfig:
     allow_flex_for_live: bool
     flex_live_ack: bool
     service_tier: str
+    openai_timeout_sec: float
+    openai_flex_timeout_sec: float
+    flex_unavailable_retry_enable: bool
+    flex_unavailable_max_retries: int
+    flex_unavailable_cooldown_sec: float
     require_runtime_inputs_live: bool
     reject_on_missing_runtime_inputs_live: bool
     hard_pre_gate_before_openai: bool
@@ -205,6 +210,11 @@ class AIGateRuntimeConfig:
             allow_flex_for_live=_env_bool(env, "AI_ALLOW_FLEX_FOR_LIVE", False, warnings, safe_default=False),
             flex_live_ack=_env_bool(env, "AI_FLEX_LIVE_ACK", False, warnings, safe_default=False),
             service_tier=service_tier,
+            openai_timeout_sec=_env_float(env, "AI_OPENAI_TIMEOUT_SEC", 180.0, warnings, min_value=10.0, max_value=1800.0),
+            openai_flex_timeout_sec=_env_float(env, "AI_OPENAI_FLEX_TIMEOUT_SEC", 600.0, warnings, min_value=30.0, max_value=1800.0),
+            flex_unavailable_retry_enable=_env_bool(env, "AI_FLEX_UNAVAILABLE_RETRY_ENABLE", True, warnings, safe_default=True),
+            flex_unavailable_max_retries=_env_int(env, "AI_FLEX_UNAVAILABLE_MAX_RETRIES", 20, warnings, min_value=0, max_value=100),
+            flex_unavailable_cooldown_sec=_env_float(env, "AI_FLEX_UNAVAILABLE_COOLDOWN_SEC", 30.0, warnings, min_value=0.0, max_value=3600.0),
             require_runtime_inputs_live=_env_bool(env, "AI_REQUIRE_RUNTIME_INPUTS_LIVE", True, warnings, safe_default=True),
             reject_on_missing_runtime_inputs_live=_env_bool(env, "AI_REJECT_ON_MISSING_RUNTIME_INPUTS_LIVE", True, warnings, safe_default=True),
             hard_pre_gate_before_openai=_env_bool(env, "AI_HARD_PRE_GATE_BEFORE_OPENAI", True, warnings, safe_default=True),
@@ -236,6 +246,11 @@ class AIGateRuntimeConfig:
             "allow_flex_for_live": self.allow_flex_for_live,
             "flex_live_ack": self.flex_live_ack,
             "service_tier": self.service_tier,
+            "openai_timeout_sec": self.openai_timeout_sec,
+            "openai_flex_timeout_sec": self.openai_flex_timeout_sec,
+            "flex_unavailable_retry_enable": self.flex_unavailable_retry_enable,
+            "flex_unavailable_max_retries": self.flex_unavailable_max_retries,
+            "flex_unavailable_cooldown_sec": self.flex_unavailable_cooldown_sec,
             "require_runtime_inputs_live": self.require_runtime_inputs_live,
             "reject_on_missing_runtime_inputs_live": self.reject_on_missing_runtime_inputs_live,
             "hard_pre_gate_before_openai": self.hard_pre_gate_before_openai,
@@ -266,6 +281,8 @@ REQUEST_STABLE_MS = max(20, int(os.getenv("AI_REQUEST_STABLE_MS", "120")))
 RESP_ENCODING = os.getenv("AI_RESPONSE_ENCODING", "utf-16")
 ANALYTICS_AUTO_ACTIVATE = os.getenv("ANALYTICS_AUTO_ACTIVATE", "false").strip().lower() in {"1", "true", "yes", "on"}
 AI_GATE_MODEL_VERSION = "po3-narrative-auditor-20260615b"
+AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260629_target_rebuild_v2"
+AI_PROMPT_CONTRACT_VERSION = "20260629_target_arbitration_explain_v2"
 LOG_FILE = None  # will be set in main() once the bus path is known
 _UNSUPPORTED_OPENAI_KWARGS_LOGGED: set[str] = set()
 _AI_RUNTIME_CONFIG_LOGGED = False
@@ -332,6 +349,13 @@ def _effective_service_tier(payload: Dict[str, Any] | None) -> tuple[str, bool, 
     return requested, requested == "flex", ""
 
 
+def _openai_timeout_for_payload(payload: Dict[str, Any] | None) -> float:
+    _service_tier, flex_used, _disabled_reason = _effective_service_tier(payload)
+    if flex_used:
+        return float(AI_CONFIG.openai_flex_timeout_sec)
+    return float(AI_CONFIG.openai_timeout_sec)
+
+
 def _apply_prompt_cache_kwargs(kwargs: Dict[str, Any]) -> None:
     if not AI_CONFIG.prompt_cache_enable:
         return
@@ -362,7 +386,7 @@ def read_json_any_encoding(path: Path) -> Dict[str, Any]:
 
     return json.loads(text)
 
-def _openai_client():
+def _openai_client(timeout_sec: float | None = None):
     if not OPENAI_API_KEY:
         raise RuntimeError(
             "Missing OpenAI API key. Set OPENAI_API_KEY as an environment variable."
@@ -374,6 +398,8 @@ def _openai_client():
     kwargs = {"api_key": OPENAI_API_KEY}
     if OPENAI_BASE_URL:
         kwargs["base_url"] = OPENAI_BASE_URL
+    if timeout_sec is not None and timeout_sec > 0:
+        kwargs["timeout"] = float(timeout_sec)
     return OpenAI(**kwargs)
 
 def _candidate_models() -> list[str]:
@@ -389,6 +415,8 @@ def _filter_supported_kwargs(func: Any, kwargs: Dict[str, Any]) -> Dict[str, Any
         supported = inspect.signature(func).parameters
     except Exception:
         return dict(kwargs)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in supported.values()):
+        return dict(kwargs)
     unsupported = [key for key in kwargs if key not in supported]
     for key in unsupported:
         if key in {"prompt_cache_key", "prompt_cache_retention", "service_tier"} and key not in _UNSUPPORTED_OPENAI_KWARGS_LOGGED:
@@ -397,14 +425,90 @@ def _filter_supported_kwargs(func: Any, kwargs: Dict[str, Any]) -> Dict[str, Any
     return {key: value for key, value in kwargs.items() if key in supported}
 
 
+def _openai_error_status_code(exc: Exception) -> int | None:
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        if value is not None:
+            try:
+                return int(value)
+            except Exception:
+                pass
+    response = getattr(exc, "response", None)
+    value = getattr(response, "status_code", None)
+    if value is not None:
+        try:
+            return int(value)
+        except Exception:
+            pass
+    return None
+
+
+def _is_flex_unavailable_retryable(exc: Exception) -> bool:
+    status = _openai_error_status_code(exc)
+    msg = str(exc or "").lower()
+    if any(marker in msg for marker in ("invalid api key", "invalid_api_key", "authentication", "permission_denied")):
+        return False
+    if any(marker in msg for marker in ("insufficient_quota", "current quota", "billing details", "monthly spend")):
+        return False
+    if status in {400, 401, 403, 404, 422}:
+        return False
+    if status in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    retryable_markers = (
+        "flex unavailable",
+        "service tier unavailable",
+        "temporarily unavailable",
+        "overloaded",
+        "capacity",
+        "try again later",
+        "connection error",
+        "timeout",
+        "timed out",
+        "read timeout",
+        "server had an error",
+    )
+    return any(marker in msg for marker in retryable_markers)
+
+
+def _call_openai_with_flex_retries(func: Any, kwargs: Dict[str, Any]) -> Any:
+    filtered = _filter_supported_kwargs(func, kwargs)
+    uses_flex = str(filtered.get("service_tier") or "").strip().lower() == "flex"
+    max_retries = int(AI_CONFIG.flex_unavailable_max_retries)
+    cooldown = float(AI_CONFIG.flex_unavailable_cooldown_sec)
+    retries_done = 0
+    while True:
+        try:
+            return func(**filtered)
+        except Exception as exc:
+            if not uses_flex or not AI_CONFIG.flex_unavailable_retry_enable or max_retries <= 0:
+                raise
+            if not _is_flex_unavailable_retryable(exc):
+                raise
+            if retries_done >= max_retries:
+                log(
+                    "[ai_gate] flex_unavailable_retries_exhausted "
+                    f"retries={retries_done} max_retries={max_retries} "
+                    f"status={_openai_error_status_code(exc) or ''} error={exc}"
+                )
+                raise
+            retries_done += 1
+            log(
+                "[ai_gate] flex_unavailable_retry "
+                f"retry={retries_done}/{max_retries} cooldown_sec={cooldown:g} "
+                f"status={_openai_error_status_code(exc) or ''} error={exc}"
+            )
+            if cooldown > 0:
+                time.sleep(cooldown)
+
+
 def _call_responses_parse(client: Any, **kwargs: Any) -> Any:
     parse_fn = client.responses.parse
-    return parse_fn(**_filter_supported_kwargs(parse_fn, kwargs))
+    return _call_openai_with_flex_retries(parse_fn, kwargs)
 
 
 def _call_responses_create(client: Any, **kwargs: Any) -> Any:
     create_fn = client.responses.create
-    return create_fn(**_filter_supported_kwargs(create_fn, kwargs))
+    return _call_openai_with_flex_retries(create_fn, kwargs)
 
 
 def _reasoning_config_for_model(model_name: str) -> Dict[str, str] | None:
@@ -502,6 +606,7 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     plan = _as_dict(payload.get("plan"))
     fvg = _as_dict(payload.get("fvg"))
     watchlist = _as_dict(payload.get("watchlist"))
+    root_target_candidates = _compact_target_candidates(_target_candidates(payload, plan))
     compact: Dict[str, Any] = {
         "id": payload.get("id"),
         "symbol": payload.get("symbol"),
@@ -583,9 +688,25 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "runner_downgraded": plan.get("runner_downgraded"),
             "runner_downgrade_reason": plan.get("runner_downgrade_reason"),
             "obstacle_kind": plan.get("obstacle_kind"),
+            "obstacle_price": plan.get("obstacle_price"),
             "obstacle_r": plan.get("obstacle_r"),
+            "obstacle_distance_r": plan.get("obstacle_distance_r"),
             "liquidity_rr": plan.get("liquidity_rr"),
+            "target_arbitration_required": plan.get("target_arbitration_required"),
+            "liquidity_target_preserved": plan.get("liquidity_target_preserved"),
+            "liquidity_target_model": plan.get("liquidity_target_model"),
+            "liquidity_target_valid_structurally": plan.get("liquidity_target_valid_structurally"),
+            "liquidity_target_blocked_by_obstacle": plan.get("liquidity_target_blocked_by_obstacle"),
+            "fallback_tp": plan.get("fallback_tp"),
+            "fallback_rr": plan.get("fallback_rr"),
+            "fallback_source": plan.get("fallback_source"),
+            "capped_before_obstacle_tp": plan.get("capped_before_obstacle_tp"),
+            "capped_before_obstacle_rr": plan.get("capped_before_obstacle_rr"),
+            "capped_before_obstacle_source": plan.get("capped_before_obstacle_source"),
+            "original_planned_tp_before_ai": plan.get("original_planned_tp_before_ai"),
+            "original_planned_rr_before_ai": plan.get("original_planned_rr_before_ai"),
         },
+        "target_candidates": root_target_candidates,
         "watchlist": {
             "armed": watchlist.get("armed"),
             "mid_touched": watchlist.get("mid_touched"),
@@ -668,6 +789,24 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "runner_trade": cand.get("runner_trade"),
             "runner_downgraded": cand.get("runner_downgraded"),
             "runner_downgrade_reason": cand.get("runner_downgrade_reason"),
+            "obstacle_kind": cand.get("obstacle_kind"),
+            "obstacle_price": cand.get("obstacle_price"),
+            "obstacle_r": cand.get("obstacle_r"),
+            "obstacle_distance_r": cand.get("obstacle_distance_r"),
+            "target_arbitration_required": cand.get("target_arbitration_required"),
+            "liquidity_target_preserved": cand.get("liquidity_target_preserved"),
+            "liquidity_target_model": cand.get("liquidity_target_model"),
+            "liquidity_target_valid_structurally": cand.get("liquidity_target_valid_structurally"),
+            "liquidity_target_blocked_by_obstacle": cand.get("liquidity_target_blocked_by_obstacle"),
+            "fallback_tp": cand.get("fallback_tp"),
+            "fallback_rr": cand.get("fallback_rr"),
+            "fallback_source": cand.get("fallback_source"),
+            "capped_before_obstacle_tp": cand.get("capped_before_obstacle_tp"),
+            "capped_before_obstacle_rr": cand.get("capped_before_obstacle_rr"),
+            "capped_before_obstacle_source": cand.get("capped_before_obstacle_source"),
+            "original_planned_tp_before_ai": cand.get("original_planned_tp_before_ai"),
+            "original_planned_rr_before_ai": cand.get("original_planned_rr_before_ai"),
+            "target_candidates": _compact_target_candidates(_target_candidates(payload, cand)),
             "po3_state": cand.get("po3_state"),
             "sweep_side": cand.get("sweep_side"),
             "structure_type": cand.get("structure_type"),
@@ -961,6 +1100,39 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
     except ImportError as e:
         raise RuntimeError("Missing dependency 'pydantic'. Install: pip install pydantic") from e
 
+    class TargetComparisonItem(BaseModel):
+        usable: bool = Field(default=False)
+        reason: str = Field(default="", max_length=180)
+        risk: str = Field(default="", max_length=120)
+        expected_role: str = Field(default="reject", max_length=32)
+
+    class TargetComparison(BaseModel):
+        liquidity_target: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
+        partial_before_obstacle_then_liquidity: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
+        capped_before_obstacle: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
+        synthetic_rr_fallback: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
+
+    class TargetArbitrationDecision(BaseModel):
+        target_arbitration_schema_version: str = Field(default=AI_TARGET_ARBITRATION_SCHEMA_VERSION, max_length=48)
+        prompt_contract_version: str = Field(default=AI_PROMPT_CONTRACT_VERSION, max_length=48)
+        arbitration_required: bool = Field(default=False)
+        chosen_target_model: str = Field(default="current_plan", max_length=64)
+        chosen_tp1: float = Field(default=0.0)
+        chosen_tp2: float = Field(default=0.0)
+        chosen_rr1: float = Field(default=0.0)
+        chosen_rr2: float = Field(default=0.0)
+        rejected_target_models: list[str] = Field(default_factory=list, max_length=4)
+        blocker_kind: str = Field(default="", max_length=64)
+        blocker_severity: float = Field(default=-1.0, ge=-1.0, le=10.0)
+        blocker_class: str = Field(default="unknown", max_length=24)
+        blocker_is_trade_killer: bool = Field(default=False)
+        why_not_liquidity_target: str = Field(default="", max_length=160)
+        why_not_partial_before_obstacle: str = Field(default="", max_length=160)
+        why_not_capped_before_obstacle: str = Field(default="", max_length=160)
+        why_not_synthetic_fallback: str = Field(default="", max_length=160)
+        target_decision_reason: str = Field(default="", max_length=160)
+        target_comparison: TargetComparison = Field(default_factory=TargetComparison)
+
     class AIGateDecision(BaseModel):
         model_config = {"protected_namespaces": ()}
         allow: bool
@@ -974,8 +1146,9 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
         missing_confirmations: list[str] = Field(default_factory=list, max_length=4)
         suggested_risk_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
         model_version: str = Field(default=AI_GATE_MODEL_VERSION)
+        target_arbitration: TargetArbitrationDecision = Field(default_factory=TargetArbitrationDecision)
 
-    client = _openai_client()
+    client = _openai_client(_openai_timeout_for_payload(payload))
     candidates = payload.get("candidates") or []
     model_payload = _compact_model_payload(payload)
     snapshot_parts, snapshot_notes = _snapshot_parts(payload)
@@ -991,6 +1164,8 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
 Structured MT5 fields are primary evidence; chart snapshots are supporting evidence. Missing or failed chart captures are not a rejection when runtime.require_snapshots is false. The field opposing_clearance_score is favorable when high and means a nearby obstruction when low.
 
 Do not reject because a configured stop model is named structural_sweep, structural_swing, or fvg_edge. Judge the actual prices: entry, SL, TP, RR, obstacle distance, cost in R, and whether the narrative remains valid. A wider structural stop lowers RR; it is not by itself an invalid pattern. Treat an opposing imbalance before target as a risk/quality issue unless the payload clearly marks it as a hard block or the target/RR/evidence becomes unrealistic.
+
+Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Fill target_arbitration_schema_version and prompt_contract_version with the exact current constants. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, and reject by filling target_comparison for all four choices with usable, reason, risk, and expected_role. Do not choose synthetic_rr_fallback just because an obstacle exists. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose synthetic_rr_fallback only if liquidity, partial, and capped choices are all worse. If choosing synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
 Prefer the candidate with the strongest complete story and execution quality, not merely the highest numeric setup_score. Return one chosen candidate index plus machine-readable rejection_codes, invalidation_risks, and missing_confirmations. If evidence is mixed, lower confidence or suggested_risk_multiplier instead of flipping allow/no on a minor ambiguity. Scores above 8 should be rare and reserved for clean sweep-displacement-structure-FVG-target alignment. Keep reasons plain ASCII and concise."""
     snapshot_status = ", ".join(snapshot_notes) if snapshot_notes else "none"
@@ -1081,6 +1256,7 @@ Prefer the candidate with the strongest complete story and execution quality, no
                     missing_confirmations=list(out.missing_confirmations or []),
                     suggested_risk_multiplier=float(out.suggested_risk_multiplier),
                     model_version=str(out.model_version or AI_GATE_MODEL_VERSION),
+                    **_target_kwargs_from_model(getattr(out, "target_arbitration", None)),
                 )
             except Exception as e:
                 if _needs_compact_json_retry(e):
@@ -1109,6 +1285,7 @@ Prefer the candidate with the strongest complete story and execution quality, no
                             missing_confirmations=list(out.missing_confirmations or []),
                             suggested_risk_multiplier=float(out.suggested_risk_multiplier),
                             model_version=str(out.model_version or AI_GATE_MODEL_VERSION),
+                            **_target_kwargs_from_model(getattr(out, "target_arbitration", None)),
                         )
                     except Exception as fallback_error:
                         try:
@@ -1137,6 +1314,7 @@ Prefer the candidate with the strongest complete story and execution quality, no
                                 missing_confirmations=list(out.missing_confirmations or []),
                                 suggested_risk_multiplier=float(out.suggested_risk_multiplier),
                                 model_version=str(out.model_version or AI_GATE_MODEL_VERSION),
+                                **_target_kwargs_from_model(getattr(out, "target_arbitration", None)),
                             )
                         except Exception as minimal_error:
                             errors.append(f"{model_name}@{budget}: {e}")
@@ -1170,6 +1348,34 @@ class Decision:
     suggested_risk_multiplier: float = 1.0
     model_version: str = AI_GATE_MODEL_VERSION
     decision_id: str = ""
+    ai_score_threshold: float = 0.0
+    ai_threshold_source: str = ""
+    global_ai_score_as_hard_floor: bool = False
+    ai_threshold_passed: bool = True
+    ai_reject_reason: str = ""
+    target_arbitration: Dict[str, Any] | None = None
+    chosen_target_model: str = ""
+    chosen_tp1: float = 0.0
+    chosen_tp2: float = 0.0
+    chosen_rr1: float = 0.0
+    chosen_rr2: float = 0.0
+    rejected_target_models: list[str] | None = None
+    target_blocker_kind: str = ""
+    target_blocker_severity: float = -1.0
+    target_blocker_class: str = ""
+    target_blocker_is_trade_killer: bool = False
+    target_decision_reason: str = ""
+    target_blocker_severity_present: bool = False
+    target_blocker_class_present: bool = False
+    target_blocker_is_trade_killer_present: bool = False
+    target_decision_reason_present: bool = False
+    why_not_liquidity_target: str = ""
+    why_not_partial_before_obstacle: str = ""
+    why_not_capped_before_obstacle: str = ""
+    why_not_synthetic_fallback: str = ""
+    target_arbitration_schema_version: str = AI_TARGET_ARBITRATION_SCHEMA_VERSION
+    prompt_contract_version: str = AI_PROMPT_CONTRACT_VERSION
+    target_comparison_json: str = "{}"
 
 def _as_dict(x: Any) -> Dict[str, Any]:
     return x if isinstance(x, dict) else {}
@@ -1192,6 +1398,82 @@ def _boolish(value: Any, default: bool = False) -> bool:
         return False
     return default
 
+def _target_candidates(payload: Dict[str, Any], item: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    item = item if isinstance(item, dict) else {}
+    plan = _as_dict(payload.get("plan"))
+    for obj in (item, plan, _as_dict(payload.get("target_candidates"))):
+        tc = obj.get("target_candidates") if isinstance(obj, dict) else None
+        if isinstance(tc, dict):
+            return tc
+    root_tc = payload.get("target_candidates")
+    return root_tc if isinstance(root_tc, dict) else {}
+
+def _target_candidate_option(candidates: Dict[str, Any], *names: str) -> Dict[str, Any]:
+    for name in names:
+        value = candidates.get(name)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+def _target_arbitration_required(payload: Dict[str, Any], item: Dict[str, Any] | None = None) -> bool:
+    item = item if isinstance(item, dict) else {}
+    plan = _as_dict(payload.get("plan"))
+    candidates = _target_candidates(payload, item)
+    return (
+        _boolish(item.get("target_arbitration_required"), False)
+        or _boolish(plan.get("target_arbitration_required"), False)
+        or _boolish(candidates.get("arbitration_required"), False)
+    )
+
+def _has_real_liquidity_target_candidate(payload: Dict[str, Any], item: Dict[str, Any] | None = None) -> bool:
+    item = item if isinstance(item, dict) else {}
+    plan = _as_dict(payload.get("plan"))
+    candidates = _target_candidates(payload, item)
+    liquidity = _target_candidate_option(candidates, "liquidity_target", "real_liquidity", "real_liquidity_target")
+    tp = _floatish(
+        _get_any(
+            liquidity,
+            ["tp2", "target", "price"],
+            _get_any(item, ["liquidity_target_preserved"], _get_any(plan, ["liquidity_target_preserved"], 0.0)),
+        ),
+        0.0,
+    )
+    return tp > 0.0 and _boolish(liquidity.get("available"), True)
+
+def _compact_target_candidates(candidates: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(candidates, dict) or not candidates:
+        return {}
+    out: Dict[str, Any] = {
+        "arbitration_required": candidates.get("arbitration_required"),
+        "current_target_source": candidates.get("current_target_source"),
+        "current_tp_model": candidates.get("current_tp_model"),
+        "current_tp2": candidates.get("current_tp2"),
+        "current_rr2": candidates.get("current_rr2"),
+        "obstacle_kind": candidates.get("obstacle_kind"),
+        "obstacle_price": candidates.get("obstacle_price"),
+        "obstacle_r": candidates.get("obstacle_r"),
+        "obstacle_distance_r": candidates.get("obstacle_distance_r"),
+        "obstacle_tf": candidates.get("obstacle_tf"),
+        "obstacle_strength_features": candidates.get("obstacle_strength_features"),
+        "effective_fallback_rr": candidates.get("effective_fallback_rr"),
+        "blocker_features": candidates.get("blocker_features") if isinstance(candidates.get("blocker_features"), dict) else {},
+    }
+    for key in ("liquidity_target", "capped_before_obstacle", "synthetic_rr_fallback"):
+        option = candidates.get(key)
+        if isinstance(option, dict):
+            out[key] = {
+                "available": option.get("available"),
+                "model": option.get("model"),
+                "tp2": option.get("tp2"),
+                "rr2": option.get("rr2"),
+                "effective_rr2": option.get("effective_rr2"),
+                "valid_structurally": option.get("valid_structurally"),
+                "blocked_by_obstacle": option.get("blocked_by_obstacle"),
+                "partial_allowed": option.get("partial_allowed"),
+                "crosses_obstacle": option.get("crosses_obstacle"),
+            }
+    return out
+
 def _floatish(value: Any, default: float = 0.0) -> float:
     try:
         if value is None or value == "":
@@ -1202,6 +1484,71 @@ def _floatish(value: Any, default: float = 0.0) -> float:
         return out
     except Exception:
         return default
+
+def _target_kwargs_from_dict(raw: Dict[str, Any] | None, present_fields: set[str] | None = None) -> Dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    present = present_fields if present_fields is not None else set(data.keys())
+    rejected = data.get("rejected_target_models")
+    if not isinstance(rejected, list):
+        rejected = []
+    comparison = data.get("target_comparison")
+    if not isinstance(comparison, dict):
+        comparison = {}
+    severity_value = data.get("blocker_severity", data.get("target_blocker_severity"))
+    class_value = data.get("blocker_class", data.get("target_blocker_class"))
+    killer_value = data.get("blocker_is_trade_killer", data.get("target_blocker_is_trade_killer"))
+    reason_value = data.get("target_decision_reason", data.get("reason"))
+    return {
+        "target_arbitration": data,
+        "chosen_target_model": str(data.get("chosen_target_model") or data.get("chosen_model") or ""),
+        "chosen_tp1": _floatish(data.get("chosen_tp1"), 0.0),
+        "chosen_tp2": _floatish(data.get("chosen_tp2"), 0.0),
+        "chosen_rr1": _floatish(data.get("chosen_rr1"), 0.0),
+        "chosen_rr2": _floatish(data.get("chosen_rr2"), 0.0),
+        "rejected_target_models": [str(x) for x in rejected if str(x or "").strip()],
+        "target_blocker_kind": str(data.get("blocker_kind") or data.get("target_blocker_kind") or ""),
+        "target_blocker_severity": _floatish(severity_value, -1.0),
+        "target_blocker_class": str(class_value or ""),
+        "target_blocker_is_trade_killer": _boolish(killer_value, False),
+        "target_decision_reason": str(reason_value or ""),
+        "target_blocker_severity_present": ("blocker_severity" in present or "target_blocker_severity" in present) and severity_value is not None,
+        "target_blocker_class_present": ("blocker_class" in present or "target_blocker_class" in present) and class_value is not None,
+        "target_blocker_is_trade_killer_present": ("blocker_is_trade_killer" in present or "target_blocker_is_trade_killer" in present) and killer_value is not None,
+        "target_decision_reason_present": ("target_decision_reason" in present or "reason" in present) and reason_value is not None,
+        "why_not_liquidity_target": str(data.get("why_not_liquidity_target") or ""),
+        "why_not_partial_before_obstacle": str(data.get("why_not_partial_before_obstacle") or ""),
+        "why_not_capped_before_obstacle": str(data.get("why_not_capped_before_obstacle") or ""),
+        "why_not_synthetic_fallback": str(data.get("why_not_synthetic_fallback") or ""),
+        "target_arbitration_schema_version": str(data.get("target_arbitration_schema_version") or AI_TARGET_ARBITRATION_SCHEMA_VERSION),
+        "prompt_contract_version": str(data.get("prompt_contract_version") or AI_PROMPT_CONTRACT_VERSION),
+        "target_comparison_json": json.dumps(comparison, ensure_ascii=False, separators=(",", ":")) if comparison else "{}",
+    }
+
+def _target_kwargs_from_model(model_obj: Any) -> Dict[str, Any]:
+    if model_obj is None:
+        return _target_kwargs_from_dict({})
+    if hasattr(model_obj, "model_dump"):
+        try:
+            present_fields = set(getattr(model_obj, "model_fields_set", set()) or set())
+            return _target_kwargs_from_dict(model_obj.model_dump(), present_fields=present_fields)
+        except Exception:
+            pass
+    if isinstance(model_obj, dict):
+        return _target_kwargs_from_dict(model_obj)
+    return _target_kwargs_from_dict({})
+
+
+def _json_object_from_text(text: Any) -> Dict[str, Any]:
+    if isinstance(text, dict):
+        return text
+    if not isinstance(text, str) or not text.strip().startswith("{"):
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
 
 def _norm_text(value: Any) -> str:
     return str(value or "").strip().lower()
@@ -1250,6 +1597,9 @@ def _write_ai_cost_report(
     skip_reason: str = "",
     input_tokens: Any = None,
     output_tokens: Any = None,
+    ai_score_threshold: Any = None,
+    ai_threshold_source: str = "",
+    ai_threshold_passed: Any = None,
 ) -> None:
     if not AI_CONFIG.cost_report_enable:
         return
@@ -1281,6 +1631,11 @@ def _write_ai_cost_report(
             "estimated_cost": None,
             "openai_called": bool(openai_called),
             "skip_reason": str(skip_reason or ""),
+            "ai_score_threshold": ai_score_threshold,
+            "ai_threshold_source": str(ai_threshold_source or ""),
+            "ai_threshold_passed": ai_threshold_passed,
+            "target_arbitration_required": _target_arbitration_required(payload, first_cand or plan),
+            "target_candidates": _compact_target_candidates(_target_candidates(payload, first_cand or plan)),
         }
         path = _cost_report_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1329,12 +1684,21 @@ CRITICAL_RUNTIME_INPUT_KEYS = [
     "suppress_continuation_touched_fvg",
     "suppress_continuation_stale_fvg",
     "reject_synthetic_fallback_after_crossed_obstacle",
+    "require_ai_target_arbitration_on_obstacle",
+    "hard_reject_crossed_obstacle_target",
+    "allow_ai_to_use_liquidity_target_behind_minor_blocker",
+    "allow_partial_before_obstacle",
+    "blocker_kill_severity",
+    "blocker_major_severity",
+    "blocker_minor_max_severity",
     "execution_reject_cost_r",
     "execution_reduce_risk_cost_r",
     "micro_scalp_max_cost_frac_of_planned_r",
     "require_displacement",
     "allow_synthetic_rr_target",
     "min_live_rr2",
+    "fallback_rr2",
+    "fallback_rr_buffer_r",
     "standard_trade_liquidity_rr_floor",
     "max_target_atr_mult",
     "max_target_adr_frac",
@@ -1342,6 +1706,12 @@ CRITICAL_RUNTIME_INPUT_KEYS = [
     "use_ai",
     "ai_strict",
     "min_ai_score_trend",
+    "ai_score_full_po3",
+    "ai_score_micro_po3",
+    "ai_score_continuation",
+    "ai_score_range",
+    "ai_score_failed_breakout",
+    "global_ai_score_as_hard_floor",
     "min_ai_confidence",
     "use_snapshot_ai",
     "require_snapshots",
@@ -1375,6 +1745,10 @@ def _cache_payload_parts(payload: Dict[str, Any], best_index: int) -> tuple[Dict
 
 def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple[str, str, Dict[str, Any]]:
     merged, po3 = _cache_payload_parts(payload, best_index)
+    runtime_inputs = _runtime_inputs(payload)
+    compact_targets = _compact_target_candidates(_target_candidates(payload, merged))
+    blocker_features = compact_targets.get("blocker_features") if isinstance(compact_targets.get("blocker_features"), dict) else {}
+    target_blob = json.dumps(compact_targets, sort_keys=True, separators=(",", ":"))
     session_name = _get_any(merged, ["session_name"], _get_any(po3, ["session_name"], payload.get("session_name")))
     in_killzone = _get_any(merged, ["in_killzone"], _get_any(po3, ["in_killzone"], payload.get("in_killzone")))
     direction = _get_any(merged, ["direction"], "buy" if payload.get("is_buy") else "sell")
@@ -1385,6 +1759,8 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
     )
     spread_r = _get_any(merged, ["spread_r"], _get_any(payload, ["spread_r"], None))
     fields = {
+        "ai_target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        "ai_prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
         "symbol": str(payload.get("symbol") or ""),
         "direction": str(direction or "").lower(),
         "setup_family": str(_get_any(merged, ["setup_family"], "") or "").lower(),
@@ -1399,7 +1775,43 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         "sl": _bucket_float(_get_any(merged, ["sl", "stop_loss", "stop"], None)),
         "tp2": _bucket_float(_get_any(merged, ["tp2", "tp", "final_tp"], None)),
         "target_source": str(_get_any(merged, ["target_source"], payload.get("target_source")) or "").lower(),
+        "target_model": str(_get_any(merged, ["target_model", "tp_model"], payload.get("target_model")) or "").lower(),
+        "chosen_target_model": str(_get_any(merged, ["chosen_target_model", "ai_chosen_target_model"], payload.get("chosen_target_model")) or "").lower(),
+        "target_candidates_hash": sha256(target_blob.encode("utf-8")).hexdigest() if target_blob != "{}" else "",
+        "liquidity_target_preserved": _bucket_float(_get_any(merged, ["liquidity_target_preserved"], None)),
+        "liquidity_target": _bucket_float(_get_any(merged, ["liquidity_target", "liquidity_target_preserved"], _get_any(po3, ["liquidity_target"], None))),
+        "liquidity_rr": _bucket_float(_get_any(merged, ["liquidity_rr"], None), 0.01),
+        "fallback_tp": _bucket_float(_get_any(merged, ["fallback_tp"], None)),
+        "fallback_rr": _bucket_float(_get_any(merged, ["fallback_rr"], None), 0.01),
+        "effective_fallback_rr": _bucket_float(compact_targets.get("effective_fallback_rr"), 0.01),
+        "capped_before_obstacle_tp": _bucket_float(_get_any(merged, ["capped_before_obstacle_tp"], None)),
+        "capped_before_obstacle_rr": _bucket_float(_get_any(merged, ["capped_before_obstacle_rr"], None), 0.01),
         "obstacle_kind": str(_get_any(merged, ["obstacle_kind"], payload.get("obstacle_kind")) or "").lower(),
+        "obstacle_tf": str(_get_any(merged, ["obstacle_tf"], payload.get("obstacle_tf")) or "").lower(),
+        "obstacle_price": _bucket_float(_get_any(merged, ["obstacle_price"], payload.get("obstacle_price"))),
+        "obstacle_distance_r": _bucket_float(_get_any(merged, ["obstacle_distance_r"], None), 0.01),
+        "obstacle_width_atr": _bucket_float(blocker_features.get("obstacle_width_atr"), 0.01),
+        "obstacle_age_bars": _bucket_float(blocker_features.get("obstacle_age_bars"), 1.0),
+        "obstacle_mitigated_percent": _bucket_float(blocker_features.get("obstacle_mitigated_percent"), 1.0),
+        "tp1_before_obstacle_possible": _boolish(blocker_features.get("tp1_before_obstacle_possible"), False),
+        "distance_from_obstacle_to_liquidity_target_r": _bucket_float(blocker_features.get("distance_from_obstacle_to_liquidity_target_r"), 0.01),
+        "target_arbitration_required": _boolish(_get_any(merged, ["target_arbitration_required"], payload.get("target_arbitration_required")), False),
+        "inp_require_ai_target_arbitration_on_obstacle": _boolish(runtime_inputs.get("require_ai_target_arbitration_on_obstacle"), False),
+        "inp_hard_reject_crossed_obstacle_target": _boolish(runtime_inputs.get("hard_reject_crossed_obstacle_target"), False),
+        "inp_reject_synthetic_fallback_after_crossed_obstacle": _boolish(runtime_inputs.get("reject_synthetic_fallback_after_crossed_obstacle"), True),
+        "inp_allow_ai_to_use_liquidity_target_behind_minor_blocker": _boolish(runtime_inputs.get("allow_ai_to_use_liquidity_target_behind_minor_blocker"), False),
+        "inp_allow_partial_before_obstacle": _boolish(runtime_inputs.get("allow_partial_before_obstacle"), False),
+        "inp_min_live_rr2": _bucket_float(runtime_inputs.get("min_live_rr2"), 0.01),
+        "inp_fallback_rr2": _bucket_float(runtime_inputs.get("fallback_rr2"), 0.01),
+        "inp_fallback_rr_buffer_r": _bucket_float(runtime_inputs.get("fallback_rr_buffer_r"), 0.01),
+        "inp_max_target_atr_mult": _bucket_float(runtime_inputs.get("max_target_atr_mult"), 0.01),
+        "inp_max_target_adr_frac": _bucket_float(runtime_inputs.get("max_target_adr_frac"), 0.01),
+        "inp_standard_trade_liquidity_rr_floor": _bucket_float(runtime_inputs.get("standard_trade_liquidity_rr_floor"), 0.01),
+        "ai_score_full_po3": _bucket_float(runtime_inputs.get("ai_score_full_po3"), 0.01),
+        "ai_score_micro_po3": _bucket_float(runtime_inputs.get("ai_score_micro_po3"), 0.01),
+        "ai_score_continuation": _bucket_float(runtime_inputs.get("ai_score_continuation"), 0.01),
+        "ai_score_range": _bucket_float(runtime_inputs.get("ai_score_range"), 0.01),
+        "ai_score_failed_breakout": _bucket_float(runtime_inputs.get("ai_score_failed_breakout"), 0.01),
         "session_name": str(session_name or "").lower(),
         "killzone_code": str(_get_any(merged, ["killzone_code"], "K" if _boolish(in_killzone, False) else "NK") or "").upper(),
         "runtime_input_hash": str(payload.get("runtime_input_hash") or _runtime_inputs(payload).get("runtime_input_hash") or ""),
@@ -1408,10 +1820,77 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
     }
     full_blob = json.dumps(fields, sort_keys=True, separators=(",", ":"))
     base_fields = dict(fields)
-    for key in ("tp2", "target_source", "obstacle_kind", "execution_cost_r_bucket", "spread_r_bucket"):
+    for key in (
+        "tp2",
+        "target_source",
+        "target_model",
+        "chosen_target_model",
+        "target_candidates_hash",
+        "liquidity_target_preserved",
+        "liquidity_target",
+        "liquidity_rr",
+        "fallback_tp",
+        "fallback_rr",
+        "effective_fallback_rr",
+        "capped_before_obstacle_tp",
+        "capped_before_obstacle_rr",
+        "obstacle_kind",
+        "obstacle_tf",
+        "obstacle_price",
+        "obstacle_distance_r",
+        "obstacle_width_atr",
+        "obstacle_age_bars",
+        "obstacle_mitigated_percent",
+        "tp1_before_obstacle_possible",
+        "distance_from_obstacle_to_liquidity_target_r",
+        "target_arbitration_required",
+        "inp_require_ai_target_arbitration_on_obstacle",
+        "inp_hard_reject_crossed_obstacle_target",
+        "inp_reject_synthetic_fallback_after_crossed_obstacle",
+        "inp_allow_ai_to_use_liquidity_target_behind_minor_blocker",
+        "inp_allow_partial_before_obstacle",
+        "inp_min_live_rr2",
+        "inp_fallback_rr2",
+        "inp_fallback_rr_buffer_r",
+        "inp_max_target_atr_mult",
+        "inp_max_target_adr_frac",
+        "inp_standard_trade_liquidity_rr_floor",
+        "execution_cost_r_bucket",
+        "spread_r_bucket",
+    ):
         base_fields.pop(key, None)
     base_blob = json.dumps(base_fields, sort_keys=True, separators=(",", ":"))
     return sha256(full_blob.encode("utf-8")).hexdigest(), sha256(base_blob.encode("utf-8")).hexdigest(), fields
+
+
+def _cached_decision_schema_miss_reason(dec_raw: Dict[str, Any]) -> str:
+    schema = str(dec_raw.get("target_arbitration_schema_version") or "")
+    prompt_contract = str(dec_raw.get("prompt_contract_version") or "")
+    if schema != AI_TARGET_ARBITRATION_SCHEMA_VERSION or prompt_contract != AI_PROMPT_CONTRACT_VERSION:
+        return "cache_miss_due_to_schema_version"
+    chosen = str(dec_raw.get("chosen_target_model") or "").strip().lower()
+    target_arbitration = dec_raw.get("target_arbitration") if isinstance(dec_raw.get("target_arbitration"), dict) else {}
+    comparison = dec_raw.get("target_comparison")
+    if not isinstance(comparison, dict):
+        comparison = target_arbitration.get("target_comparison") if isinstance(target_arbitration.get("target_comparison"), dict) else {}
+    if chosen in {"synthetic_rr_fallback", "fallback", "synthetic"}:
+        if not str(dec_raw.get("why_not_liquidity_target") or "").strip():
+            return "cache_miss_due_to_schema_version"
+        if not str(dec_raw.get("why_not_partial_before_obstacle") or "").strip():
+            return "cache_miss_due_to_schema_version"
+        if not str(dec_raw.get("why_not_capped_before_obstacle") or "").strip():
+            return "cache_miss_due_to_schema_version"
+        if not str(dec_raw.get("target_decision_reason") or "").strip():
+            return "cache_miss_due_to_schema_version"
+    required_comparison_keys = {
+        "liquidity_target",
+        "partial_before_obstacle_then_liquidity",
+        "capped_before_obstacle",
+        "synthetic_rr_fallback",
+    }
+    if chosen and chosen != "current_plan" and not required_comparison_keys.issubset(set(comparison.keys())):
+        return "cache_miss_due_to_schema_version"
+    return ""
 
 
 class AIDecisionCache:
@@ -1442,6 +1921,14 @@ class AIDecisionCache:
                     continue
                 if item.get("signature") == signature:
                     dec_raw = item.get("decision") if isinstance(item.get("decision"), dict) else {}
+                    schema_miss = _cached_decision_schema_miss_reason(dec_raw)
+                    if schema_miss:
+                        log(
+                            "[ai_cache] hit=false reason=cache_miss_due_to_schema_version"
+                            f" cached_schema={str(dec_raw.get('target_arbitration_schema_version') or '')}"
+                            f" required_schema={AI_TARGET_ARBITRATION_SCHEMA_VERSION}"
+                        )
+                        return None, schema_miss
                     dec = Decision(
                         allow=bool(dec_raw.get("allow")),
                         score=float(dec_raw.get("score") or 0.0),
@@ -1462,6 +1949,34 @@ class AIDecisionCache:
                         suggested_risk_multiplier=float(dec_raw.get("suggested_risk_multiplier") or 1.0),
                         model_version=str(dec_raw.get("model_version") or AI_GATE_MODEL_VERSION),
                         decision_id=str(dec_raw.get("decision_id") or ""),
+                        ai_score_threshold=float(dec_raw.get("ai_score_threshold") or 0.0),
+                        ai_threshold_source=str(dec_raw.get("ai_threshold_source") or ""),
+                        global_ai_score_as_hard_floor=bool(dec_raw.get("global_ai_score_as_hard_floor")),
+                        ai_threshold_passed=bool(dec_raw.get("ai_threshold_passed", True)),
+                        ai_reject_reason=str(dec_raw.get("ai_reject_reason") or ""),
+                        target_arbitration=dec_raw.get("target_arbitration") if isinstance(dec_raw.get("target_arbitration"), dict) else {},
+                        chosen_target_model=str(dec_raw.get("chosen_target_model") or ""),
+                        chosen_tp1=float(dec_raw.get("chosen_tp1") or 0.0),
+                        chosen_tp2=float(dec_raw.get("chosen_tp2") or 0.0),
+                        chosen_rr1=float(dec_raw.get("chosen_rr1") or 0.0),
+                        chosen_rr2=float(dec_raw.get("chosen_rr2") or 0.0),
+                        rejected_target_models=list(dec_raw.get("rejected_target_models") or []),
+                        target_blocker_kind=str(dec_raw.get("target_blocker_kind") or ""),
+                        target_blocker_severity=float(dec_raw.get("target_blocker_severity", -1.0) if dec_raw.get("target_blocker_severity") is not None else -1.0),
+                        target_blocker_class=str(dec_raw.get("target_blocker_class") or ""),
+                        target_blocker_is_trade_killer=bool(dec_raw.get("target_blocker_is_trade_killer")),
+                        target_decision_reason=str(dec_raw.get("target_decision_reason") or ""),
+                        target_blocker_severity_present=bool(dec_raw.get("target_blocker_severity_present")),
+                        target_blocker_class_present=bool(dec_raw.get("target_blocker_class_present")),
+                        target_blocker_is_trade_killer_present=bool(dec_raw.get("target_blocker_is_trade_killer_present")),
+                        target_decision_reason_present=bool(dec_raw.get("target_decision_reason_present")),
+                        why_not_liquidity_target=str(dec_raw.get("why_not_liquidity_target") or ""),
+                        why_not_partial_before_obstacle=str(dec_raw.get("why_not_partial_before_obstacle") or ""),
+                        why_not_capped_before_obstacle=str(dec_raw.get("why_not_capped_before_obstacle") or ""),
+                        why_not_synthetic_fallback=str(dec_raw.get("why_not_synthetic_fallback") or ""),
+                        target_arbitration_schema_version=str(dec_raw.get("target_arbitration_schema_version") or AI_TARGET_ARBITRATION_SCHEMA_VERSION),
+                        prompt_contract_version=str(dec_raw.get("prompt_contract_version") or AI_PROMPT_CONTRACT_VERSION),
+                        target_comparison_json=json.dumps(dec_raw.get("target_comparison") or {}, ensure_ascii=False, separators=(",", ":")) if isinstance(dec_raw.get("target_comparison"), dict) else str(dec_raw.get("target_comparison_json") or "{}"),
                     )
                     return dec, "hit"
                 if item.get("base_signature") == base_signature:
@@ -1472,6 +1987,14 @@ class AIDecisionCache:
         with self._lock:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
+                target_comparison: Dict[str, Any] = {}
+                if decision.target_comparison_json:
+                    try:
+                        parsed_comparison = json.loads(decision.target_comparison_json)
+                        if isinstance(parsed_comparison, dict):
+                            target_comparison = parsed_comparison
+                    except Exception:
+                        target_comparison = {}
                 row = {
                     "timestamp": int(time.time()),
                     "signature": signature,
@@ -1491,6 +2014,35 @@ class AIDecisionCache:
                         "suggested_risk_multiplier": float(decision.suggested_risk_multiplier),
                         "model_version": str(decision.model_version or AI_GATE_MODEL_VERSION),
                         "decision_id": str(decision.decision_id or ""),
+                        "ai_score_threshold": float(decision.ai_score_threshold),
+                        "ai_threshold_source": str(decision.ai_threshold_source or ""),
+                        "global_ai_score_as_hard_floor": bool(decision.global_ai_score_as_hard_floor),
+                        "ai_threshold_passed": bool(decision.ai_threshold_passed),
+                        "ai_reject_reason": str(decision.ai_reject_reason or ""),
+                        "target_arbitration": decision.target_arbitration or {},
+                        "chosen_target_model": str(decision.chosen_target_model or ""),
+                        "chosen_tp1": float(decision.chosen_tp1 or 0.0),
+                        "chosen_tp2": float(decision.chosen_tp2 or 0.0),
+                        "chosen_rr1": float(decision.chosen_rr1 or 0.0),
+                        "chosen_rr2": float(decision.chosen_rr2 or 0.0),
+                        "rejected_target_models": list(decision.rejected_target_models or []),
+                        "target_blocker_kind": str(decision.target_blocker_kind or ""),
+                        "target_blocker_severity": float(decision.target_blocker_severity if decision.target_blocker_severity is not None else -1.0),
+                        "target_blocker_class": str(decision.target_blocker_class or ""),
+                        "target_blocker_is_trade_killer": bool(decision.target_blocker_is_trade_killer),
+                        "target_decision_reason": str(decision.target_decision_reason or ""),
+                        "target_blocker_severity_present": bool(decision.target_blocker_severity_present),
+                        "target_blocker_class_present": bool(decision.target_blocker_class_present),
+                        "target_blocker_is_trade_killer_present": bool(decision.target_blocker_is_trade_killer_present),
+                        "target_decision_reason_present": bool(decision.target_decision_reason_present),
+                        "why_not_liquidity_target": str(decision.why_not_liquidity_target or ""),
+                        "why_not_partial_before_obstacle": str(decision.why_not_partial_before_obstacle or ""),
+                        "why_not_capped_before_obstacle": str(decision.why_not_capped_before_obstacle or ""),
+                        "why_not_synthetic_fallback": str(decision.why_not_synthetic_fallback or ""),
+                        "target_arbitration_schema_version": str(decision.target_arbitration_schema_version or AI_TARGET_ARBITRATION_SCHEMA_VERSION),
+                        "prompt_contract_version": str(decision.prompt_contract_version or AI_PROMPT_CONTRACT_VERSION),
+                        "target_comparison": target_comparison,
+                        "target_comparison_json": str(decision.target_comparison_json or "{}"),
                     },
                 }
                 with self.path.open("a", encoding="utf-8") as f:
@@ -1643,9 +2195,20 @@ def _candidate_hard_block_reason(item: Dict[str, Any], payload: Dict[str, Any]) 
                 return "suppressed_touched_continuation_not_retested"
 
     target_source = _norm_text(_get_any(merged, ["target_source"], payload.get("target_source")))
+    target_model = _norm_text(_get_any(merged, ["target_model", "tp_model", "chosen_target_model"], payload.get("target_model")))
     obstacle_kind = _norm_text(_get_any(merged, ["obstacle_kind"], payload.get("obstacle_kind")))
+    crossed_opposing_obstacle = "crossed" in obstacle_kind and ("opposing" in obstacle_kind or "imbalance" in obstacle_kind)
+    synthetic_target = (
+        "synthetic_rr_fallback" in target_source
+        or "synthetic_rr_fallback" in target_model
+        or target_source == "ai_selected_synthetic_rr_fallback"
+    )
+    if crossed_opposing_obstacle and _boolish(runtime_inputs.get("hard_reject_crossed_obstacle_target"), False):
+        return "synthetic_fallback_crossed_obstacle_blocked"
     if _boolish(runtime_inputs.get("reject_synthetic_fallback_after_crossed_obstacle"), True):
-        if target_source == "synthetic_rr_fallback" and "crossed" in obstacle_kind and ("opposing" in obstacle_kind or "imbalance" in obstacle_kind):
+        if synthetic_target and crossed_opposing_obstacle:
+            if _target_arbitration_required(payload, merged) and _has_real_liquidity_target_candidate(payload, merged):
+                return ""
             return "synthetic_fallback_crossed_obstacle_blocked"
 
     total_cost_r = (
@@ -2404,7 +2967,11 @@ def _rule_score(payload: Dict[str, Any]) -> Tuple[float, str]:
         score += 0.25
     elif tp_model in liquidity_runner_models:
         score += 0.22
-    elif tp_model not in {"", "fib_extension", "fixed_rr"}:
+    elif (
+        tp_model not in {"", "fib_extension", "fixed_rr", "synthetic_rr_fallback", "target_arbitration_pending", "current_plan"}
+        and not tp_model.startswith("capped_before_")
+        and not tp_model.startswith("runner_downgrade_")
+    ):
         notes.append("tp_model_unknown")
 
     if liquidity_kind in {"equal_high_cluster", "equal_low_cluster"}:
@@ -2523,6 +3090,93 @@ def _runtime_min_confidence(payload: Dict[str, Any]) -> float:
         return max(0.0, min(1.0, float(raw)))
     except Exception:
         return AI_CONFIG.min_confidence
+
+
+def _threshold_identity(payload: Dict[str, Any], chosen_index: int | None = None) -> tuple[str, str, str]:
+    plan = _as_dict(payload.get("plan"))
+    cand: Dict[str, Any] = {}
+    cands = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    if chosen_index is not None and 0 <= chosen_index < len(cands) and isinstance(cands[chosen_index], dict):
+        cand = cands[chosen_index]
+    merged = {**plan, **cand}
+    family = _norm_text(_get_any(merged, ["setup_family"], payload.get("setup_family")))
+    setup_class = _norm_text(_get_any(merged, ["setup_class"], payload.get("setup_class")))
+    branch = _norm_text(_get_any(merged, ["entry_branch", "entry_model"], payload.get("entry_branch")))
+    return family, setup_class, branch
+
+
+def effective_ai_score_threshold(payload: Dict[str, Any], chosen_index: int | None = None) -> tuple[float, str]:
+    runtime = _runtime_inputs(payload)
+    family, setup_class, branch = _threshold_identity(payload, chosen_index)
+
+    fallback = _floatish(runtime.get("min_ai_score_trend"), 7.0)
+    threshold = fallback
+    source = "min_ai_score_trend"
+
+    if family in {"full_po3", "full_po3_reversal", "full_po3_continuation"} or "full_po3" in setup_class:
+        threshold = _floatish(runtime.get("ai_score_full_po3"), fallback)
+        source = "ai_score_full_po3"
+    elif (
+        family in {"micro_po3", "micro_po3_reversal", "micro_bisi_sibi_edge"}
+        or "micro_po3" in setup_class
+        or "micro_bisi_sibi" in setup_class
+    ):
+        threshold = _floatish(runtime.get("ai_score_micro_po3"), fallback)
+        source = "ai_score_micro_po3"
+    elif family in {"micro_continuation_fvg", "continuation"} or branch == "continuation_reentry" or "continuation" in setup_class:
+        threshold = _floatish(runtime.get("ai_score_continuation"), fallback)
+        source = "ai_score_continuation"
+    elif family in {"micro_range_reentry", "range"} or branch == "range_reentry" or "range_reentry" in setup_class:
+        threshold = _floatish(runtime.get("ai_score_range"), fallback)
+        source = "ai_score_range"
+    elif family in {"micro_failed_breakout_reclaim", "failed_breakout"} or "failed_breakout" in setup_class or "reclaim" in setup_class:
+        threshold = _floatish(runtime.get("ai_score_failed_breakout"), fallback)
+        source = "ai_score_failed_breakout"
+
+    if _boolish(runtime.get("global_ai_score_as_hard_floor"), False):
+        threshold = max(fallback, threshold)
+        source = source + "+global_floor"
+
+    return max(0.0, min(10.0, threshold)), source
+
+
+def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision, chosen_index: int | None = None) -> Decision:
+    threshold, source = effective_ai_score_threshold(payload, chosen_index)
+    family, setup_class, branch = _threshold_identity(payload, chosen_index)
+    passed = float(decision.score) >= threshold
+    decision.ai_score_threshold = threshold
+    decision.ai_threshold_source = source
+    decision.global_ai_score_as_hard_floor = _boolish(_runtime_inputs(payload).get("global_ai_score_as_hard_floor"), False)
+    decision.ai_threshold_passed = passed
+    if not passed:
+        decision.allow = False
+        decision.decision_source = "ai_family_threshold_gate"
+        decision.ai_reject_reason = "ai_score_below_family_threshold"
+        if decision.rejection_codes is None:
+            decision.rejection_codes = []
+        if "ai_score_below_family_threshold" not in decision.rejection_codes:
+            decision.rejection_codes.append("ai_score_below_family_threshold")
+        if isinstance(decision.reasons, dict):
+            decision.reasons["ai_score_threshold"] = threshold
+            decision.reasons["ai_threshold_source"] = source
+            decision.reasons["ai_threshold_passed"] = False
+            decision.reasons["ai_reject_reason"] = "ai_score_below_family_threshold"
+        else:
+            decision.reasons = {
+                "previous_reasons": str(decision.reasons or ""),
+                "ai_score_threshold": threshold,
+                "ai_threshold_source": source,
+                "ai_threshold_passed": False,
+                "ai_reject_reason": "ai_score_below_family_threshold",
+            }
+    elif not decision.ai_reject_reason:
+        decision.ai_reject_reason = ""
+    log(
+        f"[ai_gate] family_threshold family={family or 'unknown'} class={setup_class or 'unknown'} "
+        f"branch={branch or 'unknown'} score={float(decision.score):.2f} threshold={threshold:.2f} "
+        f"source={source} pass={str(passed).lower()}"
+    )
+    return decision
 
 
 def _snapshots_required(payload: Dict[str, Any]) -> bool:
@@ -2702,6 +3356,7 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         if cached_decision is not None:
             _inc_counter("ai_cache_hit")
             log(f"[ai_gate] ai_cache_hit request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
+            cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
             _write_ai_cost_report(
                 payload,
                 request_id=str(payload.get("id") or ""),
@@ -2718,7 +3373,10 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             )
             return cached_decision
         _inc_counter("ai_cache_miss")
-        if cache_status.startswith("invalidated"):
+        if cache_status == "cache_miss_due_to_schema_version":
+            _inc_counter("ai_cache_miss_due_to_schema_version")
+            log(f"[ai_gate] ai_cache_miss_due_to_schema_version request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
+        elif cache_status.startswith("invalidated"):
             log(f"[ai_gate] ai_cache_invalidated_reason={cache_status} request_id={str(payload.get('id') or '')}")
         else:
             log(f"[ai_gate] ai_cache_miss request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
@@ -2930,7 +3588,31 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         missing_confirmations=inherited_missing,
         suggested_risk_multiplier=max(0.0, min(1.0, float(dec.suggested_risk_multiplier or 1.0))),
         model_version=dec.model_version or AI_GATE_MODEL_VERSION,
+        target_arbitration=dec.target_arbitration or {},
+        chosen_target_model=dec.chosen_target_model,
+        chosen_tp1=dec.chosen_tp1,
+        chosen_tp2=dec.chosen_tp2,
+        chosen_rr1=dec.chosen_rr1,
+        chosen_rr2=dec.chosen_rr2,
+        rejected_target_models=list(dec.rejected_target_models or []),
+        target_blocker_kind=dec.target_blocker_kind,
+        target_blocker_severity=dec.target_blocker_severity,
+        target_blocker_class=dec.target_blocker_class,
+        target_blocker_is_trade_killer=dec.target_blocker_is_trade_killer,
+        target_decision_reason=dec.target_decision_reason,
+        target_blocker_severity_present=dec.target_blocker_severity_present,
+        target_blocker_class_present=dec.target_blocker_class_present,
+        target_blocker_is_trade_killer_present=dec.target_blocker_is_trade_killer_present,
+        target_decision_reason_present=dec.target_decision_reason_present,
+        why_not_liquidity_target=dec.why_not_liquidity_target,
+        why_not_partial_before_obstacle=dec.why_not_partial_before_obstacle,
+        why_not_capped_before_obstacle=dec.why_not_capped_before_obstacle,
+        why_not_synthetic_fallback=dec.why_not_synthetic_fallback,
+        target_arbitration_schema_version=dec.target_arbitration_schema_version or AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        prompt_contract_version=dec.prompt_contract_version or AI_PROMPT_CONTRACT_VERSION,
+        target_comparison_json=dec.target_comparison_json or "{}",
     )
+    final_decision = _apply_family_ai_threshold_gate(payload, final_decision, chosen_index)
     if AI_CONFIG.decision_cache_enable and cache_signature:
         AI_DECISION_CACHE.store(cache_signature, cache_base_signature, cache_fields, final_decision)
     return final_decision
@@ -3027,7 +3709,7 @@ def score_setup_batch_research(payloads: list[Dict[str, Any]]) -> Dict[str, Any]
         "error": "",
     }
     try:
-        client = _openai_client()
+        client = _openai_client(AI_CONFIG.openai_timeout_sec)
         with jsonl_path.open("rb") as batch_file:
             upload = client.files.create(file=batch_file, purpose="batch")
         batch = client.batches.create(
@@ -3423,6 +4105,7 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
             "liquidity_rr": plan.get("liquidity_rr"),
             "setup_score": plan.get("setup_score"),
         },
+        "target_candidates": _compact_target_candidates(_target_candidates(payload, plan)),
         "regime": {
             "atr_pct": _get_any(regime, ["atr_pct"], _get_any(payload, ["atr_pct"])),
             "trend_strength": _get_any(regime, ["trend_strength"], _get_any(payload, ["trend_strength"])),
@@ -3460,6 +4143,39 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "missing_confirmations": list(dec.missing_confirmations or []),
         "suggested_risk_multiplier": float(dec.suggested_risk_multiplier),
         "model_version": str(dec.model_version or AI_GATE_MODEL_VERSION),
+        "setup_family": str(setup_family or ""),
+        "setup_class": str(_get_any(plan, ["setup_class"], "")),
+        "entry_branch": str(_get_any(plan, ["entry_branch", "entry_model"], "")),
+        "ai_score": float(dec.score),
+        "ai_confidence": float(dec.confidence),
+        "ai_score_threshold": float(dec.ai_score_threshold),
+        "ai_threshold_source": str(dec.ai_threshold_source or ""),
+        "global_ai_score_as_hard_floor": bool(dec.global_ai_score_as_hard_floor),
+        "ai_threshold_passed": bool(dec.ai_threshold_passed),
+        "ai_reject_reason": str(dec.ai_reject_reason or ""),
+        "target_arbitration": dec.target_arbitration or {},
+        "chosen_target_model": str(dec.chosen_target_model or ""),
+        "chosen_tp1": float(dec.chosen_tp1 or 0.0),
+        "chosen_tp2": float(dec.chosen_tp2 or 0.0),
+        "chosen_rr1": float(dec.chosen_rr1 or 0.0),
+        "chosen_rr2": float(dec.chosen_rr2 or 0.0),
+        "rejected_target_models": list(dec.rejected_target_models or []),
+        "target_blocker_kind": str(dec.target_blocker_kind or ""),
+        "target_blocker_severity": float(dec.target_blocker_severity if dec.target_blocker_severity is not None else -1.0),
+        "target_blocker_class": str(dec.target_blocker_class or ""),
+        "target_blocker_is_trade_killer": bool(dec.target_blocker_is_trade_killer),
+        "target_decision_reason": str(dec.target_decision_reason or ""),
+        "target_blocker_severity_present": bool(dec.target_blocker_severity_present),
+        "target_blocker_class_present": bool(dec.target_blocker_class_present),
+        "target_blocker_is_trade_killer_present": bool(dec.target_blocker_is_trade_killer_present),
+        "target_decision_reason_present": bool(dec.target_decision_reason_present),
+        "why_not_liquidity_target": str(dec.why_not_liquidity_target or ""),
+        "why_not_partial_before_obstacle": str(dec.why_not_partial_before_obstacle or ""),
+        "why_not_capped_before_obstacle": str(dec.why_not_capped_before_obstacle or ""),
+        "why_not_synthetic_fallback": str(dec.why_not_synthetic_fallback or ""),
+        "target_arbitration_schema_version": str(dec.target_arbitration_schema_version or AI_TARGET_ARBITRATION_SCHEMA_VERSION),
+        "prompt_contract_version": str(dec.prompt_contract_version or AI_PROMPT_CONTRACT_VERSION),
+        "target_comparison": _json_object_from_text(dec.target_comparison_json),
     }
 
     resp_path = resp_dir / f"{req_id}.json"
