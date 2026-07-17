@@ -4,11 +4,38 @@
 #ifndef __PO3_AIGATE_CONFIG_MQH__
 #define __PO3_AIGATE_CONFIG_MQH__
 
-const string ENGINE_VERSION = "5.4-rollover-recovery-penalty-time-exclusive-model-vnext-safety";
-const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-risk-lineage-20260629-ai-freshness-v2";
-const string AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260629_target_rebuild_v2";
-const string AI_PROMPT_CONTRACT_VERSION = "20260629_target_arbitration_explain_v2";
-const string RISK_MODEL_VERSION = "risk-v2-percent-sanity-20260504";
+const string ENGINE_VERSION = "5.5-architecture-cache-shadow-20260717-v4";
+const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-provider-architecture-20260717-v3";
+const string AI_DECISION_SCHEMA_VERSION = "20260717_ai_decision_authority_v5";
+const string AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260717_target_fingerprint_authority_v6";
+const string AI_PROMPT_CONTRACT_VERSION = "20260717_layered_authority_v7";
+const string TRADE_LEDGER_SCHEMA_VERSION = "20260717_trade_ledger_architecture_v6";
+const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
+const string FEATURE_LINEAGE_VERSION = "20260717_pre_entry_features_v2";
+const string RISK_MODEL_VERSION = "20260717_original_initial_risk_v3";
+const string REPEATABILITY_SCHEMA_VERSION = "20260717_repeatability_v1";
+const string HIERARCHICAL_PRIOR_SCHEMA_VERSION = "20260717_hierarchical_prior_v1";
+const string RISK_FACTOR_SCHEMA_VERSION = "20260717_risk_factor_v1";
+const string COMMISSION_MODEL_SCHEMA_VERSION = "20260717_broker_cost_v1";
+const string MANAGEMENT_SCHEMA_VERSION = "20260717_management_state_v3";
+const string MANAGEMENT_EXPERIMENT_SCHEMA_VERSION = "20260717_management_experiment_v1";
+const string MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_counterfactual_v2";
+const string INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1";
+const string SHADOW_CANDIDATE_SCHEMA_VERSION = "20260717_shadow_candidate_v3";
+const string NORMALIZED_FVG_SCHEMA_VERSION = "20260717_normalized_fvg_v2";
+const string ARCHITECTURE_CONTRACT_VERSION = "20260717_architecture_cache_shadow_v2";
+const string LIVE_FORWARD_CONTRACT_VERSION = "20260717_live_forward_v1";
+const string SEMANTIC_CACHE_SCHEMA_VERSION = "20260717_semantic_cache_v1";
+const string POLICY_MANIFEST_SCHEMA_VERSION = "20260717_policy_manifest_v1";
+const string COHORT_SCHEMA_VERSION = "20260717_homogeneous_cohort_v1";
+const string HIERARCHICAL_OUTCOME_MODEL_VERSION = "20260717_hierarchical_outcome_shadow_v2";
+const string ENTRY_MODEL_VERSION = "20260717_entry_path_shadow_v2";
+const string MANAGEMENT_MODEL_VERSION = "20260717_management_alpha_shadow_v2";
+const string SHADOW_OUTCOME_SCHEMA_VERSION = "20260717_shadow_outcome_complete_v2";
+const string FILE_BUS_LIFECYCLE_VERSION = "20260717_file_bus_lifecycle_v2";
+const string CALIBRATION_CONTRACT_VERSION = "20260716_oos_calibration_v1";
+const string DEPLOYMENT_MANIFEST_SCHEMA_VERSION = "20260717_deployment_manifest_v1";
+const double SHADOW_ADVERSE_THRESHOLD_R = 0.50;
 
 enum ENUM_PO3_STOP_MODEL
 {
@@ -23,6 +50,42 @@ enum ENUM_STRATEGY_MODE
    STRATEGY_MICRO_PO3 = 1,
    STRATEGY_SCALP_CONTINUATION = 2,
    STRATEGY_HYBRID = 3
+};
+
+enum TesterAiMode
+{
+   TESTER_AI_RECORD_ONLY = 0,
+   TESTER_AI_CACHE_ONLY = 1,
+   TESTER_AI_LIVE_WAIT_DEBUG = 2
+};
+
+enum ENUM_NETTING_POSITION_POLICY
+{
+   NETTING_REJECT_STARTUP = 0,
+   NETTING_FORCE_ONE_MANAGED_POSITION_PER_SYMBOL = 1
+};
+
+enum ENUM_NORMALIZED_FVG_MODE
+{
+   NORMALIZED_FVG_OFF = 0,
+   NORMALIZED_FVG_SHADOW = 1,
+   NORMALIZED_FVG_ENFORCE = 2
+};
+
+enum ENUM_INVALIDATION_CONFIRMATION_MODE
+{
+   INVALIDATION_CLOSED_M1_BAR = 0,
+   INVALIDATION_CLOSED_ENTRY_TF_BAR = 1,
+   INVALIDATION_N_SECOND_PERSISTENCE = 2,
+   INVALIDATION_PRICE_SPREAD_BUFFER = 3,
+   INVALIDATION_TICK = 4
+};
+
+enum ENUM_THESIS_INVALIDATION_POLICY
+{
+   THESIS_INVALIDATION_PARTIAL_EXIT = 0,
+   THESIS_INVALIDATION_FULL_EXIT = 1,
+   THESIS_INVALIDATION_ORIGINAL_SL_TP_ONLY = 2
 };
 
 // --- Scan / scheduling ---
@@ -45,6 +108,8 @@ input int   InpTesterPersistIntervalMin = 15;
 input bool  InpTesterRejectStaleAiResults = true;
 input int   InpTesterMaxAiResultAgeSimMinutes = 15;
 input bool  InpTesterFreezeAiExecutionSnapshot = true;
+input TesterAiMode InpTesterAiMode = TESTER_AI_RECORD_ONLY;
+input bool  InpTesterAllowLiveWaitDebugTrading = false;
 input bool  InpVerboseJournal        = true;
 input bool   InpJournalTesterOnly     = false;
 input bool   InpRolloverProtectionEnable = true;
@@ -130,6 +195,13 @@ input double InpRetraceTouchHigh     = 0.62;
 input int    InpLookbackLtfBars      = 360;
 input int    InpMinLtfBars           = 40;
 input int    InpMinFvgWidthTicks     = 1;
+input ENUM_NORMALIZED_FVG_MODE InpNormalizedFvgMode = NORMALIZED_FVG_SHADOW;
+input double InpNormalizedFvgSpreadMult = 1.0;
+input double InpNormalizedFvgAtrFrac = 0.01;
+input double InpNormalizedFvgSessionNoiseFrac = 0.10;
+input int    InpNormalizedFvgSessionNoiseBars = 120;
+input int    InpNormalizedFvgMinAssetClassSamples = 100;
+input string InpNormalizedFvgAssetClassPolicyFile = "PO3_AI_BUS\\config\\normalized_fvg_policy.v2.json";
 input double InpStopMaxFracOfPrice   = 0.05;
 input int    InpSLBufferPts          = 4;
 input double InpSLBufferAtrFrac      = 0.018;
@@ -153,7 +225,9 @@ input bool   InpEnableNestedFvg            = true;
 input bool   InpEnableSessionReentry       = true;
 input bool   InpEnableRangeReentry         = true;
 input bool   InpEnableContinuationReentry  = true;
-input bool   InpAutoSuppressWeakFamiliesLive = true;
+input bool   InpEnableMPCTrading = true;
+input bool   InpEnableBucketRiskPolicy = true;
+input string InpBucketRiskPolicyFile = "PO3_AI_BUS\\config\\bucket_risk_policy.json";
 input bool   InpOnlyBreakerRetestVirginStrongOrigin = false; // Exclusive mode: only breaker_retest + virgin_fvg + strong_origin may trade
 input double InpStrongOriginMinScore = 7.0; // Minimum FVG origin_score required for strong_origin in exclusive mode
 input bool   InpExclusiveModelFilterBeforeAI = true; // Block non-exclusive candidates before AI requests
@@ -208,6 +282,11 @@ input int    InpPendingExpiryH4Minutes = 720;
 input int    InpPendingExpiryD1Minutes = 2880;
 input int    InpBrokerStopBufferPts  = 5;
 input double InpCommissionPerLotRoundTurn = 0.0;
+input bool   InpBrokerCostHistoryEnable = true;
+input int    InpBrokerCostMinSamples = 20;
+input double InpBrokerCostStressedPercentile = 0.95;
+input int    InpBrokerCostHistoryDays = 90;
+input double InpCommissionFallbackPerLotRoundTurn = 0.01;
 input int    InpSessionFillPenaltyPtsActive = 2;
 input int    InpSessionFillPenaltyPtsOffHours = 8;
 input int    InpSessionFillPenaltyPtsShock = 12;
@@ -224,8 +303,6 @@ input bool   InpAllowPartialBeforeObstacle = true;
 input double InpBlockerKillSeverity = 8.0;
 input double InpBlockerMajorSeverity = 6.5;
 input double InpBlockerMinorMaxSeverity = 3.5;
-input double InpSyntheticFallbackMinCleanCaptureRatio = 0.10;
-input int    InpSyntheticFallbackMinStatsCount = 50;
 input double InpObstacleRejectR = 0.70;
 input double InpFallbackRR2          = 1.05;
 input double InpFallbackRRBufferR     = 0.05;
@@ -264,11 +341,24 @@ input int    InpBehaviorStopCooldownMin = 180;
 
 input bool   InpMaxTotalRiskEnable   = false;
 input double InpMaxTotalRiskMoney    = 30.0;
+input double InpMaxTotalRiskPct      = 3.0;
+input bool   InpRequireAggregateRiskCapLive = false;
+input bool   InpRiskFactorGateEnable = false;
+input bool   InpRiskFactorPolicyRequiredLive = false;
+input string InpRiskFactorPolicyFile = "PO3_AI_BUS\\config\\risk_factor_policy.v1.json";
 input double InpDailyLossCapPct      = 98.151;
 input double InpDailyLossCapMoney    = 0.0;
 input bool   InpAnalyticsEnable      = true;
 input int    InpAnalyticsHistoryDays = 45;
 input double InpAnalyticsVirtualBalance = 100000.0;
+input ENUM_NETTING_POSITION_POLICY InpNettingPositionPolicy = NETTING_REJECT_STARTUP;
+input double InpLedgerRReconciliationTolerance = 0.02;
+input double InpLedgerMoneyReconciliationTolerance = 0.02;
+input double InpLedgerVolumeReconciliationTolerance = 0.00000001;
+input double InpLedgerMaxMfeR = 50.0;
+input double InpLedgerMaxAbsMaeR = 50.0;
+input int    InpLedgerTimestampToleranceSec = 10;
+input double InpLedgerPriceTickTolerance = 2.0;
 input bool   InpUseSnapshotAI        = false;
 input bool   InpRequireSnapshots     = false;
 input int    InpSnapshotWidth        = 1600;
@@ -362,6 +452,24 @@ input double InpPenaltyStuckMinMfeR  = 0.35;
 input double InpPenaltyDrInvalidCutPct  = 0.35;
 input double InpPenaltyFvgInvalidCutPct = 0.15;
 input int    InpPenaltyInvalidEpsBps    = 15;
+input ENUM_THESIS_INVALIDATION_POLICY InpThesisInvalidationPolicy = THESIS_INVALIDATION_PARTIAL_EXIT;
+input ENUM_INVALIDATION_CONFIRMATION_MODE InpInvalidationConfirmationMode = INVALIDATION_CLOSED_M1_BAR;
+input int    InpInvalidationPersistenceSeconds = 15;
+input double InpInvalidationSpreadBufferMult = 1.0;
+input bool   InpInvalidationAssetClassPolicyEnable = false;
+input string InpInvalidationAssetClassPolicyFile = "PO3_AI_BUS\\config\\invalidation_policy.v1.json";
+input bool   InpClosingVolumeAllowCloseAllBelowMinimum = false;
+input int    InpCounterfactualHorizonMinutes = 1440;
+
+// --- Broker symbol sessions / pre-close governance ---
+input bool   InpUseBrokerSymbolSessions = true;
+input int    InpSymbolNoEntryBeforeCloseMin = 15;
+input int    InpSymbolFlattenBeforeCloseMin = 6;
+input int    InpSymbolFlattenRetrySeconds = 30;
+
+// --- Shadow candidate research (never trading authority) ---
+input bool   InpShadowCandidateLedgerEnable = true;
+input int    InpShadowCandidateHorizonMinutes = 1440;
 
 input ENUM_PO3_STOP_MODEL InpStopModel = STOP_STRUCTURAL_SWEEP;
 
@@ -369,13 +477,15 @@ input ENUM_PO3_STOP_MODEL InpStopModel = STOP_STRUCTURAL_SWEEP;
 input bool   InpUseAI                = true;
 input bool   InpAiStrict             = true;
 input double InpMinAiScoreTrend      = 7.0;
-input double InpMinAiConfidence      = 0.51;
 input bool   InpLiveFailClosedOnAIFailure = true;
 input double InpFallbackRiskMultiplier = 0.0;
 input bool   InpAllowRuleOnlyLive    = false;
-input bool   InpAiRequireRawAllow    = false;
-input double InpAiOverrideScore      = 8.2;
-input double InpAiOverrideConfidence = 0.75;
+input bool   InpAiVetoEnable = true;
+input double InpAiMinFollowThroughProb = 0.58;
+input double InpAiMaxInvalidationRisk = 0.62;
+input double InpAiMaxChopRisk = 0.65;
+input double InpAiMaxPostEntryFailureRisk = 0.62;
+input double InpAiMinFinalExpectancyScore = 6.80;
 input int    InpAiRetryBackoffMin    = 25;
 input bool   InpTesterAiCache        = true;
 input bool InpUseAdrTargetFloorForMicro = true;

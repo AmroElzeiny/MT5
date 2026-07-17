@@ -6,6 +6,7 @@
 #include "Types.mqh"
 #include "Indicators.mqh"
 #include "Config.mqh"
+#include "JsonLite.mqh"
 
 struct FVGDiagnostics {
    int ltf_bars;
@@ -59,6 +60,60 @@ private:
    datetime m_cache_htf_bar;
    int m_cache_htf_requested;
    MqlRates m_cache_htf_rates[];
+   string m_normalized_policy_json;
+   datetime m_normalized_policy_loaded_at;
+
+   bool _LoadNormalizedAssetClassPolicy(const string asset_class,
+                                        double &minimum_ticks,
+                                        double &spread_multiple,
+                                        double &atr_fraction,
+                                        double &session_noise_fraction,
+                                        int &clean_sample_size,
+                                        string &policy_version,
+                                        string &policy_source) {
+      minimum_ticks = MathMax(1, PO3EffectiveMinFvgWidthTicks());
+      spread_multiple = MathMax(0.0, InpNormalizedFvgSpreadMult);
+      atr_fraction = MathMax(0.0, InpNormalizedFvgAtrFrac);
+      session_noise_fraction = MathMax(0.0, InpNormalizedFvgSessionNoiseFrac);
+      clean_sample_size = 0;
+      policy_version = NORMALIZED_FVG_SCHEMA_VERSION;
+      policy_source = "configured_global_shadow_inputs";
+
+      datetime now = TimeLocal();
+      if(StringLen(m_normalized_policy_json) == 0 || m_normalized_policy_loaded_at <= 0 ||
+         now - m_normalized_policy_loaded_at >= 60){
+         int h = FileOpen(InpNormalizedFvgAssetClassPolicyFile,
+                          FILE_READ|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+         m_normalized_policy_json = "";
+         if(h != INVALID_HANDLE){
+            while(!FileIsEnding(h)) m_normalized_policy_json += FileReadString(h);
+            FileClose(h);
+         }
+         m_normalized_policy_loaded_at = now;
+      }
+      if(StringLen(m_normalized_policy_json) == 0) return false;
+      if(JsonGetString(m_normalized_policy_json, "schema_version", "") != NORMALIZED_FVG_SCHEMA_VERSION)
+         return false;
+      string policy_scope = JsonGetString(m_normalized_policy_json, "policy_scope", "asset_class");
+      if(policy_scope != "asset_class") return false;
+      if(InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE){
+         if(JsonGetString(m_normalized_policy_json, "ledger_integrity_status", "") != "CLEAN")
+            return false;
+         if(JsonGetString(m_normalized_policy_json, "taxonomy_version", "") != SETUP_TAXONOMY_VERSION)
+            return false;
+      }
+      string classes = JsonGetObject(m_normalized_policy_json, "asset_classes", "");
+      string selected = JsonGetObject(classes, asset_class, "");
+      if(StringLen(selected) == 0) return false;
+      minimum_ticks = MathMax(1.0, JsonGetNumber(selected, "minimum_ticks", minimum_ticks));
+      spread_multiple = MathMax(0.0, JsonGetNumber(selected, "spread_multiple", spread_multiple));
+      atr_fraction = MathMax(0.0, JsonGetNumber(selected, "atr_fraction", atr_fraction));
+      session_noise_fraction = MathMax(0.0, JsonGetNumber(selected, "session_noise_fraction", session_noise_fraction));
+      clean_sample_size = MathMax(0, (int)JsonGetNumber(selected, "clean_sample_size", 0));
+      policy_version = JsonGetString(m_normalized_policy_json, "policy_version", NORMALIZED_FVG_SCHEMA_VERSION);
+      policy_source = "versioned_asset_class_policy";
+      return true;
+   }
 
    int _LoadRatesCached(const string symbol, const ENUM_TIMEFRAMES tf, const int requested,
                         string &cache_symbol, ENUM_TIMEFRAMES &cache_tf,
@@ -75,6 +130,65 @@ private:
       cache_bar = current_bar;
       cache_requested = requested;
       return got;
+   }
+
+   string _NormalizedFvgAssetClass(const string symbol) const {
+      string value = symbol;
+      StringToUpper(value);
+      if(StringFind(value, "XAU") >= 0 || StringFind(value, "GOLD") >= 0 ||
+         StringFind(value, "XAG") >= 0 || StringFind(value, "SILVER") >= 0) return "metals";
+      if(StringFind(value, "WTI") >= 0 || StringFind(value, "BRENT") >= 0 ||
+         StringFind(value, "OIL") >= 0 || StringFind(value, "NGAS") >= 0) return "energy";
+      if(StringFind(value, "BTC") >= 0 || StringFind(value, "ETH") >= 0 || StringFind(value, "SOL") >= 0) return "crypto";
+      if(StringFind(value, "US30") >= 0 || StringFind(value, "NAS") >= 0 ||
+         StringFind(value, "SPX") >= 0 || StringFind(value, "GER") >= 0 ||
+         StringFind(value, "DAX") >= 0 || StringFind(value, "UK100") >= 0 ||
+         StringFind(value, "JP225") >= 0) return "indices";
+      string letters = "";
+      for(int i=0; i<StringLen(value); i++){
+         ushort c = (ushort)StringGetCharacter(value, i);
+         if(c >= 'A' && c <= 'Z') letters += StringSubstr(value, i, 1);
+      }
+      if(StringLen(letters) >= 6) return "fx";
+      return "other";
+   }
+
+   void _SortAscending(double &values[]) const {
+      for(int i=1; i<ArraySize(values); i++){
+         double key = values[i];
+         int j = i - 1;
+         while(j >= 0 && values[j] > key){ values[j+1] = values[j]; j--; }
+         values[j+1] = key;
+      }
+   }
+
+   double _RobustSessionNoise(const MqlRates &rates[], const int got,
+                              const int requested_bars, int &sample_size) const {
+      double true_ranges[];
+      ArrayResize(true_ranges, 0);
+      int inspect = MathMin(MathMax(0, got - 2), MathMax(1, requested_bars));
+      for(int i=1; i<=inspect; i++){
+         if(i + 1 >= got) break;
+         double previous_close = rates[i+1].close;
+         double tr = MathMax(rates[i].high - rates[i].low,
+                             MathMax(MathAbs(rates[i].high - previous_close),
+                                     MathAbs(rates[i].low - previous_close)));
+         if(tr <= 0.0) continue;
+         int n = ArraySize(true_ranges);
+         ArrayResize(true_ranges, n+1);
+         true_ranges[n] = tr;
+      }
+      sample_size = ArraySize(true_ranges);
+      if(sample_size <= 0) return 0.0;
+      _SortAscending(true_ranges);
+      if(sample_size % 2 == 1) return true_ranges[sample_size/2];
+      return (true_ranges[sample_size/2 - 1] + true_ranges[sample_size/2]) * 0.5;
+   }
+
+   string _NormalizedFvgModeName() const {
+      if(InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE) return "ENFORCE";
+      if(InpNormalizedFvgMode == NORMALIZED_FVG_SHADOW) return "SHADOW";
+      return "OFF";
    }
 
    void _RetraceBand(const FVGZone &z, double &band_low, double &band_high) const {
@@ -570,6 +684,47 @@ public:
       double atr = ATRFromRates(m_cache_ltf_rates, got, 14);
       if(atr <= 0) atr = point * MathMax(10, PO3EffectiveMinFvgWidthTicks());
       double current_px = m_cache_ltf_rates[1].close;
+      string normalized_asset_class = _NormalizedFvgAssetClass(symbol);
+      double policy_minimum_ticks = MathMax(1, PO3EffectiveMinFvgWidthTicks());
+      double policy_spread_multiple = InpNormalizedFvgSpreadMult;
+      double policy_atr_fraction = InpNormalizedFvgAtrFrac;
+      double policy_session_noise_fraction = InpNormalizedFvgSessionNoiseFrac;
+      int policy_clean_sample_size = 0;
+      string normalized_policy_version = NORMALIZED_FVG_SCHEMA_VERSION;
+      string normalized_policy_source = "configured_global_shadow_inputs";
+      bool normalized_policy_loaded = _LoadNormalizedAssetClassPolicy(normalized_asset_class,
+                                                                      policy_minimum_ticks,
+                                                                      policy_spread_multiple,
+                                                                      policy_atr_fraction,
+                                                                      policy_session_noise_fraction,
+                                                                      policy_clean_sample_size,
+                                                                      normalized_policy_version,
+                                                                      normalized_policy_source);
+      bool normalized_policy_evidence_sufficient = (normalized_policy_loaded &&
+                                                     policy_clean_sample_size >= MathMax(1, InpNormalizedFvgMinAssetClassSamples));
+      if(InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE && !normalized_policy_evidence_sufficient){
+         Print("[normalized_fvg] symbol=", symbol,
+               " asset_class=", normalized_asset_class,
+               " mode=ENFORCE status=blocked reason=insufficient_asset_class_policy_evidence",
+               " policy_loaded=", (normalized_policy_loaded ? "true" : "false"),
+               " clean_sample_size=", IntegerToString(policy_clean_sample_size),
+               " minimum_required=", IntegerToString(InpNormalizedFvgMinAssetClassSamples));
+         diag.all_candidates_rejected++;
+         return false;
+      }
+      int session_noise_samples = 0;
+      double robust_session_noise = _RobustSessionNoise(m_cache_ltf_rates, got,
+                                                        InpNormalizedFvgSessionNoiseBars,
+                                                        session_noise_samples);
+      double spread = MathMax(0.0, SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID));
+      double normalized_min_ticks_price = point * policy_minimum_ticks;
+      double normalized_min_spread_price = spread * policy_spread_multiple;
+      double normalized_min_atr_price = atr * policy_atr_fraction;
+      double normalized_min_session_noise_price = robust_session_noise * policy_session_noise_fraction;
+      double normalized_minimum_price = MathMax(normalized_min_ticks_price,
+                                                MathMax(normalized_min_spread_price,
+                                                        MathMax(normalized_min_atr_price,
+                                                                normalized_min_session_noise_price)));
 
       for(int idx=1; idx<got-2; idx++){
          int older = idx + 2;
@@ -615,8 +770,16 @@ public:
             continue;
          }
 
-         double width_ticks = (upper - lower) / point;
-          if(width_ticks < PO3EffectiveMinFvgWidthTicks()){
+         double width_price = upper - lower;
+         double width_ticks = width_price / point;
+         bool normalized_minimum_pass = (width_price + point * 1e-8 >= normalized_minimum_price);
+         // Preserve the existing universal tick floor in every mode. SHADOW
+         // adds measurement only; ENFORCE adds the normalized floor.
+         if(width_ticks < PO3EffectiveMinFvgWidthTicks()){
+            diag.fvg_too_small++;
+            continue;
+         }
+         if(InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE && !normalized_minimum_pass){
             diag.fvg_too_small++;
             continue;
          }
@@ -687,6 +850,20 @@ public:
          cand.freshness_score = freshness_score;
          cand.retest_quality_score = retest_quality_score;
          cand.opposing_obstruction_score = opposing_obstruction_score;
+         cand.normalized_min_ticks_price = normalized_min_ticks_price;
+         cand.normalized_min_spread_price = normalized_min_spread_price;
+         cand.normalized_min_atr_price = normalized_min_atr_price;
+         cand.normalized_min_session_noise_price = normalized_min_session_noise_price;
+         cand.normalized_minimum_price = normalized_minimum_price;
+         cand.normalized_minimum_ticks = normalized_minimum_price / point;
+         cand.normalized_minimum_shadow_pass = normalized_minimum_pass;
+         cand.normalized_minimum_enforced_pass = (InpNormalizedFvgMode != NORMALIZED_FVG_ENFORCE || normalized_minimum_pass);
+         cand.normalized_fvg_mode = _NormalizedFvgModeName();
+         cand.normalized_fvg_asset_class = normalized_asset_class;
+         cand.normalized_fvg_policy_version = normalized_policy_version;
+         cand.normalized_fvg_policy_source = normalized_policy_source;
+         cand.normalized_fvg_sample_size = policy_clean_sample_size;
+         cand.normalized_fvg_asset_class_evidence_sufficient = normalized_policy_evidence_sufficient;
          cand.continuation = (context_type == "continuation");
          cand.reversal = (context_type == "reversal");
          cand.context_type = context_type;

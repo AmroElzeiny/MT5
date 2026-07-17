@@ -9,6 +9,16 @@ class CFileBus {
 private:
    string m_root;
 
+   string LeafName(const string rel_path) const {
+      string leaf = rel_path;
+      int at = StringFind(leaf, "\\");
+      while(at >= 0){
+         leaf = StringSubstr(leaf, at + 1);
+         at = StringFind(leaf, "\\");
+      }
+      return leaf;
+   }
+
    string PathJoin(const string a, const string b) {
       if(StringLen(a)==0) return b;
       if(StringLen(b)==0) return a;
@@ -26,6 +36,12 @@ public:
    string RespDir()  const { return m_root + "\\responses"; }
    string StaleDir() const { return m_root + "\\stale"; }
    string LogDir()   const { return m_root + "\\logs"; }
+   string ProcessingDir() const { return m_root + "\\processing"; }
+   string CompletedDir() const { return m_root + "\\completed"; }
+   string RejectedDir() const { return m_root + "\\rejected"; }
+   string TimedOutDir() const { return m_root + "\\timed_out"; }
+   string QuarantinedDir() const { return m_root + "\\quarantined"; }
+   string ShutdownDir() const { return m_root + "\\shutdown"; }
 
    bool Ensure() {
       // all in Common/Files
@@ -33,7 +49,14 @@ public:
       if(!FolderCreate(ReqDir(), FILE_COMMON)) {}
       if(!FolderCreate(RespDir(), FILE_COMMON)) {}
       if(!FolderCreate(StaleDir(), FILE_COMMON)) {}
+      if(!FolderCreate(ProcessingDir(), FILE_COMMON)) {}
+      if(!FolderCreate(CompletedDir(), FILE_COMMON)) {}
+      if(!FolderCreate(RejectedDir(), FILE_COMMON)) {}
+      if(!FolderCreate(TimedOutDir(), FILE_COMMON)) {}
+      if(!FolderCreate(QuarantinedDir(), FILE_COMMON)) {}
+      if(!FolderCreate(ShutdownDir(), FILE_COMMON)) {}
       if(!FolderCreate(LogDir(), FILE_COMMON)) {}
+      if(!FolderCreate(m_root + "\\config", FILE_COMMON)) {}
       return true;
    }
 
@@ -64,21 +87,44 @@ public:
       return true;
    }
 
+   bool AppendText(const string rel_path, const string content) {
+      int h = FileOpen(rel_path, FILE_READ|FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      if(h == INVALID_HANDLE)
+         h = FileOpen(rel_path, FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      if(h == INVALID_HANDLE) return false;
+      FileSeek(h, 0, SEEK_END);
+      FileWriteString(h, content);
+      FileClose(h);
+      return true;
+   }
+
    bool Delete(const string rel_path) {
       return FileDelete(rel_path, FILE_COMMON);
    }
 
    bool CopyToStale(const string rel_path) {
-      string fname = rel_path;
-      int pos = StringFind(rel_path, "\\");
-      // derive leaf
-      for(int i=0;i<10;i++){
-         int p2 = StringFind(fname, "\\");
-         if(p2<0) break;
-         fname = StringSubstr(fname, p2+1);
-      }
-      string dst = StaleDir() + "\\" + fname;
-      // best effort: copy then delete
+      return ArchiveTerminal(rel_path, "stale");
+   }
+
+   string ArtifactKind(const string rel_path) const {
+      if(StringFind(rel_path, ReqDir() + "\\") == 0) return "request";
+      if(StringFind(rel_path, RespDir() + "\\") == 0) return "response";
+      if(StringFind(rel_path, ProcessingDir() + "\\") == 0) return "processing";
+      return "artifact";
+   }
+
+   bool ArchiveTerminal(const string rel_path, const string terminal_state) {
+      string target_dir = QuarantinedDir();
+      if(terminal_state == "completed") target_dir = CompletedDir();
+      else if(terminal_state == "rejected") target_dir = RejectedDir();
+      else if(terminal_state == "timed_out") target_dir = TimedOutDir();
+      else if(terminal_state == "stale") target_dir = StaleDir();
+      else if(terminal_state == "shutdown") target_dir = ShutdownDir();
+      else if(terminal_state != "quarantined") return false;
+      string leaf = ArtifactKind(rel_path) + "__" + LeafName(rel_path);
+      string dst = target_dir + "\\" + leaf;
+      if(FileIsExist(dst, FILE_COMMON))
+         dst = target_dir + "\\" + ArtifactKind(rel_path) + "__" + IntegerToString((int)GetTickCount()) + "__" + LeafName(rel_path);
       bool ok = FileCopy(rel_path, FILE_COMMON, dst, FILE_COMMON);
       if(ok) FileDelete(rel_path, FILE_COMMON);
       return ok;

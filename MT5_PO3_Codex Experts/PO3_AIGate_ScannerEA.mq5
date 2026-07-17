@@ -32,7 +32,25 @@ void _JournalEA(const string msg) {
 }
 
 bool _TesterLiveAiWaitMode() {
-   return (MQLInfoInteger(MQL_TESTER) && InpUseAI && InpAiWaitInTester);
+   return (MQLInfoInteger(MQL_TESTER) && InpUseAI && InpAiWaitInTester && InpTesterAiMode == TESTER_AI_LIVE_WAIT_DEBUG);
+}
+
+string _TesterAiModeName(const TesterAiMode mode) {
+   if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "TESTER_AI_LIVE_WAIT_DEBUG";
+   if(mode == TESTER_AI_CACHE_ONLY) return "TESTER_AI_CACHE_ONLY";
+   if(mode == TESTER_AI_RECORD_ONLY) return "TESTER_AI_RECORD_ONLY";
+   return "TESTER_AI_UNKNOWN";
+}
+
+string _TesterAiModeLabel(const TesterAiMode mode) {
+   if(mode == TESTER_AI_CACHE_ONLY) return "cache_only";
+   if(mode == TESTER_AI_RECORD_ONLY) return "record_only";
+   if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "live_wait_debug";
+   return "unknown";
+}
+
+string _TesterAiModeLabel() {
+   return _TesterAiModeLabel(InpTesterAiMode);
 }
 
 bool _EffectivePauseScanWhilePendingAI() {
@@ -119,6 +137,12 @@ int OnInit() {
    Print("[PO3_AIGate] Exclusive model mode: ", (InpOnlyBreakerRetestVirginStrongOrigin ? "ON" : "OFF"));
    Print("[PO3_AIGate] Exclusive model: breaker_retest + virgin_fvg + strong_origin");
    Print("[PO3_AIGate] Strong origin min score: ", DoubleToString(InpStrongOriginMinScore, 2));
+   if(MQLInfoInteger(MQL_TESTER)){
+      Print("[PO3_AIGate] [tester_ai_mode] raw_value=", IntegerToString((int)InpTesterAiMode),
+            " raw_name=", _TesterAiModeName(InpTesterAiMode),
+            " effective_name=", _TesterAiModeName(InpTesterAiMode),
+            " allow_live_wait_debug_trading=", (InpTesterAllowLiveWaitDebugTrading ? "true" : "false"));
+   }
    if(!g_engine.Init()) return INIT_FAILED;
 
    EventSetTimer(InpTimerTickSeconds);
@@ -130,6 +154,37 @@ int OnInit() {
    if(_TesterLiveAiWaitMode() && !InpPauseScanWhilePendingAI){
       _JournalEA("[tester_ai_wait] forcing_pause_scan_while_pending_ai=true"
                  + " reason=tester_live_ai_sync raw_input_pause=false effective_pause=true");
+   }
+   if(MQLInfoInteger(MQL_TESTER)){
+      string tester_mode = _TesterAiModeLabel();
+      _JournalEA("[tester_ai_mode] raw_value=" + IntegerToString((int)InpTesterAiMode)
+                 + " raw_name=" + _TesterAiModeName(InpTesterAiMode)
+                 + " effective_name=" + _TesterAiModeName(InpTesterAiMode)
+                 + " allow_live_wait_debug_trading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false"));
+      _JournalEA("[tester_ai_workflow] clean_backtest_requires_cache_replay=true");
+      _JournalEA("[tester_ai_workflow] Step 1: run RECORD_ONLY to export requests.");
+      _JournalEA("[tester_ai_workflow] Step 2: run python ai_gate.py / batch processor to fill cache.");
+      _JournalEA("[tester_ai_workflow] Step 3: rerun with CACHE_ONLY and InpTesterAiCache=true.");
+      if(InpTesterAiMode == TESTER_AI_CACHE_ONLY){
+         _JournalEA("[tester_ai_mode] mode=cache_only"
+                    + " cache_enabled=" + (InpTesterAiCache ? "true" : "false")
+                    + " live_ai_calls=false backtest_safe=true");
+         if(!InpTesterAiCache)
+            _JournalEA("[runtime_input_mismatch] field=InpTesterAiCache expected=true actual=false reason=cache_only_requires_cache");
+      } else if(InpTesterAiMode == TESTER_AI_RECORD_ONLY){
+         _JournalEA("[tester_ai_mode] mode=record_only cache_lookup=false cache_export=true live_ai_calls=false trading=false backtest_safe=true");
+      } else {
+         _JournalEA("[tester_ai_mode] mode=live_wait_debug warning=tester_live_ai_wait_not_backtest_safe"
+                    + " allow_trading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false")
+                    + " default_action=" + (InpTesterAllowLiveWaitDebugTrading ? "trade_only_if_sim_age_safe" : "record_response_do_not_trade"));
+      }
+      _JournalEA("[runtime_inputs] InpTesterAiCache=" + (InpTesterAiCache ? "true" : "false"));
+      _JournalEA("[runtime_inputs] InpTesterAiMode=" + tester_mode);
+      _JournalEA("[runtime_inputs] InpTesterAllowLiveWaitDebugTrading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false"));
+      _JournalEA("[runtime_inputs] InpFallbackRR2=" + DoubleToString(InpFallbackRR2, 4));
+      _JournalEA("[runtime_inputs] InpMaxTargetAtrMult=" + DoubleToString(InpMaxTargetAtrMult, 4));
+      _JournalEA("[runtime_inputs] InpMaxTargetAdrFrac=" + DoubleToString(InpMaxTargetAdrFrac, 4));
+      _JournalEA("[runtime_inputs] runtime_input_hash=" + g_engine.RuntimeInputHash());
    }
    _JournalEA("[ai_mode] tester=" + (MQLInfoInteger(MQL_TESTER) ? "true" : "false")
               + " live_ai_wait=" + (_TesterLiveAiWaitMode() ? "true" : "false")
@@ -151,6 +206,12 @@ int OnInit() {
 void OnDeinit(const int reason) {
    EventKillTimer();
    g_engine.Deinit();
+}
+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result) {
+   g_engine.HandleTradeTransaction(trans);
 }
 
 void _StartScan() {

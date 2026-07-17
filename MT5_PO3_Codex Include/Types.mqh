@@ -20,6 +20,45 @@ enum PO3State
    PO3_INVALIDATED = 10
 };
 
+enum ENUM_INTERNAL_ACCOUNT_POSITION_MODE
+{
+   HEDGING_EXACT_POSITION_ID = 0,
+   NETTING_VIRTUAL_SUBPOSITION_LEDGER = 1,
+   NETTING_ONE_POSITION_PER_SYMBOL_FALLBACK = 2,
+   UNSUPPORTED_ACCOUNT_MODE = 3
+};
+
+enum ENUM_SETUP_TAXONOMY
+{
+   UNKNOWN_UNCLASSIFIED = 0,
+   MICRO_FVG_MID_REVERSAL = 1,
+   MICRO_FVG_EDGE_REVERSAL = 2,
+   MICRO_BREAKER_RETEST = 3,
+   MICRO_OTE_REVERSAL = 4,
+   MICRO_CONTINUATION_FVG = 5,
+   MICRO_NESTED_CONTINUATION = 6,
+   MICRO_RANGE_REENTRY = 7,
+   MICRO_SESSION_REENTRY = 8,
+   FAILED_BREAKOUT_RECLAIM = 9,
+   FULL_PO3_REVERSAL = 10,
+   FULL_PO3_CONTINUATION = 11
+};
+
+string SetupTaxonomyToString(const ENUM_SETUP_TAXONOMY value) {
+   if(value == MICRO_FVG_MID_REVERSAL) return "MICRO_FVG_MID_REVERSAL";
+   if(value == MICRO_FVG_EDGE_REVERSAL) return "MICRO_FVG_EDGE_REVERSAL";
+   if(value == MICRO_BREAKER_RETEST) return "MICRO_BREAKER_RETEST";
+   if(value == MICRO_OTE_REVERSAL) return "MICRO_OTE_REVERSAL";
+   if(value == MICRO_CONTINUATION_FVG) return "MICRO_CONTINUATION_FVG";
+   if(value == MICRO_NESTED_CONTINUATION) return "MICRO_NESTED_CONTINUATION";
+   if(value == MICRO_RANGE_REENTRY) return "MICRO_RANGE_REENTRY";
+   if(value == MICRO_SESSION_REENTRY) return "MICRO_SESSION_REENTRY";
+   if(value == FAILED_BREAKOUT_RECLAIM) return "FAILED_BREAKOUT_RECLAIM";
+   if(value == FULL_PO3_REVERSAL) return "FULL_PO3_REVERSAL";
+   if(value == FULL_PO3_CONTINUATION) return "FULL_PO3_CONTINUATION";
+   return "UNKNOWN_UNCLASSIFIED";
+}
+
 struct FVGZone {
    bool   bullish;
    datetime t_form;
@@ -61,6 +100,22 @@ struct FVGZone {
    string execution_class;
    double mitigation_depth_frac;
    int    age_bars;
+   double raw_width_price;
+   double raw_width_ticks;
+   double normalized_min_ticks_price;
+   double normalized_min_spread_price;
+   double normalized_min_atr_price;
+   double normalized_min_session_noise_price;
+   double normalized_minimum_price;
+   double normalized_minimum_ticks;
+   bool   normalized_minimum_shadow_pass;
+   bool   normalized_minimum_enforced_pass;
+   string normalized_fvg_mode;
+   string normalized_fvg_asset_class;
+   string normalized_fvg_policy_version;
+   string normalized_fvg_policy_source;
+   int    normalized_fvg_sample_size;
+   bool   normalized_fvg_asset_class_evidence_sufficient;
 };
 
 struct PO3Context {
@@ -190,9 +245,48 @@ bool PO3IsTerminalBadState(const PO3Context &ctx) {
 struct AiDecision {
    bool   ok;           // was a response received & parsed
    bool   allow;        // AI verdict
-   double score;        // 0..10
+   bool   raw_allow;
+   bool   model_raw_allow;
+   bool   python_final_allow;
+   bool   mql_final_allow;
+   string decision_field_authority_json;
+   double score;        // migration alias: llm_quality_score only
    int    chosen_index; // candidate selection
-   double confidence;   // 0..1 confidence in the decision
+   double confidence;   // migration alias: llm_self_reported_confidence only
+   string decision_schema_version;
+   string decision_quality_tier;
+   string response_quality_alias; // read-only migration alias
+   string decision_state;
+   bool   mandatory_fields_complete;
+   string missing_mandatory_fields_json;
+   string invalid_mandatory_fields_json;
+   string selected_candidate_id;
+   string selected_candidate_hash;
+   string request_execution_fingerprint;
+   string assessed_execution_fingerprint;
+   string selected_target_identity;
+   double selected_target_price;
+   double assessed_entry;
+   double assessed_sl;
+   double assessed_tp1;
+   double assessed_tp2;
+   string candidate_assessments_json;
+   double rule_score;
+   double llm_quality_score;
+   double blended_legacy_score;
+   double legacy_agreement_confidence;
+   double llm_self_reported_confidence;
+   bool   calibration_available;
+   double calibrated_win_probability;
+   double expected_net_r;
+   double oos_predicted_probability;
+   string calibration_bucket;
+   int    calibration_sample_size;
+   double calibration_lower_bound;
+   double calibration_upper_bound;
+   string calibration_model_version;
+   string calibration_data_window_start;
+   string calibration_data_window_end;
    string reasons_json; // raw (or summarized) reasons map
    string decision_source;
    string decision_id;
@@ -202,12 +296,27 @@ struct AiDecision {
    string missing_confirmations_json;
    double suggested_risk_multiplier;
    string model_version;
-   double score_threshold;
-   string threshold_source;
-   bool   threshold_passed;
-   string reject_reason;
-   bool   global_score_as_hard_floor;
+   double llm_quality_score_threshold;
+   string llm_quality_threshold_source;
+   bool   llm_quality_threshold_passed;
+   string llm_quality_reject_reason;
+   bool   global_llm_quality_as_hard_floor;
+   double structure_quality_score;
+   double entry_timing_score;
+   double follow_through_probability;
+   double invalidation_risk;
+   double chop_risk;
+   double cost_risk;
+   double symbol_bucket_risk;
+   double session_bucket_risk;
+   double post_entry_failure_risk;
+   double final_trade_expectancy_score;
+   bool   veto_enabled;
+   string veto_reason;
+   bool   veto_fields_present;
+   string bucket_prior_override_justification;
    string chosen_target_model;
+   bool   target_arbitration_required;
    double chosen_tp1;
    double chosen_tp2;
    double chosen_rr1;
@@ -229,6 +338,25 @@ struct AiDecision {
    string target_arbitration_schema_version;
    string prompt_contract_version;
    string target_comparison_json;
+   string request_fingerprint;
+   string response_fingerprint;
+   string full_structured_response_hash;
+   string response_binding_hash;
+   string response_session_id;
+   string response_request_nonce;
+   string workload_mode;
+   string behavior_contract_hash;
+   string reasoning_configuration;
+   string bucket_prior_hash;
+   string calibration_artifact_id;
+   string hierarchical_prior_artifact_hash;
+   string hierarchical_prior_schema_version;
+   string repeatability_schema_version;
+   string repeatability_status;
+   bool   repeatability_score_threshold_authority;
+   bool   repeatability_trading_eligible;
+   string repeatability_group_key;
+   string repeatability_authority_hash;
 };
 
 struct PriceLevelCandidate {
@@ -328,12 +456,42 @@ struct TradePlan {
    double setup_score;
    string setup_family;
    string setup_class;
+   ENUM_SETUP_TAXONOMY setup_taxonomy;
+   string setup_taxonomy_version;
+   string setup_taxonomy_enum;
+   string taxonomy_mapping_source;
+   string taxonomy_mapping_failure_reason;
+   string setup_type;
+   string setup_subtype;
+   string setup_story_scope;
    string fvg_execution_class;
    string model_code;
    string session_code;
    string killzone_code;
    string broker_comment;
    string input_snapshot_hash;
+   string engine_version;
+   string git_commit;
+   string dirty_tree_status;
+   string set_file_hash;
+   string runtime_input_hash;
+   string reasoning_configuration;
+   string policy_hash;
+   string bucket_prior_hash;
+   string calibration_artifact_id;
+   string repeatability_artifact_id;
+   string feature_version;
+   string cohort_id;
+   bool   cohort_complete;
+   string request_fingerprint;
+   string response_fingerprint;
+   string hierarchical_prior_artifact_hash;
+   string hierarchical_prior_schema_version;
+   string repeatability_status;
+   bool   repeatability_score_threshold_authority;
+   bool   repeatability_trading_eligible;
+   string repeatability_group_key;
+   string repeatability_authority_hash;
    string origin_quality;
    bool   exclusive_model_mode;
    string exclusive_model_name;
@@ -351,6 +509,13 @@ struct TradePlan {
    double estimated_cost_price;
    double estimated_slippage_price;
    double estimated_commission_money;
+   string estimated_cost_source;
+   int    estimated_cost_sample_size;
+   double estimated_cost_stressed_per_lot;
+   double actual_realized_cost;
+   double cost_prediction_error;
+   string commission_model_version;
+   double spread_r;
    double execution_cost_r;
    double slippage_r;
    double commission_r;
@@ -363,6 +528,9 @@ struct TradePlan {
    double htf_alignment_score;
    double adverse_context_score;
    double expected_value_r;
+   double heuristic_quality_estimate;
+   double heuristic_quality_estimate_gross;
+   double net_reward_after_cost_r;
    bool   runner_trade;
    bool   runner_downgraded;
    string runner_downgrade_reason;
@@ -380,6 +548,15 @@ struct TradePlan {
    double fallback_tp;
    double fallback_rr;
    string fallback_source;
+   bool   fallback_feasible_for_tp2;
+   bool   fallback_feasible_for_tp1_only;
+   string fallback_infeasible_reason;
+   double fallback_reward_distance;
+   double fallback_max_allowed_distance;
+   double synthetic_capped_to_max_distance_tp;
+   double synthetic_capped_to_max_distance_rr;
+   bool   synthetic_capped_to_max_distance_feasible;
+   string synthetic_capped_to_max_distance_reason;
    double capped_before_obstacle_tp;
    double capped_before_obstacle_rr;
    string capped_before_obstacle_source;
@@ -404,6 +581,10 @@ struct TradePlan {
    string target_comparison_json;
    string original_target_candidates_json;
    string analytics_key;
+   string bucket_policy_action;
+   string bucket_policy_reason;
+   string bucket_policy_key;
+   double bucket_policy_risk_multiplier;
    string symbol_policy_action;
    string symbol_policy_reason;
    string family_policy_action;
@@ -416,6 +597,12 @@ struct TradePlan {
    string scheduler_action;
    string scheduler_reason;
    double portfolio_risk_weight;
+   string risk_factor_schema_version;
+   string risk_factor_contributions_json;
+   double original_initial_risk_money;
+   double original_initial_risk_money_per_lot;
+   double original_entry_for_risk;
+   double original_sl_for_risk;
    double session_concentration;
    double usd_concentration;
    double cluster_concentration;
@@ -436,6 +623,8 @@ struct TradePlan {
    double subtype_shrunk_win_rate;
    double subtype_avg_r;
    double subtype_risk_multiplier;
+   double active_policy_risk_multiplier;
+   bool   risk_multipliers_initialized;
    double setup_floor_score;
    double setup_floor_penalty;
    string setup_floor_action;
@@ -448,12 +637,53 @@ struct TradePlan {
    // AI
    string req_id;
    AiDecision ai;
+   bool   model_raw_allow;
+   bool   python_final_allow;
+   bool   mql_final_allow;
+   string decision_field_authority_json;
+   string python_decision_reasons;
+   string mql_decision_reasons;
    int    candidate_index;
    int    candidate_count;
    string trade_key;
    string setup_id;
    string fvg_id;
    string candidate_id;
+   string candidate_hash;
+   string ai_selected_candidate_hash;
+   string executed_candidate_hash;
+   bool   candidate_hash_match;
+   string request_execution_fingerprint;
+   string assessed_execution_fingerprint;
+   string final_execution_fingerprint;
+   bool   execution_fingerprint_match;
+   string execution_fingerprint_changed_components;
+   double assessed_entry;
+   double assessed_sl;
+   double assessed_tp1;
+   double assessed_tp2;
+   double assessed_net_rr;
+   double assessed_spread_r;
+   double assessed_slippage_r;
+   double assessed_execution_cost_r;
+   string assessed_symbol;
+   bool   assessed_is_buy;
+   string assessed_setup_code;
+   string assessed_setup_family;
+   string assessed_setup_taxonomy_enum;
+   string assessed_setup_taxonomy_version;
+   string assessed_taxonomy_mapping_source;
+   string assessed_entry_branch;
+   datetime assessed_source_t_sweep;
+   datetime assessed_source_t_disp;
+   datetime assessed_source_t_bos;
+   string assessed_target_source;
+   string assessed_target_model;
+   string assessed_obstacle_kind;
+   string assessed_obstacle_tf;
+   double assessed_obstacle_price;
+   string assessed_decision_input_hash;
+   string assessed_strategy_schema_version;
    string ai_decision_id;
    string policy_version;
    string risk_version;
@@ -530,10 +760,135 @@ struct TradePlan {
    double fill_slippage_r;
    double initial_volume;
    long   position_id;
+   ulong  result_order_ticket;
+   ulong  result_deal_ticket;
+   ulong  broker_position_ticket;
+   long   broker_position_identifier;
+   bool   execution_identity_verified;
+   bool   execution_identity_quarantined;
+   string execution_identity_reason;
+   string account_position_mode;
+   string attribution_status;
+   string attribution_error;
+   bool   learning_eligible;
+   bool   optimization_eligible;
+   bool   suppression_eligible;
+   string ledger_integrity_status;
+   string ledger_integrity_reasons;
+   string ledger_schema_version;
+   double account_equity_at_entry;
+   double account_balance_at_entry;
+   double initial_risk_money;
+   double initial_risk_pct_equity;
+   double gross_price_pnl;
+   double total_commission;
+   double total_swap;
+   double total_fees;
+   double broker_net_pnl;
+   double internal_net_pnl;
+   double pnl_reconciliation_difference;
+   double result_pct_fixed_initial_balance;
+   double result_pct_equity_at_entry;
+   double result_r_initial_risk;
+   string outcome_direction_broker;
+   string outcome_direction_r;
+   string outcome_direction_equity_pct;
+   bool   outcome_direction_match;
+   string outcome_reconciliation_status;
+   string management_version;
+   string management_state;
+   string management_previous_state;
+   datetime management_transition_time;
+   string management_transition_reason;
+   string management_evidence_snapshot_json;
+   string management_action_executed;
+   string management_action_id;
+   string management_policy;
+   datetime management_decision_at;
+   bool   management_features_time_safe;
+   string management_snapshot_action;
+   double management_snapshot_mfe_r;
+   double management_snapshot_mae_r;
+   int    management_snapshot_minutes_open;
+   double management_snapshot_distance_to_sl_r;
+   double management_snapshot_distance_to_tp_r;
+   double management_snapshot_spread_r;
+   double management_snapshot_execution_cost_r;
+   bool   management_snapshot_structure_valid;
+   string invalidation_confirmation_mode;
+   int    invalidation_reference_timeframe;
+   double invalidation_trigger_level;
+   double invalidation_spread;
+   double invalidation_buffer;
+   datetime invalidation_first_breach_time;
+   datetime invalidation_confirmed_time;
+   datetime invalidation_confirming_bar;
+   double actual_managed_result;
+   double actual_managed_result_r;
+   double counterfactual_original_sl_tp_result;
+   double counterfactual_original_sl_tp_result_r;
+   bool   counterfactual_target_before_stop_available;
+   bool   counterfactual_target_before_stop;
+   double management_alpha;
+   bool   counterfactual_ambiguous;
+   bool   counterfactual_pending;
+   string counterfactual_status;
+   string counterfactual_resolution_reason;
+   datetime counterfactual_horizon_at;
+   datetime counterfactual_evaluated_at;
+   bool   management_policy_selection_eligible;
+   string broker_session_schedule_json;
+   string broker_session_source;
+   datetime broker_session_open;
+   datetime broker_session_close;
+   datetime broker_no_entry_from;
+   datetime broker_flatten_from;
+   datetime broker_next_tradable_session;
+   int    broker_flatten_attempts;
+   int    broker_flatten_failures;
+   long   broker_flatten_last_retcode;
+   datetime broker_flatten_next_retry;
+   string shadow_candidate_record_hash;
+   string shadow_candidate_schema_version;
+   string shadow_decision_stage;
+   string shadow_rejection_reason;
+   datetime shadow_observed_at;
+   datetime shadow_horizon_at;
+   datetime shadow_evaluated_at;
+   string shadow_outcome_status;
+   string shadow_outcome_reason;
+   double shadow_outcome_r;
+   double shadow_mfe_r;
+   double shadow_mae_r;
+   int    shadow_time_to_event_sec;
+   int    shadow_time_to_025r_sec;
+   int    shadow_time_to_050r_sec;
+   int    shadow_time_to_stop_sec;
+   int    shadow_time_to_target_sec;
+   bool   shadow_reached_025r;
+   bool   shadow_reached_050r;
+   bool   shadow_reached_025r_before_adverse;
+   bool   shadow_reached_050r_before_adverse;
+   int    shadow_time_to_adverse_threshold_sec;
+   bool   shadow_025_order_ambiguous;
+   bool   shadow_050_order_ambiguous;
+   bool   shadow_target_before_stop;
+   bool   shadow_stop_before_target;
+   bool   shadow_mfe_before_adverse;
+   string shadow_horizon_result;
+   string shadow_censoring_status;
+   string shadow_ambiguity_reason;
+   bool   shadow_threshold_order_ambiguous;
+   bool   shadow_outcome_ambiguous;
    double mfe_price;
    double mae_price;
    double mfe_r;
    double mae_r;
+   int    minutes_to_0_25r_mfe;
+   int    minutes_to_0_50r_mfe;
+   bool   stuck_no_mfe_triggered;
+   bool   dr_and_structural_invalid_triggered;
+   int    penalty_reductions_count;
    datetime closed_at;
    double realized_pnl;
    double realized_r;
@@ -551,6 +906,11 @@ struct TradePlan {
 struct AiCacheEntry {
    string signature;
    string symbol;
+   string decision_schema_version;
+   string decision_quality_tier;
+   string response_quality_alias;
+   string selected_candidate_hash;
+   string assessed_execution_fingerprint;
    bool   allow;
    double score;
    int    chosen_index;
@@ -561,7 +921,8 @@ struct AiCacheEntry {
 
 struct PenaltyState {
    string symbol;
-   long   position_ticket;
+   long   position_identifier; // lifecycle identity: DEAL_POSITION_ID/POSITION_IDENTIFIER
+   ulong  position_ticket;     // broker operation handle only
    datetime opened_at;
    double entry;
    double sl;
@@ -573,6 +934,23 @@ struct PenaltyState {
 
    int    strikes;
    datetime last_reduction_at;
+   string current_state;
+   string previous_state;
+   datetime transition_time;
+   string transition_reason;
+   string evidence_snapshot_json;
+   string action_executed;
+   string action_id;
+   string management_version;
+   string executed_action_ids;
+   string confirmation_mode;
+   int    confirmation_timeframe;
+   double confirmation_trigger_level;
+   double confirmation_spread;
+   double confirmation_buffer;
+   datetime first_breach_time;
+   datetime confirmed_time;
+   datetime confirming_bar;
 };
 
 #endif

@@ -29,6 +29,8 @@ private:
    TradePlan m_watchlist[];
    TradePlan m_pending_ai[];
    TradePlan m_scan_candidates[];
+   TradePlan m_counterfactual_pending[];
+   TradePlan m_shadow_pending[];
    string m_ai_cooldown_symbols[];
    string m_ai_cooldown_signatures[];
    datetime m_ai_cooldown_until[];
@@ -42,6 +44,7 @@ private:
    ContextPolicyEntry m_context_policy[];
    SessionWeekdayPolicyEntry m_session_weekday_policy[];
    datetime m_policy_loaded_at;
+   bool m_active_policy_schema_valid;
    int m_funnel_scans;
    int m_funnel_po3_context_created;
    int m_funnel_closed_sweeps_found;
@@ -88,6 +91,26 @@ private:
    int m_total_ai_final_allow_true;
    int m_total_watchlist_added;
    int m_total_orders_placed;
+   int m_total_scans;
+   int m_total_po3_context_created;
+   int m_total_fvg_candidates_created;
+   int m_total_plans_valid;
+   int m_total_ai_cache_hits;
+   int m_total_ai_cache_misses;
+   int m_total_ai_cache_miss_due_to_schema_version;
+   int m_total_ai_advisories;
+   int m_total_trades_opened;
+   int m_total_record_only_requests_exported;
+   int m_total_tester_live_wait_non_tradeable_sim_jump;
+   int m_total_tester_live_wait_debug_trading_disabled;
+   int m_total_target_feasibility_synthetic_infeasible_max_distance;
+   int m_total_target_feasibility_synthetic_capped_to_max_distance;
+   int m_total_reject_tester_ai_cache_miss;
+   int m_total_reject_ai_chose_infeasible_target;
+   int m_total_mpc_candidates_blocked;
+   int m_total_mpc_ai_calls_saved;
+   int m_total_mpc_watchlist_blocks;
+   int m_total_mpc_execution_blocks;
    string m_funnel_pending_delete_reasons[];
    int m_funnel_pending_delete_counts[];
    string m_funnel_reject_stages[];
@@ -101,6 +124,14 @@ private:
    int m_funnel_target_validation_counts[];
    string m_funnel_watchlist_precheck_reasons[];
    int m_funnel_watchlist_precheck_counts[];
+   string m_total_target_choice_models[];
+   int m_total_target_choice_counts[];
+   string m_total_blocker_classes[];
+   int m_total_blocker_class_counts[];
+   string m_total_watchlist_precheck_reasons[];
+   int m_total_watchlist_precheck_counts[];
+   string m_total_target_validation_reasons[];
+   int m_total_target_validation_counts[];
 
    datetime m_last_positions_tick;
    datetime m_last_penalty_persist;
@@ -108,6 +139,17 @@ private:
    string m_last_execution_reject_reason;
    string m_ai_wait_log_req_ids[];
    ulong m_ai_wait_log_ms[];
+   string m_bucket_policy_json;
+   datetime m_bucket_policy_loaded_at;
+   datetime m_bucket_policy_last_attempt;
+   string m_account_position_mode;
+   ENUM_INTERNAL_ACCOUNT_POSITION_MODE m_internal_account_position_mode;
+   bool m_force_one_managed_trade_per_symbol;
+   string m_source_git_commit;
+   string m_source_dirty_tree_status;
+   string m_set_file_hash;
+   string m_deployment_manifest_hash;
+   bool m_deployment_manifest_valid;
 
    datetime _LastClosedBarTime(const string symbol, const ENUM_TIMEFRAMES tf) {
       MqlRates rates[];
@@ -146,8 +188,71 @@ private:
       return false;
    }
 
+   bool _PendingResearchRecordExists(const TradePlan &arr[],
+                                     const string record_key,
+                                     const bool use_shadow_hash) const {
+      if(StringLen(record_key) == 0) return false;
+      for(int i=0; i<ArraySize(arr); i++){
+         string existing = (use_shadow_hash ? arr[i].shadow_candidate_record_hash : arr[i].trade_key);
+         if(existing == record_key) return true;
+      }
+      return false;
+   }
+
+   void _PersistResearchQueues() {
+      m_state.SavePlans(m_state.CounterfactualPendingPath(), m_counterfactual_pending);
+      m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+   }
+
+   bool _IsTesterRuntime() const {
+      return (MQLInfoInteger(MQL_TESTER) != 0);
+   }
+
+   bool _TesterLiveWaitDebugMode() const {
+      return (_IsTesterRuntime() && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
+   }
+
    bool _TesterLiveAiBlockingWaitMode() const {
-      return (MQLInfoInteger(MQL_TESTER) && InpUseAI && InpAiWaitInTester);
+      return (_IsTesterRuntime() && InpUseAI && InpAiWaitInTester && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
+   }
+
+   TesterAiMode _EffectiveTesterAiMode() const {
+      return InpTesterAiMode;
+   }
+
+   string _TesterAiModeName(const TesterAiMode mode) const {
+      if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "TESTER_AI_LIVE_WAIT_DEBUG";
+      if(mode == TESTER_AI_CACHE_ONLY) return "TESTER_AI_CACHE_ONLY";
+      if(mode == TESTER_AI_RECORD_ONLY) return "TESTER_AI_RECORD_ONLY";
+      return "TESTER_AI_UNKNOWN";
+   }
+
+   string _TesterAiModeLabel(const TesterAiMode mode) const {
+      if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "live_wait_debug";
+      if(mode == TESTER_AI_CACHE_ONLY) return "cache_only";
+      if(mode == TESTER_AI_RECORD_ONLY) return "record_only";
+      return "unknown";
+   }
+
+   bool _InvalidTesterCacheOnlyConfig() const {
+      return (MQLInfoInteger(MQL_TESTER) &&
+              InpUseAI &&
+              _EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY &&
+              !InpTesterAiCache);
+   }
+
+   bool _TesterCacheDecisionSourceLoadable(const string decision_source) const {
+      string source = decision_source;
+      StringToLower(source);
+      if(StringFind(source, "bridge_error") >= 0) return false;
+      if(StringFind(source, "transport") >= 0) return false;
+      if(StringFind(source, "timeout") >= 0) return false;
+      if(StringFind(source, "malformed") >= 0) return false;
+      if(StringFind(source, "invalid_json") >= 0) return false;
+      if(StringFind(source, "parser") >= 0) return false;
+      if(StringFind(source, "unavailable") >= 0) return false;
+      if(StringFind(source, "placeholder") >= 0) return false;
+      return true;
    }
 
    bool _InfrastructureAiRejection(const string reason) const {
@@ -174,11 +279,45 @@ private:
    }
 
    string _TradeTicketPath(const ulong ticket) {
-      return m_bus.LogDir() + "\\trade_ticket_" + IntegerToString((int)ticket) + ".json";
+      return m_bus.LogDir() + "\\trade_ticket_" + IntegerToString((long)ticket) + ".json";
    }
 
-   string _LegacyTradeSymbolPath(const string symbol) {
-      return m_bus.LogDir() + "\\trade_" + symbol + ".json";
+   string _TradeOrderPath(const ulong ticket) {
+      return m_bus.LogDir() + "\\trade_order_" + IntegerToString((long)ticket) + ".json";
+   }
+
+   string _TradeDealPath(const ulong ticket) {
+      return m_bus.LogDir() + "\\trade_deal_" + IntegerToString((long)ticket) + ".json";
+   }
+
+   string _TradePositionPath(const ulong ticket) {
+      return m_bus.LogDir() + "\\trade_position_" + IntegerToString((long)ticket) + ".json";
+   }
+
+   string _TradePositionIdentifierPath(const long identifier) {
+      return m_bus.LogDir() + "\\trade_position_id_" + IntegerToString(identifier) + ".json";
+   }
+
+   string _ExecutionIdentityQuarantineDir() const {
+      return m_bus.LogDir() + "\\execution_identity_quarantine";
+   }
+
+   ENUM_INTERNAL_ACCOUNT_POSITION_MODE _ResolveAccountPositionMode() const {
+      long mode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+      if(mode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) return HEDGING_EXACT_POSITION_ID;
+      if(mode == ACCOUNT_MARGIN_MODE_RETAIL_NETTING || mode == ACCOUNT_MARGIN_MODE_EXCHANGE){
+         if(InpNettingPositionPolicy == NETTING_FORCE_ONE_MANAGED_POSITION_PER_SYMBOL)
+            return NETTING_ONE_POSITION_PER_SYMBOL_FALLBACK;
+         return UNSUPPORTED_ACCOUNT_MODE;
+      }
+      return UNSUPPORTED_ACCOUNT_MODE;
+   }
+
+   string _AccountPositionModeLabel(const ENUM_INTERNAL_ACCOUNT_POSITION_MODE mode) const {
+      if(mode == HEDGING_EXACT_POSITION_ID) return "HEDGING_EXACT_POSITION_ID";
+      if(mode == NETTING_VIRTUAL_SUBPOSITION_LEDGER) return "NETTING_VIRTUAL_SUBPOSITION_LEDGER";
+      if(mode == NETTING_ONE_POSITION_PER_SYMBOL_FALLBACK) return "NETTING_ONE_POSITION_PER_SYMBOL_FALLBACK";
+      return "UNSUPPORTED_ACCOUNT_MODE";
    }
 
    string _TradeResultsDir() {
@@ -189,6 +328,10 @@ private:
       return _TradeResultsDir() + "\\trade_result_" + key + ".json";
    }
 
+   string _CompletedPositionMarkerPath(const long position_identifier) {
+      return m_bus.LogDir() + "\\completed_position_id_" + IntegerToString(position_identifier) + ".json";
+   }
+
    datetime _AnalyticsResetAfter() {
       if(MQLInfoInteger(MQL_TESTER)) return 0;
       string txt;
@@ -196,7 +339,7 @@ private:
       return (datetime)(int)JsonGetNumber(txt, "reset_after", 0.0);
    }
 
-   datetime _NowServerOrLocal() {
+   datetime _NowServerOrLocal() const {
       datetime now = TimeTradeServer();
       if(now <= 0) now = TimeLocal();
       return now;
@@ -281,19 +424,50 @@ private:
       return m_bus.ReadText(rel_path, out);
    }
 
+   void _LoadDeploymentManifest() {
+      m_source_git_commit = "UNAVAILABLE";
+      m_source_dirty_tree_status = "UNKNOWN";
+      m_set_file_hash = "UNAVAILABLE";
+      m_deployment_manifest_hash = "UNAVAILABLE";
+      m_deployment_manifest_valid = false;
+      string path = m_bus.Root() + "\\config\\deployment_manifest.json";
+      string text = "";
+      string reason = "";
+      if(!m_bus.ReadText(path, text)) reason = "deployment_manifest_missing";
+      else if(!JsonValidateDocumentStrict(text, reason)) {}
+      else if(JsonGetString(text, "schema_version", "") != DEPLOYMENT_MANIFEST_SCHEMA_VERSION)
+         reason = "deployment_manifest_schema_incompatible";
+      else {
+         m_source_git_commit = JsonGetString(text, "git_commit", "");
+         m_source_dirty_tree_status = JsonGetString(text, "dirty_tree_status", "");
+         m_set_file_hash = JsonGetString(text, "set_file_hash", "");
+         m_deployment_manifest_hash = _IntegrityHash(text);
+         m_deployment_manifest_valid = (StringLen(m_source_git_commit) > 0 &&
+                                        (m_source_dirty_tree_status == "CLEAN" || m_source_dirty_tree_status == "DIRTY") &&
+                                        StringLen(m_set_file_hash) > 0);
+         if(!m_deployment_manifest_valid) reason = "deployment_manifest_fields_incomplete";
+      }
+      _Journal("[deployment_manifest] schema=" + DEPLOYMENT_MANIFEST_SCHEMA_VERSION
+               + " valid=" + (m_deployment_manifest_valid ? "true" : "false")
+               + " git_commit=" + m_source_git_commit
+               + " dirty_tree_status=" + m_source_dirty_tree_status
+               + " set_file_hash=" + m_set_file_hash
+               + " manifest_hash=" + m_deployment_manifest_hash
+               + " reason=" + (StringLen(reason) > 0 ? reason : "none"));
+   }
+
    bool _ParseSubtypePolicyLine(const string line, SubtypePolicyEntry &entry) const {
       entry.subtype_key = JsonGetString(line, "subtype_key", "");
       if(StringLen(entry.subtype_key) == 0) return false;
       entry.action = JsonGetString(line, "action", "");
       entry.score_penalty = JsonGetNumber(line, "score_penalty", 0.0);
-      entry.risk_multiplier = JsonGetNumber(line, "risk_multiplier", 1.0);
+      if(!JsonGetNumberStrict(line, "risk_multiplier", entry.risk_multiplier)) return false;
       entry.shrunk_win_rate = JsonGetNumber(line, "shrunk_win_rate", 0.0);
       entry.avg_r = JsonGetNumber(line, "avg_r", 0.0);
       entry.evidence_score = JsonGetNumber(line, "evidence_score", 0.0);
       entry.sample_count = (int)JsonGetNumber(line, "sample_count", 0.0);
       entry.policy_id = JsonGetString(line, "policy_id", "");
-      if(entry.risk_multiplier <= 0.0) entry.risk_multiplier = 1.0;
-      return true;
+      return (entry.risk_multiplier >= 0.0 && entry.risk_multiplier <= 1.0);
    }
 
    bool _ParseContextPolicyLine(const string line, ContextPolicyEntry &entry) const {
@@ -301,12 +475,11 @@ private:
       if(StringLen(entry.policy_bucket) == 0) return false;
       entry.action = JsonGetString(line, "action", "");
       entry.score_bias = JsonGetNumber(line, "score_bias", 0.0);
-      entry.risk_multiplier = JsonGetNumber(line, "risk_multiplier", 1.0);
+      if(!JsonGetNumberStrict(line, "risk_multiplier", entry.risk_multiplier)) return false;
       entry.expected_value_bias = JsonGetNumber(line, "expected_value_bias", 0.0);
       entry.sample_count = (int)JsonGetNumber(line, "sample_count", 0.0);
       entry.policy_id = JsonGetString(line, "policy_id", "");
-      if(entry.risk_multiplier <= 0.0) entry.risk_multiplier = 1.0;
-      return true;
+      return (entry.risk_multiplier >= 0.0 && entry.risk_multiplier <= 1.0);
    }
 
    bool _ParseSessionWeekdayPolicyLine(const string line, SessionWeekdayPolicyEntry &entry) const {
@@ -314,23 +487,28 @@ private:
       entry.weekday = JsonGetString(line, "weekday", "");
       if(StringLen(entry.session_name) == 0 || StringLen(entry.weekday) == 0) return false;
       entry.action = JsonGetString(line, "action", "monitor");
-      entry.risk_multiplier = JsonGetNumber(line, "risk_multiplier", 1.0);
+      if(!JsonGetNumberStrict(line, "risk_multiplier", entry.risk_multiplier)) return false;
       entry.rr_floor_delta = JsonGetNumber(line, "rr_floor_delta", 0.0);
       entry.score_bias = JsonGetNumber(line, "score_bias", 0.0);
       entry.sample_count = (int)JsonGetNumber(line, "sample_count", 0.0);
       entry.policy_id = JsonGetString(line, "policy_id", "");
-      if(entry.risk_multiplier <= 0.0) entry.risk_multiplier = 1.0;
-      return true;
+      return (entry.risk_multiplier >= 0.0 && entry.risk_multiplier <= 1.0);
    }
 
    bool _LoadActivePolicyFiles() {
       ZeroMemory(m_active_policy);
+      m_active_policy_schema_valid = true;
       ArrayResize(m_subtype_policy, 0);
       ArrayResize(m_context_policy, 0);
       ArrayResize(m_session_weekday_policy, 0);
 
       string txt;
       if(_ReadText(_ActivePolicyPath(), txt)){
+         string policy_doc_reason = "";
+         if(!JsonValidateDocumentStrict(txt, policy_doc_reason)){
+            m_active_policy_schema_valid = false;
+            _Journal("[policy_schema] valid=false section=active reason=" + policy_doc_reason);
+         }
          m_active_policy.policy_id = JsonGetString(txt, "policy_id", "");
          m_active_policy.version = (int)JsonGetNumber(txt, "version", 0.0);
          m_active_policy.activated_at = (datetime)(int)JsonGetNumber(txt, "activated_at", 0.0);
@@ -340,9 +518,19 @@ private:
          m_active_policy.change_rate_passed = JsonGetBool(txt, "change_rate_passed", false);
          m_active_policy.soft_setup_floor = JsonGetNumber(txt, "soft_setup_floor", 0.0);
          m_active_policy.hard_setup_floor = JsonGetNumber(txt, "hard_setup_floor", 0.0);
-         m_active_policy.setup_floor_penalty_mult = JsonGetNumber(txt, "setup_floor_penalty_mult", 1.0);
+         if(JsonHasKey(txt, "setup_floor_penalty_mult")){
+            if(!JsonGetNumberStrict(txt, "setup_floor_penalty_mult", m_active_policy.setup_floor_penalty_mult) ||
+               m_active_policy.setup_floor_penalty_mult < 0.0 || m_active_policy.setup_floor_penalty_mult > 1.0){
+               m_active_policy_schema_valid = false;
+               _Journal("[policy_schema] valid=false section=active reason=setup_floor_penalty_mult_invalid");
+            }
+         } else m_active_policy.setup_floor_penalty_mult = 1.0;
          m_active_policy.ote_softness_frac = JsonGetNumber(txt, "ote_softness_frac", InpOteSoftnessFrac);
-         m_active_policy.default_risk_multiplier = JsonGetNumber(txt, "default_risk_multiplier", 1.0);
+         bool default_multiplier_present = JsonGetNumberStrict(txt, "default_risk_multiplier", m_active_policy.default_risk_multiplier);
+         if(!default_multiplier_present || m_active_policy.default_risk_multiplier < 0.0 || m_active_policy.default_risk_multiplier > 1.0){
+            m_active_policy_schema_valid = false;
+            _Journal("[policy_schema] valid=false section=active reason=default_risk_multiplier_missing_or_invalid");
+         }
          m_active_policy.runner_sequence_floor = JsonGetNumber(txt, "runner_sequence_floor", InpRunnerSequenceQualityFloor);
          m_active_policy.runner_liquidity_rr_floor = JsonGetNumber(txt, "runner_liquidity_rr_floor", InpRunnerLiquidityRRFloor);
          m_active_policy.runner_cost_r_ceiling = JsonGetNumber(txt, "runner_cost_r_ceiling", InpRunnerCostRCeiling);
@@ -351,10 +539,18 @@ private:
          m_active_policy.runner_ev_floor = JsonGetNumber(txt, "runner_ev_floor", 0.0);
          bool shadow_policy = JsonGetBool(txt, "shadow_mode", false);
          string activation_state = JsonGetString(txt, "activation_state", "");
+         string ledger_integrity = JsonGetString(txt, "ledger_integrity_status", "");
+         string policy_decision_schema = JsonGetString(txt, "decision_schema_version", "");
+         string policy_taxonomy = JsonGetString(txt, "taxonomy_version", "");
          m_active_policy.valid = (StringLen(m_active_policy.policy_id) > 0 &&
+                                  m_active_policy_schema_valid &&
+                                  default_multiplier_present &&
                                   m_active_policy.evidence_passed &&
                                   m_active_policy.walk_forward_passed &&
                                   m_active_policy.change_rate_passed &&
+                                  ledger_integrity == "CLEAN" &&
+                                  policy_decision_schema == AI_DECISION_SCHEMA_VERSION &&
+                                  policy_taxonomy == SETUP_TAXONOMY_VERSION &&
                                   !shadow_policy &&
                                   activation_state != "shadow" &&
                                   !InpPolicyShadowMode);
@@ -372,7 +568,11 @@ private:
                if(StringLen(line) == 0) continue;
                SubtypePolicyEntry entry;
                ZeroMemory(entry);
-               if(!_ParseSubtypePolicyLine(line, entry)) continue;
+               if(!_ParseSubtypePolicyLine(line, entry)){
+                  m_active_policy_schema_valid = false;
+                  _Journal("[policy_schema] valid=false section=subtype reason=risk_multiplier_missing_or_invalid");
+                  continue;
+               }
                int n = ArraySize(m_subtype_policy);
                ArrayResize(m_subtype_policy, n + 1);
                m_subtype_policy[n] = entry;
@@ -391,7 +591,11 @@ private:
                if(StringLen(line) == 0) continue;
                ContextPolicyEntry entry;
                ZeroMemory(entry);
-               if(!_ParseContextPolicyLine(line, entry)) continue;
+               if(!_ParseContextPolicyLine(line, entry)){
+                  m_active_policy_schema_valid = false;
+                  _Journal("[policy_schema] valid=false section=context reason=risk_multiplier_missing_or_invalid");
+                  continue;
+               }
                int n = ArraySize(m_context_policy);
                ArrayResize(m_context_policy, n + 1);
                m_context_policy[n] = entry;
@@ -410,7 +614,11 @@ private:
                if(StringLen(line) == 0) continue;
                SessionWeekdayPolicyEntry entry;
                ZeroMemory(entry);
-               if(!_ParseSessionWeekdayPolicyLine(line, entry)) continue;
+               if(!_ParseSessionWeekdayPolicyLine(line, entry)){
+                  m_active_policy_schema_valid = false;
+                  _Journal("[policy_schema] valid=false section=session_weekday reason=risk_multiplier_missing_or_invalid");
+                  continue;
+               }
                int n = ArraySize(m_session_weekday_policy);
                ArrayResize(m_session_weekday_policy, n + 1);
                m_session_weekday_policy[n] = entry;
@@ -475,6 +683,153 @@ private:
 
    string _SessionWeekdayPolicyPath() const {
       return _PolicyDir() + "\\session_weekday_policy.ndjson";
+   }
+
+   string _PolicyAbsolutePath(const string rel_path) const {
+      return TerminalInfoString(TERMINAL_COMMONDATA_PATH) + "\\Files\\" + rel_path;
+   }
+
+   string _CurrentLedgerIntegrityStatus() {
+      string ledger_text = "";
+      if(!m_bus.ReadText(_AnalyticsDir() + "\\ledger_integrity_report.json", ledger_text))
+         return "UNAVAILABLE";
+      string status = JsonGetString(ledger_text, "global_status", "UNAVAILABLE");
+      StringToUpper(status);
+      int clean_count = (int)JsonGetNumber(ledger_text, "clean", 0.0);
+      if(status == "CLEAN" && clean_count <= 0) return "QUARANTINED_NO_CLEAN_ROWS";
+      return status;
+   }
+
+   int _ManifestRowCount(const string text) const {
+      if(StringLen(text) == 0) return 0;
+      int count = 0;
+      bool has_text = false;
+      for(int i=0; i<StringLen(text); i++){
+         ushort c = (ushort)StringGetCharacter(text, i);
+         if(c == '\n'){
+            if(has_text) count++;
+            has_text = false;
+         } else if(c != ' ' && c != '\r' && c != '\t') has_text = true;
+      }
+      if(has_text) count++;
+      return count;
+   }
+
+   string _StartupPolicyManifestRow(const string policy_type,
+                                    const string policy_id,
+                                    const string rel_path,
+                                    const string required_schema,
+                                    const bool enabled,
+                                    const bool shadow_requested,
+                                    const string ledger_status,
+                                    const bool code_compatible) {
+      string text = "";
+      bool exists = m_bus.ReadText(rel_path, text);
+      string document_reason = "";
+      bool json_doc = (StringFind(rel_path, ".ndjson") < 0);
+      bool document_valid = (!exists ? false : (!json_doc || JsonValidateDocumentStrict(text, document_reason)));
+      string schema = (json_doc ? JsonGetString(text, "schema_version", "") : required_schema);
+      if(StringLen(schema) == 0 && json_doc) schema = JsonGetString(text, "calibration_contract_version", "");
+      bool schema_valid = (StringLen(required_schema) == 0 || schema == required_schema);
+      int rows_loaded = (exists ? (json_doc ? 1 : _ManifestRowCount(text)) : 0);
+      string policy_runtime_hash = (json_doc ? JsonGetString(text, "runtime_input_hash", "") : "");
+      string policy_decision_schema = (json_doc ? JsonGetString(text, "decision_schema_version", "") : "");
+      string policy_taxonomy = (json_doc ? JsonGetString(text, "taxonomy_version", "") : "");
+      bool runtime_required = (policy_type != "risk_factors" && policy_type != "invalidation");
+      bool decision_required = (policy_type == "active" || policy_type == "subtype" || policy_type == "context" ||
+                                policy_type == "session" || policy_type == "management" || policy_type == "calibration" ||
+                                policy_type == "repeatability" || policy_type == "hierarchical_priors");
+      bool taxonomy_required = (policy_type == "active" || policy_type == "subtype" || policy_type == "context" ||
+                                policy_type == "session" || policy_type == "management" || policy_type == "calibration" ||
+                                policy_type == "hierarchical_priors");
+      bool runtime_compatible = (!runtime_required || (StringLen(policy_runtime_hash) > 0 && policy_runtime_hash == m_ai.RuntimeHash()));
+      bool decision_compatible = (!decision_required || policy_decision_schema == AI_DECISION_SCHEMA_VERSION);
+      bool taxonomy_compatible = (!taxonomy_required || policy_taxonomy == SETUP_TAXONOMY_VERSION);
+      datetime expires_at = (datetime)(json_doc ? JsonGetNumber(text, "expires_at", 0) : 0);
+      bool explicit_stale = (json_doc ? JsonGetBool(text, "stale", false) : false);
+      bool stale = explicit_stale || expires_at <= 0 || _NowServerOrLocal() > expires_at;
+      string stale_status = (explicit_stale ? "EXPLICIT_STALE" :
+                             (expires_at <= 0 ? "UNKNOWN_NO_EXPIRY" :
+                              (_NowServerOrLocal() > expires_at ? "EXPIRED" : "FRESH")));
+      int rows_rejected = ((!document_valid || !schema_valid || !runtime_compatible ||
+                            !decision_compatible || !taxonomy_compatible || stale) && exists ? rows_loaded : 0);
+      bool clean = (ledger_status == "CLEAN");
+      string status = (!enabled ? "disabled" : (!exists ? "missing" : (!document_valid ? "invalid_json" : (!schema_valid ? "incompatible_schema" : "loaded"))));
+      string authority = "blocked";
+      string reason = "none";
+      if(!enabled) reason = "policy_disabled";
+      else if(!exists) reason = "policy_file_missing";
+      else if(!document_valid) reason = document_reason;
+      else if(!schema_valid) reason = "schema_incompatible";
+      else if(!code_compatible) reason = "code_incompatible";
+      else if(!runtime_compatible) reason = "runtime_input_incompatible";
+      else if(!decision_compatible) reason = "decision_schema_incompatible";
+      else if(!taxonomy_compatible) reason = "taxonomy_incompatible";
+      else if(stale) reason = "policy_stale_or_freshness_unproven";
+      else if(!clean) reason = "ledger_not_clean";
+      else if(shadow_requested){ authority = "shadow"; reason = "shadow_requested"; }
+      else authority = "active";
+      if(enabled && reason != "none" && reason != "shadow_requested") status = "blocked";
+      string rejection_reasons = (reason == "none" || reason == "shadow_requested"
+                                  ? "[]" : "[\"" + JsonEscape(reason) + "\"]");
+      string row = "{";
+      row += JsonKVStr("policy_type", policy_type) + ",";
+      row += JsonKVStr("policy_id", policy_id) + ",";
+      row += JsonKVBool("enabled", enabled) + ",";
+      row += JsonKVStr("absolute_path", _PolicyAbsolutePath(rel_path)) + ",";
+      row += JsonKVStr("file_hash", exists ? _IntegrityHash(text) : "UNAVAILABLE") + ",";
+      row += JsonKVStr("schema_version", schema) + ",";
+      row += JsonKVStr("required_schema_version", required_schema) + ",";
+      row += JsonKVStr("status", status) + ",";
+      row += JsonKVStr("authority", authority) + ",";
+      row += JsonKVStr("activation_state", authority == "active" ? "active" : (enabled ? "blocked" : "disabled")) + ",";
+      row += JsonKVBool("shadow_state", shadow_requested) + ",";
+      row += JsonKVStr("reason", reason) + ",";
+      row += "\"rejection_reasons\":" + rejection_reasons + ",";
+      row += JsonKVInt("rows_loaded", rows_loaded) + ",";
+      row += JsonKVInt("rows_rejected", rows_rejected) + ",";
+      row += JsonKVBool("code_compatibility", code_compatible) + ",";
+      row += JsonKVBool("runtime_input_compatibility", runtime_compatible) + ",";
+      row += JsonKVBool("decision_schema_compatibility", decision_compatible) + ",";
+      row += JsonKVBool("taxonomy_compatibility", taxonomy_compatible) + ",";
+      row += JsonKVStr("ledger_integrity_status", ledger_status) + ",";
+      row += JsonKVInt("data_window_start", (int)(json_doc ? JsonGetNumber(text, "data_window_start", 0) : 0)) + ",";
+      row += JsonKVInt("data_window_end", (int)(json_doc ? JsonGetNumber(text, "data_window_end", 0) : 0)) + ",";
+      row += JsonKVInt("expires_at", (int)expires_at) + ",";
+      row += JsonKVStr("stale_status", stale_status) + ",";
+      row += JsonKVBool("stale", stale);
+      row += "}";
+      _Journal("[startup_policy_manifest] policy_type=" + policy_type
+               + " policy_id=" + policy_id + " status=" + status
+               + " authority=" + authority + " reason=" + reason);
+      return row;
+   }
+
+   void _WriteStartupPolicyManifest() {
+      string ledger_status = _CurrentLedgerIntegrityStatus();
+      string policies = "[";
+      policies += _StartupPolicyManifestRow("active", m_active_policy.policy_id, _ActivePolicyPath(), "", InpAnalyticsAutoActivate, InpPolicyShadowMode, ledger_status, m_active_policy_schema_valid) + ",";
+      policies += _StartupPolicyManifestRow("subtype", "subtype_policy", _SubtypePolicyPath(), "", InpAnalyticsAutoActivate, InpPolicyShadowMode, ledger_status, m_active_policy_schema_valid) + ",";
+      policies += _StartupPolicyManifestRow("context", "context_policy", _ContextPolicyPath(), "", InpAnalyticsAutoActivate, InpPolicyShadowMode, ledger_status, m_active_policy_schema_valid) + ",";
+      policies += _StartupPolicyManifestRow("session", "session_weekday_policy", _SessionWeekdayPolicyPath(), "", InpAnalyticsAutoActivate, InpPolicyShadowMode, ledger_status, m_active_policy_schema_valid) + ",";
+      policies += _StartupPolicyManifestRow("risk_factors", "risk_factor_policy", InpRiskFactorPolicyFile, RISK_FACTOR_SCHEMA_VERSION, InpRiskFactorGateEnable, !InpRiskFactorGateEnable, ledger_status, true) + ",";
+      policies += _StartupPolicyManifestRow("invalidation", "invalidation_policy", InpInvalidationAssetClassPolicyFile, INVALIDATION_POLICY_SCHEMA_VERSION, InpInvalidationAssetClassPolicyEnable, !InpInvalidationAssetClassPolicyEnable, ledger_status, true) + ",";
+      policies += _StartupPolicyManifestRow("normalized_fvg", "normalized_fvg_policy", InpNormalizedFvgAssetClassPolicyFile, NORMALIZED_FVG_SCHEMA_VERSION, InpNormalizedFvgMode != NORMALIZED_FVG_OFF, InpNormalizedFvgMode != NORMALIZED_FVG_ENFORCE, ledger_status, true) + ",";
+      policies += _StartupPolicyManifestRow("management", "management_policy", _AnalyticsDir() + "\\management_policy.json", MANAGEMENT_SCHEMA_VERSION, true, true, ledger_status, true) + ",";
+      policies += _StartupPolicyManifestRow("calibration", "calibration_artifact", _AnalyticsDir() + "\\calibration_artifact.json", CALIBRATION_CONTRACT_VERSION, true, true, ledger_status, true) + ",";
+      policies += _StartupPolicyManifestRow("repeatability", "repeatability_artifact", _AnalyticsDir() + "\\ai_repeatability_artifact.json", REPEATABILITY_SCHEMA_VERSION, true, true, ledger_status, true) + ",";
+      policies += _StartupPolicyManifestRow("hierarchical_priors", "hierarchical_priors", _AnalyticsDir() + "\\hierarchical_outcome_artifact.json", HIERARCHICAL_OUTCOME_MODEL_VERSION, true, true, ledger_status, true);
+      policies += "]";
+      string manifest = "{";
+      manifest += JsonKVStr("schema_version", POLICY_MANIFEST_SCHEMA_VERSION) + ",";
+      manifest += JsonKVStr("engine_version", ENGINE_VERSION) + ",";
+      manifest += JsonKVStr("runtime_input_hash", m_ai.RuntimeHash()) + ",";
+      manifest += JsonKVStr("decision_schema_version", AI_DECISION_SCHEMA_VERSION) + ",";
+      manifest += JsonKVStr("taxonomy_version", SETUP_TAXONOMY_VERSION) + ",";
+      manifest += JsonKVStr("ledger_integrity_status", ledger_status) + ",";
+      manifest += "\"policies\":" + policies;
+      manifest += "}";
+      m_bus.WriteText(m_bus.LogDir() + "\\startup_policy_manifest_mql.json", manifest);
    }
 
    string _AnalyticsDir() const {
@@ -593,6 +948,587 @@ private:
       _Journal(symbol + " setup_reject reject_stage=" + _ReasonCode(stage)
                + " reject_reason=" + _ReasonCode(reason)
                + (StringLen(detail) > 0 ? " " + detail : ""));
+   }
+
+   void _WriteShadowCandidateRecord(const TradePlan &source,
+                                    const string decision_stage,
+                                    const string rejection_reason) {
+      if(!InpShadowCandidateLedgerEnable) return;
+      TradePlan p = source;
+      _InitializeNarrativeFields(p);
+      if(StringLen(p.candidate_id) == 0)
+         p.candidate_id = p.symbol + "|" + IntegerToString((int)p.fvg.t_form) + "|" + p.entry_branch;
+      if(StringLen(p.candidate_hash) == 0) p.candidate_hash = _CandidateHash(p);
+      if(StringLen(p.request_execution_fingerprint) == 0)
+         p.request_execution_fingerprint = _ExecutionFingerprint(p);
+      datetime observed_at = _NowServerOrLocal();
+      string record_hash = _IntegrityHash(SHADOW_CANDIDATE_SCHEMA_VERSION + "|" + p.candidate_hash + "|"
+                                          + p.request_execution_fingerprint + "|"
+                                          + decision_stage + "|" + rejection_reason + "|"
+                                          + IntegerToString((int)observed_at));
+      double risk_dist = MathAbs(p.entry_est - p.sl);
+      bool trackable = (p.entry_est > 0.0 && p.sl > 0.0 && p.tp2 > 0.0 && risk_dist > 0.0 &&
+                        ((p.is_buy && p.sl < p.entry_est && p.tp2 > p.entry_est) ||
+                         (!p.is_buy && p.sl > p.entry_est && p.tp2 < p.entry_est)));
+      p.shadow_candidate_record_hash = record_hash;
+      p.shadow_candidate_schema_version = SHADOW_CANDIDATE_SCHEMA_VERSION;
+      p.shadow_decision_stage = decision_stage;
+      p.shadow_rejection_reason = rejection_reason;
+      p.shadow_observed_at = observed_at;
+      p.shadow_horizon_at = observed_at + MathMax(1, InpShadowCandidateHorizonMinutes) * 60;
+      datetime session_open = 0, session_close = 0, no_entry_from = 0, flatten_from = 0, next_tradable = 0;
+      string schedule_reason = "";
+      if(InpUseBrokerSymbolSessions &&
+         QueryBrokerSymbolSessionSchedule(p.symbol, observed_at, session_open, session_close,
+                                          no_entry_from, flatten_from, next_tradable, schedule_reason) &&
+         session_close > observed_at && session_close < p.shadow_horizon_at){
+         p.broker_session_open = session_open;
+         p.broker_session_close = session_close;
+         p.shadow_horizon_at = session_close;
+      }
+      p.shadow_outcome_status = (trackable ? "PENDING" : "UNTRACKABLE");
+      p.shadow_outcome_reason = (trackable ? "awaiting_hypothetical_price_path" : "invalid_entry_stop_target_contract");
+      p.shadow_time_to_event_sec = -1;
+      p.shadow_time_to_025r_sec = -1;
+      p.shadow_time_to_050r_sec = -1;
+      p.shadow_time_to_stop_sec = -1;
+      p.shadow_time_to_target_sec = -1;
+      p.shadow_reached_025r = false;
+      p.shadow_reached_050r = false;
+      p.shadow_reached_025r_before_adverse = false;
+      p.shadow_reached_050r_before_adverse = false;
+      p.shadow_time_to_adverse_threshold_sec = -1;
+      p.shadow_025_order_ambiguous = false;
+      p.shadow_050_order_ambiguous = false;
+      p.shadow_target_before_stop = false;
+      p.shadow_stop_before_target = false;
+      p.shadow_mfe_before_adverse = false;
+      p.shadow_horizon_result = "PENDING";
+      p.shadow_censoring_status = (trackable ? "PENDING" : "EXCLUDED_INVALID_CONTRACT");
+      p.shadow_ambiguity_reason = "";
+      p.shadow_threshold_order_ambiguous = false;
+      p.shadow_outcome_ambiguous = !trackable;
+      string row = "{";
+      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
+      row += JsonKVStr("event_type", "candidate_observed") + ",";
+      row += JsonKVStr("record_hash", record_hash) + ",";
+      row += JsonKVInt("candidate_timestamp", (int)observed_at) + ",";
+      row += JsonKVInt("setup_timestamp", (int)p.fvg.t_form) + ",";
+      row += JsonKVInt("source_sweep_timestamp", (int)(p.source_t_sweep > 0 ? p.source_t_sweep : p.po3.t_sweep)) + ",";
+      row += JsonKVInt("observed_at", (int)observed_at) + ",";
+      row += JsonKVInt("horizon_at", (int)p.shadow_horizon_at) + ",";
+      row += JsonKVInt("broker_session_close", (int)p.broker_session_close) + ",";
+      row += JsonKVStr("horizon_termination_policy", p.broker_session_close > 0 && p.shadow_horizon_at == p.broker_session_close
+                       ? "broker_session_close" : "configured_horizon") + ",";
+      row += JsonKVStr("candidate_id", p.candidate_id) + ",";
+      row += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
+      row += JsonKVBool("trading_authority", false) + ",";
+      row += JsonKVBool("can_trade", false) + ",";
+      row += JsonKVStr("decision_stage", decision_stage) + ",";
+      row += JsonKVStr("rejection_reason", rejection_reason) + ",";
+      bool ai_decision_available = (StringLen(p.ai.decision_schema_version) > 0 &&
+                                    StringLen(p.ai.decision_state) > 0);
+      if(ai_decision_available){
+         row += JsonKVBool("model_raw_allow", p.model_raw_allow) + ",";
+         row += JsonKVBool("python_final_allow", p.python_final_allow) + ",";
+      } else {
+         row += "\"model_raw_allow\":null,\"python_final_allow\":null,";
+      }
+      if(decision_stage == "pre_ai_reject" || StringFind(decision_stage, "mql_") == 0)
+         row += JsonKVBool("mql_final_allow", p.mql_final_allow) + ",";
+      else
+         row += "\"mql_final_allow\":null,";
+      row += JsonKVStr("python_decision_reasons", p.python_decision_reasons) + ",";
+      row += JsonKVStr("mql_decision_reasons", p.mql_decision_reasons) + ",";
+      row += JsonKVStr("data_quality_status", trackable ? "PENDING_HYPOTHETICAL_OUTCOME" : "UNTRACKABLE_INVALID_CONTRACT") + ",";
+      row += JsonKVStr("symbol", p.symbol) + ",";
+      row += JsonKVBool("is_buy", p.is_buy) + ",";
+      row += JsonKVStr("direction", p.is_buy ? "BUY" : "SELL") + ",";
+      row += JsonKVStr("setup_taxonomy_version", p.setup_taxonomy_version) + ",";
+      row += JsonKVStr("setup_taxonomy_enum", p.setup_taxonomy_enum) + ",";
+      row += JsonKVStr("setup_family", p.setup_family) + ",";
+      row += JsonKVStr("setup_class", p.setup_class) + ",";
+      row += JsonKVStr("entry_branch", p.entry_branch) + ",";
+      row += JsonKVStr("session", p.po3.session_name) + ",";
+      row += JsonKVStr("killzone", p.killzone_code) + ",";
+      row += JsonKVNum("entry", p.entry_est, 8) + ",";
+      row += JsonKVNum("sl", p.sl, 8) + ",";
+      row += JsonKVNum("tp1", p.tp1, 8) + ",";
+      row += JsonKVNum("tp2", p.tp2, 8) + ",";
+      row += JsonKVNum("net_rr", p.effective_rr2, 6) + ",";
+      row += JsonKVStr("target_source", p.target_source) + ",";
+      row += JsonKVStr("target_model", p.target_model) + ",";
+      row += JsonKVStr("tp_model", p.tp_model) + ",";
+      row += JsonKVStr("candidate_execution_fingerprint", p.request_execution_fingerprint) + ",";
+      row += JsonKVStr("execution_fingerprint", p.request_execution_fingerprint) + ",";
+      row += JsonKVStr("assessed_execution_fingerprint", p.assessed_execution_fingerprint) + ",";
+      row += JsonKVStr("final_execution_fingerprint", p.final_execution_fingerprint) + ",";
+      row += JsonKVNum("execution_cost_r", p.execution_cost_r, 6) + ",";
+      row += JsonKVNum("spread_r", p.spread_r, 6) + ",";
+      row += JsonKVNum("slippage_r", p.slippage_r, 6) + ",";
+      row += JsonKVNum("commission_r", p.commission_r, 6) + ",";
+      row += JsonKVStr("cost_source", p.estimated_cost_source) + ",";
+      row += JsonKVStr("engine_version", p.engine_version) + ",";
+      row += JsonKVStr("git_commit", p.git_commit) + ",";
+      row += JsonKVStr("dirty_tree_status", p.dirty_tree_status) + ",";
+      row += JsonKVStr("set_file_hash", p.set_file_hash) + ",";
+      row += JsonKVStr("runtime_input_hash", p.runtime_input_hash) + ",";
+      row += JsonKVStr("prompt_contract_version", p.prompt_contract_version) + ",";
+      row += JsonKVStr("model_version", p.ai.model_version) + ",";
+      row += JsonKVStr("reasoning_configuration", p.reasoning_configuration) + ",";
+      row += JsonKVStr("decision_schema_version", p.ai.decision_schema_version) + ",";
+      row += JsonKVStr("target_schema_version", p.target_arbitration_schema_version) + ",";
+      row += JsonKVStr("policy_id", p.policy_snapshot_id) + ",";
+      row += JsonKVStr("policy_hash", p.policy_hash) + ",";
+      row += JsonKVStr("bucket_prior_hash", p.bucket_prior_hash) + ",";
+      row += JsonKVStr("management_version", p.management_version) + ",";
+      row += JsonKVStr("taxonomy_version", p.setup_taxonomy_version) + ",";
+      row += JsonKVStr("feature_version", p.feature_version) + ",";
+      row += JsonKVStr("calibration_artifact_id", p.calibration_artifact_id) + ",";
+      row += JsonKVStr("repeatability_artifact_id", p.repeatability_artifact_id) + ",";
+      row += JsonKVStr("cohort_id", p.cohort_id) + ",";
+      row += JsonKVBool("cohort_complete", p.cohort_complete) + ",";
+      row += JsonKVNum("fvg_width", MathAbs(p.fvg.upper - p.fvg.lower), 8) + ",";
+      row += JsonKVNum("normalized_fvg_minimum", p.fvg.normalized_minimum_price, 8) + ",";
+      row += JsonKVBool("normalized_fvg_shadow_pass", p.fvg.normalized_minimum_shadow_pass) + ",";
+      row += JsonKVStr("normalized_fvg_mode", p.fvg.normalized_fvg_mode) + ",";
+      row += JsonKVStr("normalized_fvg_asset_class", p.fvg.normalized_fvg_asset_class) + ",";
+      row += JsonKVStr("normalized_fvg_policy_version", p.fvg.normalized_fvg_policy_version) + ",";
+      row += JsonKVInt("normalized_fvg_sample_size", p.fvg.normalized_fvg_sample_size) + ",";
+      row += JsonKVBool("pre_entry_features_complete", true) + ",";
+      row += JsonKVNum("effective_rr2", p.effective_rr2, 6) + ",";
+      row += JsonKVNum("liquidity_rr", p.liquidity_rr, 6) + ",";
+      row += JsonKVNum("sequence_quality", p.sequence_quality, 6) + ",";
+      row += JsonKVNum("htf_alignment_score", p.htf_alignment_score, 6) + ",";
+      row += JsonKVNum("stop_quality_score", p.stop_quality_score, 6) + ",";
+      row += JsonKVNum("trend_strength", p.trend_strength, 6) + ",";
+      row += JsonKVNum("session_vol_ratio", p.session_vol_ratio, 6) + ",";
+      row += JsonKVNum("fvg_score", p.fvg.score, 6) + ",";
+      row += JsonKVNum("adverse_context_score", p.adverse_context_score, 6) + ",";
+      row += JsonKVNum("vwap_dist_atr", p.vwap_dist_atr, 6) + ",";
+      row += JsonKVNum("news_risk", p.news_risk, 6) + ",";
+      row += "\"hypothetical_outcome\":null,\"target_before_stop\":null,\"stop_before_target\":null,";
+      row += JsonKVNum("adverse_threshold_r", SHADOW_ADVERSE_THRESHOLD_R, 4) + ",";
+      row += "\"reached_0_25r_before_adverse_threshold\":null,\"reached_0_50r_before_adverse_threshold\":null,";
+      row += "\"reached_0_25r_before_adverse\":null,\"reached_0_50r_before_adverse\":null,";
+      row += "\"mfe_r\":null,\"mae_r\":null,\"time_to_0_25r_sec\":null,\"time_to_0_50r_sec\":null,";
+      row += "\"time_to_stop_sec\":null,\"time_to_target_sec\":null,\"time_to_adverse_threshold_sec\":null,\"time_to_event_sec\":null,";
+      row += "\"horizon_result\":null,\"ambiguity_status\":null,\"censoring_status\":\"PENDING\"";
+      row += "}";
+      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
+      if(trackable && !_PendingResearchRecordExists(m_shadow_pending, record_hash, true)){
+         int n = ArraySize(m_shadow_pending);
+         ArrayResize(m_shadow_pending, n + 1);
+         m_shadow_pending[n] = p;
+      }
+   }
+
+   bool _FindCandidateAssessmentJson(const AiDecision &dec,
+                                     const string candidate_hash,
+                                     string &assessment) const {
+      assessment = "";
+      int count = JsonArrayObjectCount(dec.candidate_assessments_json);
+      for(int i=0; i<count; i++){
+         string item = "", item_hash = "";
+         if(!JsonArrayGetObject(dec.candidate_assessments_json, i, item)) continue;
+         if(!JsonGetStringStrict(item, "candidate_hash", item_hash)) continue;
+         if(item_hash != candidate_hash) continue;
+         assessment = item;
+         return true;
+      }
+      return false;
+   }
+
+   void _WriteShadowDecisionUpdate(const TradePlan &source,
+                                   const AiDecision &dec,
+                                   const string decision_stage,
+                                   const string rejection_reason,
+                                   const bool mql_final_allow) {
+      if(!InpShadowCandidateLedgerEnable) return;
+      string assessment = "";
+      bool assessment_found = _FindCandidateAssessmentJson(dec, source.candidate_hash, assessment);
+      bool model_allow = false, python_allow = false;
+      string decision_state = "UNAVAILABLE";
+      if(assessment_found){
+         if(!JsonGetBoolStrict(assessment, "model_raw_allow", model_allow) ||
+            !JsonGetBoolStrict(assessment, "python_final_allow", python_allow) ||
+            !JsonGetStringStrict(assessment, "decision_state", decision_state)){
+            assessment_found = false;
+            model_allow = false;
+            python_allow = false;
+            decision_state = "INVALID";
+         }
+      }
+      string row = "{";
+      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
+      row += JsonKVStr("event_type", "candidate_decision_update") + ",";
+      row += JsonKVInt("observed_at", (int)_NowServerOrLocal()) + ",";
+      row += JsonKVStr("candidate_id", source.candidate_id) + ",";
+      row += JsonKVStr("candidate_hash", source.candidate_hash) + ",";
+      row += JsonKVStr("execution_fingerprint", source.request_execution_fingerprint) + ",";
+      row += JsonKVStr("assessed_execution_fingerprint", source.assessed_execution_fingerprint) + ",";
+      row += JsonKVStr("final_execution_fingerprint", source.final_execution_fingerprint) + ",";
+      row += JsonKVNum("entry", source.entry_est, 8) + ",";
+      row += JsonKVNum("sl", source.sl, 8) + ",";
+      row += JsonKVNum("tp1", source.tp1, 8) + ",";
+      row += JsonKVNum("tp2", source.tp2, 8) + ",";
+      row += JsonKVNum("net_rr", source.effective_rr2, 6) + ",";
+      row += JsonKVStr("target_source", source.target_source) + ",";
+      row += JsonKVStr("target_model", source.target_model) + ",";
+      row += JsonKVNum("execution_cost_r", source.execution_cost_r, 6) + ",";
+      row += JsonKVNum("spread_r", source.spread_r, 6) + ",";
+      row += JsonKVStr("decision_stage", decision_stage) + ",";
+      row += JsonKVStr("decision_state", decision_state) + ",";
+      row += JsonKVStr("rejection_reason", rejection_reason) + ",";
+      row += JsonKVBool("assessment_found", assessment_found) + ",";
+      if(assessment_found){
+         row += JsonKVBool("model_raw_allow", model_allow) + ",";
+         row += JsonKVBool("python_final_allow", python_allow) + ",";
+      } else {
+         row += "\"model_raw_allow\":null,\"python_final_allow\":null,";
+      }
+      row += JsonKVBool("mql_final_allow", mql_final_allow) + ",";
+      row += JsonKVStr("python_reasons", dec.reasons_json) + ",";
+      row += JsonKVStr("mql_reasons", rejection_reason) + ",";
+      row += JsonKVStr("decision_schema_version", dec.decision_schema_version) + ",";
+      row += JsonKVStr("model_version", dec.model_version) + ",";
+      row += JsonKVStr("prompt_contract_version", dec.prompt_contract_version) + ",";
+      row += JsonKVStr("target_schema_version", dec.target_arbitration_schema_version) + ",";
+      row += "\"decision_field_authority\":" + (StringLen(dec.decision_field_authority_json) > 0 ? dec.decision_field_authority_json : "{}") + ",";
+      row += JsonKVStr("cohort_id", source.cohort_id) + ",";
+      row += JsonKVBool("cohort_complete", source.cohort_complete) + ",";
+      row += "\"candidate_assessment\":" + (assessment_found ? assessment : "null") + ",";
+      row += JsonKVBool("trading_authority", false);
+      row += "}";
+      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
+
+      bool changed = false;
+      for(int i=0; i<ArraySize(m_shadow_pending); i++){
+         if(m_shadow_pending[i].candidate_hash != source.candidate_hash) continue;
+         if(m_shadow_pending[i].request_execution_fingerprint != source.request_execution_fingerprint) continue;
+         m_shadow_pending[i].shadow_decision_stage = decision_stage;
+         m_shadow_pending[i].shadow_rejection_reason = rejection_reason;
+         m_shadow_pending[i].model_raw_allow = model_allow;
+         m_shadow_pending[i].python_final_allow = python_allow;
+         m_shadow_pending[i].mql_final_allow = mql_final_allow;
+         m_shadow_pending[i].python_decision_reasons = dec.reasons_json;
+         m_shadow_pending[i].mql_decision_reasons = rejection_reason;
+         m_shadow_pending[i].ai = dec;
+         m_shadow_pending[i].decision_field_authority_json = dec.decision_field_authority_json;
+         m_shadow_pending[i].entry_est = source.entry_est;
+         m_shadow_pending[i].sl = source.sl;
+         m_shadow_pending[i].tp1 = source.tp1;
+         m_shadow_pending[i].tp2 = source.tp2;
+         m_shadow_pending[i].effective_rr2 = source.effective_rr2;
+         m_shadow_pending[i].target_source = source.target_source;
+         m_shadow_pending[i].target_model = source.target_model;
+         m_shadow_pending[i].tp_model = source.tp_model;
+         m_shadow_pending[i].request_execution_fingerprint = source.request_execution_fingerprint;
+         m_shadow_pending[i].assessed_execution_fingerprint = source.assessed_execution_fingerprint;
+         m_shadow_pending[i].final_execution_fingerprint = source.final_execution_fingerprint;
+         m_shadow_pending[i].execution_cost_r = source.execution_cost_r;
+         m_shadow_pending[i].spread_r = source.spread_r;
+         m_shadow_pending[i].slippage_r = source.slippage_r;
+         m_shadow_pending[i].engine_version = source.engine_version;
+         m_shadow_pending[i].git_commit = source.git_commit;
+         m_shadow_pending[i].dirty_tree_status = source.dirty_tree_status;
+         m_shadow_pending[i].set_file_hash = source.set_file_hash;
+         m_shadow_pending[i].runtime_input_hash = source.runtime_input_hash;
+         m_shadow_pending[i].prompt_contract_version = source.prompt_contract_version;
+         m_shadow_pending[i].reasoning_configuration = source.reasoning_configuration;
+         m_shadow_pending[i].policy_snapshot_id = source.policy_snapshot_id;
+         m_shadow_pending[i].policy_hash = source.policy_hash;
+         m_shadow_pending[i].bucket_prior_hash = source.bucket_prior_hash;
+         m_shadow_pending[i].management_version = source.management_version;
+         m_shadow_pending[i].feature_version = source.feature_version;
+         m_shadow_pending[i].calibration_artifact_id = source.calibration_artifact_id;
+         m_shadow_pending[i].repeatability_artifact_id = source.repeatability_artifact_id;
+         m_shadow_pending[i].cohort_id = source.cohort_id;
+         m_shadow_pending[i].cohort_complete = source.cohort_complete;
+         changed = true;
+      }
+      if(changed) m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+   }
+
+   bool _EvaluateShadowCandidate(TradePlan &p, string &reason) {
+      reason = "";
+      p.shadow_outcome_ambiguous = false;
+      p.shadow_threshold_order_ambiguous = false;
+      p.shadow_ambiguity_reason = "";
+      p.shadow_reached_025r = false;
+      p.shadow_reached_050r = false;
+      p.shadow_reached_025r_before_adverse = false;
+      p.shadow_reached_050r_before_adverse = false;
+      p.shadow_time_to_adverse_threshold_sec = -1;
+      p.shadow_025_order_ambiguous = false;
+      p.shadow_050_order_ambiguous = false;
+      p.shadow_target_before_stop = false;
+      p.shadow_stop_before_target = false;
+      p.shadow_mfe_before_adverse = false;
+      p.shadow_time_to_event_sec = -1;
+      p.shadow_time_to_025r_sec = -1;
+      p.shadow_time_to_050r_sec = -1;
+      p.shadow_time_to_stop_sec = -1;
+      p.shadow_time_to_target_sec = -1;
+      p.shadow_horizon_result = "PENDING";
+      p.shadow_censoring_status = "PENDING";
+      double entry = p.entry_est;
+      double sl = p.sl;
+      double tp = p.tp2;
+      double risk_dist = MathAbs(entry - sl);
+      if(entry <= 0.0 || sl <= 0.0 || tp <= 0.0 || risk_dist <= 0.0 ||
+         (p.is_buy && !(sl < entry && tp > entry)) ||
+         (!p.is_buy && !(sl > entry && tp < entry))){
+         p.shadow_outcome_status = "UNTRACKABLE";
+         p.shadow_outcome_reason = "invalid_entry_stop_target_contract";
+         p.shadow_outcome_ambiguous = true;
+         p.shadow_ambiguity_reason = "invalid_entry_stop_target_contract";
+         p.shadow_horizon_result = "UNTRACKABLE";
+         p.shadow_censoring_status = "EXCLUDED_INVALID_CONTRACT";
+         reason = p.shadow_outcome_reason;
+         return true;
+      }
+      datetime now = _NowServerOrLocal();
+      datetime evaluation_end = now;
+      if(p.shadow_horizon_at > 0 && evaluation_end > p.shadow_horizon_at)
+         evaluation_end = p.shadow_horizon_at;
+      if(evaluation_end <= p.shadow_observed_at){
+         reason = "awaiting_first_closed_price_bar";
+         return false;
+      }
+      MqlRates rates[];
+      ArraySetAsSeries(rates, false);
+      int got = CopyRates(p.symbol, PERIOD_M1, p.shadow_observed_at, evaluation_end, rates);
+      if(got <= 0){
+         if(now < p.shadow_horizon_at){ reason = "price_path_temporarily_unavailable"; return false; }
+         p.shadow_outcome_status = "UNAVAILABLE";
+         p.shadow_outcome_reason = "price_path_unavailable_at_horizon";
+         p.shadow_outcome_ambiguous = true;
+         p.shadow_ambiguity_reason = "price_path_unavailable_at_horizon";
+         p.shadow_horizon_result = "DATA_LOSS";
+         p.shadow_censoring_status = "EXCLUDED_DATA_LOSS";
+         reason = p.shadow_outcome_reason;
+         return true;
+      }
+
+      double max_favorable = 0.0;
+      double max_adverse = 0.0;
+      double last_close = entry;
+      datetime event_at = 0;
+      datetime favorable_025_at = 0;
+      datetime favorable_050_at = 0;
+      datetime adverse_threshold_at = 0;
+      bool resolved = false;
+      for(int i=0; i<got; i++){
+         last_close = rates[i].close;
+         double favorable = (p.is_buy ? rates[i].high - entry : entry - rates[i].low) / risk_dist;
+         double adverse = (p.is_buy ? rates[i].low - entry : entry - rates[i].high) / risk_dist;
+         max_favorable = MathMax(max_favorable, favorable);
+         max_adverse = MathMin(max_adverse, adverse);
+         bool favorable_025_hit = (favorable >= 0.25);
+         bool favorable_050_hit = (favorable >= 0.50);
+         bool adverse_threshold_hit = (adverse <= -SHADOW_ADVERSE_THRESHOLD_R);
+         if(favorable_025_at == 0 && adverse_threshold_at == 0 && favorable_025_hit && adverse_threshold_hit){
+            p.shadow_025_order_ambiguous = true;
+            p.shadow_ambiguity_reason = "favorable_0_25r_and_adverse_threshold_same_m1_bar";
+         }
+         if(favorable_050_at == 0 && adverse_threshold_at == 0 && favorable_050_hit && adverse_threshold_hit){
+            p.shadow_050_order_ambiguous = true;
+            if(StringLen(p.shadow_ambiguity_reason) > 0) p.shadow_ambiguity_reason += ";";
+            p.shadow_ambiguity_reason += "favorable_0_50r_and_adverse_threshold_same_m1_bar";
+         }
+         if(favorable_025_at == 0 && favorable_025_hit) favorable_025_at = rates[i].time;
+         if(favorable_050_at == 0 && favorable_050_hit) favorable_050_at = rates[i].time;
+         if(adverse_threshold_at == 0 && adverse_threshold_hit) adverse_threshold_at = rates[i].time;
+         p.shadow_threshold_order_ambiguous = (p.shadow_025_order_ambiguous || p.shadow_050_order_ambiguous);
+         bool sl_hit = (p.is_buy ? rates[i].low <= sl : rates[i].high >= sl);
+         bool tp_hit = (p.is_buy ? rates[i].high >= tp : rates[i].low <= tp);
+         if(sl_hit && tp_hit){
+            p.shadow_outcome_status = "AMBIGUOUS";
+            p.shadow_outcome_reason = "sl_and_tp_touched_without_tick_sequence";
+            p.shadow_outcome_ambiguous = true;
+            p.shadow_ambiguity_reason = "sl_and_tp_touched_without_tick_sequence";
+            p.shadow_time_to_stop_sec = (int)MathMax(0, (long)(rates[i].time - p.shadow_observed_at));
+            p.shadow_time_to_target_sec = p.shadow_time_to_stop_sec;
+            p.shadow_horizon_result = "AMBIGUOUS_SAME_BAR_TERMINAL";
+            p.shadow_censoring_status = "EXCLUDED_AMBIGUOUS";
+            event_at = rates[i].time;
+            resolved = true;
+            break;
+         }
+         if(sl_hit || tp_hit){
+            p.shadow_outcome_status = (sl_hit ? "RESOLVED_STOP" : "RESOLVED_TARGET");
+            p.shadow_outcome_reason = "terminal_price_level_reached";
+            p.shadow_outcome_r = (sl_hit ? -1.0 : MathAbs(tp - entry) / risk_dist)
+                                 - MathMax(0.0, p.execution_cost_r);
+            if(sl_hit){
+               p.shadow_stop_before_target = true;
+               p.shadow_time_to_stop_sec = (int)MathMax(0, (long)(rates[i].time - p.shadow_observed_at));
+               p.shadow_horizon_result = "STOP_FIRST";
+            } else {
+               p.shadow_target_before_stop = true;
+               p.shadow_time_to_target_sec = (int)MathMax(0, (long)(rates[i].time - p.shadow_observed_at));
+               p.shadow_horizon_result = "TARGET_FIRST";
+            }
+            p.shadow_censoring_status = "UNCENSORED_TERMINAL";
+            event_at = rates[i].time;
+            resolved = true;
+            break;
+         }
+      }
+      p.shadow_mfe_r = max_favorable;
+      p.shadow_mae_r = max_adverse;
+      p.shadow_reached_025r = (favorable_025_at > 0);
+      p.shadow_reached_050r = (favorable_050_at > 0);
+      p.shadow_time_to_025r_sec = (favorable_025_at > 0
+                                   ? (int)MathMax(0, (long)(favorable_025_at - p.shadow_observed_at)) : -1);
+      p.shadow_time_to_050r_sec = (favorable_050_at > 0
+                                   ? (int)MathMax(0, (long)(favorable_050_at - p.shadow_observed_at)) : -1);
+      p.shadow_time_to_adverse_threshold_sec = (adverse_threshold_at > 0
+                                                ? (int)MathMax(0, (long)(adverse_threshold_at - p.shadow_observed_at)) : -1);
+      if(!p.shadow_025_order_ambiguous && favorable_025_at > 0 &&
+         (adverse_threshold_at == 0 || favorable_025_at < adverse_threshold_at))
+         p.shadow_reached_025r_before_adverse = true;
+      if(!p.shadow_050_order_ambiguous && favorable_050_at > 0 &&
+         (adverse_threshold_at == 0 || favorable_050_at < adverse_threshold_at))
+         p.shadow_reached_050r_before_adverse = true;
+      p.shadow_mfe_before_adverse = p.shadow_reached_025r_before_adverse;
+      if(!resolved && now < p.shadow_horizon_at){
+         p.shadow_outcome_status = "PENDING";
+         p.shadow_outcome_reason = "awaiting_hypothetical_price_path";
+         reason = p.shadow_outcome_reason;
+         return false;
+      }
+      if(!resolved){
+         p.shadow_outcome_status = "RESOLVED_HORIZON";
+         bool ended_at_session_close = (p.broker_session_close > 0 && p.shadow_horizon_at == p.broker_session_close);
+         p.shadow_outcome_reason = (ended_at_session_close ? "broker_session_close_reached" : "configured_horizon_reached");
+         p.shadow_outcome_r = (p.is_buy ? last_close - entry : entry - last_close) / risk_dist
+                              - MathMax(0.0, p.execution_cost_r);
+         string horizon_prefix = (ended_at_session_close ? "SESSION_CLOSE" : "HORIZON");
+         p.shadow_horizon_result = horizon_prefix + (p.shadow_outcome_r > 0.0 ? "_POSITIVE" :
+                                    (p.shadow_outcome_r < 0.0 ? "_NEGATIVE" : "_FLAT"));
+         p.shadow_censoring_status = (ended_at_session_close
+                                      ? "RIGHT_CENSORED_SESSION_CLOSE"
+                                      : "RIGHT_CENSORED_HORIZON");
+         event_at = evaluation_end;
+      }
+      p.shadow_evaluated_at = now;
+      p.shadow_time_to_event_sec = (event_at >= p.shadow_observed_at
+                                    ? (int)(event_at - p.shadow_observed_at) : -1);
+      reason = p.shadow_outcome_reason;
+      return true;
+   }
+
+   void _AppendShadowOutcomeResolution(const TradePlan &p) {
+      string row = "{";
+      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
+      row += JsonKVStr("event_type", "hypothetical_outcome_resolution") + ",";
+      row += JsonKVStr("parent_record_hash", p.shadow_candidate_record_hash) + ",";
+      row += JsonKVStr("candidate_id", p.candidate_id) + ",";
+      row += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
+      row += JsonKVStr("execution_fingerprint", p.request_execution_fingerprint) + ",";
+      row += JsonKVStr("assessed_execution_fingerprint", p.assessed_execution_fingerprint) + ",";
+      row += JsonKVStr("final_execution_fingerprint", p.final_execution_fingerprint) + ",";
+      row += JsonKVStr("direction", p.is_buy ? "BUY" : "SELL") + ",";
+      row += JsonKVNum("entry", p.entry_est, 8) + ",";
+      row += JsonKVNum("sl", p.sl, 8) + ",";
+      row += JsonKVNum("tp1", p.tp1, 8) + ",";
+      row += JsonKVNum("tp2", p.tp2, 8) + ",";
+      row += JsonKVNum("net_rr", p.effective_rr2, 6) + ",";
+      row += JsonKVNum("execution_cost_r", p.execution_cost_r, 6) + ",";
+      row += JsonKVStr("target_source", p.target_source) + ",";
+      row += JsonKVStr("target_model", p.target_model) + ",";
+      row += JsonKVStr("decision_stage", p.shadow_decision_stage) + ",";
+      row += JsonKVStr("decision_state", p.ai.decision_state) + ",";
+      row += JsonKVStr("rejection_reason", p.shadow_rejection_reason) + ",";
+      row += JsonKVBool("model_raw_allow", p.model_raw_allow) + ",";
+      row += JsonKVBool("python_final_allow", p.python_final_allow) + ",";
+      row += JsonKVBool("mql_final_allow", p.mql_final_allow) + ",";
+      row += JsonKVBool("trading_authority", false) + ",";
+      row += JsonKVBool("can_trade", false) + ",";
+      row += JsonKVInt("evaluated_at", (int)p.shadow_evaluated_at) + ",";
+      row += JsonKVStr("hypothetical_outcome", p.shadow_outcome_status) + ",";
+      row += JsonKVStr("outcome_reason", p.shadow_outcome_reason) + ",";
+      if(p.shadow_outcome_ambiguous) row += "\"result_r\":null,";
+      else row += JsonKVNum("result_r", p.shadow_outcome_r, 6) + ",";
+      row += JsonKVNum("mfe_r", p.shadow_mfe_r, 6) + ",";
+      row += JsonKVNum("mae_r", p.shadow_mae_r, 6) + ",";
+      row += JsonKVInt("time_to_event_sec", p.shadow_time_to_event_sec) + ",";
+      if(p.shadow_time_to_025r_sec >= 0) row += JsonKVInt("time_to_0_25r_sec", p.shadow_time_to_025r_sec) + ",";
+      else row += "\"time_to_0_25r_sec\":null,";
+      if(p.shadow_time_to_050r_sec >= 0) row += JsonKVInt("time_to_0_50r_sec", p.shadow_time_to_050r_sec) + ",";
+      else row += "\"time_to_0_50r_sec\":null,";
+      if(p.shadow_time_to_stop_sec >= 0) row += JsonKVInt("time_to_stop_sec", p.shadow_time_to_stop_sec) + ",";
+      else row += "\"time_to_stop_sec\":null,";
+      if(p.shadow_time_to_target_sec >= 0) row += JsonKVInt("time_to_target_sec", p.shadow_time_to_target_sec) + ",";
+      else row += "\"time_to_target_sec\":null,";
+      if(p.shadow_time_to_adverse_threshold_sec >= 0) row += JsonKVInt("time_to_adverse_threshold_sec", p.shadow_time_to_adverse_threshold_sec) + ",";
+      else row += "\"time_to_adverse_threshold_sec\":null,";
+      if(p.shadow_censoring_status == "UNCENSORED_TERMINAL"){
+         row += JsonKVBool("target_before_stop", p.shadow_target_before_stop) + ",";
+         row += JsonKVBool("stop_before_target", p.shadow_stop_before_target) + ",";
+      } else {
+         row += "\"target_before_stop\":null,\"stop_before_target\":null,";
+      }
+      row += JsonKVNum("adverse_threshold_r", SHADOW_ADVERSE_THRESHOLD_R, 4) + ",";
+      if(p.shadow_025_order_ambiguous){
+         row += "\"reached_0_25r_before_adverse_threshold\":null,\"reached_0_25r_before_adverse\":null,";
+      } else {
+         row += JsonKVBool("reached_0_25r_before_adverse_threshold", p.shadow_reached_025r_before_adverse) + ",";
+         row += JsonKVBool("reached_0_25r_before_adverse", p.shadow_reached_025r_before_adverse) + ",";
+      }
+      if(p.shadow_050_order_ambiguous){
+         row += "\"reached_0_50r_before_adverse_threshold\":null,\"reached_0_50r_before_adverse\":null,";
+      } else {
+         row += JsonKVBool("reached_0_50r_before_adverse_threshold", p.shadow_reached_050r_before_adverse) + ",";
+         row += JsonKVBool("reached_0_50r_before_adverse", p.shadow_reached_050r_before_adverse) + ",";
+      }
+      row += JsonKVBool("threshold_0_25_order_ambiguous", p.shadow_025_order_ambiguous) + ",";
+      row += JsonKVBool("threshold_0_50_order_ambiguous", p.shadow_050_order_ambiguous) + ",";
+      row += JsonKVBool("reached_0_25r", p.shadow_reached_025r) + ",";
+      row += JsonKVBool("reached_0_50r", p.shadow_reached_050r) + ",";
+      row += JsonKVStr("horizon_result", p.shadow_horizon_result) + ",";
+      row += JsonKVStr("censoring_status", p.shadow_censoring_status) + ",";
+      row += JsonKVStr("ambiguity_reason", p.shadow_ambiguity_reason) + ",";
+      row += JsonKVStr("cohort_id", p.cohort_id) + ",";
+      row += JsonKVBool("cohort_complete", p.cohort_complete) + ",";
+      row += JsonKVBool("ambiguous", p.shadow_outcome_ambiguous) + ",";
+      row += JsonKVStr("data_quality_status",
+                       (p.shadow_outcome_ambiguous ? "EXCLUDED_AMBIGUOUS" :
+                        (p.shadow_censoring_status == "UNCENSORED_TERMINAL" ? "RESOLVED_CLEAN_PRICE_PATH" :
+                         "RESOLVED_CENSORED_PRICE_PATH")));
+      row += "}";
+      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
+   }
+
+   void _MaintainShadowCandidateOutcomes() {
+      bool changed = false;
+      for(int i=ArraySize(m_shadow_pending)-1; i>=0; i--){
+         TradePlan p = m_shadow_pending[i];
+         string reason = "";
+         if(!_EvaluateShadowCandidate(p, reason)){
+            m_shadow_pending[i] = p;
+            continue;
+         }
+         _AppendShadowOutcomeResolution(p);
+         int last = ArraySize(m_shadow_pending) - 1;
+         if(i != last) m_shadow_pending[i] = m_shadow_pending[last];
+         ArrayResize(m_shadow_pending, last);
+         changed = true;
+      }
+      if(changed) m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+   }
+
+   void _WriteRejectedShadowCandidate(const TradePlan &base,
+                                      const FVGZone &zone,
+                                      const string branch,
+                                      const string reason) {
+      TradePlan shadow = base;
+      shadow.fvg = zone;
+      shadow.entry_branch = branch;
+      shadow.entry_model = branch;
+      _WriteShadowCandidateRecord(shadow, "pre_ai_reject", reason);
    }
 
    string _NormToken(string value) const {
@@ -764,10 +1700,13 @@ private:
    bool _TokenIsSyntheticFallback(const string value) const {
       string v = _NormToken(value);
       return (v == "synthetic_rr_fallback" ||
+              v == "synthetic_rr_capped_to_max_distance" ||
+              v == "ai_selected_synthetic_rr_capped_to_max_distance" ||
               v == "ai_selected_synthetic_rr_fallback" ||
               v == "fallback" ||
               v == "synthetic" ||
-              StringFind(v, "synthetic_rr_fallback") >= 0);
+              StringFind(v, "synthetic_rr_fallback") >= 0 ||
+              StringFind(v, "synthetic_rr_capped") >= 0);
    }
 
    bool _TokenIsCappedTarget(const string value) const {
@@ -803,6 +1742,7 @@ private:
       reason = "";
       string family_group = _FamilyGroup(p);
       string family = _NormToken(p.setup_family);
+      string setup_class = _NormToken(p.setup_class);
       string branch = _NormToken(p.entry_branch);
       bool stale = _IsStaleFvgPlan(p);
       bool touched = _IsTouchedFvgPlan(p);
@@ -811,7 +1751,13 @@ private:
          reason = "trade_only_killzone_block";
          return false;
       }
-      if(InpSuppressMicroBisiSibiEdge && (family == "micro_bisi_sibi" || family == "micro_bisi_sibi_edge" || branch == "fvg_edge")){
+      bool micro_bisi_sibi_family = (family == "micro_bisi_sibi" ||
+                                     family == "micro_bisi_sibi_edge" ||
+                                     StringFind(family, "micro_bisi_sibi") >= 0 ||
+                                     setup_class == "micro_bisi_sibi" ||
+                                     setup_class == "micro_bisi_sibi_edge" ||
+                                     StringFind(setup_class, "micro_bisi_sibi") >= 0);
+      if(InpSuppressMicroBisiSibiEdge && micro_bisi_sibi_family){
          reason = "suppressed_micro_bisi_sibi_edge";
          return false;
       }
@@ -878,9 +1824,25 @@ private:
 
    bool _ObjectiveHardPreTradeGate(TradePlan &p, const string stage, string &reason) {
       reason = "";
+      string taxonomy_reason = "";
+      if(!_ResolveSetupTaxonomy(p, taxonomy_reason)){
+         reason = "unknown_setup_taxonomy";
+         _LogUnknownSetupTaxonomy(p, stage);
+         _LogSetupReject(p.symbol, stage, reason, p.taxonomy_mapping_failure_reason);
+         return false;
+      }
+      bool was_mpc = _PlanIsMPC(p);
+      if(!_ApplyOutcomePolicy(p, stage, reason)){
+         if(was_mpc && (stage == "pre_order_hard_gate" || stage == "final_order_hard_safety"))
+            m_total_mpc_execution_blocks++;
+         return false;
+      }
       if(!_HardSuppressionGate(p, reason)){
-         _LogSetupReject(p.symbol, stage, reason, "branch=" + p.entry_branch + " family=" + p.setup_family
-                         + " session=" + p.po3.session_name + " killzone=" + (p.po3.in_killzone ? "true" : "false"));
+         string detail = "branch=" + p.entry_branch + " family=" + p.setup_family
+                         + " session=" + p.po3.session_name + " killzone=" + (p.po3.in_killzone ? "true" : "false");
+         if(reason == "suppressed_micro_bisi_sibi_edge")
+            detail += " suppression_scope=micro_bisi_sibi_only";
+         _LogSetupReject(p.symbol, stage, reason, detail);
          return false;
       }
       if(!_ExecutionCostHardGate(p, reason)){
@@ -907,86 +1869,183 @@ private:
       return true;
    }
 
-   bool _IsRealAccount() const {
-      if(MQLInfoInteger(MQL_TESTER)) return false;
-      return (AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL);
-   }
-
-   bool _IsDemoLikeAccount() const {
-      if(MQLInfoInteger(MQL_TESTER)) return false;
-      long mode = AccountInfoInteger(ACCOUNT_TRADE_MODE);
-      return (mode == ACCOUNT_TRADE_MODE_DEMO || mode == ACCOUNT_TRADE_MODE_CONTEST);
-   }
-
-   bool _RuleFallbackAllowed(const string reason, string &mode_reason) const {
-      if(!InpAllowRuleOnlyFallback){
-         mode_reason = "rule_only_fallback_disabled_" + reason;
-         return false;
-      }
-      if(MQLInfoInteger(MQL_TESTER)){
-         mode_reason = "rule_only_fallback_tester_" + reason;
-         return true;
-      }
-      if(_IsRealAccount()){
-         if(InpLiveFailClosedOnAIFailure && !InpAllowRuleOnlyLive){
-            mode_reason = "ai_failure_live_fail_closed_" + reason;
-            return false;
-         }
-         if(!InpAllowRuleOnlyLive){
-            mode_reason = "rule_only_live_disabled_" + reason;
-            return false;
-         }
-         mode_reason = "rule_only_fallback_live_reduced_" + reason;
-         return true;
-      }
-      if(_IsDemoLikeAccount()){
-         mode_reason = "rule_only_fallback_demo_" + reason;
-         return true;
-      }
-      mode_reason = "rule_only_fallback_unknown_" + reason;
-      return !InpLiveFailClosedOnAIFailure;
-   }
-
-   bool _ApplyRuleFallback(TradePlan &p, const string reason) {
-      if(p.target_arbitration_required){
-         p.reject_code = "target_arbitration_missing";
-         _LogSetupReject(p.symbol, "ai", "target_arbitration_missing", "fallback_reason=" + reason);
-         _Journal(p.symbol + " rules fallback blocked: target arbitration required before execution");
-         return false;
-      }
-      string mode_reason = "";
-      if(!_RuleFallbackAllowed(reason, mode_reason)){
-         p.reject_code = mode_reason;
-         _LogSetupReject(p.symbol, "ai", mode_reason, "fallback_reason=" + reason);
-         _Journal(p.symbol + " rules fallback blocked reason=" + mode_reason);
-         return false;
-      }
-      if(p.subtype_risk_multiplier <= 0.0) p.subtype_risk_multiplier = 1.0;
-      if(!MQLInfoInteger(MQL_TESTER)){
-         double mult = _ClampRange(InpFallbackRiskMultiplier, 0.0, 1.0);
-         if(mult <= 0.0){
-            p.reject_code = "fallback_risk_multiplier_zero";
-            _LogSetupReject(p.symbol, "ai", "fallback_risk_multiplier_zero",
-                            "fallback_risk_multiplier=" + DoubleToString(InpFallbackRiskMultiplier, 2));
-            _Journal(p.symbol + " rules fallback blocked: fallback risk multiplier is zero");
-            return false;
-         }
-         p.subtype_risk_multiplier *= mult;
-      }
+   bool _ApplyRuleOnlyNonTradingDiagnostic(TradePlan &p, const string reason) {
       p.ai.ok = false;
-      p.ai.allow = true;
-      p.ai.score = p.setup_score;
-      p.ai.chosen_index = p.candidate_index;
-      p.ai.confidence = 0.0;
+      p.ai.allow = false;
+      p.ai.raw_allow = false;
+      p.ai.decision_state = "REJECT";
+      p.ai.decision_quality_tier = "RULE_ONLY_NON_TRADING";
+      p.ai.response_quality_alias = "RULE_ONLY_NON_TRADING";
+      p.ai.mandatory_fields_complete = false;
+      p.ai.suggested_risk_multiplier = 0.0;
       p.ai.reasons_json = reason;
-      p.ai.decision_source = mode_reason;
-      p.ai.rejection_codes_json = "[\"ai_" + reason + "\"]";
-      p.ai.narrative_state = "rule_only_fallback";
-      p.ai.suggested_risk_multiplier = (!MQLInfoInteger(MQL_TESTER) ? _ClampRange(InpFallbackRiskMultiplier, 0.0, 1.0) : 1.0);
-      p.ai.model_version = "rule_only_fallback";
-      p.ai_decision_source = mode_reason;
-      p.reject_code = "";
+      p.ai.decision_source = "rule_only_non_trading";
+      p.ai.rejection_codes_json = "[\"degraded_ai_response_non_trading\"]";
+      p.ai.narrative_state = "rule_only_non_trading";
+      p.ai.model_version = "rule_only_non_trading";
+      p.ai_decision_source = "rule_only_non_trading";
+      p.reject_code = "degraded_ai_response_non_trading";
+      _LogSetupReject(p.symbol, "ai", "degraded_ai_response_non_trading", "fallback_reason=" + reason);
+      _Journal(p.symbol + " rule-only diagnostic cannot authorize trading reason=" + reason);
+      return false;
+   }
+
+   string _SetupCodeForPlan(const TradePlan &p) const {
+      string code = p.model_code;
+      if(StringLen(code) <= 0) code = _ModelCodeForPlan(p);
+      StringToUpper(code);
+      return code;
+   }
+
+   bool _PlanIsMPC(const TradePlan &p) const {
+      string code = _SetupCodeForPlan(p);
+      if(code == "MPC") return true;
+      string comment = p.broker_comment;
+      StringToUpper(comment);
+      if(StringFind(comment, "MPC-") == 0) return true;
+      string family = _NormToken(p.setup_family + " " + p.setup_class + " " + p.entry_branch + " " + p.model_code);
+      return (StringFind(family, "mpc") >= 0);
+   }
+
+   string _SetupSessionKillzoneBucket(const TradePlan &p) const {
+      string setup_code = _SetupCodeForPlan(p);
+      string session = (StringLen(p.session_code) > 0 ? p.session_code : p.po3.session_code);
+      string killzone = (StringLen(p.killzone_code) > 0 ? p.killzone_code : (p.po3.in_killzone ? "K" : "NK"));
+      StringToUpper(session);
+      StringToUpper(killzone);
+      if(StringLen(session) <= 0) session = "OFF";
+      if(StringLen(killzone) <= 0) killzone = "NK";
+      return setup_code + "-" + session + "-" + killzone;
+   }
+
+   bool _LoadBucketRiskPolicy(string &json) {
+      json = "";
+      if(!InpEnableBucketRiskPolicy || StringLen(InpBucketRiskPolicyFile) <= 0) return false;
+      datetime now = TimeLocal();
+      if(StringLen(m_bucket_policy_json) > 0 && (now - m_bucket_policy_loaded_at) < 60){
+         json = m_bucket_policy_json;
+         return true;
+      }
+      if((now - m_bucket_policy_last_attempt) < 10 && StringLen(m_bucket_policy_json) <= 0)
+         return false;
+      m_bucket_policy_last_attempt = now;
+      string txt;
+      if(!m_bus.ReadText(InpBucketRiskPolicyFile, txt))
+         return false;
+      m_bucket_policy_json = txt;
+      m_bucket_policy_loaded_at = now;
+      json = m_bucket_policy_json;
+      return (StringLen(json) > 0);
+   }
+
+   bool _ApplyBucketPolicyObject(const TradePlan &p, const string section_name, const string key,
+                                 double &risk_multiplier, string &block_reason, string &matched_key) {
+      if(StringLen(key) <= 0) return true;
+      string policy_json;
+      if(!_LoadBucketRiskPolicy(policy_json)) return true;
+      string section = JsonGetObject(policy_json, section_name, "");
+      if(StringLen(section) <= 0) return true;
+      string obj = JsonGetObject(section, key, "");
+      if(StringLen(obj) <= 0) return true;
+      matched_key = key;
+      string reason = JsonGetString(obj, "reason", "");
+      bool enabled = JsonGetBool(obj, "enabled", true);
+      double mult = 0.0;
+      if(!JsonGetNumberStrict(obj, "risk_multiplier", mult)){
+         block_reason = "risk_multiplier_missing_or_invalid";
+         return false;
+      }
+      if(mult < 0.0 || mult > 1.0){
+         block_reason = "risk_multiplier_out_of_range";
+         return false;
+      }
+      if(!enabled || mult <= 0.0){
+         block_reason = (StringLen(reason) > 0 ? reason : section_name + "_disabled");
+         return false;
+      }
+      if(mult > 0.0 && mult < risk_multiplier)
+         risk_multiplier = MathMax(0.0, MathMin(1.0, mult));
       return true;
+   }
+
+   bool _ApplyOutcomePolicy(TradePlan &p, const string stage, string &reason) {
+      reason = "";
+      if(StringLen(p.model_code) <= 0) p.model_code = _ModelCodeForPlan(p);
+      if(!InpEnableMPCTrading && _PlanIsMPC(p)){
+         reason = "mpc_trading_disabled";
+         p.bucket_policy_action = "block";
+         p.bucket_policy_reason = reason;
+         p.bucket_policy_key = "MPC";
+         p.bucket_policy_risk_multiplier = 0.0;
+         string detail = "setup_code=MPC setup_class=" + p.setup_class
+                         + " session=" + (StringLen(p.session_code) > 0 ? p.session_code : p.po3.session_code)
+                         + " killzone=" + (StringLen(p.killzone_code) > 0 ? p.killzone_code : (p.po3.in_killzone ? "K" : "NK"));
+         _LogSetupReject(p.symbol, stage, reason, detail);
+         _Journal("[mpc_block] symbol=" + p.symbol
+                  + " setup_code=MPC setup_class=" + p.setup_class
+                  + " session=" + (StringLen(p.session_code) > 0 ? p.session_code : p.po3.session_code)
+                  + " killzone=" + (StringLen(p.killzone_code) > 0 ? p.killzone_code : (p.po3.in_killzone ? "K" : "NK"))
+                  + " action=" + (stage == "pre_ai_hard_gate" ? "blocked_before_ai" : (stage == "watchlist" ? "blocked_before_watchlist" : "blocked_at_execution")));
+         return false;
+      }
+
+      double mult = 1.0;
+      string block_reason = "";
+      string matched = "";
+      string setup_code = _SetupCodeForPlan(p);
+      string session_bucket = _SetupSessionKillzoneBucket(p);
+      string symbol = p.symbol;
+      StringToUpper(symbol);
+      if(!_ApplyBucketPolicyObject(p, "setup_code", setup_code, mult, block_reason, matched) ||
+         !_ApplyBucketPolicyObject(p, "setup_session_killzone", session_bucket, mult, block_reason, matched) ||
+         !_ApplyBucketPolicyObject(p, "symbol", symbol, mult, block_reason, matched)){
+         reason = "bucket_risk_policy_block";
+         p.bucket_policy_action = "block";
+         p.bucket_policy_reason = block_reason;
+         p.bucket_policy_key = matched;
+         p.bucket_policy_risk_multiplier = 0.0;
+         _LogSetupReject(p.symbol, stage, reason,
+                         "bucket=" + matched + " reason=" + block_reason + " setup_code=" + setup_code);
+         _Journal("[bucket_policy_block] bucket=" + matched
+                  + " symbol=" + p.symbol
+                  + " reason=" + block_reason
+                  + " action=" + (stage == "pre_ai_hard_gate" ? "blocked_before_ai" : (stage == "watchlist" ? "blocked_before_watchlist" : "blocked_at_execution")));
+         return false;
+      }
+      if(mult > 0.0 && mult < 1.0){
+         p.bucket_policy_action = "risk_reduce";
+         p.bucket_policy_reason = "policy_multiplier";
+         p.bucket_policy_key = matched;
+         p.bucket_policy_risk_multiplier = mult;
+         _Journal("[bucket_policy_risk_reduce] symbol=" + p.symbol
+                  + " old_risk_pct=" + DoubleToString(InpRiskPerTradePct, 4)
+                  + " new_risk_pct=" + DoubleToString(InpRiskPerTradePct * mult, 4)
+                  + " multiplier=" + DoubleToString(mult, 4)
+                  + " bucket=" + matched);
+      }
+      return true;
+   }
+
+   bool _FilterOutcomePolicyBeforeAI(TradePlan &cands[]) {
+      int count = ArraySize(cands);
+      int write = 0;
+      for(int i=0; i<count; i++){
+         TradePlan staged = cands[i];
+         string reason = "";
+         bool is_mpc = _PlanIsMPC(staged);
+         if(!_ApplyOutcomePolicy(staged, "pre_ai_hard_gate", reason)){
+            if(is_mpc){
+               m_total_mpc_candidates_blocked++;
+               m_total_mpc_ai_calls_saved++;
+            }
+            continue;
+         }
+         if(write != i) cands[write] = staged;
+         else cands[i] = staged;
+         write++;
+      }
+      if(write != count) ArrayResize(cands, write);
+      return (write > 0);
    }
 
    int _EnabledEntryFamilyCount() const {
@@ -1108,18 +2167,87 @@ private:
       m_total_ai_final_allow_true = 0;
       m_total_watchlist_added = 0;
       m_total_orders_placed = 0;
+      m_total_scans = 0;
+      m_total_po3_context_created = 0;
+      m_total_fvg_candidates_created = 0;
+      m_total_plans_valid = 0;
+      m_total_ai_cache_hits = 0;
+      m_total_ai_cache_misses = 0;
+      m_total_ai_cache_miss_due_to_schema_version = 0;
+      m_total_ai_advisories = 0;
+      m_total_trades_opened = 0;
+      m_total_record_only_requests_exported = 0;
+      m_total_tester_live_wait_non_tradeable_sim_jump = 0;
+      m_total_tester_live_wait_debug_trading_disabled = 0;
+      m_total_target_feasibility_synthetic_infeasible_max_distance = 0;
+      m_total_target_feasibility_synthetic_capped_to_max_distance = 0;
+      m_total_reject_tester_ai_cache_miss = 0;
+      m_total_reject_ai_chose_infeasible_target = 0;
+      m_total_mpc_candidates_blocked = 0;
+      m_total_mpc_ai_calls_saved = 0;
+      m_total_mpc_watchlist_blocks = 0;
+      m_total_mpc_execution_blocks = 0;
+      ArrayResize(m_total_target_choice_models, 0);
+      ArrayResize(m_total_target_choice_counts, 0);
+      ArrayResize(m_total_blocker_classes, 0);
+      ArrayResize(m_total_blocker_class_counts, 0);
+      ArrayResize(m_total_watchlist_precheck_reasons, 0);
+      ArrayResize(m_total_watchlist_precheck_counts, 0);
+      ArrayResize(m_total_target_validation_reasons, 0);
+      ArrayResize(m_total_target_validation_counts, 0);
    }
 
    void _LogFinalSummary() const {
+      _Journal("[final_summary] scans_total=" + IntegerToString(m_total_scans)
+               + " po3_context_created_total=" + IntegerToString(m_total_po3_context_created)
+               + " fvg_candidates_created_total=" + IntegerToString(m_total_fvg_candidates_created)
+               + " plans_valid_total=" + IntegerToString(m_total_plans_valid));
+      if(MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_RECORD_ONLY)
+         _Journal("[final_summary] no_trades_expected=true next_step=run_python_cache_export_then_cache_only");
+      _Journal("[final_summary] ai_cache_hits_total=" + IntegerToString(m_total_ai_cache_hits)
+               + " ai_cache_misses_total=" + IntegerToString(m_total_ai_cache_misses)
+               + " ai_cache_miss_due_to_schema_version_total=" + IntegerToString(m_total_ai_cache_miss_due_to_schema_version)
+               + " tester_ai_cache_miss_total=" + IntegerToString(m_total_reject_tester_ai_cache_miss)
+               + " record_only_requests_exported=" + IntegerToString(m_total_record_only_requests_exported));
       _Journal("[final_summary] ai_requests_queued_total=" + IntegerToString(m_total_ai_requests_queued)
                + " tester_ai_wait_started_total=" + IntegerToString(m_total_tester_ai_wait_started)
                + " tester_ai_wait_completed_total=" + IntegerToString(m_total_tester_ai_wait_completed)
                + " tester_ai_wait_timeout_total=" + IntegerToString(m_total_tester_ai_wait_timeout)
                + " ai_results_rejected_stale_total=" + IntegerToString(m_total_ai_results_rejected_stale)
                + " ai_results_accepted_after_blocking_wait_total=" + IntegerToString(m_total_ai_results_accepted_after_blocking_wait)
+               + " ai_advisories_total=" + IntegerToString(m_total_ai_advisories)
                + " ai_final_allow_true_total=" + IntegerToString(m_total_ai_final_allow_true)
                + " watchlist_added_total=" + IntegerToString(m_total_watchlist_added)
-               + " orders_placed_total=" + IntegerToString(m_total_orders_placed));
+               + " orders_placed_total=" + IntegerToString(m_total_orders_placed)
+               + " trades_opened_total=" + IntegerToString(m_total_trades_opened));
+      _Journal("[final_summary] target_choice.synthetic_rr_fallback=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "synthetic_rr_fallback"))
+               + " target_choice.synthetic_rr_capped_to_max_distance=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "synthetic_rr_capped_to_max_distance"))
+               + " target_choice.partial_before_obstacle_then_liquidity=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "partial_before_obstacle_then_liquidity"))
+               + " target_choice.liquidity_target=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "liquidity_target"))
+               + " target_choice.capped_before_obstacle=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "capped_before_obstacle"))
+               + " target_choice.cap_before_opposing_imbalance=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "cap_before_opposing_imbalance"))
+               + " target_choice.capped_before_opposing_imbalance=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "capped_before_opposing_imbalance"))
+               + " target_choice.capped_before_htf_opposing_imbalance=" + IntegerToString(_NamedCounterValue(m_total_target_choice_models, m_total_target_choice_counts, "capped_before_htf_opposing_imbalance")));
+      _Journal("[final_summary] blocker_class.minor=" + IntegerToString(_NamedCounterValue(m_total_blocker_classes, m_total_blocker_class_counts, "minor"))
+               + " blocker_class.moderate=" + IntegerToString(_NamedCounterValue(m_total_blocker_classes, m_total_blocker_class_counts, "moderate"))
+               + " blocker_class.major=" + IntegerToString(_NamedCounterValue(m_total_blocker_classes, m_total_blocker_class_counts, "major"))
+               + " blocker_class.killer=" + IntegerToString(_NamedCounterValue(m_total_blocker_classes, m_total_blocker_class_counts, "killer"))
+               + " blocker_class.unknown=" + IntegerToString(_NamedCounterValue(m_total_blocker_classes, m_total_blocker_class_counts, "unknown")));
+      _Journal("[final_summary] watchlist_precheck.reject.price_broke_fvg_high=" + IntegerToString(_NamedCounterValue(m_total_watchlist_precheck_reasons, m_total_watchlist_precheck_counts, "price_broke_fvg_high"))
+               + " watchlist_precheck.reject.price_broke_fvg_low=" + IntegerToString(_NamedCounterValue(m_total_watchlist_precheck_reasons, m_total_watchlist_precheck_counts, "price_broke_fvg_low"))
+               + " watchlist_precheck.reject.opposite_confirmed_po3=" + IntegerToString(_NamedCounterValue(m_total_watchlist_precheck_reasons, m_total_watchlist_precheck_counts, "opposite_confirmed_po3"))
+               + " watchlist_precheck.reject.structural_invalidation_high=" + IntegerToString(_NamedCounterValue(m_total_watchlist_precheck_reasons, m_total_watchlist_precheck_counts, "structural_invalidation_high"))
+               + " tester_ai.live_wait_debug.non_tradeable_due_to_sim_time_jump=" + IntegerToString(m_total_tester_live_wait_non_tradeable_sim_jump)
+               + " tester_ai.live_wait_debug.trading_disabled=" + IntegerToString(m_total_tester_live_wait_debug_trading_disabled));
+      _Journal("[final_summary] target_feasibility.synthetic_infeasible_max_distance=" + IntegerToString(m_total_target_feasibility_synthetic_infeasible_max_distance)
+               + " target_feasibility.synthetic_capped_to_max_distance=" + IntegerToString(m_total_target_feasibility_synthetic_capped_to_max_distance)
+               + " reject.ai_chosen_target_exceeds_max_distance=" + IntegerToString(_NamedCounterValue(m_total_target_validation_reasons, m_total_target_validation_counts, "ai_chosen_target_exceeds_max_distance"))
+               + " reject.ai_chose_infeasible_target=" + IntegerToString(m_total_reject_ai_chose_infeasible_target)
+               + " reject.tester_ai_cache_miss=" + IntegerToString(m_total_reject_tester_ai_cache_miss));
+      _Journal("[final_summary] mpc_candidates_blocked_total=" + IntegerToString(m_total_mpc_candidates_blocked)
+               + " mpc_ai_calls_saved_total=" + IntegerToString(m_total_mpc_ai_calls_saved)
+               + " mpc_watchlist_blocks_total=" + IntegerToString(m_total_mpc_watchlist_blocks)
+               + " mpc_execution_blocks_total=" + IntegerToString(m_total_mpc_execution_blocks));
    }
 
    void _TrackPendingOrderDelete(const string reason, const bool expired=false) {
@@ -1287,6 +2415,272 @@ private:
       return DoubleToString(price, digits);
    }
 
+   uint _IntegrityFnv1a(const string value, const uint seed=2166136261) const {
+      uint h = seed;
+      for(int i=0; i<StringLen(value); i++)
+         h = (h ^ (uint)StringGetCharacter(value, i)) * 16777619;
+      return h;
+   }
+
+   string _IntegrityHash(const string value) const {
+      uint h1 = _IntegrityFnv1a(value, 2166136261);
+      uint h2 = _IntegrityFnv1a("po3|" + value, 2246822519);
+      return StringFormat("%08X%08X", h1, h2);
+   }
+
+   bool _CohortValueKnown(const string value) const {
+      if(StringLen(value) == 0 || value == "UNAVAILABLE" || value == "UNKNOWN") return false;
+      if(StringFind(value, "NO_") == 0 || StringFind(value, "NOT_") == 0 ||
+         StringFind(value, "MISSING") == 0) return false;
+      return true;
+   }
+
+   string _CohortIdForPlan(const TradePlan &p) const {
+      string material = COHORT_SCHEMA_VERSION + "|" + p.engine_version + "|" + p.git_commit + "|"
+                        + p.dirty_tree_status + "|" + p.set_file_hash + "|" + p.runtime_input_hash + "|"
+                        + p.prompt_contract_version + "|" + p.ai.model_version + "|" + p.reasoning_configuration + "|"
+                        + p.ai.decision_schema_version + "|" + AI_TARGET_ARBITRATION_SCHEMA_VERSION + "|"
+                        + p.policy_snapshot_id + "|" + p.policy_hash + "|" + p.bucket_prior_hash + "|"
+                        + p.management_version + "|" + p.setup_taxonomy_version + "|" + p.feature_version + "|"
+                        + p.calibration_artifact_id + "|" + p.repeatability_artifact_id;
+      return _IntegrityHash(material);
+   }
+
+   void _PopulateCohortMetadata(TradePlan &p) {
+      p.engine_version = ENGINE_VERSION;
+      p.git_commit = m_source_git_commit;
+      p.dirty_tree_status = m_source_dirty_tree_status;
+      p.set_file_hash = m_set_file_hash;
+      p.runtime_input_hash = m_ai.RuntimeHash();
+      p.prompt_contract_version = (StringLen(p.ai.prompt_contract_version) > 0 ? p.ai.prompt_contract_version : AI_PROMPT_CONTRACT_VERSION);
+      if(StringLen(p.ai.model_version) == 0) p.ai.model_version = (p.ai.ok ? "UNAVAILABLE" : "NOT_CALLED_PRE_AI");
+      p.reasoning_configuration = (StringLen(p.ai.reasoning_configuration) > 0 ? p.ai.reasoning_configuration : (p.ai.ok ? "UNAVAILABLE" : "NOT_CALLED_PRE_AI"));
+      if(StringLen(p.policy_snapshot_id) == 0) p.policy_snapshot_id = "NONE";
+      p.policy_hash = (StringLen(m_active_policy.policy_id) > 0 ? _IntegrityHash(m_active_policy.policy_id + "|" + IntegerToString(m_active_policy.version)) : "NONE");
+      p.bucket_prior_hash = (StringLen(p.ai.bucket_prior_hash) > 0 ? p.ai.bucket_prior_hash : (p.ai.ok ? "NO_BUCKET_PRIOR_ARTIFACT" : "NOT_APPLICABLE_PRE_AI"));
+      p.calibration_artifact_id = (StringLen(p.ai.calibration_artifact_id) > 0 ? p.ai.calibration_artifact_id : "NO_CALIBRATION_ARTIFACT");
+      p.repeatability_artifact_id = (StringLen(p.ai.repeatability_authority_hash) > 0 ? p.ai.repeatability_authority_hash : (p.ai.ok ? "NO_REPEATABILITY_ARTIFACT" : "NOT_APPLICABLE_PRE_AI"));
+      p.feature_version = FEATURE_LINEAGE_VERSION;
+      p.cohort_complete = (m_deployment_manifest_valid &&
+                           _CohortValueKnown(p.engine_version) &&
+                           _CohortValueKnown(p.git_commit) &&
+                           _CohortValueKnown(p.dirty_tree_status) &&
+                           _CohortValueKnown(p.set_file_hash) &&
+                           _CohortValueKnown(p.runtime_input_hash) &&
+                           _CohortValueKnown(p.prompt_contract_version) &&
+                           _CohortValueKnown(p.ai.model_version) &&
+                           _CohortValueKnown(p.reasoning_configuration) &&
+                           _CohortValueKnown(p.ai.decision_schema_version) &&
+                           _CohortValueKnown(AI_TARGET_ARBITRATION_SCHEMA_VERSION) &&
+                           _CohortValueKnown(p.policy_snapshot_id) &&
+                           _CohortValueKnown(p.policy_hash) &&
+                           _CohortValueKnown(p.bucket_prior_hash) &&
+                           _CohortValueKnown(p.management_version) &&
+                           _CohortValueKnown(p.setup_taxonomy_version) &&
+                           _CohortValueKnown(p.feature_version) &&
+                           _CohortValueKnown(p.calibration_artifact_id) &&
+                           _CohortValueKnown(p.repeatability_artifact_id));
+      p.cohort_id = _CohortIdForPlan(p);
+   }
+
+   string _CanonicalPrice(const string symbol, const double price) const {
+      double tick = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+      double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      if(tick <= 0.0) tick = (point > 0.0 ? point : 0.00001);
+      int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+      if(digits < 0) digits = 5;
+      double rounded = MathRound(price / tick) * tick;
+      return DoubleToString(NormalizeDouble(rounded, digits), digits);
+   }
+
+   string _CandidateHash(const TradePlan &p) const {
+      string symbol_upper = p.symbol;
+      StringToUpper(symbol_upper);
+      string canonical = symbol_upper + "|" + (p.is_buy ? "BUY" : "SELL") + "|";
+      canonical += p.candidate_id + "|" + p.setup_id + "|" + p.fvg_id + "|";
+      canonical += p.model_code + "|" + p.setup_family + "|" + p.setup_taxonomy_enum + "|";
+      canonical += p.setup_taxonomy_version + "|" + p.taxonomy_mapping_source + "|" + p.entry_branch + "|";
+      canonical += IntegerToString((int)p.source_t_sweep) + "|" + IntegerToString((int)p.source_t_disp) + "|" + IntegerToString((int)p.source_t_bos) + "|";
+      canonical += _CanonicalPrice(p.symbol, p.fvg.lower) + "|" + _CanonicalPrice(p.symbol, p.fvg.upper) + "|";
+      canonical += _CanonicalPrice(p.symbol, p.entry_est) + "|" + _CanonicalPrice(p.symbol, p.sl) + "|";
+      canonical += _CanonicalPrice(p.symbol, p.tp1) + "|" + _CanonicalPrice(p.symbol, p.tp2) + "|";
+      canonical += p.target_source + "|" + p.target_model + "|" + p.obstacle_kind + "|";
+      canonical += p.obstacle_tf + "|" + _CanonicalPrice(p.symbol, p.obstacle_price) + "|";
+      canonical += m_ai.DecisionHash() + "|" + ENGINE_INPUT_SCHEMA + "|" + AI_DECISION_SCHEMA_VERSION;
+      return _IntegrityHash(canonical);
+   }
+
+   string _ExecutionFingerprint(const TradePlan &p) const {
+      double risk = MathAbs(p.entry_est - p.sl);
+      double rr = 0.0;
+      if(risk > 0.0){
+         double reward = (p.is_buy ? p.tp2 - p.entry_est : p.entry_est - p.tp2);
+         rr = reward / risk;
+      }
+      string symbol_upper = p.symbol;
+      StringToUpper(symbol_upper);
+      string canonical = symbol_upper + "|" + (p.is_buy ? "BUY" : "SELL") + "|";
+      canonical += p.candidate_id + "|" + p.candidate_hash + "|" + p.model_code + "|" + p.setup_family + "|";
+      canonical += p.setup_taxonomy_enum + "|" + p.setup_taxonomy_version + "|" + p.taxonomy_mapping_source + "|" + p.entry_branch + "|";
+      canonical += IntegerToString((int)p.source_t_sweep) + "|" + IntegerToString((int)p.source_t_disp) + "|" + IntegerToString((int)p.source_t_bos) + "|";
+      canonical += _CanonicalPrice(p.symbol, p.entry_est) + "|" + _CanonicalPrice(p.symbol, p.sl) + "|";
+      canonical += _CanonicalPrice(p.symbol, p.tp1) + "|" + _CanonicalPrice(p.symbol, p.tp2) + "|";
+      canonical += DoubleToString(rr, 6) + "|" + DoubleToString(p.spread_r, 6) + "|";
+      canonical += DoubleToString(p.slippage_r, 6) + "|" + DoubleToString(p.execution_cost_r, 6) + "|";
+      canonical += p.target_source + "|" + p.target_model + "|" + p.obstacle_kind + "|";
+      canonical += p.obstacle_tf + "|" + _CanonicalPrice(p.symbol, p.obstacle_price) + "|";
+      canonical += m_ai.DecisionHash() + "|" + ENGINE_INPUT_SCHEMA + "|" + AI_DECISION_SCHEMA_VERSION;
+      return _IntegrityHash(canonical);
+   }
+
+   void _PrepareDecisionIdentity(TradePlan &p) {
+      _InitializeNarrativeFields(p);
+      p.candidate_hash = _CandidateHash(p);
+      p.request_execution_fingerprint = _ExecutionFingerprint(p);
+      p.assessed_execution_fingerprint = p.request_execution_fingerprint;
+      p.assessed_entry = p.entry_est;
+      p.assessed_sl = p.sl;
+      p.assessed_tp1 = p.tp1;
+      p.assessed_tp2 = p.tp2;
+      double risk = MathAbs(p.entry_est - p.sl);
+      p.assessed_net_rr = (risk > 0.0 ? (p.is_buy ? p.tp2 - p.entry_est : p.entry_est - p.tp2) / risk : 0.0);
+      p.assessed_spread_r = p.spread_r;
+      p.assessed_slippage_r = p.slippage_r;
+      p.assessed_execution_cost_r = p.execution_cost_r;
+      p.assessed_symbol = p.symbol;
+      p.assessed_is_buy = p.is_buy;
+      p.assessed_setup_code = p.model_code;
+      p.assessed_setup_family = p.setup_family;
+      p.assessed_setup_taxonomy_enum = p.setup_taxonomy_enum;
+      p.assessed_setup_taxonomy_version = p.setup_taxonomy_version;
+      p.assessed_taxonomy_mapping_source = p.taxonomy_mapping_source;
+      p.assessed_entry_branch = p.entry_branch;
+      p.assessed_source_t_sweep = p.source_t_sweep;
+      p.assessed_source_t_disp = p.source_t_disp;
+      p.assessed_source_t_bos = p.source_t_bos;
+      p.assessed_target_source = p.target_source;
+      p.assessed_target_model = p.target_model;
+      p.assessed_obstacle_kind = p.obstacle_kind;
+      p.assessed_obstacle_tf = p.obstacle_tf;
+      p.assessed_obstacle_price = p.obstacle_price;
+      p.assessed_decision_input_hash = m_ai.DecisionHash();
+      p.assessed_strategy_schema_version = ENGINE_INPUT_SCHEMA;
+      p.ai_selected_candidate_hash = "";
+      p.executed_candidate_hash = "";
+      p.candidate_hash_match = false;
+      p.final_execution_fingerprint = "";
+      p.execution_fingerprint_match = false;
+      p.execution_fingerprint_changed_components = "";
+   }
+
+   string _AssessedFingerprintFromDecision(const TradePlan &p, const AiDecision &dec) const {
+      string canonical = p.request_execution_fingerprint + "|" + p.candidate_hash + "|";
+      canonical += dec.selected_target_identity + "|";
+      canonical += _CanonicalPrice(p.symbol, dec.assessed_entry) + "|";
+      canonical += _CanonicalPrice(p.symbol, dec.assessed_sl) + "|";
+      canonical += _CanonicalPrice(p.symbol, dec.assessed_tp1) + "|";
+      canonical += _CanonicalPrice(p.symbol, dec.assessed_tp2) + "|";
+      canonical += _CanonicalPrice(p.symbol, dec.selected_target_price) + "|";
+      canonical += AI_DECISION_SCHEMA_VERSION;
+      return _IntegrityHash(canonical);
+   }
+
+   bool _DecisionAssessmentsMatchGroup(const AiDecision &dec, const TradePlan &plans[], string &reason) const {
+      reason = "ok";
+      int plan_count = ArraySize(plans);
+      int assessment_count = JsonArrayObjectCount(dec.candidate_assessments_json);
+      if(plan_count <= 0 || assessment_count != plan_count){
+         reason = "candidate_assessment_count_mismatch";
+         return false;
+      }
+      for(int pidx=0; pidx<plan_count; pidx++){
+         int matches = 0;
+         for(int aidx=0; aidx<assessment_count; aidx++){
+            string item = "";
+            if(!JsonArrayGetObject(dec.candidate_assessments_json, aidx, item)){
+               reason = "candidate_assessment_parse_failed";
+               return false;
+            }
+            string item_id = "", item_hash = "", request_fp = "";
+            string taxonomy_version = "", taxonomy_enum = "", taxonomy_source = "";
+            if(!JsonGetStringStrict(item, "candidate_id", item_id) ||
+               !JsonGetStringStrict(item, "candidate_hash", item_hash) ||
+               !JsonGetStringStrict(item, "request_execution_fingerprint", request_fp) ||
+               !JsonGetStringStrict(item, "setup_taxonomy_version", taxonomy_version) ||
+               !JsonGetStringStrict(item, "setup_taxonomy_enum", taxonomy_enum) ||
+               !JsonGetStringStrict(item, "taxonomy_mapping_source", taxonomy_source)){
+               reason = "candidate_assessment_identity_missing";
+               return false;
+            }
+            if(item_hash != plans[pidx].candidate_hash) continue;
+            matches++;
+            if(item_id != plans[pidx].candidate_id || request_fp != plans[pidx].request_execution_fingerprint ||
+               taxonomy_version != plans[pidx].setup_taxonomy_version ||
+               taxonomy_enum != plans[pidx].setup_taxonomy_enum ||
+               taxonomy_source != plans[pidx].taxonomy_mapping_source){
+               reason = "candidate_hash_mismatch";
+               return false;
+            }
+         }
+         if(matches != 1){
+            reason = "candidate_hash_mismatch";
+            return false;
+         }
+      }
+      return true;
+   }
+
+   void _AppendChangedComponent(string &list, const string name) const {
+      if(StringLen(list) > 0) list += ",";
+      list += name;
+   }
+
+   bool _ExecutionFingerprintWithinTolerance(TradePlan &p, string &changed_components) {
+      changed_components = "";
+      double tick = SymbolInfoDouble(p.symbol, SYMBOL_TRADE_TICK_SIZE);
+      double point = SymbolInfoDouble(p.symbol, SYMBOL_POINT);
+      if(tick <= 0.0) tick = (point > 0.0 ? point : 0.00001);
+      double risk = MathAbs(p.assessed_entry - p.assessed_sl);
+      double price_tol = MathMax(2.0 * tick, 0.05 * risk);
+      double cost_tol_r = 0.02;
+      double rr_tol = 0.05;
+      if(p.candidate_hash != p.ai_selected_candidate_hash) _AppendChangedComponent(changed_components, "candidate_hash");
+      if(p.candidate_id != p.ai.selected_candidate_id) _AppendChangedComponent(changed_components, "candidate_id");
+      if(p.symbol != p.assessed_symbol) _AppendChangedComponent(changed_components, "symbol");
+      if(p.is_buy != p.assessed_is_buy) _AppendChangedComponent(changed_components, "direction");
+      if(p.model_code != p.assessed_setup_code) _AppendChangedComponent(changed_components, "setup_code");
+      if(p.setup_family != p.assessed_setup_family) _AppendChangedComponent(changed_components, "setup_family");
+      if(p.setup_taxonomy_enum != p.assessed_setup_taxonomy_enum) _AppendChangedComponent(changed_components, "setup_taxonomy_enum");
+      if(p.setup_taxonomy_version != p.assessed_setup_taxonomy_version) _AppendChangedComponent(changed_components, "setup_taxonomy_version");
+      if(p.taxonomy_mapping_source != p.assessed_taxonomy_mapping_source) _AppendChangedComponent(changed_components, "taxonomy_mapping_source");
+      if(p.entry_branch != p.assessed_entry_branch) _AppendChangedComponent(changed_components, "entry_branch");
+      if(p.source_t_sweep != p.assessed_source_t_sweep) _AppendChangedComponent(changed_components, "source_t_sweep");
+      if(p.source_t_disp != p.assessed_source_t_disp) _AppendChangedComponent(changed_components, "source_t_disp");
+      if(p.source_t_bos != p.assessed_source_t_bos) _AppendChangedComponent(changed_components, "source_t_bos");
+      if(p.target_source != p.assessed_target_source) _AppendChangedComponent(changed_components, "target_source");
+      if(p.target_model != p.assessed_target_model) _AppendChangedComponent(changed_components, "target_model");
+      if(p.obstacle_kind != p.assessed_obstacle_kind) _AppendChangedComponent(changed_components, "obstacle_kind");
+      if(p.obstacle_tf != p.assessed_obstacle_tf) _AppendChangedComponent(changed_components, "obstacle_tf");
+      if(MathAbs(p.obstacle_price - p.assessed_obstacle_price) > price_tol) _AppendChangedComponent(changed_components, "obstacle_price");
+      if(m_ai.DecisionHash() != p.assessed_decision_input_hash) _AppendChangedComponent(changed_components, "decision_input_hash");
+      if(ENGINE_INPUT_SCHEMA != p.assessed_strategy_schema_version) _AppendChangedComponent(changed_components, "strategy_schema_version");
+      if(MathAbs(p.entry_est - p.assessed_entry) > price_tol) _AppendChangedComponent(changed_components, "entry");
+      if(MathAbs(p.sl - p.assessed_sl) > price_tol) _AppendChangedComponent(changed_components, "sl");
+      if(MathAbs(p.tp1 - p.assessed_tp1) > price_tol) _AppendChangedComponent(changed_components, "tp1");
+      if(MathAbs(p.tp2 - p.assessed_tp2) > price_tol) _AppendChangedComponent(changed_components, "tp2");
+      double current_risk = MathAbs(p.entry_est - p.sl);
+      double current_rr = (current_risk > 0.0 ? (p.is_buy ? p.tp2 - p.entry_est : p.entry_est - p.tp2) / current_risk : 0.0);
+      if(MathAbs(current_rr - p.assessed_net_rr) > rr_tol) _AppendChangedComponent(changed_components, "net_rr");
+      if(MathAbs(p.spread_r - p.assessed_spread_r) > cost_tol_r) _AppendChangedComponent(changed_components, "spread_r");
+      if(MathAbs(p.slippage_r - p.assessed_slippage_r) > cost_tol_r) _AppendChangedComponent(changed_components, "slippage_r");
+      if(MathAbs(p.execution_cost_r - p.assessed_execution_cost_r) > cost_tol_r) _AppendChangedComponent(changed_components, "execution_cost_r");
+      p.final_execution_fingerprint = _ExecutionFingerprint(p);
+      p.execution_fingerprint_changed_components = changed_components;
+      p.candidate_hash_match = (p.candidate_hash == p.ai_selected_candidate_hash);
+      p.execution_fingerprint_match = (StringLen(changed_components) == 0);
+      return p.execution_fingerprint_match;
+   }
+
    double _Clamp01(const double v) const {
       return MathMax(0.0, MathMin(1.0, v));
    }
@@ -1404,24 +2798,105 @@ private:
       return "virgin_fvg";
    }
 
+   string _FamilyForTaxonomy(const ENUM_SETUP_TAXONOMY taxonomy) const {
+      if(taxonomy == FULL_PO3_REVERSAL) return "full_po3_reversal";
+      if(taxonomy == FULL_PO3_CONTINUATION) return "full_po3_continuation";
+      if(taxonomy == FAILED_BREAKOUT_RECLAIM) return "micro_failed_breakout_reclaim";
+      if(taxonomy == MICRO_RANGE_REENTRY || taxonomy == MICRO_SESSION_REENTRY) return "micro_range_reentry";
+      if(taxonomy == MICRO_CONTINUATION_FVG || taxonomy == MICRO_NESTED_CONTINUATION) return "micro_continuation_fvg";
+      if(taxonomy == MICRO_FVG_EDGE_REVERSAL || taxonomy == MICRO_BREAKER_RETEST) return "micro_bisi_sibi_edge";
+      if(taxonomy == MICRO_FVG_MID_REVERSAL || taxonomy == MICRO_OTE_REVERSAL) return "micro_po3_reversal";
+      return "";
+   }
+
+   bool _ResolveSetupTaxonomy(TradePlan &p, string &reason) {
+      reason = "";
+      if(p.setup_taxonomy != UNKNOWN_UNCLASSIFIED &&
+         p.setup_taxonomy_version == SETUP_TAXONOMY_VERSION &&
+         p.setup_taxonomy_enum == SetupTaxonomyToString(p.setup_taxonomy)){
+         if(StringLen(p.taxonomy_mapping_source) == 0) p.taxonomy_mapping_source = "persisted_exact_taxonomy";
+         if(StringLen(p.setup_type) == 0)
+            p.setup_type = (p.setup_taxonomy == FULL_PO3_REVERSAL || p.setup_taxonomy == FULL_PO3_CONTINUATION ? "full_po3" : "micro_po3");
+         if(StringLen(p.setup_subtype) == 0) p.setup_subtype = p.setup_taxonomy_enum;
+         if(StringLen(p.setup_story_scope) == 0) p.setup_story_scope = p.po3.po3_scope;
+         return true;
+      }
+
+      string branch = _NormToken(StringLen(p.entry_branch) > 0 ? p.entry_branch : p.entry_model);
+      string family = _NormToken(p.setup_family);
+      string setup_class = _NormToken(p.setup_class);
+      string scope = _NormToken(p.po3.po3_scope);
+      string structure = _NormToken(p.po3.structure_type);
+      string fvg_class = _NormToken(_FvgExecutionClass(p));
+      bool full_scope = (scope == "institutional_po3" || family == "full_po3" ||
+                         family == "full_po3_reversal" || family == "full_po3_continuation" ||
+                         setup_class == "full_po3" || setup_class == "full_po3_reversal" ||
+                         setup_class == "full_po3_continuation");
+      bool continuation = (branch == "continuation_reentry" || structure == "continuation" ||
+                           structure == "continuation_bos" || structure == "micro_continuation" ||
+                           fvg_class == "continuation_reentry" || p.fvg.continuation);
+      bool failed_breakout = (structure == "micro_failed_breakout_reclaim" ||
+                              family == "micro_failed_breakout_reclaim" ||
+                              setup_class == "failed_breakout_reclaim");
+
+      ENUM_SETUP_TAXONOMY resolved = UNKNOWN_UNCLASSIFIED;
+      string source = "exact_branch_structure_scope";
+      if(failed_breakout && (branch == "fvg_mid" || branch == "fvg_edge" || branch == "range_reentry"))
+         resolved = FAILED_BREAKOUT_RECLAIM;
+      else if(full_scope && continuation)
+         resolved = FULL_PO3_CONTINUATION;
+      else if(full_scope && (branch == "fvg_mid" || branch == "fvg_edge" || branch == "breaker_retest" ||
+                             branch == "ote_inside_fvg" || branch == "nested_htf_ltf_fvg" || branch == "nested_fvg_edge"))
+         resolved = FULL_PO3_REVERSAL;
+      else if(branch == "session_reentry") resolved = MICRO_SESSION_REENTRY;
+      else if(branch == "range_reentry") resolved = MICRO_RANGE_REENTRY;
+      else if(branch == "nested_htf_ltf_fvg" || branch == "nested_fvg_edge") resolved = MICRO_NESTED_CONTINUATION;
+      else if(continuation) resolved = MICRO_CONTINUATION_FVG;
+      else if(branch == "breaker_retest") resolved = MICRO_BREAKER_RETEST;
+      else if(branch == "ote_inside_fvg") resolved = MICRO_OTE_REVERSAL;
+      else if(branch == "fvg_edge") resolved = MICRO_FVG_EDGE_REVERSAL;
+      else if(branch == "fvg_mid") resolved = MICRO_FVG_MID_REVERSAL;
+
+      p.setup_taxonomy = resolved;
+      p.setup_taxonomy_version = SETUP_TAXONOMY_VERSION;
+      p.setup_taxonomy_enum = SetupTaxonomyToString(resolved);
+      p.taxonomy_mapping_source = (resolved == UNKNOWN_UNCLASSIFIED ? "" : source);
+      p.setup_type = (resolved == FULL_PO3_REVERSAL || resolved == FULL_PO3_CONTINUATION ? "full_po3" : "micro_po3");
+      p.setup_subtype = p.setup_taxonomy_enum;
+      p.setup_story_scope = p.po3.po3_scope;
+      if(resolved != UNKNOWN_UNCLASSIFIED){
+         p.taxonomy_mapping_failure_reason = "";
+         return true;
+      }
+      reason = "unknown_setup_taxonomy";
+      p.setup_type = "unknown";
+      p.taxonomy_mapping_failure_reason = "branch=" + branch + ";family=" + family +
+                                         ";class=" + setup_class + ";scope=" + scope +
+                                         ";structure=" + structure + ";fvg_class=" + fvg_class;
+      return false;
+   }
+
+   void _LogUnknownSetupTaxonomy(const TradePlan &p, const string stage) {
+      string row = "{";
+      row += JsonKVInt("timestamp", (int)_NowServerOrLocal()) + ",";
+      row += JsonKVStr("stage", stage) + ",";
+      row += JsonKVStr("symbol", p.symbol) + ",";
+      row += JsonKVStr("candidate_id", p.candidate_id) + ",";
+      row += JsonKVStr("entry_branch", p.entry_branch) + ",";
+      row += JsonKVStr("setup_family", p.setup_family) + ",";
+      row += JsonKVStr("setup_class", p.setup_class) + ",";
+      row += JsonKVStr("po3_scope", p.po3.po3_scope) + ",";
+      row += JsonKVStr("structure_type", p.po3.structure_type) + ",";
+      row += JsonKVStr("fvg_execution_class", p.fvg_execution_class) + ",";
+      row += JsonKVStr("reason", p.taxonomy_mapping_failure_reason);
+      row += "}";
+      m_bus.AppendText("logs\\unknown_setup_taxonomy.jsonl", row + "\n");
+      _Journal("[setup_taxonomy] valid=false action=blocked_before_ai symbol=" + p.symbol +
+               " candidate_id=" + p.candidate_id + " reason=" + p.taxonomy_mapping_failure_reason);
+   }
+
    string _DeriveSetupFamily(const TradePlan &p) const {
-      string branch = p.entry_branch;
-      if(StringLen(branch) == 0) branch = p.entry_model;
-      bool full_scope = (p.po3.po3_scope == "institutional_po3" || InpStrategyMode == STRATEGY_FULL_PO3);
-      bool scalp_context = (p.po3.structure_type == "micro_continuation" ||
-                            p.po3.structure_type == "micro_failed_breakout_reclaim" ||
-                            p.po3.htf_structure_type == "micro_synthetic");
-      if(p.po3.structure_type == "micro_failed_breakout_reclaim") return "micro_failed_breakout_reclaim";
-      if(branch == "range_reentry" || branch == "session_reentry") return "micro_range_reentry";
-      if(branch == "fvg_edge" && !full_scope) return "micro_bisi_sibi_edge";
-      if(branch == "breaker_retest" && !full_scope) return "micro_bisi_sibi_edge";
-      if(branch == "nested_htf_ltf_fvg" || branch == "nested_fvg_edge" || branch == "continuation_reentry" || scalp_context)
-         return (full_scope ? "full_po3_continuation" : "micro_continuation_fvg");
-      if(p.fvg.continuation || _FvgExecutionClass(p) == "continuation_reentry")
-         return (full_scope ? "full_po3_continuation" : "micro_continuation_fvg");
-      if(p.fvg.reversal || p.po3.htf_mss || p.po3.htf_choch || p.po3.ltf_mss || p.po3.ltf_choch)
-         return (full_scope ? "full_po3_reversal" : "micro_po3_reversal");
-      return (full_scope ? "full_po3_continuation" : "micro_continuation_fvg");
+      return _FamilyForTaxonomy(p.setup_taxonomy);
    }
 
    string _FamilyGroup(const string family) const {
@@ -1472,6 +2947,7 @@ private:
    }
 
    double _FamilySetupFloor(const TradePlan &p) const {
+      if(_NormToken(p.entry_branch) == "session_reentry") return InpSetupFloorSession;
       string family = (StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p));
       if(family == "full_po3_reversal" || family == "full_po3_continuation") return InpSetupFloorFullPO3;
       if(family == "micro_po3_reversal") return InpSetupFloorMicroPO3;
@@ -1487,12 +2963,12 @@ private:
       return InpSetupFloorRange;
    }
 
-   double _FamilyAiScoreFloor(const TradePlan &p) const {
+   double _FamilyLlmQualityFloor(const TradePlan &p) const {
       string source = "";
-      return EffectiveAiScoreThreshold(p, source);
+      return EffectiveLlmQualityScoreThreshold(p, source);
    }
 
-   double EffectiveAiScoreThreshold(const TradePlan &p, string &threshold_source) const {
+   double EffectiveLlmQualityScoreThreshold(const TradePlan &p, string &threshold_source) const {
       string family = _NormToken(StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p));
       string setup_class = _NormToken(p.setup_class);
       string branch = _NormToken(p.entry_branch);
@@ -1688,6 +3164,16 @@ private:
       return "OFF";
    }
 
+   string _SessionCodeForEntryTime(const datetime entry_time) const {
+      datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
+      return m_po3.SessionCodeAt(t);
+   }
+
+   string _KillzoneCodeForEntryTime(const datetime entry_time) const {
+      datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
+      return m_po3.KillzoneCodeAt(t);
+   }
+
    string _ShortPlanId(const TradePlan &p) const {
       string raw = p.symbol + "|" + IntegerToString((int)p.source_t_sweep) + "|" +
                    IntegerToString((int)p.fvg.t_form) + "|" + IntegerToString(p.candidate_index) + "|" + p.entry_branch;
@@ -1699,19 +3185,40 @@ private:
       return StringFormat("%05d", id);
    }
 
-   string _BrokerCommentForPlan(const TradePlan &p) const {
+   string _BrokerCommentForPlanAtEntryTime(const TradePlan &p, const datetime entry_time) const {
       string model = (StringLen(p.model_code) > 0 ? p.model_code : _ModelCodeForPlan(p));
-      string session = (StringLen(p.session_code) > 0 ? p.session_code : _SessionCodeForPlan(p));
-      string kz = (StringLen(p.killzone_code) > 0 ? p.killzone_code : (p.po3.in_killzone ? "K" : "NK"));
+      string session = _SessionCodeForEntryTime(entry_time);
+      string kz = _KillzoneCodeForEntryTime(entry_time);
       string comment = model + "-" + session + "-" + kz + "-" + _CompactSymbolCode(p.symbol) + "-" + _ShortPlanId(p);
       if(StringLen(comment) > 31)
          comment = model + "-" + session + "-" + kz + "-" + StringSubstr(_CompactSymbolCode(p.symbol), 0, 4) + "-" + _ShortPlanId(p);
       return comment;
    }
 
+   string _BrokerCommentForPlan(const TradePlan &p) const {
+      datetime entry_time = (p.filled_at > 0 ? p.filled_at : (p.planned_at > 0 ? p.planned_at : (p.created_at > 0 ? p.created_at : _NowServerOrLocal())));
+      return _BrokerCommentForPlanAtEntryTime(p, entry_time);
+   }
+
+   void _ApplyEntryTimeCommentIdentity(TradePlan &p, const datetime entry_time) const {
+      datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
+      p.session_code = _SessionCodeForEntryTime(t);
+      p.killzone_code = _KillzoneCodeForEntryTime(t);
+      p.broker_comment = _BrokerCommentForPlanAtEntryTime(p, t);
+   }
+
    void _InitializeNarrativeFields(TradePlan &p) {
+      if(!p.risk_multipliers_initialized){
+         p.subtype_risk_multiplier = 1.0;
+         p.active_policy_risk_multiplier = 1.0;
+         p.bucket_policy_risk_multiplier = 1.0;
+         p.session_weekday_risk_multiplier = 1.0;
+         p.risk_multipliers_initialized = true;
+      }
       if(StringLen(p.entry_branch) == 0) p.entry_branch = p.entry_model;
       if(StringLen(p.fvg_execution_class) == 0) p.fvg_execution_class = _FvgExecutionClass(p);
+      string taxonomy_reason = "";
+      _ResolveSetupTaxonomy(p, taxonomy_reason);
       if(StringLen(p.setup_family) == 0) p.setup_family = _DeriveSetupFamily(p);
       if(StringLen(p.setup_class) == 0) p.setup_class = _DeriveSetupClass(p);
       if(StringLen(p.model_code) == 0) p.model_code = _ModelCodeForPlan(p);
@@ -1738,6 +3245,7 @@ private:
       if(p.lineage_version <= 0) p.lineage_version = 1;
       if(p.attempt_number_for_sweep <= 0) p.attempt_number_for_sweep = 1;
       if(StringLen(p.narrative_state) == 0) p.narrative_state = "staged";
+      _PopulateCohortMetadata(p);
    }
 
    void _CarryNarrativeForward(TradePlan &next, const TradePlan &prev, const bool material_refresh) {
@@ -1987,20 +3495,43 @@ private:
       double slip_pts = _EstimatedSessionSlippagePts(p);
       if(p.runner_trade) slip_pts += 1.0;
       p.estimated_slippage_price = slip_pts * point;
-      p.estimated_commission_money = InpCommissionPerLotRoundTurn;
+      string cost_source = "";
+      int cost_samples = 0;
+      double median_cost = 0.0;
+      datetime cost_window_start = 0, cost_window_end = 0;
+      double stressed_cost_per_lot = BrokerCostEstimatePerLot(p.symbol,
+                                                              cost_source,
+                                                              cost_samples,
+                                                              median_cost,
+                                                              cost_window_start,
+                                                              cost_window_end);
+      p.estimated_commission_money = stressed_cost_per_lot;
+      p.estimated_cost_source = cost_source;
+      p.estimated_cost_sample_size = cost_samples;
+      p.estimated_cost_stressed_per_lot = stressed_cost_per_lot;
+      p.commission_model_version = COMMISSION_MODEL_SCHEMA_VERSION;
       p.estimated_cost_price = spread + p.estimated_slippage_price;
       double risk = MathAbs(p.entry_est - p.sl);
       p.execution_cost_r = (risk > 0.0 ? spread / risk : 0.0);
+      p.spread_r = p.execution_cost_r;
       p.slippage_r = (risk > 0.0 ? p.estimated_slippage_price / risk : 0.0);
       p.commission_r = 0.0;
-      if(risk > 0.0 && InpCommissionPerLotRoundTurn > 0.0){
+      if(risk > 0.0 && stressed_cost_per_lot > 0.0){
          double tick_size = SymbolInfoDouble(p.symbol, SYMBOL_TRADE_TICK_SIZE);
          double tick_value = SymbolInfoDouble(p.symbol, SYMBOL_TRADE_TICK_VALUE);
          if(tick_size > 0.0 && tick_value > 0.0){
             double risk_money_per_lot = (risk / tick_size) * tick_value;
-            if(risk_money_per_lot > 0.0) p.commission_r = InpCommissionPerLotRoundTurn / risk_money_per_lot;
+            if(risk_money_per_lot > 0.0) p.commission_r = stressed_cost_per_lot / risk_money_per_lot;
          }
       }
+      _Journal("[broker_cost_estimate] symbol=" + p.symbol
+               + " source=" + cost_source
+               + " samples=" + IntegerToString(cost_samples)
+               + " median_per_lot=" + DoubleToString(median_cost, 6)
+               + " stressed_per_lot=" + DoubleToString(stressed_cost_per_lot, 6)
+               + " percentile=" + DoubleToString(InpBrokerCostStressedPercentile, 4)
+               + " window_start=" + TimeToString(cost_window_start, TIME_DATE)
+               + " window_end=" + TimeToString(cost_window_end, TIME_DATE));
    }
 
    void _ApplyStopAudit(TradePlan &p, const double initial_sl, const double entry_price) {
@@ -2038,7 +3569,7 @@ private:
       p.stop_quality_score = _ClampRange(quality, 0.0, 10.0);
    }
 
-   double _ExpectedWinRate(const TradePlan &p) const {
+   double _HeuristicWinRateDiagnostic(const TradePlan &p) const {
       double win_rate = 0.34;
       win_rate += (p.setup_score - 40.0) * 0.0045;
       win_rate += (p.sequence_quality - 5.0) * 0.018;
@@ -2050,22 +3581,22 @@ private:
       return _ClampRange(win_rate, 0.15, 0.82);
    }
 
-   double _ExpectedWinRateGross(const TradePlan &p) const {
+   double _HeuristicWinRateGrossDiagnostic(const TradePlan &p) const {
       TradePlan tmp = p;
       tmp.execution_cost_r = 0.0;
-      return _ExpectedWinRate(tmp);
+      return _HeuristicWinRateDiagnostic(tmp);
    }
 
-   double _ExpectedValueR(const TradePlan &p) const {
-      double win_rate = _ExpectedWinRate(p);
+   double _HeuristicQualityEstimateDiagnostic(const TradePlan &p) const {
+      double win_rate = _HeuristicWinRateDiagnostic(p);
       double rr = MathMax(0.0, _ExecutionRR2(p));
       double base = win_rate * rr - (1.0 - win_rate);
       if(p.subtype_avg_r != 0.0) base = 0.65 * base + 0.35 * p.subtype_avg_r;
       return base;
    }
 
-   double _ExpectedValueRGross(const TradePlan &p) const {
-      double win_rate = _ExpectedWinRateGross(p);
+   double _HeuristicQualityEstimateGrossDiagnostic(const TradePlan &p) const {
+      double win_rate = _HeuristicWinRateGrossDiagnostic(p);
       double rr = MathMax(0.0, _ExecutionRR2(p));
       double base = win_rate * rr - (1.0 - win_rate);
       if(p.subtype_avg_r != 0.0) base = 0.65 * base + 0.35 * p.subtype_avg_r;
@@ -2085,16 +3616,19 @@ private:
       p.htf_alignment_score = _HtfAlignmentScore(p);
       p.adverse_context_score = _AdverseContextScore(p);
       p.runner_trade = _IsRunnerTrade(p);
-      if(p.subtype_risk_multiplier <= 0.0) p.subtype_risk_multiplier = 1.0;
       if(p.ote_softness_frac <= 0.0){
          p.ote_softness_frac = (m_active_policy.ote_softness_frac > 0.0 ? m_active_policy.ote_softness_frac : InpOteSoftnessFrac);
       }
       p.ote_distance_frac = _OteDistanceFrac(p);
       p.ote_state = _OteState(p);
       _EstimateExecutionCosts(p);
-      p.gross_expected_r = _ExpectedValueRGross(p);
-      p.net_expected_r = p.gross_expected_r - p.execution_cost_r - p.slippage_r - p.commission_r;
-      p.expected_value_r = p.net_expected_r;
+      p.heuristic_quality_estimate_gross = _HeuristicQualityEstimateGrossDiagnostic(p);
+      p.heuristic_quality_estimate = _HeuristicQualityEstimateDiagnostic(p);
+      p.net_reward_after_cost_r = MathMax(0.0, _ExecutionRR2(p)) - _TotalExecutionCostR(p);
+      // Explicit migration aliases: persisted for old diagnostics, never authoritative.
+      p.gross_expected_r = p.heuristic_quality_estimate_gross;
+      p.net_expected_r = p.heuristic_quality_estimate;
+      p.expected_value_r = p.heuristic_quality_estimate;
       p.target_model = _FamilyTargetModel(p);
       p.management_profile = _FamilyManagementProfile(p);
       p.analytics_key = p.symbol + "|" + p.setup_family + "|" + p.entry_branch + "|" + p.po3.session_name;
@@ -2107,6 +3641,10 @@ private:
    bool _ApplySubtypeEvidence(TradePlan &p, string &reason) {
       reason = "";
       _LoadActivePolicyIfNeeded();
+      if(!m_active_policy_schema_valid){ reason = "active_policy_schema_invalid"; return false; }
+      p.active_policy_risk_multiplier = (m_active_policy.valid ? m_active_policy.default_risk_multiplier : 1.0);
+      if(p.active_policy_risk_multiplier <= 0.0){ reason = "active_policy_risk_multiplier_zero"; return false; }
+      if(p.active_policy_risk_multiplier > 1.0){ reason = "active_policy_risk_multiplier_invalid"; return false; }
       string subtype_key = _Po3Subtype(p) + "|" + _FvgSubtype(p) + "|" + p.setup_class + "|" + _RegimeBucket(p);
       int idx = _FindSubtypePolicy(subtype_key);
       p.subtype_policy_action = "allow";
@@ -2120,11 +3658,15 @@ private:
       p.subtype_policy_penalty = entry.score_penalty;
       p.subtype_shrunk_win_rate = entry.shrunk_win_rate;
       p.subtype_avg_r = entry.avg_r;
-      p.subtype_risk_multiplier = (entry.risk_multiplier > 0.0 ? entry.risk_multiplier : 1.0);
+      p.subtype_risk_multiplier = entry.risk_multiplier;
       if(StringLen(entry.policy_id) > 0) p.policy_snapshot_id = entry.policy_id;
 
       if(p.subtype_policy_action == "suppress"){
          reason = "subtype_suppressed";
+         return false;
+      }
+      if(p.subtype_risk_multiplier <= 0.0){
+         reason = "subtype_risk_multiplier_zero";
          return false;
       }
       if(p.subtype_policy_action == "downrank" && p.subtype_policy_penalty > 0.0){
@@ -2136,6 +3678,7 @@ private:
    bool _ApplyContextPolicy(TradePlan &p, string &reason) {
       reason = "";
       _LoadActivePolicyIfNeeded();
+      if(!m_active_policy_schema_valid){ reason = "active_policy_schema_invalid"; return false; }
       int idx = _FindContextPolicy(p.policy_bucket);
       if(idx < 0) return true;
 
@@ -2145,8 +3688,13 @@ private:
          reason = "context_suppressed";
          return false;
       }
+      if(entry.risk_multiplier <= 0.0){
+         reason = "context_risk_multiplier_zero";
+         return false;
+      }
       p.setup_score += entry.score_bias;
-      p.expected_value_r += entry.expected_value_bias;
+      p.heuristic_quality_estimate += entry.expected_value_bias;
+      p.expected_value_r = p.heuristic_quality_estimate;
       p.subtype_risk_multiplier *= entry.risk_multiplier;
       return true;
    }
@@ -2154,11 +3702,10 @@ private:
    bool _ApplySessionWeekdayPolicy(TradePlan &p, string &reason) {
       reason = "";
       _LoadActivePolicyIfNeeded();
+      if(!m_active_policy_schema_valid){ reason = "active_policy_schema_invalid"; return false; }
 
-      if(p.subtype_risk_multiplier <= 0.0) p.subtype_risk_multiplier = 1.0;
       if(p.session_weekday_risk_multiplier > 0.0 && MathAbs(p.session_weekday_risk_multiplier - 1.0) > 0.0001){
          p.subtype_risk_multiplier /= p.session_weekday_risk_multiplier;
-         if(p.subtype_risk_multiplier <= 0.0) p.subtype_risk_multiplier = 1.0;
       }
 
       p.session_weekday_policy_action = "";
@@ -2178,13 +3725,21 @@ private:
       SessionWeekdayPolicyEntry entry = m_session_weekday_policy[idx];
       string action = (StringLen(entry.action) > 0 ? entry.action : "monitor");
       p.session_weekday_policy_action = action;
-      p.session_weekday_risk_multiplier = _ClampRange(entry.risk_multiplier, 0.05, 1.50);
+      if(entry.risk_multiplier < 0.0 || entry.risk_multiplier > 1.0){
+         reason = "session_weekday_risk_multiplier_invalid";
+         return false;
+      }
+      p.session_weekday_risk_multiplier = entry.risk_multiplier;
       p.session_weekday_rr_delta = _ClampRange(entry.rr_floor_delta, -0.25, 0.50);
       p.session_weekday_score_bias = _ClampRange(entry.score_bias, -12.0, 8.0);
       if(StringLen(entry.policy_id) > 0) p.policy_snapshot_id = entry.policy_id;
 
       if(action == "suppress"){
          reason = "session_weekday_suppressed";
+         return false;
+      }
+      if(p.session_weekday_risk_multiplier <= 0.0){
+         reason = "session_weekday_risk_multiplier_zero";
          return false;
       }
 
@@ -2352,6 +3907,8 @@ private:
 
    bool _RejectPlacement(const TradePlan &p, const string reason) {
       m_last_execution_reject_reason = reason;
+      if(StringLen(p.ai.decision_schema_version) > 0 && StringLen(p.candidate_hash) > 0)
+         _WriteShadowDecisionUpdate(p, p.ai, "mql_execution_rejected", reason, false);
       _LogSetupReject(p.symbol, "execution", reason,
                       "entry=" + _FmtPrice(p.symbol, p.entry_est)
                       + " sl=" + _FmtPrice(p.symbol, p.sl)
@@ -2667,10 +4224,15 @@ private:
    }
 
    string _TesterAiCacheSignature(const TradePlan &plans[]) const {
-      string sig = ENGINE_VERSION + "|" + ENGINE_INPUT_SCHEMA + "|" + _GroupSignature(plans);
+      string sig = AI_DECISION_SCHEMA_VERSION + "|" + AI_TARGET_ARBITRATION_SCHEMA_VERSION + "|" + AI_PROMPT_CONTRACT_VERSION + "|" + m_ai.DecisionHash() + "|" + _GroupSignature(plans);
       for(int i=0; i<ArraySize(plans); i++){
+         sig += "|" + plans[i].candidate_hash;
+         sig += "|" + plans[i].assessed_execution_fingerprint;
          sig += "|" + plans[i].setup_family;
          sig += "|" + plans[i].setup_class;
+         sig += "|" + plans[i].setup_taxonomy_version;
+         sig += "|" + plans[i].setup_taxonomy_enum;
+         sig += "|" + plans[i].taxonomy_mapping_source;
          sig += "|" + plans[i].entry_branch;
          sig += "|" + plans[i].target_source;
          sig += "|" + plans[i].obstacle_kind;
@@ -2678,8 +4240,6 @@ private:
          sig += "|" + DoubleToString(plans[i].fallback_tp, 8);
          sig += "|" + DoubleToString(plans[i].capped_before_obstacle_tp, 8);
          sig += "|" + (plans[i].target_arbitration_required ? "1" : "0");
-         sig += "|" + DoubleToString(plans[i].setup_score, 4);
-         sig += "|" + DoubleToString(plans[i].expected_value_r, 4);
          sig += "|" + DoubleToString(plans[i].po3.context_score, 4);
          sig += "|" + DoubleToString(plans[i].po3.displacement_score, 4);
       }
@@ -2701,8 +4261,35 @@ private:
       return m_bus.LogDir() + "\\tester_ai_cache";
    }
 
+   bool _TesterAiCacheHasFiles() const {
+      string found = "";
+      long handle = FileFindFirst(_TesterAiCacheDir() + "\\*.json", found, FILE_COMMON);
+      if(handle == INVALID_HANDLE) return false;
+      FileFindClose(handle);
+      return true;
+   }
+
    string _TesterAiCachePath(const string signature) const {
       return _TesterAiCacheDir() + "\\" + _TesterAiCacheKey(signature) + ".json";
+   }
+
+   string _DecisionFieldAuthorityJson() const {
+      string j = "{";
+      j += JsonKVStr("schema_version", ARCHITECTURE_CONTRACT_VERSION) + ",";
+      j += "\"candidate_entry_sl_tp\":{\"owner\":\"deterministic\",\"authority\":\"active\"},";
+      j += "\"broker_feasibility\":{\"owner\":\"deterministic\",\"authority\":\"active\"},";
+      j += "\"exact_risk_size\":{\"owner\":\"deterministic_portfolio\",\"authority\":\"active\"},";
+      j += "\"calibrated_probability\":{\"owner\":\"statistical\",\"authority\":\"unavailable\"},";
+      j += "\"expected_net_r\":{\"owner\":\"statistical\",\"authority\":\"unavailable\"},";
+      j += "\"llm_quality_score\":{\"owner\":\"llm\",\"authority\":\"diagnostic_and_veto_only\"},";
+      j += "\"llm_risk_assessments\":{\"owner\":\"llm\",\"authority\":\"veto_only_uncalibrated\"},";
+      j += "\"llm_narrative\":{\"owner\":\"llm\",\"authority\":\"diagnostic\"},";
+      j += "\"python_final_allow\":{\"owner\":\"python_policy\",\"authority\":\"intermediate\"},";
+      j += "\"mql_final_allow\":{\"owner\":\"mql_execution\",\"authority\":\"final\"},";
+      j += "\"portfolio_exposure\":{\"owner\":\"portfolio\",\"authority\":\"active\"},";
+      j += "\"management_action\":{\"owner\":\"management\",\"authority\":\"shadow_until_validated\"}";
+      j += "}";
+      return j;
    }
 
    string _AiDecisionJson(const string req_id, const string signature, const AiDecision &dec) const {
@@ -2712,13 +4299,79 @@ private:
       if(StringLen(invalidation_risks) == 0) invalidation_risks = "[]";
       string missing_confirmations = dec.missing_confirmations_json;
       if(StringLen(missing_confirmations) == 0) missing_confirmations = "[]";
+      string candidate_assessments = dec.candidate_assessments_json;
+      if(StringLen(candidate_assessments) == 0) candidate_assessments = "[]";
+      string target_comparison = dec.target_comparison_json;
+      if(StringLen(target_comparison) == 0) target_comparison = "{}";
+      string field_authority = dec.decision_field_authority_json;
+      if(StringLen(field_authority) <= 2) field_authority = _DecisionFieldAuthorityJson();
       string j = "{";
       j += JsonKVStr("id", req_id) + ",";
       j += JsonKVStr("cache_signature", signature) + ",";
+      j += JsonKVStr("session_id", m_ai.SessionId()) + ",";
+      j += JsonKVStr("request_nonce", m_ai.RequestNonce(req_id)) + ",";
+      j += JsonKVStr("workload_mode", m_ai.WorkloadMode()) + ",";
+      j += JsonKVStr("live_forward_contract_version", LIVE_FORWARD_CONTRACT_VERSION) + ",";
+      j += JsonKVStr("behavior_contract_hash", m_ai.BehaviorContractHash()) + ",";
+      j += JsonKVStr("architecture_contract_version", ARCHITECTURE_CONTRACT_VERSION) + ",";
+      j += JsonKVStr("reasoning_configuration", dec.reasoning_configuration) + ",";
+      j += JsonKVStr("bucket_prior_hash", dec.bucket_prior_hash) + ",";
+      j += JsonKVStr("calibration_artifact_id", dec.calibration_artifact_id) + ",";
+      j += JsonKVStr("response_binding_hash", m_ai.ResponseBindingHash(req_id, dec)) + ",";
+      j += JsonKVStr("decision_schema_version", AI_DECISION_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("decision_quality_tier", "CACHE_OF_FULL_STRUCTURED") + ",";
+      j += JsonKVStr("response_quality", "CACHE_OF_FULL_STRUCTURED") + ",";
+      j += JsonKVStr("request_fingerprint", dec.request_fingerprint) + ",";
+      j += JsonKVStr("response_fingerprint", dec.response_fingerprint) + ",";
+      j += JsonKVStr("full_structured_response_hash", dec.full_structured_response_hash) + ",";
+      j += JsonKVStr("hierarchical_prior_artifact_hash", dec.hierarchical_prior_artifact_hash) + ",";
+      j += JsonKVStr("hierarchical_prior_schema_version", dec.hierarchical_prior_schema_version) + ",";
+      j += JsonKVStr("repeatability_schema_version", dec.repeatability_schema_version) + ",";
+      j += JsonKVStr("repeatability_status", dec.repeatability_status) + ",";
+      j += JsonKVBool("repeatability_score_threshold_authority", dec.repeatability_score_threshold_authority) + ",";
+      j += JsonKVBool("repeatability_trading_eligible", dec.repeatability_trading_eligible) + ",";
+      j += JsonKVStr("repeatability_group_key", dec.repeatability_group_key) + ",";
+      j += JsonKVStr("repeatability_authority_hash", dec.repeatability_authority_hash) + ",";
+      j += JsonKVBool("mandatory_fields_complete", dec.mandatory_fields_complete) + ",";
+      j += "\"decision_field_authority\":" + field_authority + ",";
+      j += "\"missing_mandatory_fields\":" + (StringLen(dec.missing_mandatory_fields_json) > 0 ? dec.missing_mandatory_fields_json : "[]") + ",";
+      j += "\"invalid_mandatory_fields\":" + (StringLen(dec.invalid_mandatory_fields_json) > 0 ? dec.invalid_mandatory_fields_json : "[]") + ",";
+      j += JsonKVStr("decision_state", dec.decision_state) + ",";
+      j += JsonKVStr("selected_candidate_id", dec.selected_candidate_id) + ",";
+      j += JsonKVStr("selected_candidate_hash", dec.selected_candidate_hash) + ",";
+      j += JsonKVStr("request_execution_fingerprint", dec.request_execution_fingerprint) + ",";
+      j += JsonKVStr("assessed_execution_fingerprint", dec.assessed_execution_fingerprint) + ",";
+      j += JsonKVStr("selected_target_identity", dec.selected_target_identity) + ",";
+      j += JsonKVNum("selected_target_price", dec.selected_target_price, 8) + ",";
+      j += JsonKVNum("assessed_entry", dec.assessed_entry, 8) + ",";
+      j += JsonKVNum("assessed_sl", dec.assessed_sl, 8) + ",";
+      j += JsonKVNum("assessed_tp1", dec.assessed_tp1, 8) + ",";
+      j += JsonKVNum("assessed_tp2", dec.assessed_tp2, 8) + ",";
+      j += "\"candidate_assessments\":" + candidate_assessments + ",";
       j += JsonKVBool("allow", dec.allow) + ",";
-      j += JsonKVNum("score", dec.score, 6) + ",";
+      j += JsonKVBool("raw_allow", dec.raw_allow) + ",";
+      j += JsonKVBool("model_raw_allow", dec.model_raw_allow) + ",";
+      j += JsonKVBool("python_final_allow", dec.python_final_allow) + ",";
+      j += "\"mql_final_allow\":null,";
+      j += JsonKVNum("rule_score", dec.rule_score, 6) + ",";
+      j += JsonKVNum("llm_quality_score", dec.llm_quality_score, 6) + ",";
+      j += JsonKVNum("blended_legacy_score", dec.blended_legacy_score, 6) + ",";
+      j += JsonKVNum("legacy_agreement_confidence", dec.legacy_agreement_confidence, 6) + ",";
+      j += JsonKVNum("llm_self_reported_confidence", dec.llm_self_reported_confidence, 6) + ",";
+      j += "\"calibrated_win_probability\":null,";
+      j += "\"expected_net_r\":null,";
+      j += "\"oos_predicted_probability\":null,";
+      j += JsonKVStr("calibration_bucket", dec.calibration_bucket) + ",";
+      j += JsonKVInt("calibration_sample_size", dec.calibration_sample_size) + ",";
+      j += "\"calibration_lower_bound\":null,";
+      j += "\"calibration_upper_bound\":null,";
+      j += JsonKVStr("calibration_model_version", dec.calibration_model_version) + ",";
+      j += JsonKVStr("calibration_data_window_start", dec.calibration_data_window_start) + ",";
+      j += JsonKVStr("calibration_data_window_end", dec.calibration_data_window_end) + ",";
+      j += JsonKVBool("calibration_available", false) + ",";
+      j += JsonKVNum("score", dec.llm_quality_score, 6) + ",";
       j += JsonKVInt("chosen_index", dec.chosen_index) + ",";
-      j += JsonKVNum("confidence", dec.confidence, 6) + ",";
+      j += JsonKVNum("confidence", dec.llm_self_reported_confidence, 6) + ",";
       j += JsonKVStr("decision_source", dec.decision_source) + ",";
       j += JsonKVStr("reasons", dec.reasons_json) + ",";
       j += JsonKVStr("decision_id", dec.decision_id) + ",";
@@ -2728,6 +4381,41 @@ private:
       j += "\"missing_confirmations\":" + missing_confirmations + ",";
       j += JsonKVNum("suggested_risk_multiplier", dec.suggested_risk_multiplier, 6) + ",";
       j += JsonKVStr("model_version", dec.model_version) + ",";
+      j += JsonKVNum("structure_quality_score", dec.structure_quality_score, 6) + ",";
+      j += JsonKVNum("entry_timing_score", dec.entry_timing_score, 6) + ",";
+      j += JsonKVNum("follow_through_probability", dec.follow_through_probability, 6) + ",";
+      j += JsonKVNum("invalidation_risk", dec.invalidation_risk, 6) + ",";
+      j += JsonKVNum("chop_risk", dec.chop_risk, 6) + ",";
+      j += JsonKVNum("cost_risk", dec.cost_risk, 6) + ",";
+      j += JsonKVNum("symbol_bucket_risk", dec.symbol_bucket_risk, 6) + ",";
+      j += JsonKVNum("session_bucket_risk", dec.session_bucket_risk, 6) + ",";
+      j += JsonKVNum("post_entry_failure_risk", dec.post_entry_failure_risk, 6) + ",";
+      j += JsonKVNum("final_trade_expectancy_score", dec.final_trade_expectancy_score, 6) + ",";
+      j += JsonKVBool("veto_enabled", dec.veto_enabled) + ",";
+      j += JsonKVStr("veto_reason", dec.veto_reason) + ",";
+      j += "\"veto\":{" + JsonKVBool("enabled", dec.veto_enabled) + "," + JsonKVStr("reason", dec.veto_reason) + "},";
+      j += JsonKVStr("bucket_prior_override_justification", dec.bucket_prior_override_justification) + ",";
+      j += "\"target_arbitration\":{";
+      j += JsonKVStr("target_arbitration_schema_version", dec.target_arbitration_schema_version) + ",";
+      j += JsonKVStr("prompt_contract_version", dec.prompt_contract_version) + ",";
+      j += JsonKVBool("arbitration_required", dec.target_arbitration_required) + ",";
+      j += JsonKVStr("chosen_target_model", dec.chosen_target_model) + ",";
+      j += JsonKVNum("chosen_tp1", dec.chosen_tp1, 8) + ",";
+      j += JsonKVNum("chosen_tp2", dec.chosen_tp2, 8) + ",";
+      j += JsonKVNum("chosen_rr1", dec.chosen_rr1, 6) + ",";
+      j += JsonKVNum("chosen_rr2", dec.chosen_rr2, 6) + ",";
+      j += "\"rejected_target_models\":" + (StringLen(dec.rejected_target_models_json) > 0 ? dec.rejected_target_models_json : "[]") + ",";
+      j += JsonKVStr("blocker_kind", dec.target_blocker_kind) + ",";
+      j += JsonKVNum("blocker_severity", dec.target_blocker_severity, 6) + ",";
+      j += JsonKVStr("blocker_class", dec.target_blocker_class) + ",";
+      j += JsonKVBool("blocker_is_trade_killer", dec.target_blocker_is_trade_killer) + ",";
+      j += JsonKVStr("why_not_liquidity_target", dec.why_not_liquidity_target) + ",";
+      j += JsonKVStr("why_not_partial_before_obstacle", dec.why_not_partial_before_obstacle) + ",";
+      j += JsonKVStr("why_not_capped_before_obstacle", dec.why_not_capped_before_obstacle) + ",";
+      j += JsonKVStr("why_not_synthetic_fallback", dec.why_not_synthetic_fallback) + ",";
+      j += JsonKVStr("target_decision_reason", dec.target_decision_reason) + ",";
+      j += "\"target_comparison\":" + target_comparison;
+      j += "},";
       j += JsonKVStr("chosen_target_model", dec.chosen_target_model) + ",";
       j += JsonKVNum("chosen_tp1", dec.chosen_tp1, 8) + ",";
       j += JsonKVNum("chosen_tp2", dec.chosen_tp2, 8) + ",";
@@ -2747,10 +4435,8 @@ private:
       j += JsonKVStr("why_not_partial_before_obstacle", dec.why_not_partial_before_obstacle) + ",";
       j += JsonKVStr("why_not_capped_before_obstacle", dec.why_not_capped_before_obstacle) + ",";
       j += JsonKVStr("why_not_synthetic_fallback", dec.why_not_synthetic_fallback) + ",";
-      j += JsonKVStr("target_arbitration_schema_version", (StringLen(dec.target_arbitration_schema_version) > 0 ? dec.target_arbitration_schema_version : AI_TARGET_ARBITRATION_SCHEMA_VERSION)) + ",";
-      j += JsonKVStr("prompt_contract_version", (StringLen(dec.prompt_contract_version) > 0 ? dec.prompt_contract_version : AI_PROMPT_CONTRACT_VERSION)) + ",";
-      string target_comparison = dec.target_comparison_json;
-      if(StringLen(target_comparison) == 0) target_comparison = "{}";
+      j += JsonKVStr("target_arbitration_schema_version", dec.target_arbitration_schema_version) + ",";
+      j += JsonKVStr("prompt_contract_version", dec.prompt_contract_version) + ",";
       j += "\"target_comparison\":" + target_comparison;
       j += "}";
       return j;
@@ -2779,77 +4465,89 @@ private:
       int idx = _FindTesterAiCache(signature);
       if(idx >= 0){
          out = m_tester_ai_cache_decisions[idx];
-         return out.ok;
+         return (out.ok && out.mandatory_fields_complete &&
+                 out.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
+                 (out.decision_quality_tier == "FULL_STRUCTURED" || out.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED"));
       }
 
       string txt;
       if(!m_bus.ReadText(_TesterAiCachePath(signature), txt)) return false;
-      if(JsonGetString(txt, "cache_signature", "") != signature) return false;
+      string cached_signature = "";
+      if(!JsonGetStringStrict(txt, "cache_signature", cached_signature) || cached_signature != signature){
+         _Journal("[ai_cache] hit=false reason=cache_signature_mismatch");
+         return false;
+      }
+      string cached_decision_schema = JsonGetString(txt, "decision_schema_version", "");
       string cached_schema = JsonGetString(txt, "target_arbitration_schema_version", "");
       string cached_prompt_contract = JsonGetString(txt, "prompt_contract_version", "");
-      if(cached_schema != AI_TARGET_ARBITRATION_SCHEMA_VERSION || cached_prompt_contract != AI_PROMPT_CONTRACT_VERSION){
+      string cached_prior_schema = JsonGetString(txt, "hierarchical_prior_schema_version", "");
+      string cached_repeatability_schema = JsonGetString(txt, "repeatability_schema_version", "");
+      if(cached_decision_schema != AI_DECISION_SCHEMA_VERSION ||
+         cached_schema != AI_TARGET_ARBITRATION_SCHEMA_VERSION ||
+         cached_prompt_contract != AI_PROMPT_CONTRACT_VERSION ||
+         cached_prior_schema != HIERARCHICAL_PRIOR_SCHEMA_VERSION ||
+         cached_repeatability_schema != REPEATABILITY_SCHEMA_VERSION){
          m_funnel_ai_cache_miss_due_to_schema_version++;
+         m_total_ai_cache_miss_due_to_schema_version++;
+         m_total_ai_cache_misses++;
          _Journal("[ai_cache] hit=false reason=cache_miss_due_to_schema_version"
+                  + " cached_decision_schema=" + (StringLen(cached_decision_schema) > 0 ? cached_decision_schema : "missing")
+                  + " required_decision_schema=" + AI_DECISION_SCHEMA_VERSION
                   + " cached_schema=" + cached_schema
                   + " required_schema=" + AI_TARGET_ARBITRATION_SCHEMA_VERSION
                   + " cached_prompt_contract=" + cached_prompt_contract
-                  + " required_prompt_contract=" + AI_PROMPT_CONTRACT_VERSION);
+                  + " required_prompt_contract=" + AI_PROMPT_CONTRACT_VERSION
+                  + " cached_prior_schema=" + cached_prior_schema
+                  + " required_prior_schema=" + HIERARCHICAL_PRIOR_SCHEMA_VERSION
+                  + " cached_repeatability_schema=" + cached_repeatability_schema
+                  + " required_repeatability_schema=" + REPEATABILITY_SCHEMA_VERSION);
          return false;
       }
-      double score = JsonGetNumber(txt, "score", -1.0e100);
-      double confidence = JsonGetNumber(txt, "confidence", -1.0e100);
-      double chosen = JsonGetNumber(txt, "chosen_index", -1.0e100);
-      if(score <= -1.0e90 || confidence <= -1.0e90 || chosen <= -1.0e90) return false;
 
-      ZeroMemory(out);
-      out.ok = true;
-      out.allow = JsonGetBool(txt, "allow", false);
-      out.score = score;
-      out.chosen_index = (int)chosen;
-      out.confidence = confidence;
-      out.decision_source = JsonGetString(txt, "decision_source", "");
-      out.reasons_json = JsonGetString(txt, "reasons", "");
-      out.decision_id = JsonGetString(txt, "decision_id", "");
-      out.rejection_codes_json = JsonGetArray(txt, "rejection_codes", "[]");
-      out.narrative_state = JsonGetString(txt, "narrative_state", "");
-      out.invalidation_risks_json = JsonGetArray(txt, "invalidation_risks", "[]");
-      out.missing_confirmations_json = JsonGetArray(txt, "missing_confirmations", "[]");
-      out.suggested_risk_multiplier = JsonGetNumber(txt, "suggested_risk_multiplier", 1.0);
-      out.model_version = JsonGetString(txt, "model_version", "");
-      out.chosen_target_model = JsonGetString(txt, "chosen_target_model", "");
-      out.chosen_tp1 = JsonGetNumber(txt, "chosen_tp1", 0.0);
-      out.chosen_tp2 = JsonGetNumber(txt, "chosen_tp2", 0.0);
-      out.chosen_rr1 = JsonGetNumber(txt, "chosen_rr1", 0.0);
-      out.chosen_rr2 = JsonGetNumber(txt, "chosen_rr2", 0.0);
-      out.rejected_target_models_json = JsonGetArray(txt, "rejected_target_models", "[]");
-      out.target_blocker_kind = JsonGetString(txt, "target_blocker_kind", "");
-      out.target_blocker_severity = JsonGetNumber(txt, "target_blocker_severity", 0.0);
-      out.target_blocker_class = JsonGetString(txt, "target_blocker_class", "");
-      out.target_blocker_is_trade_killer = JsonGetBool(txt, "target_blocker_is_trade_killer", false);
-      out.target_decision_reason = JsonGetString(txt, "target_decision_reason", "");
-      out.target_blocker_severity_present = JsonGetBool(txt, "target_blocker_severity_present", JsonHasKey(txt, "target_blocker_severity"));
-      out.target_blocker_class_present = JsonGetBool(txt, "target_blocker_class_present", JsonHasKey(txt, "target_blocker_class"));
-      out.target_blocker_is_trade_killer_present = JsonGetBool(txt, "target_blocker_is_trade_killer_present", JsonHasKey(txt, "target_blocker_is_trade_killer"));
-      out.target_decision_reason_present = JsonGetBool(txt, "target_decision_reason_present", JsonHasKey(txt, "target_decision_reason"));
-      out.why_not_liquidity_target = JsonGetString(txt, "why_not_liquidity_target", "");
-      out.why_not_partial_before_obstacle = JsonGetString(txt, "why_not_partial_before_obstacle", "");
-      out.why_not_capped_before_obstacle = JsonGetString(txt, "why_not_capped_before_obstacle", "");
-      out.why_not_synthetic_fallback = JsonGetString(txt, "why_not_synthetic_fallback", "");
-      out.target_arbitration_schema_version = cached_schema;
-      out.prompt_contract_version = cached_prompt_contract;
-      out.target_comparison_json = JsonGetObject(txt, "target_comparison", "{}");
+      string cached_id = JsonGetString(txt, "id", "");
+      if(StringLen(cached_id) == 0) return false;
+      string parse_id = "cacheparse_" + _TesterAiCacheKey(signature) + "_" + IntegerToString((int)MathRand());
+      string id_token = "\"id\":\"" + JsonEscape(cached_id) + "\"";
+      string parse_token = "\"id\":\"" + JsonEscape(parse_id) + "\"";
+      if(StringFind(txt, id_token) < 0) return false;
+      StringReplace(txt, id_token, parse_token);
+      string parse_path = m_bus.RespDir() + "\\" + parse_id + ".json";
+      if(!m_bus.WriteText(parse_path, txt)) return false;
+      if(!m_ai.TryReadDecision(parse_id, out) || !out.ok || !out.mandatory_fields_complete ||
+         out.decision_schema_version != AI_DECISION_SCHEMA_VERSION ||
+         (out.decision_quality_tier != "FULL_STRUCTURED" && out.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED") ||
+         !_TesterCacheDecisionSourceLoadable(out.decision_source)){
+         m_total_ai_cache_misses++;
+         _Journal("[ai_cache] hit=false reason=strict_cached_decision_validation_failed");
+         return false;
+      }
       _PutTesterAiCacheMemory(signature, out);
+      _Journal("[ai_cache] hit=true source=cache_of_full_structured signature=" + signature
+               + " candidate_hash=" + out.selected_candidate_hash
+               + " execution_fingerprint=" + out.assessed_execution_fingerprint);
       return true;
    }
 
-   void _RememberTesterAiDecision(const string signature, const AiDecision &dec) {
-      if(!MQLInfoInteger(MQL_TESTER) || !InpTesterAiCache || !dec.ok || StringLen(signature) == 0) return;
+   bool _RememberTesterAiDecision(const string signature, const AiDecision &dec, const bool force_store=false) {
+      if(!MQLInfoInteger(MQL_TESTER) || (!InpTesterAiCache && !force_store) || !dec.ok || StringLen(signature) == 0) return false;
+      if(!dec.mandatory_fields_complete || dec.decision_schema_version != AI_DECISION_SCHEMA_VERSION ||
+         (dec.decision_quality_tier != "FULL_STRUCTURED" && dec.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED") ||
+         dec.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION ||
+         dec.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
+         StringLen(dec.selected_candidate_hash) == 0 || StringLen(dec.assessed_execution_fingerprint) == 0 ||
+         StringLen(dec.request_execution_fingerprint) == 0 ||
+         StringLen(dec.decision_field_authority_json) <= 2 ||
+         StringLen(dec.candidate_assessments_json) < 3 || dec.suggested_risk_multiplier < 0.0 || dec.suggested_risk_multiplier > 1.0){
+         _Journal("[ai_cache] stored=false reason=incomplete_or_degraded_decision_contract");
+         return false;
+      }
       string source = dec.decision_source;
       StringToLower(source);
-      if(StringFind(source, "error") >= 0 || StringFind(source, "fallback") >= 0) return;
+      if(StringFind(source, "error") >= 0 || StringFind(source, "fallback") >= 0) return false;
       _PutTesterAiCacheMemory(signature, dec);
       FolderCreate(_TesterAiCacheDir(), FILE_COMMON);
       m_bus.WriteText(_TesterAiCachePath(signature), _AiDecisionJson("cached", signature, dec));
+      return true;
    }
 
    bool _QueueTesterCachedDecision(TradePlan &plans[], const string signature, const AiDecision &dec) {
@@ -2874,9 +4572,24 @@ private:
          m_pending_ai[base + i] = plans[i];
       }
       m_funnel_ai_cache_hit++;
+      m_total_ai_cache_hits++;
       _Journal(plans[0].symbol + " tester AI cache hit candidates=" + IntegerToString(ArraySize(plans))
                + " key=" + _TesterAiCacheKey(signature));
+      _Journal("[ai_cache] hit=true req_id=" + req_id
+               + " signature=" + signature
+               + " sim_time=" + TimeToString(sim_now, TIME_DATE|TIME_MINUTES));
       return true;
+   }
+
+   int _CollectPendingGroupPlans(const string req_id, TradePlan &out[]) {
+      ArrayResize(out, 0);
+      for(int i=0; i<ArraySize(m_pending_ai); i++){
+         if(m_pending_ai[i].req_id != req_id) continue;
+         int n = ArraySize(out);
+         ArrayResize(out, n + 1);
+         out[n] = m_pending_ai[i];
+      }
+      return ArraySize(out);
    }
 
    string _PendingGroupSignature(const string req_id, string &out_symbol) const {
@@ -2949,16 +4662,16 @@ private:
                + " until=" + TimeToString(until, TIME_MINUTES|TIME_SECONDS));
    }
 
-   void _ArchiveBusArtifact(const string rel_path) {
+   void _ArchiveBusArtifact(const string rel_path, const string terminal_state) {
       if(StringLen(rel_path) == 0) return;
       if(!_PathExists(rel_path)) return;
-      m_bus.CopyToStale(rel_path);
+      m_bus.ArchiveTerminal(rel_path, terminal_state);
    }
 
-   void _ArchivePendingArtifacts(const string req_id) {
+   void _ArchivePendingArtifacts(const string req_id, const string terminal_state="stale") {
       if(StringLen(req_id) == 0) return;
-      _ArchiveBusArtifact(m_bus.ReqDir() + "\\" + req_id + ".json");
-      _ArchiveBusArtifact(m_bus.RespDir() + "\\" + req_id + ".json");
+      _ArchiveBusArtifact(m_bus.ReqDir() + "\\" + req_id + ".json", terminal_state);
+      _ArchiveBusArtifact(m_bus.RespDir() + "\\" + req_id + ".json", terminal_state);
    }
 
    string _TesterSnapshotCacheKey(const string symbol, const ENUM_TIMEFRAMES tf) {
@@ -3196,6 +4909,19 @@ private:
             stale = true;
             reason = "ai_timeout";
          }
+         if(!stale && InpUseAI){
+            bool full_structured = (arr[i].ai.decision_quality_tier == "FULL_STRUCTURED" ||
+                                    arr[i].ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+            if((!pending_ai && (!arr[i].ai.ok || !arr[i].ai.mandatory_fields_complete ||
+                                arr[i].ai.decision_schema_version != AI_DECISION_SCHEMA_VERSION ||
+                                !full_structured)) ||
+               (pending_ai && (StringLen(arr[i].candidate_id) == 0 ||
+                               StringLen(arr[i].candidate_hash) == 0 ||
+                               StringLen(arr[i].request_execution_fingerprint) == 0))){
+               stale = true;
+               reason = "legacy_or_incomplete_ai_contract_non_trading";
+            }
+         }
          if(!stale) continue;
          _Journal(arr[i].symbol + (pending_ai ? " pending AI dropped: " : " watchlist dropped: ") + reason);
          int last = ArraySize(arr) - 1;
@@ -3404,6 +5130,251 @@ private:
       return base;
    }
 
+   bool _ComputeOriginalPolicyCounterfactual(TradePlan &meta, string &reason) {
+      reason = "";
+      meta.actual_managed_result = meta.broker_net_pnl;
+      meta.actual_managed_result_r = meta.result_r_initial_risk;
+      meta.counterfactual_original_sl_tp_result = 0.0;
+      meta.counterfactual_original_sl_tp_result_r = 0.0;
+      meta.counterfactual_target_before_stop_available = false;
+      meta.counterfactual_target_before_stop = false;
+      meta.management_alpha = 0.0;
+      meta.counterfactual_ambiguous = true;
+      meta.counterfactual_pending = false;
+      meta.counterfactual_status = "EVALUATING";
+      meta.counterfactual_resolution_reason = "";
+      meta.counterfactual_evaluated_at = 0;
+      meta.management_policy_selection_eligible = false;
+
+      double entry = (meta.original_entry_for_risk > 0.0 ? meta.original_entry_for_risk
+                       : (meta.filled_entry > 0.0 ? meta.filled_entry : meta.planned_entry));
+      double sl = (meta.original_sl_for_risk > 0.0 ? meta.original_sl_for_risk
+                    : (meta.planned_sl > 0.0 ? meta.planned_sl : meta.sl));
+      double tp1 = (meta.planned_tp1 > 0.0 ? meta.planned_tp1 : meta.tp1);
+      double tp2 = (meta.planned_tp2 > 0.0 ? meta.planned_tp2 : meta.tp2);
+      double risk_dist = MathAbs(entry - sl);
+      if(entry <= 0.0 || sl <= 0.0 || tp2 <= 0.0 || risk_dist <= 0.0 || meta.initial_risk_money <= 0.0){
+         reason = "counterfactual_original_contract_incomplete";
+         return false;
+      }
+      if((meta.is_buy && (sl >= entry || tp2 <= entry)) ||
+         (!meta.is_buy && (sl <= entry || tp2 >= entry))){
+         reason = "counterfactual_original_direction_invalid";
+         return false;
+      }
+
+      datetime start = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+      datetime horizon = start + MathMax(1, InpCounterfactualHorizonMinutes) * 60;
+      if(meta.broker_session_close > start && meta.broker_session_close < horizon)
+         horizon = meta.broker_session_close;
+      meta.counterfactual_horizon_at = horizon;
+      if(horizon <= start){ reason = "counterfactual_horizon_invalid"; return false; }
+      datetime now = _NowServerOrLocal();
+      datetime evaluation_end = (now < horizon ? now : horizon);
+      if(evaluation_end <= start){
+         meta.counterfactual_pending = true;
+         meta.counterfactual_status = "PENDING";
+         meta.counterfactual_resolution_reason = "awaiting_original_policy_horizon";
+         reason = meta.counterfactual_resolution_reason;
+         return false;
+      }
+      MqlRates rates[];
+      ArraySetAsSeries(rates, false);
+      int got = CopyRates(meta.symbol, PERIOD_M1, start, evaluation_end, rates);
+      if(got <= 0){
+         if(now < horizon){
+            meta.counterfactual_pending = true;
+            meta.counterfactual_status = "PENDING";
+            meta.counterfactual_resolution_reason = "counterfactual_price_path_temporarily_unavailable";
+         } else {
+            meta.counterfactual_status = "UNAVAILABLE";
+            meta.counterfactual_resolution_reason = "counterfactual_price_path_unavailable_at_horizon";
+         }
+         reason = meta.counterfactual_resolution_reason;
+         return false;
+      }
+
+      double partial_pct = (meta.tp1_partial_pct > 0.0 ? meta.tp1_partial_pct : InpTP1PartialPct);
+      bool tp1_valid = (partial_pct > 0.0 && partial_pct < 1.0 && tp1 > 0.0 &&
+                        (meta.is_buy ? (tp1 > entry && tp1 < tp2) : (tp1 < entry && tp1 > tp2)));
+      double remaining = 1.0;
+      double result_r = 0.0;
+      bool tp1_done = false;
+      bool resolved = false;
+      double last_close = entry;
+      for(int i=0; i<got; i++){
+         last_close = rates[i].close;
+         bool sl_hit = (meta.is_buy ? rates[i].low <= sl : rates[i].high >= sl);
+         bool tp1_hit = (tp1_valid && !tp1_done &&
+                         (meta.is_buy ? rates[i].high >= tp1 : rates[i].low <= tp1));
+         bool tp2_hit = (meta.is_buy ? rates[i].high >= tp2 : rates[i].low <= tp2);
+         if(sl_hit && (tp2_hit || tp1_hit)){
+            reason = "counterfactual_intrabar_sequence_ambiguous";
+            meta.counterfactual_ambiguous = true;
+            meta.counterfactual_pending = false;
+            meta.counterfactual_status = "AMBIGUOUS";
+            meta.counterfactual_resolution_reason = reason;
+            meta.counterfactual_evaluated_at = now;
+            return false;
+         }
+         if(sl_hit){
+            result_r -= remaining;
+            meta.counterfactual_target_before_stop_available = true;
+            meta.counterfactual_target_before_stop = false;
+            resolved = true;
+            break;
+         }
+         if(tp1_hit){
+            double tp1_r = (meta.is_buy ? tp1 - entry : entry - tp1) / risk_dist;
+            result_r += tp1_r * partial_pct;
+            remaining -= partial_pct;
+            tp1_done = true;
+         }
+         if(tp2_hit){
+            double tp2_r = (meta.is_buy ? tp2 - entry : entry - tp2) / risk_dist;
+            result_r += tp2_r * remaining;
+            remaining = 0.0;
+            meta.counterfactual_target_before_stop_available = true;
+            meta.counterfactual_target_before_stop = true;
+            resolved = true;
+            break;
+         }
+      }
+      if(!resolved && now < horizon){
+         meta.counterfactual_pending = true;
+         meta.counterfactual_ambiguous = false;
+         meta.counterfactual_status = "PENDING";
+         meta.counterfactual_resolution_reason = "awaiting_original_policy_horizon";
+         reason = meta.counterfactual_resolution_reason;
+         return false;
+      }
+      if(!resolved && remaining > 0.0){
+         double horizon_r = (meta.is_buy ? last_close - entry : entry - last_close) / risk_dist;
+         result_r += horizon_r * remaining;
+      }
+      double cost_r = meta.actual_realized_cost / meta.initial_risk_money;
+      result_r -= cost_r;
+      meta.counterfactual_original_sl_tp_result_r = result_r;
+      meta.counterfactual_original_sl_tp_result = result_r * meta.initial_risk_money;
+      meta.management_alpha = meta.actual_managed_result_r - meta.counterfactual_original_sl_tp_result_r;
+      meta.counterfactual_ambiguous = false;
+      meta.counterfactual_pending = false;
+      meta.counterfactual_status = (resolved ? "RESOLVED_ORIGINAL_LEVELS" : "RESOLVED_HORIZON");
+      meta.counterfactual_evaluated_at = now;
+      reason = (resolved ? "counterfactual_resolved_by_original_sl_tp" : "counterfactual_resolved_at_horizon");
+      meta.counterfactual_resolution_reason = reason;
+      return true;
+   }
+
+   void _QueueCounterfactualEvaluation(const TradePlan &meta) {
+      if(!meta.counterfactual_pending || StringLen(meta.trade_key) == 0) return;
+      if(_PendingResearchRecordExists(m_counterfactual_pending, meta.trade_key, false)) return;
+      int n = ArraySize(m_counterfactual_pending);
+      ArrayResize(m_counterfactual_pending, n + 1);
+      m_counterfactual_pending[n] = meta;
+      m_state.SavePlans(m_state.CounterfactualPendingPath(), m_counterfactual_pending);
+      _Journal("[management_counterfactual] trade_key=" + meta.trade_key
+               + " status=pending horizon_at=" + IntegerToString((int)meta.counterfactual_horizon_at)
+               + " reason=" + meta.counterfactual_resolution_reason);
+   }
+
+   void _AppendCounterfactualUpdate(const TradePlan &meta) {
+      string row = "{";
+      row += JsonKVStr("schema_version", MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION) + ",";
+      row += JsonKVStr("event_type", "management_counterfactual_resolution") + ",";
+      row += JsonKVStr("trade_key", meta.trade_key) + ",";
+      row += JsonKVNum("position_id", (double)meta.position_id, 0) + ",";
+      row += JsonKVStr("symbol", meta.symbol) + ",";
+      row += JsonKVStr("management_version", meta.management_version) + ",";
+      row += JsonKVInt("evaluated_at", (int)meta.counterfactual_evaluated_at) + ",";
+      row += JsonKVInt("horizon_at", (int)meta.counterfactual_horizon_at) + ",";
+      row += JsonKVBool("counterfactual_complete", !meta.counterfactual_pending) + ",";
+      row += JsonKVStr("counterfactual_status", meta.counterfactual_status) + ",";
+      row += JsonKVStr("counterfactual_resolution_reason", meta.counterfactual_resolution_reason) + ",";
+      row += JsonKVBool("counterfactual_ambiguous", meta.counterfactual_ambiguous) + ",";
+      row += JsonKVNum("actual_managed_result", meta.actual_managed_result, 4) + ",";
+      row += JsonKVNum("actual_managed_result_r", meta.actual_managed_result_r, 6) + ",";
+      if(meta.counterfactual_ambiguous){
+         row += "\"counterfactual_original_sl_tp_result\":null,";
+         row += "\"counterfactual_original_sl_tp_result_r\":null,";
+         row += "\"management_alpha\":null,";
+      } else {
+         row += JsonKVNum("counterfactual_original_sl_tp_result", meta.counterfactual_original_sl_tp_result, 4) + ",";
+         row += JsonKVNum("counterfactual_original_sl_tp_result_r", meta.counterfactual_original_sl_tp_result_r, 6) + ",";
+         row += JsonKVNum("management_alpha", meta.management_alpha, 6) + ",";
+      }
+      row += JsonKVBool("management_policy_selection_eligible", meta.management_policy_selection_eligible) + ",";
+      row += JsonKVBool("trading_authority", false);
+      row += "}";
+      m_bus.AppendText(m_bus.LogDir() + "\\management_counterfactual_updates.jsonl", row + "\n");
+   }
+
+   void _MaintainCounterfactualEvaluations() {
+      bool changed = false;
+      for(int i=ArraySize(m_counterfactual_pending)-1; i>=0; i--){
+         TradePlan meta = m_counterfactual_pending[i];
+         string reason = "";
+         bool evaluated = _ComputeOriginalPolicyCounterfactual(meta, reason);
+         if(!evaluated && meta.counterfactual_pending){
+            m_counterfactual_pending[i] = meta;
+            continue;
+         }
+         meta.management_policy_selection_eligible = (evaluated && !meta.counterfactual_ambiguous &&
+                                                       meta.learning_eligible && meta.execution_identity_verified &&
+                                                       meta.candidate_hash_match && meta.execution_fingerprint_match &&
+                                                       meta.management_version == MANAGEMENT_SCHEMA_VERSION);
+         _AppendCounterfactualUpdate(meta);
+         _Journal("[management_counterfactual] trade_key=" + meta.trade_key
+                  + " status=" + meta.counterfactual_status
+                  + " actual_r=" + DoubleToString(meta.actual_managed_result_r, 6)
+                  + " counterfactual_r=" + (meta.counterfactual_ambiguous ? "null" : DoubleToString(meta.counterfactual_original_sl_tp_result_r, 6))
+                  + " management_alpha=" + (meta.counterfactual_ambiguous ? "null" : DoubleToString(meta.management_alpha, 6))
+                  + " policy_selection_eligible=" + (meta.management_policy_selection_eligible ? "true" : "false")
+                  + " reason=" + reason);
+         int last = ArraySize(m_counterfactual_pending) - 1;
+         if(i != last) m_counterfactual_pending[i] = m_counterfactual_pending[last];
+         ArrayResize(m_counterfactual_pending, last);
+         changed = true;
+      }
+      if(changed) m_state.SavePlans(m_state.CounterfactualPendingPath(), m_counterfactual_pending);
+   }
+
+   void _CaptureManagementDecisionSnapshot(TradePlan &meta,
+                                           const string action,
+                                           const double live_px,
+                                           const double current_sl,
+                                           const double current_tp) {
+      if(meta.management_features_time_safe || StringLen(action) == 0 || live_px <= 0.0) return;
+      double risk_dist = _RiskDistanceForMeta(meta);
+      if(risk_dist <= 0.0) return;
+      datetime now = _NowServerOrLocal();
+      datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+      meta.management_decision_at = now;
+      meta.management_features_time_safe = true;
+      meta.management_snapshot_action = action;
+      meta.management_snapshot_mfe_r = meta.mfe_r;
+      meta.management_snapshot_mae_r = meta.mae_r;
+      meta.management_snapshot_minutes_open = (opened_at > 0 && now >= opened_at
+                                                 ? (int)((now - opened_at) / 60) : 0);
+      meta.management_snapshot_distance_to_sl_r = (current_sl > 0.0
+                                                    ? MathAbs(live_px - current_sl) / risk_dist : 0.0);
+      meta.management_snapshot_distance_to_tp_r = (current_tp > 0.0
+                                                    ? MathAbs(current_tp - live_px) / risk_dist : 0.0);
+      double bid = SymbolInfoDouble(meta.symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(meta.symbol, SYMBOL_ASK);
+      meta.management_snapshot_spread_r = (bid > 0.0 && ask > 0.0
+                                            ? MathAbs(ask - bid) / risk_dist
+                                            : MathMax(0.0, meta.spread_r));
+      meta.management_snapshot_execution_cost_r = MathMax(0.0, meta.execution_cost_r);
+      meta.management_snapshot_structure_valid = !meta.dr_and_structural_invalid_triggered;
+      _Journal("[management_snapshot] trade_key=" + meta.trade_key
+               + " action=" + action
+               + " captured_at=" + IntegerToString((int)now)
+               + " mfe_r=" + DoubleToString(meta.management_snapshot_mfe_r, 4)
+               + " mae_r=" + DoubleToString(meta.management_snapshot_mae_r, 4)
+               + " time_safe=true model_authority=shadow_only");
+   }
+
    void _UpdateAnalyticsSnapshot(TradePlan &meta, const ulong ticket, const double live_px, const double live_vol) {
       if(!InpAnalyticsEnable) return;
       if(meta.planned_entry <= 0) meta.planned_entry = meta.entry_est;
@@ -3437,6 +5408,27 @@ private:
       if(risk_dist > 0){
          meta.mfe_r = (meta.is_buy ? (meta.mfe_price - meta.filled_entry) : (meta.filled_entry - meta.mfe_price)) / risk_dist;
          meta.mae_r = (meta.is_buy ? (meta.mae_price - meta.filled_entry) : (meta.filled_entry - meta.mae_price)) / risk_dist;
+         datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+         int minutes_open = (opened_at > 0 && now >= opened_at ? (int)((now - opened_at) / 60) : 0);
+         if(meta.minutes_to_0_25r_mfe <= 0 && meta.mfe_r >= 0.25)
+            meta.minutes_to_0_25r_mfe = minutes_open;
+         if(meta.minutes_to_0_50r_mfe <= 0 && meta.mfe_r >= 0.50)
+            meta.minutes_to_0_50r_mfe = minutes_open;
+         int stuck_minutes = (meta.penalty_stuck_minutes > 0 ? meta.penalty_stuck_minutes : InpPenaltyStuckMinutes);
+         double stuck_min_mfe = (meta.penalty_stuck_min_mfe_r > 0.0 ? meta.penalty_stuck_min_mfe_r : InpPenaltyStuckMinMfeR);
+         if(stuck_minutes > 0 && minutes_open >= stuck_minutes && meta.mfe_r < stuck_min_mfe)
+            meta.stuck_no_mfe_triggered = true;
+         bool dr_invalid = (meta.is_buy ? (meta.source_dr_low > 0 && live_px < meta.source_dr_low) :
+                                          (meta.source_dr_high > 0 && live_px > meta.source_dr_high));
+         bool structural_invalid = (meta.is_buy ? ((meta.source_manip_low > 0 && live_px < meta.source_manip_low) ||
+                                                   (meta.po3.swing_low > 0 && live_px < meta.po3.swing_low)) :
+                                                   ((meta.source_manip_high > 0 && live_px > meta.source_manip_high) ||
+                                                    (meta.po3.swing_high > 0 && live_px > meta.po3.swing_high)));
+         if(dr_invalid && structural_invalid)
+            meta.dr_and_structural_invalid_triggered = true;
+         if((meta.stuck_no_mfe_triggered || meta.dr_and_structural_invalid_triggered) &&
+            meta.initial_volume > 0.0 && live_vol > 0.0 && live_vol < meta.initial_volume)
+            meta.penalty_reductions_count = MathMax(meta.penalty_reductions_count, 1);
          double tp1_price = (meta.planned_tp1 > 0 ? meta.planned_tp1 : meta.tp1);
          double tp2_price = (meta.planned_tp2 > 0 ? meta.planned_tp2 : meta.tp2);
          double sl_price = (meta.planned_sl > 0 ? meta.planned_sl : meta.sl);
@@ -3470,7 +5462,7 @@ private:
    }
 
    bool _HasBlockingPendingOrderForPlan(const TradePlan &p) {
-      if(!InpSkipIfSymbolOpen) return false;
+      if(!InpSkipIfSymbolOpen && !m_force_one_managed_trade_per_symbol) return false;
       bool saw_pending = false;
       for(int i=0; i<OrdersTotal(); i++){
          ulong ticket = OrderGetTicket(i);
@@ -3493,12 +5485,16 @@ private:
    }
 
    bool _ShouldSkipForSymbolExposure(const string symbol) {
+      if(m_force_one_managed_trade_per_symbol)
+         return (_SymbolHasOpenPosition(symbol) || _SymbolHasPendingOrder(symbol));
       if(!InpSkipIfSymbolOpen) return false;
       return (_SymbolHasOpenPosition(symbol) || _SymbolHasPendingOrder(symbol));
    }
 
    bool _SymbolBusy(const string symbol) {
       if(_ShouldSkipForGlobalOpenPositions()) return true;
+      if(m_force_one_managed_trade_per_symbol &&
+         (_SymbolHasOpenPosition(symbol) || _SymbolHasPendingOrder(symbol))) return true;
       if(InpSkipIfSymbolOpen && _SymbolHasOpenPosition(symbol)) return true;
       if(InpSkipIfSymbolOpen && InpMaxTradesPerSweep <= 1 && _SymbolHasPendingOrder(symbol)) return true;
       if(_HasSymbolInPlans(m_watchlist, symbol)) return true;
@@ -3675,6 +5671,204 @@ private:
       return true;
    }
 
+   void _CaptureEntryRiskContext(TradePlan &meta,
+                                 const double volume,
+                                 const double entry_price,
+                                 const double stop_price) {
+      meta.account_equity_at_entry = AccountInfoDouble(ACCOUNT_EQUITY);
+      meta.account_balance_at_entry = AccountInfoDouble(ACCOUNT_BALANCE);
+      meta.initial_risk_money = _RiskMoneyForPosition(meta.symbol, meta.is_buy, volume, entry_price, stop_price);
+      meta.initial_risk_pct_equity = (meta.account_equity_at_entry > 0.0
+                                      ? meta.initial_risk_money / meta.account_equity_at_entry * 100.0
+                                      : 0.0);
+      meta.original_initial_risk_money = meta.initial_risk_money;
+      meta.original_initial_risk_money_per_lot = (volume > 0.0 ? meta.initial_risk_money / volume : 0.0);
+      meta.original_entry_for_risk = entry_price;
+      meta.original_sl_for_risk = stop_price;
+      meta.risk_factor_schema_version = RISK_FACTOR_SCHEMA_VERSION;
+      meta.ledger_schema_version = TRADE_LEDGER_SCHEMA_VERSION;
+      meta.management_version = MANAGEMENT_SCHEMA_VERSION;
+      if(StringLen(meta.management_state) == 0) meta.management_state = "HEALTHY";
+      if(StringLen(meta.management_policy) == 0){
+         if(InpThesisInvalidationPolicy == THESIS_INVALIDATION_FULL_EXIT)
+            meta.management_policy = "full_exit_on_confirmed_thesis_invalidation";
+         else if(InpThesisInvalidationPolicy == THESIS_INVALIDATION_ORIGINAL_SL_TP_ONLY)
+            meta.management_policy = "original_sl_tp_only";
+         else
+            meta.management_policy = "partial_exit_on_confirmed_thesis_invalidation";
+      }
+      meta.invalidation_confirmation_mode = IntegerToString((int)InpInvalidationConfirmationMode);
+   }
+
+   bool _ApplyBrokerSessionEntryGate(TradePlan &meta, string &reason) {
+      reason = "";
+      string schedule_json = "{}";
+      if(!SymbolEntryAllowedByBrokerSession(meta.symbol, _NowServerOrLocal(), reason, schedule_json))
+         return false;
+      meta.broker_session_schedule_json = schedule_json;
+      meta.broker_session_source = (InpUseBrokerSymbolSessions ? "broker_session_api" : "disabled");
+      meta.broker_session_open = (datetime)JsonGetNumber(schedule_json, "open", 0.0);
+      meta.broker_session_close = (datetime)JsonGetNumber(schedule_json, "close", 0.0);
+      meta.broker_no_entry_from = (datetime)JsonGetNumber(schedule_json, "no_entry_from", 0.0);
+      meta.broker_flatten_from = (datetime)JsonGetNumber(schedule_json, "flatten_from", 0.0);
+      meta.broker_next_tradable_session = (datetime)JsonGetNumber(schedule_json, "next_tradable", 0.0);
+      return true;
+   }
+
+   bool _ApplyFinalPortfolioRiskGovernance(TradePlan &meta,
+                                           const double proposed_risk_money,
+                                           string &reason) {
+      reason = "";
+      double open_risk = 0.0;
+      double pending_risk = 0.0;
+      double post_risk = 0.0;
+      double post_pct = 0.0;
+      double cap_money = 0.0;
+      bool aggregate_ok = PortfolioInitialRiskGate(proposed_risk_money,
+                                                    open_risk,
+                                                    pending_risk,
+                                                    post_risk,
+                                                    post_pct,
+                                                    cap_money,
+                                                    reason);
+      double base_money = MathMax(AccountInfoDouble(ACCOUNT_EQUITY), 0.0);
+      double open_pct = (base_money > 0.0 ? open_risk / base_money * 100.0 : 0.0);
+      _Journal("[portfolio_initial_risk] open_risk_money=" + DoubleToString(open_risk, 2)
+               + " open_risk_pct=" + DoubleToString(open_pct, 4)
+               + " pending_risk_money=" + DoubleToString(pending_risk, 2)
+               + " proposed_risk_money=" + DoubleToString(proposed_risk_money, 2)
+               + " post_trade_risk_pct=" + DoubleToString(post_pct, 4)
+               + " cap_pct=" + DoubleToString(InpMaxTotalRiskPct, 4)
+               + " cap_money=" + DoubleToString(cap_money, 2)
+               + " status=" + (aggregate_ok ? "pass" : "blocked")
+               + (StringLen(reason) > 0 ? " reason=" + reason : ""));
+      if(!aggregate_ok) return false;
+
+      if(proposed_risk_money <= 0.0000001){
+         meta.risk_factor_schema_version = RISK_FACTOR_SCHEMA_VERSION;
+         if(StringLen(meta.risk_factor_contributions_json) == 0)
+            meta.risk_factor_contributions_json = "{}";
+         return true;
+      }
+
+      string factor_json = "{}";
+      string factor_reason = "";
+      string session = (StringLen(meta.session_code) > 0 ? meta.session_code : meta.po3.session_name);
+      if(!RiskFactorGate(meta.symbol, meta.is_buy, session, proposed_risk_money, factor_json, factor_reason)){
+         reason = factor_reason;
+         return false;
+      }
+      meta.risk_factor_schema_version = RISK_FACTOR_SCHEMA_VERSION;
+      meta.risk_factor_contributions_json = factor_json;
+      return true;
+   }
+
+   double _MatchingPendingRiskForReplacement(const TradePlan &meta) const {
+      double total = 0.0;
+      for(int i=0; i<OrdersTotal(); i++){
+         ulong ticket = OrderGetTicket(i);
+         if(!OrderMatchesMagic(ticket)) continue;
+         if(OrderGetString(ORDER_SYMBOL) != meta.symbol) continue;
+         string comment = OrderGetString(ORDER_COMMENT);
+         if(StringLen(meta.broker_comment) > 0 && comment != meta.broker_comment && comment != meta.trade_key) continue;
+         ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+         bool is_buy = (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_BUY_STOP_LIMIT);
+         bool is_sell = (type == ORDER_TYPE_SELL_LIMIT || type == ORDER_TYPE_SELL_STOP || type == ORDER_TYPE_SELL_STOP_LIMIT);
+         if(!is_buy && !is_sell) continue;
+         if(is_buy != meta.is_buy) continue;
+         total += MathMax(0.0, _RiskMoneyForPosition(meta.symbol, meta.is_buy,
+                                                    OrderGetDouble(ORDER_VOLUME_CURRENT),
+                                                    OrderGetDouble(ORDER_PRICE_OPEN),
+                                                    OrderGetDouble(ORDER_SL)));
+      }
+      return total;
+   }
+
+   void _MaintainBrokerSymbolSessionProtection() {
+      if(!InpUseBrokerSymbolSessions) return;
+      datetime now = _NowServerOrLocal();
+
+      for(int i=OrdersTotal()-1; i>=0; i--){
+         ulong order_ticket = OrderGetTicket(i);
+         if(!OrderMatchesMagic(order_ticket)) continue;
+         string symbol = OrderGetString(ORDER_SYMBOL);
+         datetime session_open = 0, session_close = 0, no_entry_from = 0, flatten_from = 0, next_tradable = 0;
+         string schedule_reason = "";
+         if(!QueryBrokerSymbolSessionSchedule(symbol, now, session_open, session_close,
+                                              no_entry_from, flatten_from, next_tradable, schedule_reason)) continue;
+         if(flatten_from <= 0 || now < flatten_from || now >= session_close) continue;
+         TradePlan meta;
+         string comment = OrderGetString(ORDER_COMMENT);
+         if(!_LoadTradeMeta(order_ticket, symbol, comment, meta)) continue;
+         if(meta.broker_flatten_next_retry > now) continue;
+         meta.broker_flatten_attempts++;
+         bool deleted = m_trade.OrderDelete(order_ticket);
+         meta.broker_flatten_last_retcode = (long)m_trade.ResultRetcode();
+         if(!deleted){
+            meta.broker_flatten_failures++;
+            meta.broker_flatten_next_retry = now + MathMax(1, InpSymbolFlattenRetrySeconds);
+         } else {
+            meta.broker_flatten_next_retry = 0;
+            meta.narrative_state = "deleted_before_broker_session_close";
+         }
+         _WriteTradeMeta(meta, order_ticket);
+         _Journal("[pre_close_pending] symbol=" + symbol
+                  + " order_ticket=" + IntegerToString((long)order_ticket)
+                  + " attempt=" + IntegerToString(meta.broker_flatten_attempts)
+                  + " success=" + (deleted ? "true" : "false")
+                  + " retcode=" + IntegerToString(meta.broker_flatten_last_retcode)
+                  + " next_retry=" + TimeToString(meta.broker_flatten_next_retry, TIME_DATE|TIME_SECONDS));
+      }
+
+      for(int i=PositionsTotal()-1; i>=0; i--){
+         ulong position_ticket = PositionGetTicket(i);
+         if(!PositionMatchesMagic(position_ticket)) continue;
+         string symbol = PositionGetString(POSITION_SYMBOL);
+         datetime session_open = 0, session_close = 0, no_entry_from = 0, flatten_from = 0, next_tradable = 0;
+         string schedule_reason = "";
+         if(!QueryBrokerSymbolSessionSchedule(symbol, now, session_open, session_close,
+                                              no_entry_from, flatten_from, next_tradable, schedule_reason)) continue;
+         if(flatten_from <= 0 || now < flatten_from || now >= session_close) continue;
+         TradePlan meta;
+         string comment = PositionGetString(POSITION_COMMENT);
+         string identity_reason = "";
+         if(!_LoadAndResolvePositionMeta(position_ticket, symbol, comment, meta, identity_reason)){
+            _Journal("[pre_close_remaining_exposure] symbol=" + symbol
+                     + " position_ids=" + IntegerToString((long)PositionGetInteger(POSITION_IDENTIFIER))
+                     + " risk_money=unavailable close_failures=0 reason=identity_unavailable:" + identity_reason);
+            continue;
+         }
+         if(meta.broker_flatten_next_retry > now) continue;
+         meta.broker_session_open = session_open;
+         meta.broker_session_close = session_close;
+         meta.broker_no_entry_from = no_entry_from;
+         meta.broker_flatten_from = flatten_from;
+         meta.broker_next_tradable_session = next_tradable;
+         meta.broker_session_source = "broker_session_api";
+         meta.broker_flatten_attempts++;
+         double remaining_volume = PositionGetDouble(POSITION_VOLUME);
+         double risk_money = (meta.original_initial_risk_money_per_lot > 0.0
+                              ? meta.original_initial_risk_money_per_lot * remaining_volume : 0.0);
+         bool closed = m_trade.PositionClose(position_ticket);
+         meta.broker_flatten_last_retcode = (long)m_trade.ResultRetcode();
+         if(!closed){
+            meta.broker_flatten_failures++;
+            meta.broker_flatten_next_retry = now + MathMax(1, InpSymbolFlattenRetrySeconds);
+         } else {
+            meta.broker_flatten_next_retry = 0;
+            meta.narrative_state = "flatten_submitted_before_broker_session_close";
+         }
+         _WriteTradeMeta(meta, position_ticket);
+         _Journal("[pre_close_remaining_exposure] symbol=" + symbol
+                  + " position_ids=" + IntegerToString(meta.broker_position_identifier)
+                  + " risk_money=" + DoubleToString(risk_money, 2)
+                  + " close_failures=" + IntegerToString(meta.broker_flatten_failures)
+                  + " attempt=" + IntegerToString(meta.broker_flatten_attempts)
+                  + " success=" + (closed ? "true" : "false")
+                  + " retcode=" + IntegerToString(meta.broker_flatten_last_retcode));
+      }
+   }
+
    bool _SymbolEligible(const string symbol) {
       if(!SymbolSelect(symbol, true)) return false;
       if(!SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE)) return false;
@@ -3698,15 +5892,6 @@ private:
          if(PositionGetString(POSITION_SYMBOL) == symbol) return true;
       }
       return false;
-   }
-
-   ulong _FindPositionTicket(const string symbol) {
-      for(int i=0; i<PositionsTotal(); i++){
-         ulong ticket = PositionGetTicket(i);
-         if(!PositionMatchesMagic(ticket)) continue;
-         if(PositionGetString(POSITION_SYMBOL) == symbol) return ticket;
-      }
-      return 0;
    }
 
    bool _HasStructureShift(const PO3Context &po3) {
@@ -4017,7 +6202,8 @@ private:
                + " tp2_distance_atr=" + DoubleToString(tp2_atr, 2)
                + " rr2=" + DoubleToString(rr2, 2)
                + " setup_family=" + p.setup_family
-               + " net_expected_r=" + DoubleToString(p.net_expected_r, 3)
+               + " heuristic_quality_estimate=" + DoubleToString(p.heuristic_quality_estimate, 3)
+               + " net_reward_after_cost_r=" + DoubleToString(p.net_reward_after_cost_r, 3)
                + " execution_cost_r=" + DoubleToString(p.execution_cost_r, 3)
                + " slippage_r=" + DoubleToString(p.slippage_r, 3)
                + " commission_r=" + DoubleToString(p.commission_r, 3)
@@ -4221,6 +6407,15 @@ private:
       p.fallback_tp = 0.0;
       p.fallback_rr = 0.0;
       p.fallback_source = "";
+      p.fallback_feasible_for_tp2 = false;
+      p.fallback_feasible_for_tp1_only = false;
+      p.fallback_infeasible_reason = "";
+      p.fallback_reward_distance = 0.0;
+      p.fallback_max_allowed_distance = 0.0;
+      p.synthetic_capped_to_max_distance_tp = 0.0;
+      p.synthetic_capped_to_max_distance_rr = 0.0;
+      p.synthetic_capped_to_max_distance_feasible = false;
+      p.synthetic_capped_to_max_distance_reason = "";
       p.capped_before_obstacle_tp = 0.0;
       p.capped_before_obstacle_rr = 0.0;
       p.capped_before_obstacle_source = "";
@@ -4283,15 +6478,47 @@ private:
       p.effective_rr2 = new_rr;
       p.ai_chosen_tp2 = new_tp;
       p.ai_chosen_rr2 = new_rr;
+      _RefreshTargetFeasibility(p, reason);
+      if(!p.fallback_feasible_for_tp2 &&
+         p.fallback_infeasible_reason == "exceeds_max_target_distance" &&
+         p.synthetic_capped_to_max_distance_feasible){
+         p.tp2 = p.synthetic_capped_to_max_distance_tp;
+         p.fallback_tp = p.tp2;
+         p.fallback_rr = p.synthetic_capped_to_max_distance_rr;
+         p.fallback_source = "synthetic_rr_capped_to_max_distance";
+         p.tp_model = "synthetic_rr_capped_to_max_distance";
+         p.target_model = "synthetic_rr_capped_to_max_distance";
+         p.target_source = "ai_selected_synthetic_rr_capped_to_max_distance";
+         p.effective_rr2 = p.synthetic_capped_to_max_distance_rr;
+         p.ai_chosen_target_model = "synthetic_rr_capped_to_max_distance";
+         p.ai_chosen_tp2 = p.tp2;
+         p.ai_chosen_rr2 = p.effective_rr2;
+         _Journal("[target_rebuild_downgrade] from=synthetic_rr_fallback"
+                  + " to=synthetic_rr_capped_to_max_distance"
+                  + " reason=max_distance_after_entry_change"
+                  + " old_entry=" + _FmtPrice(p.symbol, old_entry)
+                  + " new_entry=" + _FmtPrice(p.symbol, p.entry_est)
+                  + " old_tp=" + _FmtPrice(p.symbol, old_tp)
+                  + " new_tp=" + _FmtPrice(p.symbol, p.tp2)
+                  + " old_rr=" + DoubleToString(old_rr, 6)
+                  + " new_rr=" + DoubleToString(p.effective_rr2, 6));
+      }
+      _Journal("[target_rebuild_feasibility] old_entry=" + _FmtPrice(p.symbol, old_entry)
+               + " new_entry=" + _FmtPrice(p.symbol, p.entry_est)
+               + " chosen=" + p.target_model
+               + " old_rr=" + DoubleToString(old_rr, 6)
+               + " new_rr=" + DoubleToString(_ExecutionRR2(p), 6)
+               + " feasible=" + ((p.fallback_feasible_for_tp2 || p.synthetic_capped_to_max_distance_feasible) ? "true" : "false")
+               + " reason=" + (p.fallback_feasible_for_tp2 ? "ok" : p.fallback_infeasible_reason));
       _Journal("[fallback_recalc] reason=" + reason
                + " old_entry=" + _FmtPrice(p.symbol, old_entry)
                + " new_entry=" + _FmtPrice(p.symbol, p.entry_est)
                + " old_tp=" + _FmtPrice(p.symbol, old_tp)
-               + " new_tp=" + _FmtPrice(p.symbol, new_tp)
+               + " new_tp=" + _FmtPrice(p.symbol, p.tp2)
                + " old_rr=" + DoubleToString(old_rr, 6)
-               + " new_rr=" + DoubleToString(new_rr, 6)
+               + " new_rr=" + DoubleToString(_ExecutionRR2(p), 6)
                + " effective_fallback_rr=" + DoubleToString(effective_rr, 6));
-      return (new_tp > 0.0 && new_rr > 0.0);
+      return (p.tp2 > 0.0 && _ExecutionRR2(p) > 0.0);
    }
 
    double _ObstacleSeverity(const string obstacle_kind, const double obstacle_r) const {
@@ -4353,11 +6580,26 @@ private:
    }
 
    bool _CanAskAiForTargetArbitration(const TradePlan &p) const {
-      return (InpRequireAITargetArbitrationOnObstacle &&
-              !InpHardRejectCrossedObstacleTarget &&
-              p.liquidity_target_valid_structurally &&
-              p.liquidity_target_preserved > 0.0 &&
-              p.liquidity_target_blocked_by_obstacle);
+      if(!InpRequireAITargetArbitrationOnObstacle || InpHardRejectCrossedObstacleTarget)
+         return false;
+      string obstacle = _NormToken(p.obstacle_kind);
+      bool obstacle_requires = (StringLen(obstacle) > 0 &&
+                                (StringFind(obstacle, "crossed_opposing_imbalance") >= 0 ||
+                                 StringFind(obstacle, "crossed_htf_opposing_imbalance") >= 0 ||
+                                 StringFind(obstacle, "opposing_imbalance") >= 0 ||
+                                 StringFind(obstacle, "opposing") >= 0 ||
+                                 StringFind(obstacle, "imbalance") >= 0));
+      if(p.liquidity_target_valid_structurally && p.liquidity_target_preserved > 0.0 && StringLen(obstacle) > 0)
+         return true;
+      if(p.liquidity_target_valid_structurally && p.liquidity_target_preserved > 0.0 && p.liquidity_target_blocked_by_obstacle)
+         return true;
+      if(p.capped_before_obstacle_tp > 0.0)
+         return true;
+      if(obstacle_requires)
+         return true;
+      if(_TokenIsSyntheticFallback(p.target_source) && StringLen(obstacle) > 0)
+         return true;
+      return false;
    }
 
    void _MaybeRequireTargetArbitration(TradePlan &p, const double chosen_tp, const string chosen_source) {
@@ -4397,6 +6639,15 @@ private:
          p.target_source = "ai_selected_partial_then_liquidity";
          p.target_model = "partial_before_obstacle_then_liquidity";
          p.tp_model = "partial_then_liquidity";
+         return;
+      }
+      if(StringFind(_NormToken(p.ai_chosen_target_model), "synthetic_rr_capped") >= 0 ||
+         StringFind(_NormToken(p.target_source), "synthetic_rr_capped") >= 0 ||
+         StringFind(_NormToken(p.tp_model), "synthetic_rr_capped") >= 0 ||
+         StringFind(_NormToken(p.target_model), "synthetic_rr_capped") >= 0){
+         p.target_source = "ai_selected_synthetic_rr_capped_to_max_distance";
+         p.target_model = "synthetic_rr_capped_to_max_distance";
+         p.tp_model = "synthetic_rr_capped_to_max_distance";
          return;
       }
       if(_TokenIsSyntheticFallback(p.ai_chosen_target_model) ||
@@ -4490,9 +6741,10 @@ private:
    }
 
    void _PersistNormalizedTargetArbitration(TradePlan &p, const AiDecision &dec) {
-      p.target_arbitration_normalized_valid = true;
-      p.target_arbitration_schema_version = (StringLen(dec.target_arbitration_schema_version) > 0 ? dec.target_arbitration_schema_version : AI_TARGET_ARBITRATION_SCHEMA_VERSION);
-      p.prompt_contract_version = (StringLen(dec.prompt_contract_version) > 0 ? dec.prompt_contract_version : AI_PROMPT_CONTRACT_VERSION);
+      p.target_arbitration_schema_version = dec.target_arbitration_schema_version;
+      p.prompt_contract_version = dec.prompt_contract_version;
+      p.target_arbitration_normalized_valid = (p.target_arbitration_schema_version == AI_TARGET_ARBITRATION_SCHEMA_VERSION &&
+                                                p.prompt_contract_version == AI_PROMPT_CONTRACT_VERSION);
       p.why_not_liquidity_target = dec.why_not_liquidity_target;
       p.why_not_partial_before_obstacle = dec.why_not_partial_before_obstacle;
       p.why_not_capped_before_obstacle = dec.why_not_capped_before_obstacle;
@@ -4603,6 +6855,18 @@ private:
       reject_reason = "ok";
       reject_detail = "";
       _NormalizeTargetLabels(plan);
+      string sanitize_reason = "";
+      if(!_ApplyFeasibleTargetSanitizer(plan, sanitize_reason)){
+         reject_reason = sanitize_reason;
+         reject_detail = "target_sanitizer_failed";
+         _TrackNamedCounter(m_funnel_target_validation_reasons, m_funnel_target_validation_counts, reject_reason);
+         _TrackNamedCounter(m_total_target_validation_reasons, m_total_target_validation_counts, reject_reason);
+         _Journal("[target_validation] pass=false stage=pre_watchlist"
+                  + " reject_reason=" + reject_reason
+                  + " chosen=" + _EffectiveTargetModel(plan)
+                  + " detail=" + reject_detail);
+         return false;
+      }
 
       bool awaiting_arbitration = (plan.target_arbitration_required &&
                                    StringLen(plan.ai_chosen_target_model) == 0 &&
@@ -4619,9 +6883,11 @@ private:
       string chosen = _EffectiveTargetModel(plan);
       bool target_reached = false;
       bool direction_valid = true;
+      bool max_distance_pass = true;
       bool partial_then_liquidity = (_TokenIsPartialThenLiquidity(chosen) || _TokenIsPartialThenLiquidity(plan.target_source) || _TokenIsPartialThenLiquidity(plan.tp_model));
       bool capped_final = (_TokenIsCappedTarget(chosen) || _TokenIsCappedTarget(plan.target_source) || _TokenIsCappedTarget(plan.tp_model));
       bool synthetic_final = (_PlanUsesSyntheticFallback(plan));
+      bool rr_floor_pass = _RRMeetsFloor(rr2, min_rr);
 
       if(plan.tp2 <= 0.0){
          reject_reason = "ai_chosen_target_missing_tp";
@@ -4645,7 +6911,7 @@ private:
             reject_reason = "ai_chosen_target_already_reached";
             reject_detail = "px=" + _FmtPrice(plan.symbol, px) + " tp2=" + _FmtPrice(plan.symbol, plan.tp2);
             target_reached = true;
-         } else if(!_RRMeetsFloor(rr2, min_rr)){
+         } else if(!rr_floor_pass){
             if(partial_then_liquidity) reject_reason = "ai_partial_target_valid_but_runner_invalid";
             else if(capped_final) reject_reason = "ai_chosen_capped_target_rr_too_low";
             else if(synthetic_final) reject_reason = "ai_chosen_synthetic_fallback_rr_too_low";
@@ -4664,6 +6930,7 @@ private:
                                                    plan.tp_model == "liquidity_target" ||
                                                    plan.target_source == "ai_selected_liquidity_target");
                if(max_dist > 0.0 && reward > max_dist && !liquidity_or_runner_allowed){
+                  max_distance_pass = false;
                   reject_reason = "ai_chosen_target_exceeds_max_distance";
                   reject_detail = "reward=" + _FmtPrice(plan.symbol, reward) + " max_target_distance=" + _FmtPrice(plan.symbol, max_dist);
                }
@@ -4671,7 +6938,6 @@ private:
          }
       }
 
-      string comparison = "rr2_plus_eps_gte_min_rr";
       _Journal("[target_validation_context] stage=pre_watchlist"
                + " entry=" + _FmtPrice(plan.symbol, plan.entry_est)
                + " sl=" + _FmtPrice(plan.symbol, plan.sl)
@@ -4681,16 +6947,20 @@ private:
                + " rr2=" + DoubleToString(rr2, 6)
                + " rr2_raw=" + DoubleToString(rr2, 10)
                + " source=final_plan");
-      _Journal("[target_validation] rr2_raw=" + DoubleToString(rr2, 10)
-               + " min_rr_raw=" + DoubleToString(min_rr, 10)
-               + " rr2_print=" + DoubleToString(rr2, 4)
-               + " min_rr_print=" + DoubleToString(min_rr, 4)
-               + " eps=" + DoubleToString(rr_eps, 4)
-               + " comparison=" + comparison
-               + " pass=" + (reject_reason == "ok" ? "true" : "false"));
+      _Journal("[target_validation_rr] rr2_raw=" + DoubleToString(rr2, 10)
+               + " min_rr=" + DoubleToString(min_rr, 10)
+               + " eps=" + DoubleToString(rr_eps, 6)
+               + " rr_floor_pass=" + (rr_floor_pass ? "true" : "false"));
+      _Journal("[target_validation_overall] pass=" + (reject_reason == "ok" ? "true" : "false")
+               + " reason=" + reject_reason
+               + " rr_floor_pass=" + (rr_floor_pass ? "true" : "false")
+               + " target_reached_pass=" + (target_reached ? "false" : "true")
+               + " max_distance_pass=" + (max_distance_pass ? "true" : "false")
+               + " direction_pass=" + (direction_valid ? "true" : "false"));
 
       if(reject_reason != "ok"){
          _TrackNamedCounter(m_funnel_target_validation_reasons, m_funnel_target_validation_counts, reject_reason);
+         _TrackNamedCounter(m_total_target_validation_reasons, m_total_target_validation_counts, reject_reason);
          _Journal("[target_validation] pass=false stage=pre_watchlist"
                   + " reject_reason=" + reject_reason
                   + " chosen=" + chosen
@@ -4797,9 +7067,41 @@ private:
       bool chose_capped = (StringFind(chosen_model, "capped") >= 0 ||
                            chosen_model == "partial_before_obstacle" ||
                            chosen_model == "capped_before_obstacle");
+      bool chose_synthetic_capped = (chosen_model == "synthetic_rr_capped_to_max_distance" ||
+                                     chosen_model == "ai_selected_synthetic_rr_capped_to_max_distance");
       bool chose_fallback = (chosen_model == "synthetic_rr_fallback" ||
                              chosen_model == "fallback" ||
-                             chosen_model == "synthetic");
+                             chosen_model == "synthetic" ||
+                             chose_synthetic_capped);
+      if(!arbitration_was_required && chose_fallback && _ObstacleIsCrossedOpposing(p.obstacle_kind)){
+         reason = "invalid_target_arbitration_required_flag";
+         _Journal("[target_arbitration] required=false chosen=" + chosen_model
+                  + " obstacle_kind=" + p.obstacle_kind
+                  + " action=reject reason=invalid_target_arbitration_required_flag");
+         return false;
+      }
+      if(chose_fallback){
+         _RefreshTargetFeasibility(p, "ai_target_choice_validation");
+         bool raw_fallback_choice = !chose_synthetic_capped;
+         if(raw_fallback_choice && !p.fallback_feasible_for_tp2){
+            _Journal("[ai_target_choice_validation] chosen=synthetic_rr_fallback feasible=false"
+                     + " action=defer_to_target_sanitizer"
+                     + " infeasible_reason=" + p.fallback_infeasible_reason
+                     + " capped_feasible=" + (p.synthetic_capped_to_max_distance_feasible ? "true" : "false"));
+            if(p.fallback_infeasible_reason == "exceeds_max_target_distance" &&
+               p.synthetic_capped_to_max_distance_feasible){
+               chosen_model = "synthetic_rr_capped_to_max_distance";
+               chose_synthetic_capped = true;
+               chosen_tp = p.synthetic_capped_to_max_distance_tp;
+               applied_source = "ai_selected_synthetic_rr_capped_to_max_distance";
+               applied_target_model = "synthetic_rr_capped_to_max_distance";
+               applied_tp_model = "synthetic_rr_capped_to_max_distance";
+            }
+         } else {
+            _Journal("[ai_target_choice_validation] chosen=" + chosen_model
+                     + " feasible=true");
+         }
+      }
       if(arbitration_was_required && chose_fallback){
          bool missing_synthetic_explanation =
             (StringLen(dec.why_not_liquidity_target) == 0 ||
@@ -4837,10 +7139,17 @@ private:
          applied_target_model = (StringLen(p.capped_before_obstacle_source) > 0 ? p.capped_before_obstacle_source : "cap_before_opposing_imbalance");
          applied_tp_model = "capped_before_obstacle";
       } else if(chose_fallback){
-         if(chosen_tp <= 0.0) chosen_tp = p.fallback_tp;
-         applied_source = "ai_selected_synthetic_rr_fallback";
-         applied_target_model = "synthetic_rr_fallback";
-         applied_tp_model = "synthetic_rr_fallback";
+         if(chose_synthetic_capped){
+            if(chosen_tp <= 0.0) chosen_tp = p.synthetic_capped_to_max_distance_tp;
+            applied_source = "ai_selected_synthetic_rr_capped_to_max_distance";
+            applied_target_model = "synthetic_rr_capped_to_max_distance";
+            applied_tp_model = "synthetic_rr_capped_to_max_distance";
+         } else {
+            if(chosen_tp <= 0.0) chosen_tp = p.fallback_tp;
+            applied_source = "ai_selected_synthetic_rr_fallback";
+            applied_target_model = "synthetic_rr_fallback";
+            applied_tp_model = "synthetic_rr_fallback";
+         }
       } else if(chosen_model == "current" || chosen_model == "current_plan" || chosen_model == "keep_current"){
          chosen_tp = p.tp2;
          applied_source = (StringLen(p.target_source) > 0 ? p.target_source : p.tp_model);
@@ -4853,6 +7162,14 @@ private:
 
       double rr = _TargetRR(p, chosen_tp);
       if(chosen_tp <= 0.0 || rr <= 0.0){
+         if(chose_fallback){
+            p.ai_chosen_target_model = applied_target_model;
+            string sanitize_reason = "";
+            if(_ApplyFeasibleTargetSanitizer(p, sanitize_reason))
+               return true;
+            reason = sanitize_reason;
+            return false;
+         }
          reason = "target_arbitration_invalid_target";
          return false;
       }
@@ -4924,16 +7241,21 @@ private:
       if(chose_liquidity) target_choice_counter = "liquidity_target";
       else if(chose_partial_liquidity) target_choice_counter = "partial_before_obstacle_then_liquidity";
       else if(chose_capped) target_choice_counter = "capped_before_obstacle";
+      else if(chose_synthetic_capped) target_choice_counter = "synthetic_rr_capped_to_max_distance";
       else if(chose_fallback) target_choice_counter = "synthetic_rr_fallback";
       _TrackNamedCounter(m_funnel_target_choice_models, m_funnel_target_choice_counts, target_choice_counter);
       _TrackNamedCounter(m_funnel_blocker_classes, m_funnel_blocker_class_counts, blocker_class);
+      _TrackNamedCounter(m_total_target_choice_models, m_total_target_choice_counts, target_choice_counter);
+      if(chose_capped && StringLen(p.target_model) > 0)
+         _TrackNamedCounter(m_total_target_choice_models, m_total_target_choice_counts, p.target_model);
+      _TrackNamedCounter(m_total_blocker_classes, m_total_blocker_class_counts, blocker_class);
       _Journal("[target_arbitration] required=" + (arbitration_was_required ? "true" : "false")
                + " chosen=" + p.target_model
                + " blocker_class=" + blocker_class
                + " severity=" + DoubleToString(severity, 2)
                + " allow=true"
-               + " score=" + DoubleToString(dec.score, 2)
-               + " confidence=" + DoubleToString(dec.confidence, 2));
+               + " llm_quality_score=" + DoubleToString(dec.llm_quality_score, 2)
+               + " llm_self_reported_confidence_diagnostic=" + DoubleToString(dec.llm_self_reported_confidence, 2));
       _Journal("[target_apply] chosen=" + p.target_model
                + " tp1=" + _FmtPrice(p.symbol, p.tp1)
                + " tp2=" + _FmtPrice(p.symbol, p.tp2)
@@ -5046,13 +7368,12 @@ private:
                + " buffer=" + DoubleToString(InpFallbackRRBufferR, 6)
                + " effective_fallback_rr=" + DoubleToString(fallback_rr, 6));
       double synthetic_reward = stop_dist * fallback_rr;
-      if(max_target_dist > 0.0 && synthetic_reward > max_target_dist)
-         synthetic_reward = max_target_dist;
       if(InpAllowSyntheticRRTarget && synthetic_reward > 0 && (saw_valid_target || saw_too_near)){
          double synthetic_target = (p.is_buy ? p.entry_est + synthetic_reward : p.entry_est - synthetic_reward);
          p.fallback_tp = synthetic_target;
          p.fallback_rr = fallback_rr;
          p.fallback_source = "synthetic_rr_fallback";
+         _RefreshTargetFeasibility(p, "pre_ai");
          string obstacle_kind = "";
          double obstacle_price = 0.0;
          bool obstacle_before = _HasOpposingObstacleBeforeTarget(p, p.entry_est, synthetic_target, obstacles,
@@ -5068,6 +7389,11 @@ private:
                p.capped_before_obstacle_source = "capped_before_" + obstacle_kind;
                p.obstacle_distance_r = (stop_dist > 0 ? MathAbs(obstacle_price - p.entry_est) / stop_dist : 0.0);
             }
+            p.obstacle_kind = _CrossedObstacleKind(obstacle_kind);
+            p.obstacle_price = obstacle_price;
+            p.obstacle_r = p.obstacle_distance_r;
+            p.obstacle_tf = (StringFind(obstacle_kind, "htf") >= 0 ? "htf" : "entry_tf");
+            _RefreshTargetFeasibility(p, "pre_ai_obstacle");
             if(capped_reward > 0 &&
                (min_target_dist <= 0 || capped_reward >= min_target_dist) &&
                _RRMeetsFloor(capped_rr, min_rr)){
@@ -5075,7 +7401,6 @@ private:
                p.tp_model = "capped_before_" + obstacle_kind;
                p.target_source = "capped_before_" + obstacle_kind;
                p.target_model = "capped_before_" + obstacle_kind;
-               p.obstacle_kind = obstacle_kind;
                p.obstacle_price = obstacle_price;
                p.obstacle_r = capped_rr;
                p.effective_rr2 = capped_rr;
@@ -5093,11 +7418,25 @@ private:
                reason = "synthetic_fallback_crossed_obstacle_blocked";
                return false;
             }
+            if(!p.fallback_feasible_for_tp2){
+               if(p.fallback_infeasible_reason == "exceeds_max_target_distance" &&
+                  p.synthetic_capped_to_max_distance_feasible){
+                  p.tp2 = p.synthetic_capped_to_max_distance_tp;
+                  p.tp_model = "synthetic_rr_capped_to_max_distance";
+                  p.target_source = "synthetic_rr_capped_to_max_distance";
+                  p.target_model = "synthetic_rr_capped_to_max_distance";
+                  p.effective_rr2 = p.synthetic_capped_to_max_distance_rr;
+                  _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
+                  return true;
+               }
+               reason = (StringLen(p.fallback_infeasible_reason) > 0 ? "synthetic_fallback_" + p.fallback_infeasible_reason : "target_too_close_for_swing_duration");
+               return false;
+            }
             p.tp2 = synthetic_target;
             p.tp_model = "synthetic_rr_fallback";
             p.target_source = "synthetic_rr_fallback";
             p.target_model = "synthetic_rr_fallback";
-            p.obstacle_kind = (obstacle_before ? "crossed_" + obstacle_kind : "");
+            p.obstacle_kind = (obstacle_before ? _CrossedObstacleKind(obstacle_kind) : "");
             p.obstacle_price = (obstacle_before ? obstacle_price : 0.0);
             p.obstacle_r = 0.0;
             p.effective_rr2 = (stop_dist > 0 ? reward / stop_dist : 0.0);
@@ -5180,6 +7519,246 @@ private:
 
    double _RewardToTarget(const bool is_buy, const double entry_price, const double target_price) {
       return (is_buy ? target_price - entry_price : entry_price - target_price);
+   }
+
+   bool _PriceAlreadyReachedTarget(const TradePlan &p, const double target_price, const double risk) const {
+      if(target_price <= 0.0) return true;
+      double bid = SymbolInfoDouble(p.symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(p.symbol, SYMBOL_ASK);
+      double point = SymbolInfoDouble(p.symbol, SYMBOL_POINT);
+      if(point <= 0.0) point = 0.00001;
+      double eps = MathMax(point * 2.0, risk * 0.01);
+      double px = (p.is_buy ? bid : ask);
+      if(px <= 0.0) return false;
+      return (p.is_buy ? px >= target_price - eps : px <= target_price + eps);
+   }
+
+   void _RefreshTargetFeasibility(TradePlan &p, const string stage) {
+      double risk = MathAbs(p.entry_est - p.sl);
+      double min_rr = MathMax(0.0, InpMinLiveRR2);
+      double max_dist = _MaxPlanTargetDistance(p, p.entry_est, risk);
+      double fallback_tp = p.fallback_tp;
+      double fallback_reward = _RewardToTarget(p.is_buy, p.entry_est, fallback_tp);
+      double fallback_rr = (risk > 0.0 && fallback_reward > 0.0 ? fallback_reward / risk : 0.0);
+      if(p.fallback_rr > 0.0) fallback_rr = p.fallback_rr;
+
+      p.fallback_feasible_for_tp2 = false;
+      p.fallback_feasible_for_tp1_only = false;
+      p.fallback_infeasible_reason = "";
+      p.fallback_reward_distance = MathMax(0.0, fallback_reward);
+      p.fallback_max_allowed_distance = max_dist;
+      p.synthetic_capped_to_max_distance_tp = 0.0;
+      p.synthetic_capped_to_max_distance_rr = 0.0;
+      p.synthetic_capped_to_max_distance_feasible = false;
+      p.synthetic_capped_to_max_distance_reason = "";
+
+      bool direction_valid = (fallback_tp > 0.0 && _IsRewardSideLevel(p.is_buy, p.entry_est, fallback_tp));
+      bool target_reached = _PriceAlreadyReachedTarget(p, fallback_tp, risk);
+      bool exceeds_max = (max_dist > 0.0 && fallback_reward > max_dist + _RREps());
+      bool rr_pass = _RRMeetsFloor(fallback_rr, min_rr);
+
+      if(fallback_tp <= 0.0) p.fallback_infeasible_reason = "missing_tp";
+      else if(risk <= 0.0) p.fallback_infeasible_reason = "no_valid_stop";
+      else if(!direction_valid) p.fallback_infeasible_reason = "invalid_direction";
+      else if(target_reached) p.fallback_infeasible_reason = "target_already_reached";
+      else if(exceeds_max) p.fallback_infeasible_reason = "exceeds_max_target_distance";
+      else if(!rr_pass) p.fallback_infeasible_reason = "rr_below_min";
+      else p.fallback_feasible_for_tp2 = true;
+
+      if(exceeds_max && risk > 0.0 && max_dist > 0.0){
+         double capped_rr = max_dist / risk;
+         double capped_tp = _TpFromReward(p, max_dist);
+         if(capped_tp > 0.0 && _RRMeetsFloor(capped_rr, min_rr) && !_PriceAlreadyReachedTarget(p, capped_tp, risk)){
+            p.synthetic_capped_to_max_distance_tp = capped_tp;
+            p.synthetic_capped_to_max_distance_rr = capped_rr;
+            p.synthetic_capped_to_max_distance_feasible = true;
+            p.synthetic_capped_to_max_distance_reason = "fallback_capped_by_max_distance";
+            m_total_target_feasibility_synthetic_capped_to_max_distance++;
+         }
+         m_total_target_feasibility_synthetic_infeasible_max_distance++;
+      }
+
+      if(StringLen(p.fallback_infeasible_reason) == 0 && !p.fallback_feasible_for_tp2)
+         p.fallback_infeasible_reason = "unknown";
+
+      if(StringLen(p.fallback_infeasible_reason) > 0 || p.fallback_tp > 0.0){
+         _Journal("[target_feasibility] stage=" + stage
+                  + " model=synthetic_rr_fallback"
+                  + " configured_rr=" + DoubleToString(InpFallbackRR2, 2)
+                  + " rr=" + DoubleToString(fallback_rr, 4)
+                  + " feasible=" + (p.fallback_feasible_for_tp2 ? "true" : "false")
+                  + " reason=" + (p.fallback_feasible_for_tp2 ? "ok" : p.fallback_infeasible_reason)
+                  + " reward=" + _FmtPrice(p.symbol, p.fallback_reward_distance)
+                  + " max_allowed=" + _FmtPrice(p.symbol, max_dist)
+                  + " target_reached=" + (target_reached ? "true" : "false")
+                  + " direction_valid=" + (direction_valid ? "true" : "false"));
+      }
+      if(p.synthetic_capped_to_max_distance_feasible){
+         _Journal("[target_feasibility] stage=" + stage
+                  + " model=synthetic_rr_capped_to_max_distance"
+                  + " tp=" + _FmtPrice(p.symbol, p.synthetic_capped_to_max_distance_tp)
+                  + " rr=" + DoubleToString(p.synthetic_capped_to_max_distance_rr, 4)
+                  + " feasible=true"
+                  + " reason=fallback_capped_by_max_distance");
+      }
+   }
+
+   bool _ApplySyntheticCappedToMaxDistance(TradePlan &p, const string reason) {
+      _RefreshTargetFeasibility(p, reason);
+      if(!p.synthetic_capped_to_max_distance_feasible) return false;
+      double old_tp = p.tp2;
+      double old_rr = _ExecutionRR2(p);
+      p.tp2 = p.synthetic_capped_to_max_distance_tp;
+      p.fallback_tp = p.tp2;
+      p.fallback_rr = p.synthetic_capped_to_max_distance_rr;
+      p.fallback_source = "synthetic_rr_capped_to_max_distance";
+      p.target_source = "ai_selected_synthetic_rr_capped_to_max_distance";
+      p.target_model = "synthetic_rr_capped_to_max_distance";
+      p.tp_model = "synthetic_rr_capped_to_max_distance";
+      p.effective_rr2 = p.synthetic_capped_to_max_distance_rr;
+      p.ai_chosen_target_model = "synthetic_rr_capped_to_max_distance";
+      p.ai_chosen_tp2 = p.tp2;
+      p.ai_chosen_rr2 = p.effective_rr2;
+      _Journal("[target_rebuild_downgrade] from=synthetic_rr_fallback"
+               + " to=synthetic_rr_capped_to_max_distance"
+               + " reason=max_distance_after_entry_change"
+               + " old_tp=" + _FmtPrice(p.symbol, old_tp)
+               + " new_tp=" + _FmtPrice(p.symbol, p.tp2)
+               + " old_rr=" + DoubleToString(old_rr, 4)
+               + " new_rr=" + DoubleToString(p.effective_rr2, 4));
+      return true;
+   }
+
+   bool _TargetPriceFeasibleForTp(TradePlan &p, const double target_price, const bool require_min_rr) {
+      if(target_price <= 0.0 || p.entry_est <= 0.0 || p.sl <= 0.0) return false;
+      double risk = MathAbs(p.entry_est - p.sl);
+      if(risk <= 0.0) return false;
+      if(!_IsRewardSideLevel(p.is_buy, p.entry_est, target_price)) return false;
+      if(_PriceAlreadyReachedTarget(p, target_price, risk)) return false;
+      double reward = _RewardToTarget(p.is_buy, p.entry_est, target_price);
+      if(reward <= 0.0) return false;
+      double max_dist = _MaxPlanTargetDistance(p, p.entry_est, risk);
+      if(max_dist > 0.0 && reward > max_dist + _RREps()) return false;
+      if(require_min_rr && !_RRMeetsFloor(reward / risk, MathMax(0.0, InpMinLiveRR2))) return false;
+      return true;
+   }
+
+   bool _CurrentTargetFeasibleForTp2(TradePlan &p) {
+      if(!_HasKnownTargetModel(p)) return false;
+      return _TargetPriceFeasibleForTp(p, p.tp2, true);
+   }
+
+   bool _PlanBlockerIsKiller(const TradePlan &p) {
+      string cls = _NormToken(p.ai_blocker_class);
+      double severity = p.ai_blocker_severity;
+      if(severity <= 0.0 && StringLen(p.obstacle_kind) > 0)
+         severity = _ObstacleSeverity(p.obstacle_kind, p.obstacle_distance_r);
+      return (p.ai_blocker_is_trade_killer || cls == "killer" || cls == "kill" || severity >= InpBlockerKillSeverity);
+   }
+
+   void _LogTargetSanitizerRewrite(const string from_model, const string to_model, const string reason, const TradePlan &p) {
+      _Journal("[target_sanitizer] from=" + from_model
+               + " to=" + to_model
+               + " reason=" + reason
+               + " tp1=" + _FmtPrice(p.symbol, p.tp1)
+               + " tp2=" + _FmtPrice(p.symbol, p.tp2)
+               + " rr2=" + DoubleToString(_ExecutionRR2(p), 6));
+   }
+
+   bool _ApplyFeasibleTargetSanitizer(TradePlan &p, string &reason) {
+      reason = "ok";
+      bool ai_context = (StringLen(p.ai_chosen_target_model) > 0 ||
+                         StringLen(p.ai.chosen_target_model) > 0 ||
+                         StringLen(p.ai_decision_id) > 0 ||
+                         StringLen(p.target_decision_reason) > 0 ||
+                         p.target_arbitration_required);
+      if(!ai_context) return true;
+
+      _NormalizeTargetLabels(p);
+      _RefreshTargetFeasibility(p, "target_sanitizer");
+      if(_CurrentTargetFeasibleForTp2(p))
+         return true;
+
+      string from_model = _EffectiveTargetModel(p);
+
+      if(InpAllowPartialBeforeObstacle &&
+         p.capped_before_obstacle_tp > 0.0 &&
+         p.liquidity_target_preserved > 0.0 &&
+         _TargetPriceFeasibleForTp(p, p.capped_before_obstacle_tp, false) &&
+         _TargetPriceFeasibleForTp(p, p.liquidity_target_preserved, true)){
+         p.tp1 = p.capped_before_obstacle_tp;
+         p.tp2 = p.liquidity_target_preserved;
+         p.target_source = "ai_selected_partial_then_liquidity";
+         p.target_model = "partial_before_obstacle_then_liquidity";
+         p.tp_model = "partial_then_liquidity";
+         p.effective_rr2 = _TargetRR(p, p.tp2);
+         p.ai_chosen_target_model = "partial_before_obstacle_then_liquidity";
+         p.ai_chosen_tp1 = p.tp1;
+         p.ai_chosen_tp2 = p.tp2;
+         p.ai.chosen_rr1 = _TargetRR(p, p.tp1);
+         p.ai_chosen_rr2 = p.effective_rr2;
+         _LogTargetSanitizerRewrite(from_model, "partial_before_obstacle_then_liquidity", "feasible_priority_target", p);
+         return true;
+      }
+
+      if(!_PlanBlockerIsKiller(p) &&
+         p.liquidity_target_preserved > 0.0 &&
+         _TargetPriceFeasibleForTp(p, p.liquidity_target_preserved, true)){
+         p.tp2 = p.liquidity_target_preserved;
+         p.target_source = "ai_selected_liquidity_target";
+         p.target_model = (StringLen(p.liquidity_target_model) > 0 ? p.liquidity_target_model : "liquidity_target");
+         p.tp_model = "liquidity_target";
+         p.effective_rr2 = _TargetRR(p, p.tp2);
+         p.ai_chosen_target_model = "liquidity_target";
+         p.ai_chosen_tp2 = p.tp2;
+         p.ai_chosen_rr2 = p.effective_rr2;
+         _LogTargetSanitizerRewrite(from_model, "liquidity_target", "feasible_priority_target", p);
+         return true;
+      }
+
+      if(p.capped_before_obstacle_tp > 0.0 &&
+         _TargetPriceFeasibleForTp(p, p.capped_before_obstacle_tp, true)){
+         p.tp2 = p.capped_before_obstacle_tp;
+         p.target_source = "ai_selected_capped_before_obstacle";
+         p.target_model = (StringLen(p.capped_before_obstacle_source) > 0 ? p.capped_before_obstacle_source : "capped_before_obstacle");
+         p.tp_model = "capped_before_obstacle";
+         p.effective_rr2 = _TargetRR(p, p.tp2);
+         p.ai_chosen_target_model = "capped_before_obstacle";
+         p.ai_chosen_tp2 = p.tp2;
+         p.ai_chosen_rr2 = p.effective_rr2;
+         _LogTargetSanitizerRewrite(from_model, "capped_before_obstacle", "feasible_priority_target", p);
+         return true;
+      }
+
+      if(p.synthetic_capped_to_max_distance_feasible &&
+         _TargetPriceFeasibleForTp(p, p.synthetic_capped_to_max_distance_tp, true)){
+         if(_ApplySyntheticCappedToMaxDistance(p, "target_sanitizer")){
+            _LogTargetSanitizerRewrite(from_model, "synthetic_rr_capped_to_max_distance", "feasible_priority_target", p);
+            return true;
+         }
+      }
+
+      if(p.fallback_feasible_for_tp2 &&
+         p.fallback_tp > 0.0 &&
+         _TargetPriceFeasibleForTp(p, p.fallback_tp, true)){
+         p.tp2 = p.fallback_tp;
+         p.target_source = "ai_selected_synthetic_rr_fallback";
+         p.target_model = "synthetic_rr_fallback";
+         p.tp_model = "synthetic_rr_fallback";
+         p.effective_rr2 = _TargetRR(p, p.tp2);
+         p.ai_chosen_target_model = "synthetic_rr_fallback";
+         p.ai_chosen_tp2 = p.tp2;
+         p.ai_chosen_rr2 = p.effective_rr2;
+         _LogTargetSanitizerRewrite(from_model, "synthetic_rr_fallback", "feasible_priority_target", p);
+         return true;
+      }
+
+      reason = "no_feasible_target";
+      _Journal("[target_sanitizer] reject=true reason=no_feasible_target"
+               + " from=" + from_model
+               + " fallback_reason=" + p.fallback_infeasible_reason
+               + " capped_feasible=" + (p.synthetic_capped_to_max_distance_feasible ? "true" : "false"));
+      return false;
    }
 
    bool _ResolveInitialStop(const TradePlan &p, const double buffer, double &out_sl, string &reason) {
@@ -5340,6 +7919,17 @@ private:
       }
 
       double tp1_reward = stop_dist * MathMax(0.40, p.tp1_r_multiple);
+      if(InpTP1UseFibExtension){
+         double tp1_swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
+         if(tp1_swing_range > 0.0 && InpTP1FibExtension > 1.0){
+            double fib_tp1 = (p.is_buy
+                              ? p.po3.swing_high + tp1_swing_range * (InpTP1FibExtension - 1.0)
+                              : p.po3.swing_low - tp1_swing_range * (InpTP1FibExtension - 1.0));
+            double fib_tp1_reward = _RewardToTarget(p.is_buy, p.entry_est, fib_tp1);
+            if(fib_tp1_reward > 0.0 && fib_tp1_reward < tp2_reward)
+               tp1_reward = fib_tp1_reward;
+         }
+      }
       double min_tp1_reward = MathMax(stop_dist * 0.65, spread_price * InpMinTP1SpreadMult);
       if(min_tp1_reward > 0) tp1_reward = MathMax(tp1_reward, min_tp1_reward);
       if(tp2_reward > 0) tp1_reward = MathMin(tp1_reward, tp2_reward * 0.70);
@@ -5408,7 +7998,7 @@ private:
       if((p.execution_cost_r + p.slippage_r + p.commission_r) > cost_ceiling){ reason = "runner_cost_burden"; return false; }
       if(p.htf_alignment_score < align_floor){ reason = "runner_htf_alignment"; return false; }
       if(p.adverse_context_score > adverse_ceiling){ reason = "runner_adverse_context"; return false; }
-      if(ev_floor > 0.0 && p.expected_value_r < ev_floor){ reason = "runner_ev_floor"; return false; }
+      if(ev_floor > 0.0 && p.net_reward_after_cost_r < ev_floor){ reason = "runner_net_reward_floor"; return false; }
       return true;
    }
 
@@ -5437,9 +8027,12 @@ private:
       }
       p.standard_target_after_downgrade = p.tp2;
       _EstimateExecutionCosts(p);
-      p.gross_expected_r = _ExpectedValueRGross(p);
-      p.net_expected_r = p.gross_expected_r - p.execution_cost_r - p.slippage_r - p.commission_r;
-      p.expected_value_r = p.net_expected_r;
+      p.heuristic_quality_estimate_gross = _HeuristicQualityEstimateGrossDiagnostic(p);
+      p.heuristic_quality_estimate = _HeuristicQualityEstimateDiagnostic(p);
+      p.net_reward_after_cost_r = MathMax(0.0, _ExecutionRR2(p)) - _TotalExecutionCostR(p);
+      p.gross_expected_r = p.heuristic_quality_estimate_gross;
+      p.net_expected_r = p.heuristic_quality_estimate;
+      p.expected_value_r = p.heuristic_quality_estimate;
       return (_RRMeetsFloor(_ExecutionRR2(p), min_rr) &&
               (p.execution_cost_r + p.slippage_r + p.commission_r) <= InpStandardTradeCostRCeiling);
    }
@@ -5490,25 +8083,42 @@ private:
          reason = "entry_retrace_not_confirmed";
          return false;
       }
-      if(execution_stage && _IsRealAccount() && InpUseAI && InpLiveFailClosedOnAIFailure && !InpAllowRuleOnlyLive){
-         if(StringFind(p.ai_decision_source, "rule_only") >= 0 || StringFind(p.ai_decision_source, "fallback") >= 0){
-            reason = "rule_only_live_blocked";
+      if(execution_stage && InpUseAI){
+         bool full_structured = (p.ai.decision_quality_tier == "FULL_STRUCTURED" ||
+                                 p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+         if(!full_structured){
+            reason = "degraded_ai_response_non_trading";
             return false;
          }
-         string ai_threshold_source = "";
-         double ai_threshold = EffectiveAiScoreThreshold(p, ai_threshold_source);
-         bool family_threshold_reject = (p.ai.reject_reason == "ai_score_below_family_threshold" ||
-                                         StringFind(p.ai.rejection_codes_json, "ai_score_below_family_threshold") >= 0);
-         if(!p.ai.allow && !family_threshold_reject){
+         if(!p.ai.mandatory_fields_complete){
+            reason = "ai_quality_schema_incomplete";
+            return false;
+         }
+         if(p.ai.decision_state == "ABSTAIN"){
+            reason = "ai_abstain";
+            return false;
+         }
+         if(p.ai.decision_state != "APPROVE" || !p.ai.allow || !p.ai.raw_allow){
             reason = "ai_raw_allow_false";
             return false;
          }
-         if(p.ai.score < ai_threshold){
-            reason = "ai_score_below_family_threshold";
+         if(p.ai.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
+            p.ai.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION){
+            reason = "ai_quality_schema_incomplete";
             return false;
          }
-         if(p.ai.confidence < InpMinAiConfidence){
-            reason = "ai_confidence_below_threshold";
+         if(!p.ai.repeatability_trading_eligible){
+            reason = "model_prompt_decision_non_repeatable";
+            return false;
+         }
+         string quality_threshold_source = "";
+         double quality_threshold = EffectiveLlmQualityScoreThreshold(p, quality_threshold_source);
+         if(p.ai.repeatability_score_threshold_authority && p.ai.llm_quality_score < quality_threshold){
+            reason = "llm_quality_score_below_family_threshold";
+            return false;
+         }
+         if(p.ai.suggested_risk_multiplier <= 0.0){
+            reason = "resolved_risk_multiplier_zero";
             return false;
          }
       }
@@ -5539,10 +8149,9 @@ private:
          reason = (_FamilyGroup(p) == "continuation" ? "continuation_cost_too_high" : "execution_cost_too_high");
          return false;
       }
-      p.net_expected_r = p.gross_expected_r - p.execution_cost_r - p.slippage_r - p.commission_r;
-      p.expected_value_r = p.net_expected_r;
-      if(p.net_expected_r < InpMinNetExpectedR){
-         reason = "net_expected_r_too_low";
+      p.net_reward_after_cost_r = MathMax(0.0, _ExecutionRR2(p)) - _TotalExecutionCostR(p);
+      if(p.net_reward_after_cost_r < InpMinNetExpectedR){
+         reason = "net_reward_after_cost_r_too_low";
          return false;
       }
       double floor = _DeterministicSetupScoreFloor(p);
@@ -5565,25 +8174,32 @@ private:
       return true;
    }
 
+   string _AiVetoReason(const AiDecision &dec) const {
+      if(!dec.ok) return "";
+      if(InpAiVetoEnable && dec.veto_fields_present){
+         if(dec.veto_enabled)
+            return "ai_veto:" + (StringLen(dec.veto_reason) > 0 ? dec.veto_reason : "model_veto");
+         if(dec.follow_through_probability < InpAiMinFollowThroughProb)
+            return "ai_veto:follow_through_probability";
+         if(dec.invalidation_risk > InpAiMaxInvalidationRisk)
+            return "ai_veto:invalidation_risk";
+         if(dec.chop_risk > InpAiMaxChopRisk)
+            return "ai_veto:chop_risk";
+         if(dec.post_entry_failure_risk > InpAiMaxPostEntryFailureRisk)
+            return "ai_veto:post_entry_failure_risk";
+         if(dec.final_trade_expectancy_score < InpAiMinFinalExpectancyScore)
+            return "ai_veto:final_trade_expectancy_score";
+      }
+      return "";
+   }
+
    bool _AiHardVeto(const AiDecision &dec) const {
-      if(!dec.ok) return false;
-      if(dec.allow) return false;
-      if(dec.confidence < 0.72) return false;
-      return (dec.score <= 5.20);
+      return (StringLen(_AiVetoReason(dec)) > 0);
    }
 
    double _RequiredAiScore(const TradePlan &p) const {
       string source = "";
-      return MathMax(0.0, EffectiveAiScoreThreshold(p, source));
-   }
-
-   double _RequiredAiConfidence(const TradePlan &p) const {
-      double confidence = InpMinAiConfidence;
-      if(!InpRequireConfirmedPO3ForExecution){
-         if(p.po3.context_tier == "B") confidence += 0.03;
-         else if(p.po3.context_tier == "C") confidence += 0.06;
-      }
-      return MathMin(0.95, confidence);
+      return MathMax(0.0, EffectiveLlmQualityScoreThreshold(p, source));
    }
 
    double _SetupScore(const TradePlan &p) {
@@ -5656,6 +8272,14 @@ private:
       p.fvg = zone;
       p.entry_branch = branch;
       p.entry_model = branch;
+      p.setup_taxonomy = UNKNOWN_UNCLASSIFIED;
+      p.setup_taxonomy_version = "";
+      p.setup_taxonomy_enum = "";
+      p.taxonomy_mapping_source = "";
+      p.taxonomy_mapping_failure_reason = "";
+      p.setup_type = "";
+      p.setup_subtype = "";
+      p.setup_story_scope = "";
       if(!_BranchEnabledByConfig(branch, reason)) return false;
       if(InpRequireFvgAfterDisp && p.po3.has_displacement && zone.t_form <= p.po3.t_disp){
          reason = "fvg_not_after_impulse";
@@ -5673,6 +8297,12 @@ private:
       }
       if(branch == "fvg_edge") p.entry_model = (p.is_buy ? "fvg_upper" : "fvg_lower");
       p.fvg_execution_class = _FvgExecutionClass(p);
+      string taxonomy_reason = "";
+      if(!_ResolveSetupTaxonomy(p, taxonomy_reason)){
+         reason = "unknown_setup_taxonomy";
+         _LogUnknownSetupTaxonomy(p, "candidate_generation");
+         return false;
+      }
       p.setup_family = _DeriveSetupFamily(p);
       string family_reason = "";
       if(!_FamilyAllowedByStrategy(p, family_reason)){
@@ -5709,6 +8339,7 @@ private:
          return false;
       }
       m_funnel_plan_prices_valid++;
+      m_total_plans_valid++;
       if(p.po3.state == PO3_FVG_CONFIRMED)
          PO3SetState(p.po3, PO3_ENTRY_WAITING, "valid_entry_zone_waiting");
       if(!m_po3.CheckOTE(p)){
@@ -5756,10 +8387,10 @@ private:
    }
 
    bool _CandidateRanksAhead(const TradePlan &a, const TradePlan &b) const {
-      if(a.expected_value_r > b.expected_value_r) return true;
-      if(a.expected_value_r < b.expected_value_r) return false;
       if(a.setup_score > b.setup_score) return true;
       if(a.setup_score < b.setup_score) return false;
+      if(a.net_reward_after_cost_r > b.net_reward_after_cost_r) return true;
+      if(a.net_reward_after_cost_r < b.net_reward_after_cost_r) return false;
       return (a.trend_strength > b.trend_strength);
    }
 
@@ -5802,8 +8433,37 @@ private:
    bool _AddToWatchlist(const TradePlan &p) {
       TradePlan staged = p;
       _InitializeNarrativeFields(staged);
+      bool full_structured = (staged.ai.decision_quality_tier == "FULL_STRUCTURED" || staged.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+      if(!full_structured || !staged.ai.mandatory_fields_complete || staged.ai.decision_state != "APPROVE" ||
+         !staged.ai.allow || !staged.ai.raw_allow){
+         string response_reason = (!full_structured ? "degraded_ai_response_non_trading" : "ai_quality_schema_incomplete");
+         if(staged.ai.decision_state == "ABSTAIN") response_reason = "ai_abstain";
+         _LogSetupReject(staged.symbol, "decision_integrity", response_reason,
+                         "decision_quality_tier=" + staged.ai.decision_quality_tier
+                         + " decision_state=" + staged.ai.decision_state);
+         return false;
+      }
+      if(staged.ai.suggested_risk_multiplier <= 0.0){
+         _LogSetupReject(staged.symbol, "decision_integrity", "resolved_risk_multiplier_zero", "stage=watchlist");
+         return false;
+      }
+      if(staged.candidate_hash != staged.ai_selected_candidate_hash ||
+         staged.ai.selected_candidate_hash != staged.candidate_hash ||
+         staged.request_execution_fingerprint != staged.ai.request_execution_fingerprint ||
+         _AssessedFingerprintFromDecision(staged, staged.ai) != staged.assessed_execution_fingerprint){
+         _LogSetupReject(staged.symbol, "decision_integrity", "candidate_hash_mismatch",
+                         "ai_selected_candidate_hash=" + staged.ai.selected_candidate_hash
+                         + " executed_candidate_hash=" + staged.candidate_hash);
+         return false;
+      }
       _FreezeSourcePO3Story(staged);
       _ApplySetupManagementProfile(staged);
+      string outcome_policy_reason = "";
+      bool was_mpc = _PlanIsMPC(staged);
+      if(!_ApplyOutcomePolicy(staged, "watchlist", outcome_policy_reason)){
+         if(was_mpc) m_total_mpc_watchlist_blocks++;
+         return false;
+      }
       if(_PlanUsesSyntheticFallback(staged) && !_RecomputeSyntheticFallbackTarget(staged, "watchlist_precheck_after_ai_or_rebuild")){
          _LogSetupReject(p.symbol, "ai_target_validation", "ai_selected_synthetic_fallback_invalid", "stage=watchlist_precheck");
          _Journal("[watchlist_precheck] pass=false reason=ai_selected_synthetic_fallback_invalid action=not_added");
@@ -5863,11 +8523,20 @@ private:
          _WriteTradeMeta(staged);
          m_funnel_watchlist_precheck_rejects++;
          _TrackNamedCounter(m_funnel_watchlist_precheck_reasons, m_funnel_watchlist_precheck_counts, precheck_reason);
+         _TrackNamedCounter(m_total_watchlist_precheck_reasons, m_total_watchlist_precheck_counts, precheck_reason);
          _LogSetupReject(p.symbol, "watchlist_precheck", precheck_reason,
                          "entry=" + _FmtPrice(staged.symbol, staged.entry_est)
                          + " tp2=" + _FmtPrice(staged.symbol, staged.tp2)
                          + " rr2=" + DoubleToString(_ExecutionRR2(staged), 6));
          _Journal("[watchlist_precheck] pass=false reason=" + precheck_reason + " action=not_added");
+         return false;
+      }
+      string fingerprint_changes = "";
+      if(!_ExecutionFingerprintWithinTolerance(staged, fingerprint_changes)){
+         _LogSetupReject(staged.symbol, "decision_integrity", "execution_fingerprint_mismatch",
+                         "stage=watchlist changed_components=" + fingerprint_changes
+                         + " assessed_execution_fingerprint=" + staged.assessed_execution_fingerprint
+                         + " final_execution_fingerprint=" + staged.final_execution_fingerprint);
          return false;
       }
       _Journal("[watchlist_precheck] pass=true reason=" + precheck_reason + " action=added");
@@ -5883,7 +8552,7 @@ private:
       m_watchlist[n].bars_waited = 0;
       m_watchlist[n].armed = false;
       m_watchlist[n].armed_at = 0;
-      if(StringLen(m_watchlist[n].ai_decision_source) == 0) m_watchlist[n].ai_decision_source = "rule_only_fallback";
+      if(StringLen(m_watchlist[n].ai_decision_source) == 0) m_watchlist[n].ai_decision_source = "llm_full_structured";
       m_watchlist[n].narrative_state = "staged";
       m_funnel_watchlist_added++;
       m_total_watchlist_added++;
@@ -5928,6 +8597,16 @@ private:
          cands[i].ai_result_age_sim_minutes = 0;
          cands[i].tester_ai_result_stale = false;
       }
+      if(!_FilterOutcomePolicyBeforeAI(cands)){
+         _Journal("candidate group dropped: outcome policy removed all candidates before AI");
+         return false;
+      }
+      count = ArraySize(cands);
+      for(int i=0; i<count; i++){
+         cands[i].candidate_index = i;
+         cands[i].candidate_count = count;
+         _PrepareDecisionIdentity(cands[i]);
+      }
       string group_signature = _GroupSignature(cands);
       string tester_cache_signature = _TesterAiCacheSignature(cands);
       AiDecision cached_decision;
@@ -5935,14 +8614,26 @@ private:
          if(_QueueTesterCachedDecision(cands, tester_cache_signature, cached_decision)) return true;
          _Journal(cands[0].symbol + " tester AI cache response staging failed; using normal AI path");
       }
+      if(InpUseAI && MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY){
+         m_total_reject_tester_ai_cache_miss++;
+         m_total_ai_cache_misses++;
+         _LogSetupReject(cands[0].symbol, "ai", "tester_ai_cache_miss",
+                         "signature=" + tester_cache_signature
+                         + " tester_ai_cache=" + (InpTesterAiCache ? "true" : "false")
+                         + " tester_ai_mode=cache_only");
+         _Journal("[tester_ai_mode] mode=cache_only cache_miss=true live_ai_calls=false action=reject tester_ai_cache_miss"
+                  + " symbol=" + cands[0].symbol
+                  + " signature=" + tester_cache_signature);
+         return false;
+      }
       int cooldown_remaining = 0;
       if(InpUseAI && _IsAiCooldownActive(cands[0].symbol, group_signature, cooldown_remaining)){
          _Journal(cands[0].symbol + " AI request skipped: unchanged setup cooling down for "
                   + IntegerToString(cooldown_remaining) + "s");
          if(InpAiStrict) return false;
-         _Journal(cands[0].symbol + " AI cooldown bypassed via rules-only watchlist because strict AI is off");
-         if(!_ApplyRuleFallback(cands[0], "cooldown")) return false;
-         return _AddToWatchlist(cands[0]);
+         _Journal(cands[0].symbol + " AI cooldown decision_quality_tier=RULE_ONLY_NON_TRADING action=reject");
+         _ApplyRuleOnlyNonTradingDiagnostic(cands[0], "cooldown");
+         return false;
       }
       if(!_CaptureSnapshotsForPlans(cands)){
          _RememberAiCooldown(cands[0].symbol, group_signature, "snapshot_missing");
@@ -5954,10 +8645,38 @@ private:
 
       if(InpUseAI){
          string req_id;
-         if(m_ai.SendRequestCandidates(cands, req_id)){
+         string tester_cache_key = _TesterAiCacheKey(tester_cache_signature);
+         if(MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_RECORD_ONLY){
+            if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key)){
+               m_funnel_ai_requests++;
+               m_total_ai_requests_queued++;
+               m_total_record_only_requests_exported++;
+               _LogSetupReject(cands[0].symbol, "ai", "tester_ai_record_only",
+                               "req_id=" + req_id
+                               + " candidates=" + IntegerToString(count)
+                               + " tester_cache_key=" + tester_cache_key
+                               + " tester_cache_signature=" + tester_cache_signature);
+               _Journal("[tester_ai_mode] mode=record_only request_recorded=true req_id=" + req_id
+                        + " action=reject_no_trade"
+                        + " tester_cache_key=" + tester_cache_key
+                        + " tester_cache_signature=" + tester_cache_signature);
+            } else {
+               _LogSetupReject(cands[0].symbol, "ai", "ai_transport_error",
+                               "record_only=true candidate_count=" + IntegerToString(count));
+            }
+            return false;
+         }
+         if(MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG)
+            _Journal("[tester_ai_mode] mode=live_wait_debug"
+                     + " warning=tester_live_ai_wait_not_backtest_safe"
+                     + " allow_trading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false")
+                     + " default_action=" + (InpTesterAllowLiveWaitDebugTrading ? "trade_only_if_sim_age_safe" : "record_response_do_not_trade"));
+         if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key)){
             m_funnel_ai_requests++;
             m_total_ai_requests_queued++;
-            _Journal(cands[0].symbol + " AI request queued candidates=" + IntegerToString(count) + " req_id=" + req_id);
+            _Journal(cands[0].symbol + " AI request queued candidates=" + IntegerToString(count)
+                     + " req_id=" + req_id
+                     + (MQLInfoInteger(MQL_TESTER) ? " tester_cache_key=" + tester_cache_key : ""));
             int base = ArraySize(m_pending_ai);
             ArrayResize(m_pending_ai, base + count);
             datetime sim_now = TimeCurrent();
@@ -5981,11 +8700,11 @@ private:
          _Journal(cands[0].symbol + " AI request failed to send");
          m_ai.NotifyFailureBackoff();
          if(InpAiStrict) return false;
-         _Journal(cands[0].symbol + " falling back to rules-only watchlist mode");
+         _Journal(cands[0].symbol + " decision_quality_tier=RULE_ONLY_NON_TRADING action=reject reason=send_failed");
       }
 
-      if(!_ApplyRuleFallback(cands[0], (InpUseAI ? "send_failed" : "ai_disabled"))) return false;
-      return _AddToWatchlist(cands[0]);
+      _ApplyRuleOnlyNonTradingDiagnostic(cands[0], (InpUseAI ? "send_failed" : "ai_disabled"));
+      return false;
    }
 
    void _RemovePendingGroup(const string req_id) {
@@ -5998,39 +8717,17 @@ private:
       }
    }
 
-   bool _FallbackPendingGroup(const string req_id, const string reason) {
-      TradePlan selected;
-      bool have_selected = false;
+   bool _RejectPendingGroupAsNonTrading(const string req_id, const string reason) {
       string group_symbol = "";
       for(int i=0; i<ArraySize(m_pending_ai); i++){
          if(m_pending_ai[i].req_id != req_id) continue;
          if(StringLen(group_symbol) == 0) group_symbol = m_pending_ai[i].symbol;
-         if(!have_selected || m_pending_ai[i].expected_value_r > selected.expected_value_r ||
-            (m_pending_ai[i].expected_value_r == selected.expected_value_r &&
-             m_pending_ai[i].setup_score > selected.setup_score)){
-            selected = m_pending_ai[i];
-            have_selected = true;
-         }
+         _ApplyRuleOnlyNonTradingDiagnostic(m_pending_ai[i], reason);
       }
-      if(!have_selected){
-         _RemovePendingGroup(req_id);
-         return false;
-      }
-
-      selected.req_id = "";
-      selected.ai_requested_at = 0;
-      selected.ai_requested_wall_ms = 0;
-      if(!_ApplyRuleFallback(selected, reason)){
-         _RemovePendingGroup(req_id);
-         return false;
-      }
-      selected.last_confirm_bar_time = _LastClosedBarTime(selected.symbol, selected.confirm_tf);
-      _Journal(group_symbol + " AI " + reason + " -> rules fallback candidate="
-               + IntegerToString(selected.candidate_index)
-               + " setup_score=" + DoubleToString(selected.setup_score, 2));
-      bool added = _AddToWatchlist(selected);
+      _Journal(group_symbol + " AI " + reason
+               + " decision_quality_tier=RULE_ONLY_NON_TRADING action=reject_all_candidates");
       _RemovePendingGroup(req_id);
-      return added;
+      return false;
    }
 
    void _UpdateNarrativeFromLive(TradePlan &p, const PO3Context &live_po3) {
@@ -6409,6 +9106,38 @@ private:
                   + " reason=final_hard_safety_" + hard_safety_reason);
          return false;
       }
+      string relax_session_reason = "";
+      if(!_ApplyBrokerSessionEntryGate(relaxed, relax_session_reason)){
+         _Journal(meta.symbol + " pending entry relax skipped old_entry=" + _FmtPrice(meta.symbol, old_entry)
+                  + " relaxed_entry=" + _FmtPrice(meta.symbol, relaxed_entry)
+                  + " reason=broker_session_gate_" + relax_session_reason);
+         return false;
+      }
+      double pending_volume = OrderGetDouble(ORDER_VOLUME_CURRENT);
+      double old_pending_risk = _RiskMoneyForPosition(meta.symbol, meta.is_buy, pending_volume,
+                                                      old_entry, OrderGetDouble(ORDER_SL));
+      double new_pending_risk = _RiskMoneyForPosition(meta.symbol, meta.is_buy, pending_volume,
+                                                      relaxed_entry, relaxed.sl);
+      if(new_pending_risk <= 0.0){
+         _Journal(meta.symbol + " pending entry relax skipped reason=modified_original_risk_unavailable");
+         return false;
+      }
+      double incremental_risk = MathMax(0.0, new_pending_risk - MathMax(0.0, old_pending_risk));
+      if(incremental_risk > 0.0000001){
+         string relax_portfolio_reason = "";
+         if(!_ApplyFinalPortfolioRiskGovernance(relaxed, incremental_risk, relax_portfolio_reason)){
+            _Journal(meta.symbol + " pending entry relax skipped reason=portfolio_initial_risk_gate_" + relax_portfolio_reason);
+            return false;
+         }
+      }
+      relaxed.executed_candidate_hash = relaxed.candidate_hash;
+      string relax_fingerprint_changes = "";
+      if(!_ExecutionFingerprintWithinTolerance(relaxed, relax_fingerprint_changes)){
+         _Journal("[execution_fingerprint] match=false stage=pending_relax changed_components=" + relax_fingerprint_changes
+                  + " assessed=" + relaxed.assessed_execution_fingerprint
+                  + " final=" + relaxed.final_execution_fingerprint);
+         return false;
+      }
 
       ENUM_ORDER_TYPE_TIME type_time = (expiry > 0 ? ORDER_TIME_SPECIFIED : ORDER_TIME_GTC);
       if(!m_trade.OrderModify(ticket, relaxed_entry, relaxed.sl, relaxed.tp2, type_time, expiry)){
@@ -6422,6 +9151,7 @@ private:
       relaxed.planned_sl = relaxed.sl;
       relaxed.planned_tp1 = relaxed.tp1;
       relaxed.planned_tp2 = relaxed.tp2;
+      _CaptureEntryRiskContext(relaxed, pending_volume, relaxed_entry, relaxed.sl);
       relaxed.narrative_state = "pending_order";
       relaxed.bars_waited = meta.bars_waited;
       relaxed.last_confirm_bar_time = meta.last_confirm_bar_time;
@@ -6479,22 +9209,303 @@ private:
       if(meta.planned_tp1 <= 0) meta.planned_tp1 = meta.tp1;
       if(meta.planned_tp2 <= 0) meta.planned_tp2 = meta.tp2;
       if(meta.planned_at <= 0) meta.planned_at = (meta.created_at > 0 ? meta.created_at : _NowServerOrLocal());
-      if(StringLen(meta.ai_decision_source) == 0) meta.ai_decision_source = "rule_only_fallback";
+      if(StringLen(meta.ai_decision_source) == 0) meta.ai_decision_source = "unavailable_non_trading";
       string j = m_state.TradePlanToJson(meta);
       m_bus.WriteText(_TradeKeyPath(meta.trade_key), j);
       if(StringLen(meta.broker_comment) > 0 && meta.broker_comment != meta.trade_key)
          m_bus.WriteText(_TradeKeyPath(meta.broker_comment), j);
       if(ticket > 0) m_bus.WriteText(_TradeTicketPath(ticket), j);
-      if(meta.position_id > 0) m_bus.WriteText(_TradeTicketPath((ulong)meta.position_id), j);
+      if(meta.result_order_ticket > 0){
+         m_bus.WriteText(_TradeOrderPath(meta.result_order_ticket), j);
+         m_bus.WriteText(_TradeTicketPath(meta.result_order_ticket), j);
+      }
+      if(meta.result_deal_ticket > 0) m_bus.WriteText(_TradeDealPath(meta.result_deal_ticket), j);
+      if(meta.broker_position_ticket > 0){
+         m_bus.WriteText(_TradePositionPath(meta.broker_position_ticket), j);
+         m_bus.WriteText(_TradeTicketPath(meta.broker_position_ticket), j);
+      }
+      if(meta.broker_position_identifier > 0)
+         m_bus.WriteText(_TradePositionIdentifierPath(meta.broker_position_identifier), j);
+      if(meta.position_id > 0)
+         m_bus.WriteText(_TradePositionIdentifierPath(meta.position_id), j);
+   }
+
+   bool _TradeMetaIdentityMatches(const TradePlan &p,
+                                  const ulong ticket,
+                                  const string symbol,
+                                  const string comment) const {
+      if(StringLen(symbol) > 0 && p.symbol != symbol) return false;
+      if(StringLen(comment) > 0 && p.broker_comment != comment && p.trade_key != comment) return false;
+      if(ticket <= 0) return false;
+      return (p.result_order_ticket == ticket ||
+              p.result_deal_ticket == ticket ||
+              p.broker_position_ticket == ticket ||
+              p.broker_position_identifier == (long)ticket ||
+              p.position_id == (long)ticket);
    }
 
    bool _LoadTradeMeta(const ulong ticket, const string symbol, const string comment, TradePlan &p){
-      if(ticket > 0 && _ReadTradeMetaPath(_TradeTicketPath(ticket), p)) return true;
+      if(ticket > 0 && _ReadTradeMetaPath(_TradePositionPath(ticket), p) &&
+         _TradeMetaIdentityMatches(p, ticket, symbol, comment)) return true;
+      if(ticket > 0 && _ReadTradeMetaPath(_TradeOrderPath(ticket), p) &&
+         _TradeMetaIdentityMatches(p, ticket, symbol, comment)) return true;
+      if(ticket > 0 && _ReadTradeMetaPath(_TradeDealPath(ticket), p) &&
+         _TradeMetaIdentityMatches(p, ticket, symbol, comment)) return true;
+      if(ticket > 0 && _ReadTradeMetaPath(_TradePositionIdentifierPath((long)ticket), p) &&
+         _TradeMetaIdentityMatches(p, ticket, symbol, comment)) return true;
+      if(ticket > 0 && _ReadTradeMetaPath(_TradeTicketPath(ticket), p) &&
+         _TradeMetaIdentityMatches(p, ticket, symbol, comment)) return true;
       if(StringLen(comment) > 0 && _ReadTradeMetaPath(_TradeKeyPath(comment), p)){
-         if(ticket > 0) _WriteTradeMeta(p, ticket);
+         if(!_TradeMetaIdentityMatches(p, ticket, symbol, comment)) return false;
+         _WriteTradeMeta(p, ticket);
          return true;
       }
-      return _ReadTradeMetaPath(_LegacyTradeSymbolPath(symbol), p);
+      return false;
+   }
+
+   ulong _FindPositionTicketByIdentifier(const long position_identifier) {
+      if(position_identifier <= 0) return 0;
+      for(int i=0; i<PositionsTotal(); i++){
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0 || !PositionMatchesMagic(ticket)) continue;
+         if((long)PositionGetInteger(POSITION_IDENTIFIER) == position_identifier) return ticket;
+      }
+      return 0;
+   }
+
+   void _QuarantineExecutionIdentity(TradePlan &meta,
+                                     const string reason,
+                                     const ulong order_ticket,
+                                     const ulong deal_ticket) {
+      meta.result_order_ticket = order_ticket;
+      meta.result_deal_ticket = deal_ticket;
+      meta.execution_identity_verified = false;
+      meta.execution_identity_quarantined = true;
+      meta.execution_identity_reason = reason;
+      meta.account_position_mode = m_account_position_mode;
+      meta.attribution_status = "QUARANTINED";
+      meta.attribution_error = reason;
+      meta.learning_eligible = false;
+      meta.optimization_eligible = false;
+      meta.suppression_eligible = false;
+      meta.ledger_integrity_status = "QUARANTINED";
+      meta.ledger_integrity_reasons = "[\"" + JsonEscape(reason) + "\"]";
+      meta.ledger_schema_version = TRADE_LEDGER_SCHEMA_VERSION;
+      FolderCreate(_ExecutionIdentityQuarantineDir(), FILE_COMMON);
+      string leaf = "identity_" + IntegerToString((long)(order_ticket > 0 ? order_ticket : deal_ticket))
+                    + "_" + IntegerToString((long)_NowServerOrLocal()) + ".json";
+      string row = "{";
+      row += JsonKVInt("created_at", (int)_NowServerOrLocal()) + ",";
+      row += JsonKVStr("reason", reason) + ",";
+      row += JsonKVStr("account_position_mode", m_account_position_mode) + ",";
+      row += JsonKVStr("symbol", meta.symbol) + ",";
+      row += JsonKVStr("trade_key", meta.trade_key) + ",";
+      row += JsonKVStr("broker_comment", meta.broker_comment) + ",";
+      row += JsonKVStr("candidate_id", meta.candidate_id) + ",";
+      row += JsonKVStr("candidate_hash", meta.candidate_hash) + ",";
+      row += JsonKVStr("execution_fingerprint", meta.final_execution_fingerprint) + ",";
+      row += JsonKVNum("order_ticket", (double)order_ticket, 0) + ",";
+      row += JsonKVNum("deal_ticket", (double)deal_ticket, 0);
+      row += "}";
+      m_bus.WriteText(_ExecutionIdentityQuarantineDir() + "\\" + leaf, row);
+      _WriteTradeMeta(meta, order_ticket);
+      _Journal("[execution_identity_quarantine] reason=" + reason
+               + " order_ticket=" + IntegerToString((long)order_ticket)
+               + " deal_ticket=" + IntegerToString((long)deal_ticket)
+               + " candidate_hash=" + meta.candidate_hash);
+   }
+
+   bool _ResolveExactExecutionIdentity(TradePlan &meta,
+                                       const ulong order_ticket,
+                                       const ulong deal_ticket,
+                                       const double requested_volume,
+                                       string &reason) {
+      reason = "";
+      meta.result_order_ticket = order_ticket;
+      meta.result_deal_ticket = deal_ticket;
+      meta.account_position_mode = m_account_position_mode;
+      if(order_ticket == 0){ reason = "missing_result_order_ticket"; return false; }
+      if(deal_ticket == 0){ reason = "missing_result_deal_ticket"; return false; }
+      if(StringLen(meta.trade_key) == 0 || StringLen(meta.candidate_id) == 0 ||
+         StringLen(meta.candidate_hash) == 0 || StringLen(meta.final_execution_fingerprint) == 0){
+         reason = "missing_trade_candidate_or_fingerprint_identity";
+         return false;
+      }
+
+      if(!HistoryDealSelect(deal_ticket)){
+         datetime now = _NowServerOrLocal();
+         HistorySelect(now - 86400, now + 60);
+      }
+      if(!HistoryDealSelect(deal_ticket)){ reason = "result_deal_not_in_history"; return false; }
+      if((ulong)HistoryDealGetInteger(deal_ticket, DEAL_ORDER) != order_ticket){
+         reason = "deal_order_ticket_mismatch";
+         return false;
+      }
+      if((ulong)HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != InpMagicNumber){
+         reason = "deal_magic_mismatch";
+         return false;
+      }
+      if(HistoryDealGetString(deal_ticket, DEAL_SYMBOL) != meta.symbol){
+         reason = "deal_symbol_mismatch";
+         return false;
+      }
+      ENUM_DEAL_ENTRY deal_entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+      if(deal_entry != DEAL_ENTRY_IN && deal_entry != DEAL_ENTRY_INOUT){
+         reason = "deal_is_not_entry";
+         return false;
+      }
+      ENUM_DEAL_TYPE deal_type = (ENUM_DEAL_TYPE)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
+      if((meta.is_buy && deal_type != DEAL_TYPE_BUY) || (!meta.is_buy && deal_type != DEAL_TYPE_SELL)){
+         reason = "deal_direction_mismatch";
+         return false;
+      }
+      double volume_step = SymbolInfoDouble(meta.symbol, SYMBOL_VOLUME_STEP);
+      double volume_tolerance = MathMax(InpLedgerVolumeReconciliationTolerance, volume_step * 0.51);
+      double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
+      if(requested_volume <= 0.0 || MathAbs(deal_volume - requested_volume) > volume_tolerance){
+         reason = "deal_volume_mismatch";
+         return false;
+      }
+
+      if(!HistoryOrderSelect(order_ticket)){ reason = "result_order_not_in_history"; return false; }
+      if((ulong)HistoryOrderGetInteger(order_ticket, ORDER_MAGIC) != InpMagicNumber){
+         reason = "order_magic_mismatch";
+         return false;
+      }
+      if(HistoryOrderGetString(order_ticket, ORDER_SYMBOL) != meta.symbol){
+         reason = "order_symbol_mismatch";
+         return false;
+      }
+      string order_comment = HistoryOrderGetString(order_ticket, ORDER_COMMENT);
+      if(StringLen(meta.broker_comment) == 0 || order_comment != meta.broker_comment){
+         reason = "order_comment_mismatch";
+         return false;
+      }
+      double order_volume = HistoryOrderGetDouble(order_ticket, ORDER_VOLUME_INITIAL);
+      if(MathAbs(order_volume - requested_volume) > volume_tolerance){
+         reason = "order_volume_mismatch";
+         return false;
+      }
+
+      long position_identifier = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+      if(position_identifier <= 0){ reason = "missing_deal_position_id"; return false; }
+      ulong position_ticket = _FindPositionTicketByIdentifier(position_identifier);
+      if(position_ticket == 0 || !PositionSelectByTicket(position_ticket)){
+         reason = "exact_position_not_found_by_deal_position_id";
+         return false;
+      }
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber){
+         reason = "position_magic_mismatch";
+         return false;
+      }
+      if(PositionGetString(POSITION_SYMBOL) != meta.symbol){
+         reason = "position_symbol_mismatch";
+         return false;
+      }
+      ENUM_POSITION_TYPE position_type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      if((meta.is_buy && position_type != POSITION_TYPE_BUY) || (!meta.is_buy && position_type != POSITION_TYPE_SELL)){
+         reason = "position_direction_mismatch";
+         return false;
+      }
+      if(PositionGetString(POSITION_COMMENT) != meta.broker_comment){
+         reason = "position_comment_mismatch";
+         return false;
+      }
+      double position_volume = PositionGetDouble(POSITION_VOLUME);
+      if(position_volume <= 0.0 || MathAbs(position_volume - requested_volume) > volume_tolerance){
+         reason = "position_volume_mismatch";
+         return false;
+      }
+      datetime deal_time = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
+      datetime position_time = (datetime)PositionGetInteger(POSITION_TIME);
+      if(deal_time <= 0 || position_time <= 0 ||
+         MathAbs((double)(position_time - deal_time)) > (double)MathMax(0, InpLedgerTimestampToleranceSec)){
+         reason = "position_open_time_mismatch";
+         return false;
+      }
+
+      meta.position_id = position_identifier;
+      meta.broker_position_identifier = position_identifier;
+      meta.broker_position_ticket = position_ticket;
+      meta.filled_entry = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
+      meta.filled_at = deal_time;
+      meta.execution_identity_verified = true;
+      meta.execution_identity_quarantined = false;
+      meta.execution_identity_reason = "verified_order_deal_position_chain";
+      meta.attribution_status = "VERIFIED";
+      meta.attribution_error = "";
+      meta.learning_eligible = false;
+      meta.optimization_eligible = false;
+      meta.suppression_eligible = false;
+      meta.ledger_integrity_status = "UNATTRIBUTED";
+      meta.ledger_integrity_reasons = "[\"outcome_not_closed_or_audited\"]";
+      meta.ledger_schema_version = TRADE_LEDGER_SCHEMA_VERSION;
+      _Journal("[execution_identity] order_ticket=" + IntegerToString((long)order_ticket)
+               + " deal_ticket=" + IntegerToString((long)deal_ticket)
+               + " position_id=" + IntegerToString(position_identifier)
+               + " position_ticket=" + IntegerToString((long)position_ticket)
+               + " trade_key=" + meta.trade_key
+               + " candidate_hash=" + meta.candidate_hash
+               + " execution_fingerprint=" + meta.final_execution_fingerprint
+               + " verified=true account_mode=" + m_account_position_mode);
+      return true;
+   }
+
+   ulong _FindEntryDealForOrder(const ulong order_ticket, const long expected_position_identifier=0) {
+      if(order_ticket == 0) return 0;
+      datetime now = _NowServerOrLocal();
+      if(!HistorySelect(now - MathMax(1, InpAnalyticsHistoryDays) * 86400, now + 60)) return 0;
+      for(int i=HistoryDealsTotal()-1; i>=0; i--){
+         ulong deal_ticket = HistoryDealGetTicket(i);
+         if(deal_ticket == 0) continue;
+         if((ulong)HistoryDealGetInteger(deal_ticket, DEAL_ORDER) != order_ticket) continue;
+         if((ulong)HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != InpMagicNumber) continue;
+         ENUM_DEAL_ENTRY entry_kind = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+         if(entry_kind != DEAL_ENTRY_IN && entry_kind != DEAL_ENTRY_INOUT) continue;
+         long position_identifier = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+         if(expected_position_identifier > 0 && position_identifier != expected_position_identifier) continue;
+         return deal_ticket;
+      }
+      return 0;
+   }
+
+   bool _LoadAndResolvePositionMeta(const ulong position_ticket,
+                                    const string symbol,
+                                    const string comment,
+                                    TradePlan &meta,
+                                    string &reason) {
+      reason = "";
+      if(_LoadTradeMeta(position_ticket, symbol, comment, meta)){
+         if(meta.execution_identity_verified && !meta.execution_identity_quarantined) return true;
+      }
+      if(!PositionSelectByTicket(position_ticket)){ reason = "position_not_selectable"; return false; }
+      long position_identifier = (long)PositionGetInteger(POSITION_IDENTIFIER);
+      TradePlan pending_meta;
+      bool have_pending_meta = false;
+      if(StringLen(comment) > 0)
+         have_pending_meta = _ReadTradeMetaPath(_TradeKeyPath(comment), pending_meta);
+      if(!have_pending_meta || pending_meta.result_order_ticket == 0){
+         reason = "missing_exact_order_metadata_for_position";
+         return false;
+      }
+      if(pending_meta.symbol != symbol || pending_meta.broker_comment != comment){
+         reason = "pending_metadata_symbol_or_comment_mismatch";
+         return false;
+      }
+      ulong entry_deal = _FindEntryDealForOrder(pending_meta.result_order_ticket, position_identifier);
+      if(entry_deal == 0){ reason = "entry_deal_not_found_for_order_and_position"; return false; }
+      if(!_ResolveExactExecutionIdentity(pending_meta,
+                                         pending_meta.result_order_ticket,
+                                         entry_deal,
+                                         pending_meta.initial_volume,
+                                         reason)) return false;
+      if(pending_meta.broker_position_ticket != position_ticket){
+         reason = "resolved_position_ticket_mismatch";
+         return false;
+      }
+      meta = pending_meta;
+      _WriteTradeMeta(meta, position_ticket);
+      return true;
    }
 
    void _NormalizeRecoveredExposureMeta(TradePlan &meta,
@@ -6570,14 +9581,27 @@ private:
          long position_id = (long)PositionGetInteger(POSITION_IDENTIFIER);
 
          TradePlan meta;
-         bool had_meta = _LoadTradeMeta(ticket, sym, comment, meta);
-         if(!had_meta) ZeroMemory(meta);
+         string identity_reason = "";
+         bool had_meta = _LoadAndResolvePositionMeta(ticket, sym, comment, meta, identity_reason);
+         if(!had_meta){
+            ZeroMemory(meta);
+            meta.symbol = sym;
+            meta.broker_comment = comment;
+            meta.trade_key = comment;
+            meta.position_id = position_id;
+            meta.broker_position_identifier = position_id;
+            meta.broker_position_ticket = ticket;
+         }
          _NormalizeRecoveredExposureMeta(meta, sym, is_buy, entry, sl, tp, vol, opened, comment, position_id, false);
+         if(!had_meta)
+            _QuarantineExecutionIdentity(meta, "restart_position_attribution_unavailable:" + identity_reason, 0, 0);
          double live_px = (is_buy ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK));
          if(live_px <= 0.0) live_px = entry;
-         _UpdateAnalyticsSnapshot(meta, ticket, live_px, vol);
+         if(meta.execution_identity_verified && !meta.execution_identity_quarantined)
+            _UpdateAnalyticsSnapshot(meta, ticket, live_px, vol);
          _WriteTradeMeta(meta, ticket);
-         _RememberConsumedSweep(meta);
+         if(meta.execution_identity_verified && !meta.execution_identity_quarantined)
+            _RememberConsumedSweep(meta);
          if(had_meta) repaired_positions++;
          else recovered_positions++;
          _Journal(sym + " managed position " + (had_meta ? "reattached" : "recovered")
@@ -6605,8 +9629,20 @@ private:
 
          TradePlan meta;
          bool had_meta = _LoadTradeMeta(ticket, sym, comment, meta);
-         if(!had_meta) ZeroMemory(meta);
+         if(!had_meta){
+            ZeroMemory(meta);
+            meta.symbol = sym;
+            meta.broker_comment = comment;
+            meta.trade_key = comment;
+            meta.result_order_ticket = ticket;
+         }
          _NormalizeRecoveredExposureMeta(meta, sym, is_buy_limit, entry, sl, tp, vol, setup_time, comment, (long)ticket, true);
+         if(!had_meta){
+            _QuarantineExecutionIdentity(meta, "restart_pending_order_attribution_unavailable", ticket, 0);
+            _Journal(sym + " deleting unattributed pending order during restart ticket=" + IntegerToString((long)ticket));
+            if(m_trade.OrderDelete(ticket)) _TrackPendingOrderDelete("unattributed_pending_order");
+            continue;
+         }
          if(InpOnlyBreakerRetestVirginStrongOrigin && !_ExclusiveModelPreExecutionOk(meta)){
             _Journal(sym + " managed pending order deleted during restart recovery reason=exclusive_model_integrity_failed ticket="
                      + IntegerToString((int)ticket));
@@ -6633,6 +9669,12 @@ private:
 
    void _QueueAnalyticsRefreshJob(const TradePlan &meta) {
       if(!InpAnalyticsEnable || !InpAutoAnalyticsRefresh) return;
+      if(!meta.learning_eligible || !meta.optimization_eligible || meta.ledger_integrity_status != "CLEAN"){
+         _Journal("[ledger_integrity_gate] analytics_refresh=false trade_key=" + meta.trade_key
+                  + " status=" + meta.ledger_integrity_status
+                  + " reasons=" + meta.ledger_integrity_reasons);
+         return;
+      }
       string job = "{";
       job += JsonKVStr("job_type", "refresh_suite") + ",";
       job += JsonKVStr("trade_key", meta.trade_key) + ",";
@@ -6660,25 +9702,233 @@ private:
       m_bus.WriteText(job_name, job);
    }
 
+   void _AppendLedgerIntegrityReason(string &json, int &count, const string reason) const {
+      if(count > 0) json += ",";
+      json += "\"" + JsonEscape(reason) + "\"";
+      count++;
+   }
+
+   void _AppendCompletedAiTradeLedger(const TradePlan &meta,
+                                      const string partials_json,
+                                      const string deals_json,
+                                      const double full_close_pct,
+                                      const long final_reason) {
+      if(!InpAnalyticsEnable) return;
+      string setup_code = _SetupCodeForPlan(meta);
+      string row = "{";
+      row += JsonKVStr("trade_key", meta.trade_key) + ",";
+      row += JsonKVStr("position_ticket", IntegerToString((long)meta.broker_position_ticket)) + ",";
+      row += JsonKVStr("position_identifier", IntegerToString(meta.broker_position_identifier)) + ",";
+      row += JsonKVStr("order_ticket", IntegerToString((long)meta.result_order_ticket)) + ",";
+      row += JsonKVStr("deal_ticket", IntegerToString((long)meta.result_deal_ticket)) + ",";
+      row += JsonKVBool("execution_identity_verified", meta.execution_identity_verified) + ",";
+      row += JsonKVStr("attribution_status", meta.attribution_status) + ",";
+      row += JsonKVStr("ledger_schema_version", meta.ledger_schema_version) + ",";
+      row += JsonKVStr("ledger_integrity_status", meta.ledger_integrity_status) + ",";
+      row += "\"ledger_integrity_reasons\":" + (StringLen(meta.ledger_integrity_reasons) > 0 ? meta.ledger_integrity_reasons : "[]") + ",";
+      row += JsonKVBool("learning_eligible", meta.learning_eligible) + ",";
+      row += JsonKVBool("optimization_eligible", meta.optimization_eligible) + ",";
+      row += JsonKVBool("suppression_eligible", meta.suppression_eligible) + ",";
+      row += JsonKVStr("candidate_id", meta.candidate_id) + ",";
+      row += JsonKVStr("candidate_hash", meta.candidate_hash) + ",";
+      row += JsonKVStr("ai_selected_candidate_hash", meta.ai_selected_candidate_hash) + ",";
+      row += JsonKVStr("executed_candidate_hash", meta.executed_candidate_hash) + ",";
+      row += JsonKVBool("candidate_hash_match", meta.candidate_hash_match) + ",";
+      row += JsonKVStr("assessed_execution_fingerprint", meta.assessed_execution_fingerprint) + ",";
+      row += JsonKVStr("final_execution_fingerprint", meta.final_execution_fingerprint) + ",";
+      row += JsonKVBool("execution_fingerprint_match", meta.execution_fingerprint_match) + ",";
+      row += JsonKVStr("symbol", meta.symbol) + ",";
+      row += JsonKVStr("direction", meta.is_buy ? "buy" : "sell") + ",";
+      row += JsonKVStr("setup_code", setup_code) + ",";
+      row += JsonKVStr("setup_family", meta.setup_family) + ",";
+      row += JsonKVStr("setup_class", meta.setup_class) + ",";
+      row += JsonKVStr("setup_taxonomy_version", meta.setup_taxonomy_version) + ",";
+      row += JsonKVStr("setup_taxonomy_enum", meta.setup_taxonomy_enum) + ",";
+      row += JsonKVStr("taxonomy_mapping_source", meta.taxonomy_mapping_source) + ",";
+      row += JsonKVStr("session", meta.session_code) + ",";
+      row += JsonKVStr("killzone", meta.killzone_code) + ",";
+      row += JsonKVStr("decision_schema_version", meta.ai.decision_schema_version) + ",";
+      row += JsonKVStr("decision_quality_tier", meta.ai.decision_quality_tier) + ",";
+      row += JsonKVStr("response_quality", meta.ai.response_quality_alias) + ",";
+      row += JsonKVStr("decision_state", meta.ai.decision_state) + ",";
+      row += JsonKVBool("model_raw_allow", meta.model_raw_allow) + ",";
+      row += JsonKVBool("python_final_allow", meta.python_final_allow) + ",";
+      row += JsonKVBool("mql_final_allow", meta.mql_final_allow) + ",";
+      row += "\"decision_field_authority\":" + (StringLen(meta.decision_field_authority_json) > 0 ? meta.decision_field_authority_json : "{}") + ",";
+      row += JsonKVStr("python_decision_reasons", meta.python_decision_reasons) + ",";
+      row += JsonKVStr("mql_decision_reasons", meta.mql_decision_reasons) + ",";
+      row += JsonKVStr("engine_version", meta.engine_version) + ",";
+      row += JsonKVStr("git_commit", meta.git_commit) + ",";
+      row += JsonKVStr("dirty_tree_status", meta.dirty_tree_status) + ",";
+      row += JsonKVStr("set_file_hash", meta.set_file_hash) + ",";
+      row += JsonKVStr("runtime_input_hash", meta.runtime_input_hash) + ",";
+      row += JsonKVStr("prompt_contract_version", meta.prompt_contract_version) + ",";
+      row += JsonKVStr("model_version", meta.ai.model_version) + ",";
+      row += JsonKVStr("reasoning_configuration", meta.reasoning_configuration) + ",";
+      row += JsonKVStr("target_schema_version", meta.target_arbitration_schema_version) + ",";
+      row += JsonKVStr("policy_id", meta.policy_snapshot_id) + ",";
+      row += JsonKVStr("policy_hash", meta.policy_hash) + ",";
+      row += JsonKVStr("bucket_prior_hash", meta.bucket_prior_hash) + ",";
+      row += JsonKVStr("taxonomy_version", meta.setup_taxonomy_version) + ",";
+      row += JsonKVStr("feature_version", meta.feature_version) + ",";
+      row += JsonKVStr("calibration_artifact_id", meta.calibration_artifact_id) + ",";
+      row += JsonKVStr("repeatability_artifact_id", meta.repeatability_artifact_id) + ",";
+      row += JsonKVStr("cohort_id", meta.cohort_id) + ",";
+      row += JsonKVBool("cohort_complete", meta.cohort_complete) + ",";
+      row += JsonKVNum("rule_score", meta.ai.rule_score, 6) + ",";
+      row += JsonKVNum("llm_quality_score", meta.ai.llm_quality_score, 6) + ",";
+      row += JsonKVNum("blended_legacy_score_diagnostic", meta.ai.blended_legacy_score, 6) + ",";
+      row += JsonKVNum("legacy_agreement_confidence_diagnostic", meta.ai.legacy_agreement_confidence, 6) + ",";
+      row += JsonKVNum("llm_self_reported_confidence", meta.ai.llm_self_reported_confidence, 6) + ",";
+      row += JsonKVBool("calibration_available", meta.ai.calibration_available) + ",";
+      row += "\"calibrated_win_probability\":null,";
+      row += "\"expected_net_r\":null,";
+      row += JsonKVNum("structure_quality_score", meta.ai.structure_quality_score, 6) + ",";
+      row += JsonKVNum("entry_timing_score", meta.ai.entry_timing_score, 6) + ",";
+      row += JsonKVNum("follow_through_probability", meta.ai.follow_through_probability, 6) + ",";
+      row += JsonKVNum("invalidation_risk", meta.ai.invalidation_risk, 6) + ",";
+      row += JsonKVNum("chop_risk", meta.ai.chop_risk, 6) + ",";
+      row += JsonKVNum("post_entry_failure_risk", meta.ai.post_entry_failure_risk, 6) + ",";
+      row += JsonKVNum("final_trade_expectancy_score", meta.ai.final_trade_expectancy_score, 6) + ",";
+      row += JsonKVBool("ai_veto_enabled", meta.ai.veto_enabled) + ",";
+      row += JsonKVStr("ai_veto_reason", meta.ai.veto_reason) + ",";
+      row += JsonKVStr("bucket_prior_override_justification", meta.ai.bucket_prior_override_justification) + ",";
+      row += JsonKVNum("entry_price", meta.filled_entry, 8) + ",";
+      row += JsonKVNum("sl", (meta.planned_sl > 0 ? meta.planned_sl : meta.sl), 8) + ",";
+      row += JsonKVNum("tp1", (meta.planned_tp1 > 0 ? meta.planned_tp1 : meta.tp1), 8) + ",";
+      row += JsonKVNum("tp2", (meta.planned_tp2 > 0 ? meta.planned_tp2 : meta.tp2), 8) + ",";
+      row += JsonKVNum("rr2", _PlanRR2(meta), 6) + ",";
+      row += JsonKVNum("volume", meta.initial_volume, 4) + ",";
+      row += "\"partials\":" + (StringLen(partials_json) > 0 ? partials_json : "[]") + ",";
+      row += "\"deals\":" + (StringLen(deals_json) > 0 ? deals_json : "[]") + ",";
+      row += JsonKVNum("full_close_pnl", meta.realized_pnl, 2) + ",";
+      row += JsonKVNum("full_close_pct", full_close_pct, 6) + ",";
+      row += JsonKVNum("full_close_r", meta.realized_r, 6) + ",";
+      row += JsonKVNum("gross_price_pnl", meta.gross_price_pnl, 2) + ",";
+      row += JsonKVNum("total_commission", meta.total_commission, 2) + ",";
+      row += JsonKVNum("total_swap", meta.total_swap, 2) + ",";
+      row += JsonKVNum("total_fees", meta.total_fees, 2) + ",";
+      row += JsonKVNum("predicted_round_turn_cost", meta.estimated_cost_stressed_per_lot * MathMax(0.0, meta.initial_volume), 4) + ",";
+      row += JsonKVNum("actual_realized_cost", meta.actual_realized_cost, 4) + ",";
+      row += JsonKVNum("cost_prediction_error", meta.cost_prediction_error, 4) + ",";
+      row += JsonKVStr("cost_source", meta.estimated_cost_source) + ",";
+      row += JsonKVInt("cost_sample_size", meta.estimated_cost_sample_size) + ",";
+      row += JsonKVStr("commission_model_version", meta.commission_model_version) + ",";
+      row += JsonKVNum("broker_net_pnl", meta.broker_net_pnl, 2) + ",";
+      row += JsonKVNum("internal_net_pnl", meta.internal_net_pnl, 2) + ",";
+      row += JsonKVNum("pnl_reconciliation_difference", meta.pnl_reconciliation_difference, 6) + ",";
+      row += JsonKVNum("result_pct_fixed_initial_balance", meta.result_pct_fixed_initial_balance, 6) + ",";
+      row += JsonKVNum("result_pct_equity_at_entry", meta.result_pct_equity_at_entry, 6) + ",";
+      row += JsonKVNum("result_r_initial_risk", meta.result_r_initial_risk, 6) + ",";
+      row += JsonKVStr("outcome_direction_broker", meta.outcome_direction_broker) + ",";
+      row += JsonKVStr("outcome_direction_r", meta.outcome_direction_r) + ",";
+      row += JsonKVStr("outcome_direction_equity_pct", meta.outcome_direction_equity_pct) + ",";
+      row += JsonKVBool("outcome_direction_match", meta.outcome_direction_match) + ",";
+      row += JsonKVStr("outcome_reconciliation_status", meta.outcome_reconciliation_status) + ",";
+      row += JsonKVStr("full_close_reason", _DealReasonLabel(final_reason)) + ",";
+      row += JsonKVStr("target_source", meta.target_source) + ",";
+      row += JsonKVStr("target_model", meta.target_model) + ",";
+      row += JsonKVStr("hierarchical_prior_artifact_hash", meta.hierarchical_prior_artifact_hash) + ",";
+      row += JsonKVStr("hierarchical_prior_schema_version", meta.hierarchical_prior_schema_version) + ",";
+      row += JsonKVStr("repeatability_status", meta.repeatability_status) + ",";
+      row += JsonKVStr("repeatability_group_key", meta.repeatability_group_key) + ",";
+      row += JsonKVStr("repeatability_authority_hash", meta.repeatability_authority_hash) + ",";
+      row += JsonKVStr("risk_factor_schema_version", meta.risk_factor_schema_version) + ",";
+      row += "\"risk_factor_contributions\":" + (StringLen(meta.risk_factor_contributions_json) > 0 ? meta.risk_factor_contributions_json : "{}") + ",";
+      row += JsonKVNum("original_initial_risk_money", meta.original_initial_risk_money, 4) + ",";
+      row += JsonKVStr("management_version", meta.management_version) + ",";
+      row += JsonKVStr("management_state", meta.management_state) + ",";
+      row += JsonKVStr("management_policy", meta.management_policy) + ",";
+      row += JsonKVInt("management_decision_at", (int)meta.management_decision_at) + ",";
+      row += JsonKVBool("management_features_time_safe", meta.management_features_time_safe) + ",";
+      row += JsonKVStr("management_snapshot_action", meta.management_snapshot_action) + ",";
+      row += JsonKVNum("management_snapshot_mfe_r", meta.management_snapshot_mfe_r, 6) + ",";
+      row += JsonKVNum("management_snapshot_mae_r", meta.management_snapshot_mae_r, 6) + ",";
+      row += JsonKVInt("management_snapshot_minutes_open", meta.management_snapshot_minutes_open) + ",";
+      row += JsonKVNum("management_snapshot_distance_to_sl_r", meta.management_snapshot_distance_to_sl_r, 6) + ",";
+      row += JsonKVNum("management_snapshot_distance_to_tp_r", meta.management_snapshot_distance_to_tp_r, 6) + ",";
+      row += JsonKVNum("management_snapshot_spread_r", meta.management_snapshot_spread_r, 6) + ",";
+      row += JsonKVNum("management_snapshot_execution_cost_r", meta.management_snapshot_execution_cost_r, 6) + ",";
+      row += JsonKVBool("management_snapshot_structure_valid", meta.management_snapshot_structure_valid) + ",";
+      row += JsonKVNum("actual_managed_result", meta.actual_managed_result, 4) + ",";
+      row += JsonKVNum("actual_managed_result_r", meta.actual_managed_result_r, 6) + ",";
+      if(!meta.counterfactual_pending && !meta.counterfactual_ambiguous){
+         row += JsonKVNum("counterfactual_original_sl_tp_result", meta.counterfactual_original_sl_tp_result, 4) + ",";
+         row += JsonKVNum("counterfactual_original_sl_tp_result_r", meta.counterfactual_original_sl_tp_result_r, 6) + ",";
+      } else {
+         row += "\"counterfactual_original_sl_tp_result\":null,\"counterfactual_original_sl_tp_result_r\":null,";
+      }
+      if(meta.counterfactual_target_before_stop_available)
+         row += JsonKVBool("target_before_stop", meta.counterfactual_target_before_stop) + ",";
+      else
+         row += "\"target_before_stop\":null,";
+      if(meta.counterfactual_target_before_stop_available)
+         row += JsonKVBool("unmanaged_original_plan_target_before_stop", meta.counterfactual_target_before_stop) + ",";
+      else
+         row += "\"unmanaged_original_plan_target_before_stop\":null,";
+      if(!meta.counterfactual_pending && !meta.counterfactual_ambiguous)
+         row += JsonKVNum("unmanaged_original_plan_net_r", meta.counterfactual_original_sl_tp_result_r, 6) + ",";
+      else
+         row += "\"unmanaged_original_plan_net_r\":null,";
+      row += JsonKVNum("observed_mfe_r", meta.mfe_r, 6) + ",";
+      row += JsonKVNum("observed_mae_r", MathAbs(meta.mae_r), 6) + ",";
+      if(meta.management_policy_selection_eligible)
+         row += JsonKVNum("management_alpha", meta.management_alpha, 6) + ",";
+      else
+         row += "\"management_alpha\":null,";
+      row += JsonKVBool("counterfactual_ambiguous", meta.counterfactual_ambiguous) + ",";
+      row += JsonKVBool("management_policy_selection_eligible", meta.management_policy_selection_eligible) + ",";
+      row += JsonKVNum("mfe_r", meta.mfe_r, 6) + ",";
+      row += JsonKVNum("mae_r", meta.mae_r, 6) + ",";
+      row += JsonKVInt("minutes_to_0_25r_mfe", meta.minutes_to_0_25r_mfe) + ",";
+      row += JsonKVInt("minutes_to_0_50r_mfe", meta.minutes_to_0_50r_mfe) + ",";
+      row += JsonKVBool("stuck_no_mfe_triggered", meta.stuck_no_mfe_triggered) + ",";
+      row += JsonKVBool("dr_and_structural_invalid_triggered", meta.dr_and_structural_invalid_triggered) + ",";
+      row += JsonKVInt("penalty_reductions_count", meta.penalty_reductions_count) + ",";
+      row += JsonKVInt("opened_at", (int)meta.filled_at) + ",";
+      row += JsonKVInt("closed_at", (int)meta.closed_at);
+      row += "}";
+      m_bus.AppendText("logs\\completed_ai_trades.jsonl", row + "\n");
+      _Journal("[trade_completed] ticket=" + IntegerToString((long)meta.broker_position_ticket)
+               + " key=" + meta.trade_key
+               + " symbol=" + meta.symbol
+               + " setup_code=" + setup_code
+               + " full_close_pnl=" + DoubleToString(meta.realized_pnl, 2)
+               + " full_close_pct=" + DoubleToString(full_close_pct, 6)
+               + " llm_quality_score=" + DoubleToString(meta.ai.llm_quality_score, 2)
+               + " llm_self_reported_confidence=" + DoubleToString(meta.ai.llm_self_reported_confidence, 3));
+   }
+
    bool _WriteClosedTradeOutcome(const string key_hint, const long position_id, const string symbol_hint) {
       if(!InpAnalyticsEnable) return false;
 
       string key = key_hint;
-      if(StringLen(key) == 0 && position_id > 0) key = symbol_hint + "_" + IntegerToString((int)position_id);
+      if(StringLen(key) == 0 && position_id > 0) key = symbol_hint + "_" + IntegerToString(position_id);
       if(StringLen(key) == 0) return false;
+      if(position_id > 0 && _PathExists(_CompletedPositionMarkerPath(position_id))) return false;
       if(_PathExists(_TradeResultPath(key))) return false;
       if(_HasOpenPositionWithKey(key)) return false;
 
       TradePlan meta;
       bool have_meta = false;
       if(StringLen(key_hint) > 0) have_meta = _ReadTradeMetaPath(_TradeKeyPath(key_hint), meta);
-      if(!have_meta && position_id > 0) have_meta = _ReadTradeMetaPath(_TradeTicketPath((ulong)position_id), meta);
-      if(!have_meta && StringLen(symbol_hint) > 0) have_meta = _ReadTradeMetaPath(_LegacyTradeSymbolPath(symbol_hint), meta);
+      if(!have_meta && position_id > 0) have_meta = _ReadTradeMetaPath(_TradePositionIdentifierPath(position_id), meta);
       if(have_meta && StringLen(meta.trade_key) > 0) key = meta.trade_key;
       if(!have_meta){
-         ZeroMemory(meta);
-         meta.trade_key = key;
-         meta.symbol = symbol_hint;
+         _Journal("[execution_identity_quarantine] reason=closed_trade_metadata_missing"
+                  + " position_id=" + IntegerToString(position_id)
+                  + " symbol=" + symbol_hint
+                  + " analytics_excluded=true");
+         return false;
+      }
+      if(!meta.execution_identity_verified || meta.execution_identity_quarantined ||
+         position_id <= 0 || meta.broker_position_identifier != position_id){
+         _Journal("[execution_identity_quarantine] reason=closed_trade_identity_not_verified"
+                  + " position_id=" + IntegerToString(position_id)
+                  + " stored_position_id=" + IntegerToString(meta.broker_position_identifier)
+                  + " candidate_hash=" + meta.candidate_hash
+                  + " analytics_excluded=true");
+         return false;
       }
 
       datetime now = _NowServerOrLocal();
@@ -6687,7 +9937,19 @@ private:
 
       double in_vol = 0.0, in_value = 0.0;
       double out_vol = 0.0, out_value = 0.0;
-      double realized_pnl = 0.0;
+      double broker_gross_price_pnl = 0.0;
+      double total_commission = 0.0;
+      double total_swap = 0.0;
+      double total_fees = 0.0;
+      double broker_net_pnl = 0.0;
+      double internal_gross_price_pnl = 0.0;
+      double exit_prices[];
+      double exit_volumes[];
+      ArrayResize(exit_prices, 0);
+      ArrayResize(exit_volumes, 0);
+      bool deal_magic_mismatch = false;
+      bool deal_symbol_mismatch = false;
+      bool inout_ambiguous = false;
       int out_count = 0;
       datetime first_in_time = 0;
       datetime last_out_time = 0;
@@ -6695,42 +9957,74 @@ private:
       string final_symbol = symbol_hint;
       string partials_json = "[";
       int partial_count = 0;
+      string all_deals_json = "[";
+      int all_deal_count = 0;
 
       int deals = HistoryDealsTotal();
       for(int i=0; i<deals; i++){
          ulong deal_ticket = HistoryDealGetTicket(i);
          if(deal_ticket == 0) continue;
-         if((ulong)HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != InpMagicNumber) continue;
-
          long deal_pos_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
-         string deal_comment = HistoryDealGetString(deal_ticket, DEAL_COMMENT);
          if(position_id > 0){
-            if(deal_pos_id != position_id && deal_comment != key_hint) continue;
+            if(deal_pos_id != position_id) continue;
          } else if(StringLen(key_hint) > 0){
-            if(deal_comment != key_hint) continue;
+            continue;
          } else {
             continue;
          }
+
+         if((ulong)HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != InpMagicNumber)
+            deal_magic_mismatch = true;
+         string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
+         if(StringLen(meta.symbol) > 0 && deal_symbol != meta.symbol)
+            deal_symbol_mismatch = true;
 
          ENUM_DEAL_ENTRY entry_kind = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
          double vol = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
          double price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
          datetime deal_time = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
-         final_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
+         final_symbol = deal_symbol;
+         double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT);
+         double deal_commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
+         double deal_swap = HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
+         double deal_fee = HistoryDealGetDouble(deal_ticket, DEAL_FEE);
+         long deal_reason_all = HistoryDealGetInteger(deal_ticket, DEAL_REASON);
+         broker_gross_price_pnl += deal_profit;
+         total_commission += deal_commission;
+         total_swap += deal_swap;
+         total_fees += deal_fee;
+         broker_net_pnl += deal_profit + deal_commission + deal_swap + deal_fee;
+         if(all_deal_count > 0) all_deals_json += ",";
+         all_deals_json += "{";
+         all_deals_json += JsonKVStr("deal_ticket", IntegerToString((long)deal_ticket)) + ",";
+         all_deals_json += JsonKVInt("time", (int)deal_time) + ",";
+         all_deals_json += JsonKVStr("entry_kind", _DealEntryLabel(entry_kind)) + ",";
+         all_deals_json += JsonKVStr("symbol", deal_symbol) + ",";
+         all_deals_json += JsonKVNum("price", price, 8) + ",";
+         all_deals_json += JsonKVNum("volume", vol, 4) + ",";
+         all_deals_json += JsonKVNum("profit", deal_profit, 2) + ",";
+         all_deals_json += JsonKVNum("commission", deal_commission, 2) + ",";
+         all_deals_json += JsonKVNum("swap", deal_swap, 2) + ",";
+         all_deals_json += JsonKVNum("fee", deal_fee, 2) + ",";
+         all_deals_json += JsonKVStr("reason", _DealReasonLabel(deal_reason_all));
+         all_deals_json += "}";
+         all_deal_count++;
 
-         if(entry_kind == DEAL_ENTRY_IN){
+         if(entry_kind == DEAL_ENTRY_IN || entry_kind == DEAL_ENTRY_INOUT){
             in_vol += vol;
             in_value += price * vol;
             if(first_in_time == 0 || deal_time < first_in_time) first_in_time = deal_time;
+            if(entry_kind == DEAL_ENTRY_INOUT) inout_ambiguous = true;
          }
          if(entry_kind == DEAL_ENTRY_OUT || entry_kind == DEAL_ENTRY_OUT_BY || entry_kind == DEAL_ENTRY_INOUT){
-            double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT);
-            double deal_commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
-            double deal_swap = HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
             long deal_reason = HistoryDealGetInteger(deal_ticket, DEAL_REASON);
             out_vol += vol;
             out_value += price * vol;
-            realized_pnl += deal_profit + deal_commission + deal_swap;
+            int exit_idx = ArraySize(exit_prices);
+            ArrayResize(exit_prices, exit_idx + 1);
+            ArrayResize(exit_volumes, exit_idx + 1);
+            exit_prices[exit_idx] = price;
+            exit_volumes[exit_idx] = vol;
             if(partial_count > 0) partials_json += ",";
             partials_json += "{";
             partials_json += JsonKVStr("deal_ticket", IntegerToString((long)deal_ticket)) + ",";
@@ -6741,7 +10035,8 @@ private:
             partials_json += JsonKVNum("profit", deal_profit, 2) + ",";
             partials_json += JsonKVNum("commission", deal_commission, 2) + ",";
             partials_json += JsonKVNum("swap", deal_swap, 2) + ",";
-            partials_json += JsonKVNum("pnl", deal_profit + deal_commission + deal_swap, 2) + ",";
+            partials_json += JsonKVNum("fee", deal_fee, 2) + ",";
+            partials_json += JsonKVNum("pnl", deal_profit + deal_commission + deal_swap + deal_fee, 2) + ",";
             partials_json += JsonKVStr("reason", _DealReasonLabel(deal_reason));
             partials_json += "}";
             partial_count++;
@@ -6753,8 +10048,25 @@ private:
          }
       }
       partials_json += "]";
+      all_deals_json += "]";
 
       if(out_count <= 0 || last_out_time <= 0) return false;
+      double average_entry = (in_vol > 0.0 ? in_value / in_vol : meta.filled_entry);
+      double ledger_tick_size = SymbolInfoDouble(meta.symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(ledger_tick_size <= 0.0) ledger_tick_size = SymbolInfoDouble(meta.symbol, SYMBOL_POINT);
+      if(ledger_tick_size <= 0.0) ledger_tick_size = 0.00001;
+      double ledger_entry_tolerance = MathMax(0.0, InpLedgerPriceTickTolerance) * ledger_tick_size;
+      bool entry_price_reconciliation_mismatch = (meta.filled_entry > 0.0 && average_entry > 0.0 &&
+                                                  MathAbs(meta.filled_entry - average_entry) > ledger_entry_tolerance);
+      ENUM_ORDER_TYPE profit_type = (meta.is_buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+      for(int e=0; e<ArraySize(exit_prices); e++){
+         double calculated_profit = 0.0;
+         if(OrderCalcProfit(profit_type, meta.symbol, exit_volumes[e], average_entry, exit_prices[e], calculated_profit))
+            internal_gross_price_pnl += calculated_profit;
+      }
+      double internal_net_pnl = internal_gross_price_pnl + total_commission + total_swap + total_fees;
+      double pnl_reconciliation_difference = broker_net_pnl - internal_net_pnl;
+      double realized_pnl = broker_net_pnl;
       datetime reset_after = _AnalyticsResetAfter();
       if(reset_after > 0 && last_out_time <= reset_after) return false;
 
@@ -6770,7 +10082,9 @@ private:
       if(meta.initial_volume <= 0 && in_vol > 0) meta.initial_volume = in_vol;
       if(position_id > 0) meta.position_id = position_id;
       if(StringLen(meta.ai_decision_source) == 0){
-         meta.ai_decision_source = (StringLen(meta.ai.decision_source) > 0 ? meta.ai.decision_source : "rule_only_fallback");
+         meta.ai_decision_source = (StringLen(meta.ai.decision_source) > 0
+                                    ? meta.ai.decision_source
+                                    : "legacy_decision_source_unknown_non_trading");
       }
       _PopulateDerivedPlanFields(meta);
 
@@ -6784,12 +10098,40 @@ private:
       double exit_price = (out_vol > 0 ? out_value / out_vol : 0.0);
       meta.closed_at = last_out_time;
       meta.realized_pnl = realized_pnl;
+      meta.gross_price_pnl = broker_gross_price_pnl;
+      meta.total_commission = total_commission;
+      meta.total_swap = total_swap;
+      meta.total_fees = total_fees;
+      meta.actual_realized_cost = -(total_commission + total_swap + total_fees);
+      double predicted_round_turn_cost = meta.estimated_cost_stressed_per_lot * MathMax(0.0, meta.initial_volume);
+      meta.cost_prediction_error = meta.actual_realized_cost - predicted_round_turn_cost;
+      meta.broker_net_pnl = broker_net_pnl;
+      meta.internal_net_pnl = internal_net_pnl;
+      meta.pnl_reconciliation_difference = pnl_reconciliation_difference;
       if(risk_dist > 0 && meta.initial_volume > 0){
-         double initial_risk_money = _RiskMoneyForPosition(meta.symbol, meta.is_buy, meta.initial_volume,
-                                                           (meta.filled_entry > 0 ? meta.filled_entry : meta.planned_entry),
-                                                           (meta.planned_sl > 0 ? meta.planned_sl : meta.sl));
-         if(initial_risk_money > 0) meta.realized_r = realized_pnl / initial_risk_money;
+         if(meta.initial_risk_money <= 0.0)
+            meta.initial_risk_money = _RiskMoneyForPosition(meta.symbol, meta.is_buy, meta.initial_volume,
+                                                            (meta.filled_entry > 0 ? meta.filled_entry : meta.planned_entry),
+                                                            (meta.planned_sl > 0 ? meta.planned_sl : meta.sl));
+         if(meta.initial_risk_money > 0) meta.realized_r = broker_net_pnl / meta.initial_risk_money;
       }
+      meta.result_r_initial_risk = meta.realized_r;
+      meta.result_pct_fixed_initial_balance = (InpAnalyticsVirtualBalance > 0.0
+                                               ? broker_net_pnl / InpAnalyticsVirtualBalance * 100.0 : 0.0);
+      meta.result_pct_equity_at_entry = (meta.account_equity_at_entry > 0.0
+                                         ? broker_net_pnl / meta.account_equity_at_entry * 100.0 : 0.0);
+      meta.outcome_direction_broker = (broker_net_pnl > 0.00000001 ? "positive" : (broker_net_pnl < -0.00000001 ? "negative" : "flat"));
+      meta.outcome_direction_r = (meta.result_r_initial_risk > 0.00000001 ? "positive" : (meta.result_r_initial_risk < -0.00000001 ? "negative" : "flat"));
+      meta.outcome_direction_equity_pct = (meta.result_pct_equity_at_entry > 0.00000001 ? "positive" : (meta.result_pct_equity_at_entry < -0.00000001 ? "negative" : "flat"));
+      meta.outcome_direction_match = (meta.outcome_direction_broker == meta.outcome_direction_r &&
+                                      meta.outcome_direction_broker == meta.outcome_direction_equity_pct);
+      meta.outcome_reconciliation_status = (meta.outcome_direction_match ? "clean" : "quarantined");
+      _Journal("[broker_pnl_reconciliation] position_id=" + IntegerToString(position_id)
+               + " broker_net_pnl=" + DoubleToString(broker_net_pnl, 2)
+               + " internal_net_pnl=" + DoubleToString(internal_net_pnl, 2)
+               + " difference=" + DoubleToString(pnl_reconciliation_difference, 6)
+               + " status=" + (MathAbs(pnl_reconciliation_difference) <= InpLedgerMoneyReconciliationTolerance ? "clean" : "quarantined")
+               + " contributing_deals=" + all_deals_json);
       meta.exit_path = _ExitPathLabel(meta, exit_price, out_count, final_reason);
       double plan_rr_for_eff = _PlanRR2(meta);
       if(plan_rr_for_eff > 0.0) meta.target_efficiency = _ClampRange(meta.mfe_r / plan_rr_for_eff, 0.0, 2.0);
@@ -6797,6 +10139,23 @@ private:
       meta.be_move_helped = (meta.tp1_done && StringFind(meta.exit_path, "stop") >= 0 && meta.realized_r >= 0.0);
       meta.trailing_stop_improved = false;
       meta.analytics_logged = true;
+      string counterfactual_reason = "";
+      bool counterfactual_ok = _ComputeOriginalPolicyCounterfactual(meta, counterfactual_reason);
+      _Journal("[management_counterfactual] position_id=" + IntegerToString(position_id)
+               + " actual_r=" + DoubleToString(meta.actual_managed_result_r, 6)
+               + " counterfactual_r=" + DoubleToString(meta.counterfactual_original_sl_tp_result_r, 6)
+               + " management_alpha=" + DoubleToString(meta.management_alpha, 6)
+               + " ambiguous=" + (meta.counterfactual_ambiguous ? "true" : "false")
+               + " status=" + (counterfactual_ok ? "evaluated" : (meta.counterfactual_pending ? "pending" : "excluded"))
+               + " reason=" + counterfactual_reason);
+      _Journal("[broker_cost_calibration] symbol=" + meta.symbol
+               + " asset_class=" + meta.asset_class
+               + " source=" + meta.estimated_cost_source
+               + " sample_size=" + IntegerToString(meta.estimated_cost_sample_size)
+               + " predicted_round_turn_cost=" + DoubleToString(predicted_round_turn_cost, 4)
+               + " actual_realized_cost=" + DoubleToString(meta.actual_realized_cost, 4)
+               + " prediction_error=" + DoubleToString(meta.cost_prediction_error, 4)
+               + " model_version=" + meta.commission_model_version);
 
       string po3_subtype = _Po3Subtype(meta);
       string fvg_subtype = _FvgSubtype(meta);
@@ -6807,33 +10166,149 @@ private:
       double effective_rr2 = _ExecutionRR2(meta);
       double liquidity_rr = _LiquidityRR(meta);
       double virtual_balance_base = MathMax(1.0, InpAnalyticsVirtualBalance);
-      double result_pct_virtual = (meta.realized_pnl / virtual_balance_base) * 100.0;
-      string data_integrity_status = "clean";
+      double result_pct_virtual = meta.result_pct_fixed_initial_balance;
+      string data_integrity_status = "CLEAN";
       string data_integrity_reasons = "[";
       int integrity_count = 0;
-      if(meta.position_id <= 0){
-         data_integrity_status = "suspicious";
-         data_integrity_reasons += "\"missing_position_id\"";
-         integrity_count++;
+      bool critical_integrity_failure = false;
+      if(!meta.execution_identity_verified || meta.execution_identity_quarantined){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "execution_identity_not_verified");
+         critical_integrity_failure = true;
       }
-      if(MathAbs(meta.realized_pnl) <= 0.0000001){
-         if(integrity_count > 0) data_integrity_reasons += ",";
-         data_integrity_status = "suspicious";
-         data_integrity_reasons += "\"zero_realized_pnl\"";
-         integrity_count++;
+      if(meta.position_id <= 0 || meta.broker_position_identifier <= 0 || meta.position_id != meta.broker_position_identifier){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "position_identifier_invalid_or_mismatch");
+         critical_integrity_failure = true;
       }
       if(StringLen(meta.trade_key) == 0){
-         if(integrity_count > 0) data_integrity_reasons += ",";
-         data_integrity_status = "suspicious";
-         data_integrity_reasons += "\"missing_trade_key\"";
-         integrity_count++;
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "missing_trade_key");
+         critical_integrity_failure = true;
       }
+      if(!meta.candidate_hash_match || meta.candidate_hash != meta.ai_selected_candidate_hash || meta.candidate_hash != meta.executed_candidate_hash){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "candidate_hash_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(!meta.execution_fingerprint_match || StringLen(meta.final_execution_fingerprint) == 0){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "execution_fingerprint_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(meta.setup_taxonomy == UNKNOWN_UNCLASSIFIED || meta.setup_taxonomy_version != SETUP_TAXONOMY_VERSION){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "unknown_setup_taxonomy");
+         critical_integrity_failure = true;
+      }
+      if(meta.ai.decision_quality_tier != "FULL_STRUCTURED" && meta.ai.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED"){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "degraded_ai_response_non_trading");
+         critical_integrity_failure = true;
+      }
+      if(deal_magic_mismatch){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "deal_magic_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(deal_symbol_mismatch){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "deal_symbol_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(inout_ambiguous){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "deal_inout_accounting_ambiguous");
+         critical_integrity_failure = true;
+      }
+      if(MathAbs(in_vol - out_vol) > MathMax(InpLedgerVolumeReconciliationTolerance,
+                                             SymbolInfoDouble(meta.symbol, SYMBOL_VOLUME_STEP) * 0.51)){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "entry_exit_volume_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(MathAbs(pnl_reconciliation_difference) > InpLedgerMoneyReconciliationTolerance){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "broker_internal_pnl_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(entry_price_reconciliation_mismatch){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "entry_price_reconciliation_mismatch");
+         critical_integrity_failure = true;
+         _Journal("[ledger_integrity] reason=entry_price_reconciliation_mismatch"
+                  + " stored=" + _FmtPrice(meta.symbol, meta.filled_entry)
+                  + " deal_average=" + _FmtPrice(meta.symbol, average_entry)
+                  + " tolerance_ticks=" + DoubleToString(InpLedgerPriceTickTolerance, 2));
+      }
+      if(meta.initial_risk_money <= 0.0 || !MathIsValidNumber(meta.result_r_initial_risk)){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "initial_risk_money_invalid");
+         critical_integrity_failure = true;
+      }
+      if(!meta.outcome_direction_match){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "outcome_direction_mismatch");
+         critical_integrity_failure = true;
+      }
+      if(meta.filled_at <= 0 || meta.closed_at < meta.filled_at){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "timestamp_order_invalid");
+         critical_integrity_failure = true;
+      }
+      if(!MathIsValidNumber(meta.mfe_r) || !MathIsValidNumber(meta.mae_r) ||
+         meta.mfe_r < -InpLedgerRReconciliationTolerance || meta.mae_r > InpLedgerRReconciliationTolerance ||
+         meta.mfe_r > InpLedgerMaxMfeR || MathAbs(meta.mae_r) > InpLedgerMaxAbsMaeR)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "mfe_mae_invariant_failed");
+      if(meta.account_equity_at_entry <= 0.0)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "equity_at_entry_missing");
+      if(MathAbs(meta.realized_pnl) <= 0.0000001)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "zero_realized_pnl");
+      if(StringLen(meta.management_version) == 0)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "management_version_missing");
+      if(meta.counterfactual_ambiguous && !meta.counterfactual_pending)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "counterfactual_path_ambiguous_or_unavailable");
+      if(!meta.model_raw_allow || !meta.python_final_allow || !meta.mql_final_allow){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "three_stage_decision_authority_incomplete");
+         critical_integrity_failure = true;
+      }
+      if(!meta.cohort_complete)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "cohort_metadata_incomplete");
       data_integrity_reasons += "]";
+      if(critical_integrity_failure) data_integrity_status = "QUARANTINED";
+      else if(integrity_count > 0) data_integrity_status = "SUSPICIOUS";
+      meta.ledger_integrity_status = data_integrity_status;
+      meta.ledger_integrity_reasons = data_integrity_reasons;
+      meta.ledger_schema_version = TRADE_LEDGER_SCHEMA_VERSION;
+      meta.attribution_status = (meta.execution_identity_verified ? "VERIFIED" : "QUARANTINED");
+      meta.attribution_error = (critical_integrity_failure ? data_integrity_reasons : "");
+      bool clean_eligible = (data_integrity_status == "CLEAN" && meta.execution_identity_verified &&
+                             meta.candidate_hash_match && meta.execution_fingerprint_match &&
+                             meta.setup_taxonomy != UNKNOWN_UNCLASSIFIED && meta.cohort_complete &&
+                             meta.model_raw_allow && meta.python_final_allow && meta.mql_final_allow);
+      meta.learning_eligible = clean_eligible;
+      meta.optimization_eligible = clean_eligible;
+      meta.suppression_eligible = clean_eligible;
+      meta.management_policy_selection_eligible = (clean_eligible && !meta.counterfactual_ambiguous &&
+                                                   !meta.counterfactual_pending &&
+                                                   meta.management_version == MANAGEMENT_SCHEMA_VERSION);
+      if(meta.counterfactual_pending) _QueueCounterfactualEvaluation(meta);
       string j = "{";
-      j += JsonKVInt("analytics_schema_version", 2) + ",";
+      j += JsonKVInt("analytics_schema_version", 3) + ",";
       j += JsonKVStr("trade_key", key) + ",";
       j += JsonKVStr("broker_comment", meta.broker_comment) + ",";
       j += JsonKVStr("source_deal_comment", key_hint) + ",";
+      j += JsonKVStr("decision_schema_version", meta.ai.decision_schema_version) + ",";
+      j += JsonKVStr("decision_quality_tier", meta.ai.decision_quality_tier) + ",";
+      j += JsonKVStr("response_quality", meta.ai.response_quality_alias) + ",";
+      j += JsonKVStr("decision_state", meta.ai.decision_state) + ",";
+      j += JsonKVStr("candidate_id", meta.candidate_id) + ",";
+      j += JsonKVStr("candidate_hash", meta.candidate_hash) + ",";
+      j += JsonKVStr("ai_selected_candidate_hash", meta.ai_selected_candidate_hash) + ",";
+      j += JsonKVStr("executed_candidate_hash", meta.executed_candidate_hash) + ",";
+      j += JsonKVBool("candidate_hash_match", meta.candidate_hash_match) + ",";
+      j += JsonKVStr("assessed_execution_fingerprint", meta.assessed_execution_fingerprint) + ",";
+      j += JsonKVStr("final_execution_fingerprint", meta.final_execution_fingerprint) + ",";
+      j += JsonKVBool("execution_fingerprint_match", meta.execution_fingerprint_match) + ",";
+      j += JsonKVNum("result_order_ticket", (double)meta.result_order_ticket, 0) + ",";
+      j += JsonKVNum("result_deal_ticket", (double)meta.result_deal_ticket, 0) + ",";
+      j += JsonKVNum("broker_position_ticket", (double)meta.broker_position_ticket, 0) + ",";
+      j += JsonKVNum("broker_position_identifier", (double)meta.broker_position_identifier, 0) + ",";
+      j += JsonKVBool("execution_identity_verified", meta.execution_identity_verified) + ",";
+      j += JsonKVBool("execution_identity_quarantined", meta.execution_identity_quarantined) + ",";
+      j += JsonKVStr("account_position_mode", meta.account_position_mode) + ",";
+      j += JsonKVStr("attribution_status", meta.attribution_status) + ",";
+      j += JsonKVStr("attribution_error", meta.attribution_error) + ",";
+      j += JsonKVStr("ledger_schema_version", meta.ledger_schema_version) + ",";
+      j += JsonKVStr("ledger_integrity_status", meta.ledger_integrity_status) + ",";
+      j += "\"ledger_integrity_reasons\":" + meta.ledger_integrity_reasons + ",";
+      j += JsonKVBool("learning_eligible", meta.learning_eligible) + ",";
+      j += JsonKVBool("optimization_eligible", meta.optimization_eligible) + ",";
+      j += JsonKVBool("suppression_eligible", meta.suppression_eligible) + ",";
       j += JsonKVStr("data_integrity_status", data_integrity_status) + ",";
       j += "\"data_integrity_reasons\":" + data_integrity_reasons + ",";
       j += JsonKVStr("symbol", meta.symbol) + ",";
@@ -6855,10 +10330,36 @@ private:
       j += JsonKVNum("position_id", (double)meta.position_id, 0) + ",";
       j += JsonKVNum("realized_pnl", meta.realized_pnl, 2) + ",";
       j += JsonKVNum("realized_r", meta.realized_r, 6) + ",";
+      j += JsonKVNum("gross_price_pnl", meta.gross_price_pnl, 2) + ",";
+      j += JsonKVNum("total_commission", meta.total_commission, 2) + ",";
+      j += JsonKVNum("total_swap", meta.total_swap, 2) + ",";
+      j += JsonKVNum("total_fees", meta.total_fees, 2) + ",";
+      j += JsonKVNum("predicted_round_turn_cost", meta.estimated_cost_stressed_per_lot * MathMax(0.0, meta.initial_volume), 4) + ",";
+      j += JsonKVNum("actual_realized_cost", meta.actual_realized_cost, 4) + ",";
+      j += JsonKVNum("cost_prediction_error", meta.cost_prediction_error, 4) + ",";
+      j += JsonKVStr("cost_source", meta.estimated_cost_source) + ",";
+      j += JsonKVInt("cost_sample_size", meta.estimated_cost_sample_size) + ",";
+      j += JsonKVStr("commission_model_version", meta.commission_model_version) + ",";
+      j += JsonKVNum("broker_net_pnl", meta.broker_net_pnl, 2) + ",";
+      j += JsonKVNum("internal_net_pnl", meta.internal_net_pnl, 2) + ",";
+      j += JsonKVNum("pnl_reconciliation_difference", meta.pnl_reconciliation_difference, 6) + ",";
+      j += JsonKVNum("account_equity_at_entry", meta.account_equity_at_entry, 2) + ",";
+      j += JsonKVNum("account_balance_at_entry", meta.account_balance_at_entry, 2) + ",";
+      j += JsonKVNum("initial_risk_money", meta.initial_risk_money, 2) + ",";
+      j += JsonKVNum("initial_risk_pct_equity", meta.initial_risk_pct_equity, 6) + ",";
+      j += JsonKVNum("result_pct_fixed_initial_balance", meta.result_pct_fixed_initial_balance, 6) + ",";
+      j += JsonKVNum("result_pct_equity_at_entry", meta.result_pct_equity_at_entry, 6) + ",";
+      j += JsonKVNum("result_r_initial_risk", meta.result_r_initial_risk, 6) + ",";
+      j += JsonKVStr("outcome_direction_broker", meta.outcome_direction_broker) + ",";
+      j += JsonKVStr("outcome_direction_r", meta.outcome_direction_r) + ",";
+      j += JsonKVStr("outcome_direction_equity_pct", meta.outcome_direction_equity_pct) + ",";
+      j += JsonKVBool("outcome_direction_match", meta.outcome_direction_match) + ",";
+      j += JsonKVStr("outcome_reconciliation_status", meta.outcome_reconciliation_status) + ",";
       j += JsonKVNum("virtual_balance_base", virtual_balance_base, 2) + ",";
       j += JsonKVNum("result_pct_of_virtual_start", result_pct_virtual, 6) + ",";
       j += JsonKVNum("result_pct_of_virtual_balance", result_pct_virtual, 6) + ",";
       j += "\"partials\":" + partials_json + ",";
+      j += "\"deals\":" + all_deals_json + ",";
       j += JsonKVNum("mfe_price", meta.mfe_price, 8) + ",";
       j += JsonKVNum("mae_price", meta.mae_price, 8) + ",";
       j += JsonKVNum("mfe_r", meta.mfe_r, 6) + ",";
@@ -6883,6 +10384,12 @@ private:
       j += JsonKVStr("regime_bucket", regime_bucket) + ",";
       j += JsonKVStr("setup_family", meta.setup_family) + ",";
       j += JsonKVStr("setup_class", meta.setup_class) + ",";
+      j += JsonKVStr("setup_taxonomy_version", meta.setup_taxonomy_version) + ",";
+      j += JsonKVStr("setup_taxonomy_enum", meta.setup_taxonomy_enum) + ",";
+      j += JsonKVStr("taxonomy_mapping_source", meta.taxonomy_mapping_source) + ",";
+      j += JsonKVStr("setup_type", meta.setup_type) + ",";
+      j += JsonKVStr("setup_subtype", meta.setup_subtype) + ",";
+      j += JsonKVStr("setup_story_scope", meta.setup_story_scope) + ",";
       j += JsonKVStr("entry_branch", meta.entry_branch) + ",";
       j += JsonKVStr("fvg_execution_class", meta.fvg_execution_class) + ",";
       j += JsonKVStr("model_code", meta.model_code) + ",";
@@ -6928,6 +10435,26 @@ private:
       j += JsonKVStr("ai_decision_id", meta.ai_decision_id) + ",";
       j += JsonKVStr("policy_version", meta.policy_version) + ",";
       j += JsonKVStr("risk_version", meta.risk_version) + ",";
+      j += JsonKVStr("management_version", meta.management_version) + ",";
+      j += JsonKVStr("management_state", meta.management_state) + ",";
+      j += JsonKVStr("management_previous_state", meta.management_previous_state) + ",";
+      j += JsonKVStr("management_transition_reason", meta.management_transition_reason) + ",";
+      j += JsonKVStr("management_action_executed", meta.management_action_executed) + ",";
+      j += JsonKVStr("management_action_id", meta.management_action_id) + ",";
+      j += JsonKVStr("management_policy", meta.management_policy) + ",";
+      j += JsonKVStr("invalidation_confirmation_mode", meta.invalidation_confirmation_mode) + ",";
+      j += JsonKVNum("actual_managed_result", meta.actual_managed_result, 4) + ",";
+      j += JsonKVNum("actual_managed_result_r", meta.actual_managed_result_r, 6) + ",";
+      j += JsonKVNum("counterfactual_original_sl_tp_result", meta.counterfactual_original_sl_tp_result, 4) + ",";
+      j += JsonKVNum("counterfactual_original_sl_tp_result_r", meta.counterfactual_original_sl_tp_result_r, 6) + ",";
+      j += JsonKVNum("management_alpha", meta.management_alpha, 6) + ",";
+      j += JsonKVBool("counterfactual_ambiguous", meta.counterfactual_ambiguous) + ",";
+      j += JsonKVBool("counterfactual_pending", meta.counterfactual_pending) + ",";
+      j += JsonKVStr("counterfactual_status", meta.counterfactual_status) + ",";
+      j += JsonKVStr("counterfactual_resolution_reason", meta.counterfactual_resolution_reason) + ",";
+      j += JsonKVInt("counterfactual_horizon_at", (int)meta.counterfactual_horizon_at) + ",";
+      j += JsonKVInt("counterfactual_evaluated_at", (int)meta.counterfactual_evaluated_at) + ",";
+      j += JsonKVBool("management_policy_selection_eligible", meta.management_policy_selection_eligible) + ",";
       j += JsonKVStr("lineage_root_id", meta.lineage_root_id) + ",";
       j += JsonKVStr("parent_setup_id", meta.parent_setup_id) + ",";
       j += JsonKVInt("lineage_version", meta.lineage_version) + ",";
@@ -6968,16 +10495,23 @@ private:
       j += JsonKVNum("sequence_quality", meta.sequence_quality, 6) + ",";
       j += JsonKVNum("htf_alignment_score", meta.htf_alignment_score, 6) + ",";
       j += JsonKVNum("adverse_context_score", meta.adverse_context_score, 6) + ",";
-      j += JsonKVNum("gross_expected_r", meta.gross_expected_r, 6) + ",";
-      j += JsonKVNum("net_expected_r", meta.net_expected_r, 6) + ",";
-      j += JsonKVNum("expected_value_r", meta.expected_value_r, 6) + ",";
-      j += JsonKVNum("ai_score", meta.ai.score, 4) + ",";
-      j += JsonKVNum("ai_confidence", meta.ai.confidence, 4) + ",";
-      j += JsonKVNum("ai_score_threshold", meta.ai.score_threshold, 4) + ",";
-      j += JsonKVStr("ai_threshold_source", meta.ai.threshold_source) + ",";
-      j += JsonKVBool("ai_threshold_passed", meta.ai.threshold_passed) + ",";
-      j += JsonKVStr("ai_reject_reason", meta.ai.reject_reason) + ",";
-      j += JsonKVBool("global_ai_score_as_hard_floor", meta.ai.global_score_as_hard_floor) + ",";
+      j += JsonKVNum("heuristic_quality_estimate_gross", meta.heuristic_quality_estimate_gross, 6) + ",";
+      j += JsonKVNum("heuristic_quality_estimate", meta.heuristic_quality_estimate, 6) + ",";
+      j += JsonKVNum("net_reward_after_cost_r", meta.net_reward_after_cost_r, 6) + ",";
+      j += JsonKVBool("heuristic_quality_trade_authority", false) + ",";
+      j += JsonKVNum("rule_score", meta.ai.rule_score, 4) + ",";
+      j += JsonKVNum("llm_quality_score", meta.ai.llm_quality_score, 4) + ",";
+      j += JsonKVNum("blended_legacy_score_diagnostic", meta.ai.blended_legacy_score, 4) + ",";
+      j += JsonKVNum("legacy_agreement_confidence_diagnostic", meta.ai.legacy_agreement_confidence, 4) + ",";
+      j += JsonKVNum("llm_self_reported_confidence", meta.ai.llm_self_reported_confidence, 4) + ",";
+      j += JsonKVBool("calibration_available", meta.ai.calibration_available) + ",";
+      j += "\"calibrated_win_probability\":null,";
+      j += "\"expected_net_r\":null,";
+      j += JsonKVNum("llm_quality_score_threshold", meta.ai.llm_quality_score_threshold, 4) + ",";
+      j += JsonKVStr("llm_quality_threshold_source", meta.ai.llm_quality_threshold_source) + ",";
+      j += JsonKVBool("llm_quality_threshold_passed", meta.ai.llm_quality_threshold_passed) + ",";
+      j += JsonKVStr("llm_quality_reject_reason", meta.ai.llm_quality_reject_reason) + ",";
+      j += JsonKVBool("global_llm_quality_as_hard_floor", meta.ai.global_llm_quality_as_hard_floor) + ",";
       j += JsonKVStr("ai_rejection_codes_json", meta.ai.rejection_codes_json) + ",";
       j += JsonKVStr("ai_narrative_state", meta.ai.narrative_state) + ",";
       j += JsonKVStr("ai_invalidation_risks_json", meta.ai.invalidation_risks_json) + ",";
@@ -7053,6 +10587,16 @@ private:
       j += JsonKVBool("ltf_choch", meta.po3.ltf_choch);
       j += "}";
       m_bus.WriteText(_TradeResultPath(key), j);
+      if(position_id > 0){
+         string marker = "{";
+         marker += JsonKVNum("position_id", (double)position_id, 0) + ",";
+         marker += JsonKVStr("trade_key", key) + ",";
+         marker += JsonKVStr("ledger_schema_version", TRADE_LEDGER_SCHEMA_VERSION) + ",";
+         marker += JsonKVInt("closed_at", (int)meta.closed_at);
+         marker += "}";
+         m_bus.WriteText(_CompletedPositionMarkerPath(position_id), marker);
+      }
+      _AppendCompletedAiTradeLedger(meta, partials_json, all_deals_json, result_pct_virtual, final_reason);
       _WriteTradeMeta(meta);
       _QueueAnalyticsRefreshJob(meta);
       return true;
@@ -7083,7 +10627,7 @@ private:
          string symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
          long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
          if(StringLen(key) == 0 && position_id <= 0) continue;
-         string dedupe = (StringLen(key) > 0 ? key : (symbol + "_" + IntegerToString((int)position_id)));
+         string dedupe = (StringLen(key) > 0 ? key : (symbol + "_" + IntegerToString(position_id)));
          if(_HasStringValue(processed_keys, dedupe)) continue;
          if(_HasOpenPositionWithKey(key)) continue;
          if(_WriteClosedTradeOutcome(key, position_id, symbol)){
@@ -7096,11 +10640,30 @@ private:
 
 bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, const bool force_market_only=false) {
       m_last_execution_reject_reason = "";
+      bool full_structured = (p.ai.decision_quality_tier == "FULL_STRUCTURED" || p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+      if(!full_structured || !p.ai.mandatory_fields_complete || p.ai.decision_state != "APPROVE" ||
+         !p.ai.python_final_allow || !p.ai.model_raw_allow)
+         return _RejectPlacement(p, (!full_structured ? "degraded_ai_response_non_trading" : "ai_quality_schema_incomplete"));
+      if(p.ai.decision_state == "ABSTAIN") return _RejectPlacement(p, "ai_abstain");
+      if(p.ai.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
+         p.ai.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION)
+         return _RejectPlacement(p, "ai_quality_schema_incomplete");
+      if(!p.ai.repeatability_trading_eligible)
+         return _RejectPlacement(p, "model_prompt_decision_non_repeatable");
+      if(p.candidate_hash != p.ai_selected_candidate_hash || p.candidate_hash != p.ai.selected_candidate_hash)
+         return _RejectPlacement(p, "candidate_hash_mismatch");
+      if(p.request_execution_fingerprint != p.ai.request_execution_fingerprint ||
+         _AssessedFingerprintFromDecision(p, p.ai) != p.assessed_execution_fingerprint)
+         return _RejectPlacement(p, "execution_fingerprint_mismatch");
       string rollover_reason = "";
       if(PO3EntryBlockedByRollover(_NowServerOrLocal(), rollover_reason))
          return _RejectPlacement(p, rollover_reason);
       if(!_ExclusiveModelPreExecutionOk(p)) return false;
       if(_ShouldSkipForGlobalOpenPositions()) return _RejectPlacement(p, "another managed position is already open");
+      if(m_force_one_managed_trade_per_symbol && _SymbolHasOpenPosition(p.symbol))
+         return _RejectPlacement(p, "netting_mode_one_managed_trade_per_symbol");
+      if(m_force_one_managed_trade_per_symbol && !ignore_symbol_pending && _SymbolHasPendingOrder(p.symbol))
+         return _RejectPlacement(p, "netting_mode_one_managed_trade_per_symbol");
       if(InpSkipIfSymbolOpen && _SymbolHasOpenPosition(p.symbol)) return _RejectPlacement(p, "symbol already has an open managed position");
       if(!ignore_symbol_pending && _HasBlockingPendingOrderForPlan(p)) return _RejectPlacement(p, "symbol already has a pending managed order");
       if(_CountOpenPositions() >= InpMaxOpenPositions) return _RejectPlacement(p, "max open positions reached");
@@ -7138,24 +10701,25 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       double rem = 0.0;
       if(InpMaxTotalRiskEnable){
          HasCapacityForNewTrade(0.0, rem);
-         if(rem <= 0.0) return _RejectPlacement(p, "portfolio risk capacity exhausted");
+         if(rem <= 0.0){
+            _Journal("[portfolio_risk_block] reason=max_total_risk_reached open_risk_pct=unknown cap=" + DoubleToString(InpMaxTotalRiskMoney, 2));
+            return _RejectPlacement(p, "portfolio risk capacity exhausted");
+         }
          target_risk = MathMin(target_risk, rem);
       }
-      double risk_mult = (p.subtype_risk_multiplier > 0.0 ? p.subtype_risk_multiplier :
-                          (m_active_policy.default_risk_multiplier > 0.0 ? m_active_policy.default_risk_multiplier : 1.0));
-      if(p.ai.suggested_risk_multiplier > 0.0)
-         risk_mult *= MathMin(1.0, p.ai.suggested_risk_multiplier);
-      if(p.execution_cost_risk_reduced && p.execution_cost_risk_multiplier > 0.0)
-         risk_mult *= MathMin(1.0, p.execution_cost_risk_multiplier);
-      double clamped_risk_mult = _ClampRange(risk_mult, 0.0, 1.50);
-      if(clamped_risk_mult <= 0.0) return _RejectPlacement(p, "risk_multiplier_resolved_to_zero");
-      target_risk *= clamped_risk_mult;
+      if(p.subtype_risk_multiplier <= 0.0 || p.active_policy_risk_multiplier <= 0.0 || p.bucket_policy_risk_multiplier <= 0.0 ||
+         p.ai.suggested_risk_multiplier <= 0.0 ||
+         (p.execution_cost_risk_reduced && p.execution_cost_risk_multiplier <= 0.0))
+         return _RejectPlacement(p, "resolved_risk_multiplier_zero");
+      if(p.subtype_risk_multiplier > 1.0 || p.active_policy_risk_multiplier > 1.0 || p.bucket_policy_risk_multiplier > 1.0 ||
+         p.ai.suggested_risk_multiplier > 1.0 || p.execution_cost_risk_multiplier > 1.0)
+         return _RejectPlacement(p, "resolved_risk_multiplier_invalid");
+      double risk_mult = p.subtype_risk_multiplier * p.active_policy_risk_multiplier * p.bucket_policy_risk_multiplier * p.ai.suggested_risk_multiplier;
+      if(p.execution_cost_risk_reduced) risk_mult *= p.execution_cost_risk_multiplier;
+      if(risk_mult <= 0.0) return _RejectPlacement(p, "resolved_risk_multiplier_zero");
+      target_risk *= risk_mult;
 
       string trade_key = _MakeTradeKey(p);
-      TradePlan identity = p;
-      identity.trade_key = trade_key;
-      _InitializeNarrativeFields(identity);
-      string trade_comment = identity.broker_comment;
       double market_tol_r = MathMax(InpMarketEntryToleranceR, InpEntryZoneToleranceR);
       if(_IsMicroFamily(p)) market_tol_r = MathMax(market_tol_r, InpMicroMarketEntryToleranceR);
       double market_tol = planned_risk * market_tol_r;
@@ -7163,7 +10727,9 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       if(market_ok){
           TradePlan live = p;
           live.trade_key = trade_key;
-          live.broker_comment = trade_comment;
+         string live_session_reason = "";
+         if(!_ApplyBrokerSessionEntryGate(live, live_session_reason))
+            return _RejectPlacement(p, "broker_session_gate:" + live_session_reason);
          string live_price_reason = "";
          if(!_BuildPlanPrices(live, entry_px, live_price_reason))
             return _RejectPlacement(p, "failed_to_rebuild_live_plan_prices:" + live_price_reason);
@@ -7201,14 +10767,53 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
          if(vol <= 0) return _RejectPlacement(p, "volume for risk resolved to zero");
          double new_risk = _RiskMoneyForPosition(p.symbol, p.is_buy, vol, entry_px, live.sl);
          if(new_risk <= 0) return _RejectPlacement(p, "could not evaluate live risk for order");
+         double governance_proposed_risk = new_risk;
+         if(ignore_symbol_pending)
+            governance_proposed_risk = MathMax(0.0, new_risk - _MatchingPendingRiskForReplacement(live));
+         string live_portfolio_reason = "";
+         if(!_ApplyFinalPortfolioRiskGovernance(live, governance_proposed_risk, live_portfolio_reason))
+            return _RejectPlacement(p, "portfolio_initial_risk_gate:" + live_portfolio_reason);
          string corr_reason = "";
          if(!_CorrelatedExposureOk(live, new_risk, corr_reason))
             return _RejectPlacement(p, corr_reason);
-         if(InpMaxTotalRiskEnable && !HasCapacityForNewTrade(new_risk, rem))
-            return _RejectPlacement(p, "portfolio risk cap would be exceeded by market order");
          string live_hard_safety_reason = "";
          if(!CanPlaceOrderHardSafety(live, live_hard_safety_reason))
             return _RejectPlacement(p, "final hard safety " + live_hard_safety_reason);
+         live.executed_candidate_hash = live.candidate_hash;
+         string live_fingerprint_changes = "";
+         if(!_ExecutionFingerprintWithinTolerance(live, live_fingerprint_changes)){
+            _Journal("[execution_fingerprint] match=false stage=market changed_components=" + live_fingerprint_changes
+                     + " assessed=" + live.assessed_execution_fingerprint
+                     + " final=" + live.final_execution_fingerprint);
+            return _RejectPlacement(p, "execution_fingerprint_mismatch:" + live_fingerprint_changes);
+         }
+
+         datetime market_entry_time = _NowServerOrLocal();
+         _ApplyEntryTimeCommentIdentity(live, market_entry_time);
+         string trade_comment = live.broker_comment;
+
+         live.planned_entry = p.entry_est;
+         live.planned_sl = live.sl;
+         live.planned_tp1 = live.tp1;
+         live.planned_tp2 = live.tp2;
+         live.planned_at = market_entry_time;
+         live.initial_volume = vol;
+         _CaptureEntryRiskContext(live, vol, entry_px, live.sl);
+         live.narrative_state = "execution_submitted";
+         live.model_raw_allow = live.ai.model_raw_allow;
+         live.python_final_allow = live.ai.python_final_allow;
+         live.mql_final_allow = true;
+         live.ai.mql_final_allow = true;
+         live.mql_decision_reasons = "all_final_market_execution_gates_passed";
+         live.tp1_done = false;
+         live.account_position_mode = m_account_position_mode;
+         _WriteTradeMeta(live);
+         _Journal("[decision_authority] model_raw_allow=" + (live.model_raw_allow ? "true" : "false")
+                  + " python_final_allow=" + (live.python_final_allow ? "true" : "false")
+                  + " mql_final_allow=true python_reasons=" + live.python_decision_reasons
+                  + " mql_reasons=" + live.mql_decision_reasons);
+         _WriteShadowDecisionUpdate(live, live.ai, "mql_market_approved",
+                                    live.mql_decision_reasons, true);
 
          bool ok = false;
          m_funnel_market_entries_attempted++;
@@ -7217,30 +10822,29 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
 
          if(!ok) return _RejectPlacement(p, "market order rejected: " + _TradeRetcodeText());
          m_funnel_trades_opened++;
+         m_total_trades_opened++;
          m_total_orders_placed++;
          _RememberConsumedSweep(live);
 
-         live.planned_entry = p.entry_est;
-         live.planned_sl = live.sl;
-         live.planned_tp1 = live.tp1;
-         live.planned_tp2 = live.tp2;
-         live.planned_at = _NowServerOrLocal();
-         live.initial_volume = vol;
          live.narrative_state = "executed";
-         live.tp1_done = false;
-         ulong pos_ticket = _FindPositionTicket(p.symbol);
-         if(pos_ticket > 0 && PositionSelectByTicket(pos_ticket)){
-            live.position_id = (long)PositionGetInteger(POSITION_IDENTIFIER);
-            live.filled_entry = PositionGetDouble(POSITION_PRICE_OPEN);
-            live.filled_at = (datetime)PositionGetInteger(POSITION_TIME);
-         } else {
-            live.filled_entry = entry_px;
+         ulong result_order = m_trade.ResultOrder();
+         ulong result_deal = m_trade.ResultDeal();
+         string identity_reason = "";
+         bool identity_ok = _ResolveExactExecutionIdentity(live, result_order, result_deal, vol, identity_reason);
+         if(!identity_ok){
+            live.filled_entry = (m_trade.ResultPrice() > 0.0 ? m_trade.ResultPrice() : entry_px);
             live.filled_at = _NowServerOrLocal();
+            _QuarantineExecutionIdentity(live, identity_reason, result_order, result_deal);
          }
-         _UpdateAnalyticsSnapshot(live, pos_ticket, (p.is_buy ? bid : ask), vol);
-         _WriteTradeMeta(live, pos_ticket);
+         ulong pos_ticket = (identity_ok ? live.broker_position_ticket : 0);
+         if(identity_ok)
+            _UpdateAnalyticsSnapshot(live, pos_ticket, (p.is_buy ? bid : ask), vol);
+         _WriteTradeMeta(live, (identity_ok ? live.broker_position_ticket : result_order));
           _Journal(p.symbol + " market entry placed key=" + trade_key
                    + " comment=" + trade_comment
+                   + " entry_session=" + live.session_code
+                   + " entry_killzone=" + live.killzone_code
+                   + " entry_time=" + TimeToString(market_entry_time, TIME_DATE|TIME_MINUTES)
                    + " vol=" + DoubleToString(vol, 2)
                    + " planned=" + _FmtPrice(p.symbol, p.entry_est)
                    + " filled=" + _FmtPrice(p.symbol, live.filled_entry)
@@ -7263,7 +10867,9 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       double pending_entry = p.entry_est;
       TradePlan pending = p;
       pending.trade_key = trade_key;
-      pending.broker_comment = trade_comment;
+      string pending_session_reason = "";
+      if(!_ApplyBrokerSessionEntryGate(pending, pending_session_reason))
+         return _RejectPlacement(p, "broker_session_gate:" + pending_session_reason);
       string pending_price_reason = "";
       if(!_BuildPlanPrices(pending, pending_entry, pending_price_reason))
          return _RejectPlacement(p, "failed_to_rebuild_pending_entry_plan_prices:" + pending_price_reason);
@@ -7308,14 +10914,27 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       if(vol <= 0) return _RejectPlacement(p, "pending volume for risk resolved to zero");
       double new_risk = _RiskMoneyForPosition(p.symbol, p.is_buy, vol, pending_entry, pending.sl);
       if(new_risk <= 0) return _RejectPlacement(p, "could not evaluate pending risk for order");
+      string pending_portfolio_reason = "";
+      if(!_ApplyFinalPortfolioRiskGovernance(pending, new_risk, pending_portfolio_reason))
+         return _RejectPlacement(p, "portfolio_initial_risk_gate:" + pending_portfolio_reason);
       string pending_corr_reason = "";
       if(!_CorrelatedExposureOk(pending, new_risk, pending_corr_reason))
          return _RejectPlacement(p, pending_corr_reason);
-      if(InpMaxTotalRiskEnable && !HasCapacityForNewTrade(new_risk, rem))
-         return _RejectPlacement(p, "portfolio risk cap would be exceeded by pending order");
       string pending_hard_safety_reason = "";
       if(!CanPlaceOrderHardSafety(pending, pending_hard_safety_reason))
          return _RejectPlacement(p, "final hard safety " + pending_hard_safety_reason);
+      pending.executed_candidate_hash = pending.candidate_hash;
+      string pending_fingerprint_changes = "";
+      if(!_ExecutionFingerprintWithinTolerance(pending, pending_fingerprint_changes)){
+         _Journal("[execution_fingerprint] match=false stage=pending changed_components=" + pending_fingerprint_changes
+                  + " assessed=" + pending.assessed_execution_fingerprint
+                  + " final=" + pending.final_execution_fingerprint);
+         return _RejectPlacement(p, "execution_fingerprint_mismatch:" + pending_fingerprint_changes);
+      }
+
+      datetime pending_entry_time = _NowServerOrLocal();
+      _ApplyEntryTimeCommentIdentity(pending, pending_entry_time);
+      string trade_comment = pending.broker_comment;
 
       datetime expiry = TimeTradeServer();
       if(expiry <= 0) expiry = TimeLocal();
@@ -7323,6 +10942,17 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       expiry += expiry_minutes * 60;
 
       bool ok = false;
+      pending.model_raw_allow = pending.ai.model_raw_allow;
+      pending.python_final_allow = pending.ai.python_final_allow;
+      pending.mql_final_allow = true;
+      pending.ai.mql_final_allow = true;
+      pending.mql_decision_reasons = "all_final_pending_execution_gates_passed";
+      _Journal("[decision_authority] model_raw_allow=" + (pending.model_raw_allow ? "true" : "false")
+               + " python_final_allow=" + (pending.python_final_allow ? "true" : "false")
+               + " mql_final_allow=true python_reasons=" + pending.python_decision_reasons
+               + " mql_reasons=" + pending.mql_decision_reasons);
+      _WriteShadowDecisionUpdate(pending, pending.ai, "mql_pending_approved",
+                                 pending.mql_decision_reasons, true);
       m_funnel_pending_entries_attempted++;
       if(p.is_buy) ok = m_trade.BuyLimit(vol, pending_entry, p.symbol, pending.sl, pending.tp2, ORDER_TIME_SPECIFIED, expiry, trade_comment);
       else         ok = m_trade.SellLimit(vol, pending_entry, p.symbol, pending.sl, pending.tp2, ORDER_TIME_SPECIFIED, expiry, trade_comment);
@@ -7337,14 +10967,28 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       pending.planned_tp2 = pending.tp2;
       pending.planned_at = _NowServerOrLocal();
       pending.initial_volume = vol;
+      _CaptureEntryRiskContext(pending, vol, pending_entry, pending.sl);
       pending.narrative_state = "pending_order";
       pending.tp1_done = false;
       pending.bars_waited = 0;
       pending.last_confirm_bar_time = _LastClosedBarTime(pending.symbol, pending.confirm_tf);
       ulong order_ticket = m_trade.ResultOrder();
+      pending.result_order_ticket = order_ticket;
+      pending.result_deal_ticket = 0;
+      pending.account_position_mode = m_account_position_mode;
+      pending.execution_identity_verified = false;
+      pending.execution_identity_quarantined = false;
+      pending.execution_identity_reason = "pending_order_awaiting_fill";
+      if(order_ticket == 0){
+         pending.narrative_state = "pending_order_identity_unavailable";
+         _QuarantineExecutionIdentity(pending, "missing_result_order_ticket_after_pending_submit", 0, 0);
+      }
       _WriteTradeMeta(pending, order_ticket);
       _Journal(p.symbol + " pending limit placed key=" + trade_key
                + " comment=" + trade_comment
+               + " entry_session=" + pending.session_code
+               + " entry_killzone=" + pending.killzone_code
+               + " entry_time=" + TimeToString(pending_entry_time, TIME_DATE|TIME_MINUTES)
                + " vol=" + DoubleToString(vol, 2)
                + " entry=" + _FmtPrice(p.symbol, pending_entry)
                + " sl=" + _FmtPrice(p.symbol, pending.sl)
@@ -7426,6 +11070,24 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
 
    bool _TrySameStoryNewEntry(TradePlan &p, const string invalid_reason) {
       if(!InpAllowSameStoryNewEntry) return false;
+      bool has_bound_ai_assessment = (StringLen(p.ai_decision_source) > 0 ||
+                                      StringLen(p.ai_decision_id) > 0 ||
+                                      StringLen(p.ai_selected_candidate_hash) > 0 ||
+                                      StringLen(p.ai.selected_candidate_hash) > 0 ||
+                                      StringLen(p.assessed_execution_fingerprint) > 0);
+      if(has_bound_ai_assessment){
+         _LogSetupReject(p.symbol, "decision_integrity",
+                         "alternative_candidate_requires_independent_ai_assessment",
+                         "candidate_id=" + p.candidate_id
+                         + " candidate_hash=" + p.candidate_hash
+                         + " ai_selected_candidate_hash=" + p.ai_selected_candidate_hash
+                         + " invalid_reason=" + invalid_reason
+                         + " action=reject_original_no_ai_assessment_transfer");
+         _Journal(p.symbol + " same-story branch replacement blocked: assessed candidate cannot transfer AI authority"
+                  + " candidate_hash=" + p.candidate_hash
+                  + " invalid_reason=" + invalid_reason);
+         return false;
+      }
       int attempts = MathMax(1, p.attempt_number_for_sweep);
       if(attempts >= MathMax(1, InpMaxSameStoryEntryAttempts)){
          _Journal(p.symbol + " same-story branch replacement blocked max_attempts="
@@ -7471,8 +11133,7 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
                last_reason = reason;
                continue;
             }
-            if(!have_best || candidate.expected_value_r > best.expected_value_r ||
-               (candidate.expected_value_r == best.expected_value_r && candidate.setup_score > best.setup_score)){
+            if(!have_best || _CandidateRanksAhead(candidate, best)){
                best = candidate;
                have_best = true;
             }
@@ -7488,9 +11149,6 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       }
 
       _CarryNarrativeForward(best, p, true);
-      best.ai = p.ai;
-      best.ai_decision_id = p.ai_decision_id;
-      best.ai_decision_source = p.ai_decision_source;
       best.snapshot_htf_path = p.snapshot_htf_path;
       best.snapshot_ltf_path = p.snapshot_ltf_path;
       best.created_at = p.created_at;
@@ -7515,7 +11173,7 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
                + " source_story=" + _PO3StoryId(p)
                + " setup_score=" + DoubleToString(p.setup_score, 2)
                + " rr2=" + DoubleToString(_ExecutionRR2(p), 2)
-               + " ai_reused=" + (StringLen(p.ai_decision_source) > 0 ? p.ai_decision_source : "none"));
+               + " ai_binding=none");
       return true;
    }
 
@@ -7560,6 +11218,22 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
          p.last_score_refresh = TimeLocal();
          return true;
       }
+      bool refreshed_candidate_identity_changed = !_SameFvgZone(refreshed.fvg, p.fvg, p.symbol);
+      bool has_bound_ai_assessment = (StringLen(p.ai_decision_source) > 0 ||
+                                      StringLen(p.ai_decision_id) > 0 ||
+                                      StringLen(p.ai_selected_candidate_hash) > 0 ||
+                                      StringLen(p.ai.selected_candidate_hash) > 0 ||
+                                      StringLen(p.assessed_execution_fingerprint) > 0);
+      if(refreshed_candidate_identity_changed && has_bound_ai_assessment){
+         _LogSetupReject(p.symbol, "decision_integrity",
+                         "alternative_candidate_requires_independent_ai_assessment",
+                         "candidate_id=" + p.candidate_id
+                         + " candidate_hash=" + p.candidate_hash
+                         + " old_fvg_time=" + IntegerToString((int)p.fvg.t_form)
+                         + " new_fvg_time=" + IntegerToString((int)refreshed.fvg.t_form)
+                         + " action=drop_watchlist_no_ai_assessment_transfer");
+         return false;
+      }
       bool material_refresh = (refreshed.fvg.t_form != p.fvg.t_form ||
                                MathAbs(refreshed.entry_est - p.entry_est) > SymbolInfoDouble(p.symbol, SYMBOL_POINT) * 2.0 ||
                                refreshed.tp_model != p.tp_model);
@@ -7593,6 +11267,14 @@ public:
       m_last_rollover_log = 0;
       m_last_execution_reject_reason = "";
       m_policy_loaded_at = 0;
+      m_account_position_mode = "unknown";
+      m_internal_account_position_mode = UNSUPPORTED_ACCOUNT_MODE;
+      m_force_one_managed_trade_per_symbol = false;
+      m_source_git_commit = "UNAVAILABLE";
+      m_source_dirty_tree_status = "UNKNOWN";
+      m_set_file_hash = "UNAVAILABLE";
+      m_deployment_manifest_hash = "UNAVAILABLE";
+      m_deployment_manifest_valid = false;
       ZeroMemory(m_active_policy);
       ArrayResize(m_subtype_policy, 0);
       ArrayResize(m_context_policy, 0);
@@ -7600,10 +11282,74 @@ public:
       _ResetFinalCounters();
    }
 
+   string RuntimeInputHash() {
+      return m_ai.RuntimeHash();
+   }
+
    bool Init() {
       MathSrand((int)TimeLocal());
       m_bus = CFileBus(InpBusRoot);
       m_bus.Ensure();
+      _LoadDeploymentManifest();
+      m_internal_account_position_mode = _ResolveAccountPositionMode();
+      m_account_position_mode = _AccountPositionModeLabel(m_internal_account_position_mode);
+      m_force_one_managed_trade_per_symbol = (m_internal_account_position_mode == NETTING_ONE_POSITION_PER_SYMBOL_FALLBACK);
+      FolderCreate(_ExecutionIdentityQuarantineDir(), FILE_COMMON);
+      Print("[PO3_AIGate] [account_position_mode] broker_margin_mode=",
+            IntegerToString((int)AccountInfoInteger(ACCOUNT_MARGIN_MODE)),
+            " internal_mode=", m_account_position_mode,
+            " netting_policy=", (InpNettingPositionPolicy == NETTING_FORCE_ONE_MANAGED_POSITION_PER_SYMBOL
+                                   ? "FORCE_ONE_MANAGED_POSITION_PER_SYMBOL" : "REJECT_STARTUP"),
+            " virtual_subposition_ledger_available=false",
+            " startup_allowed=", (m_internal_account_position_mode == UNSUPPORTED_ACCOUNT_MODE ? "false" : "true"),
+            " exact_order_deal_position_attribution=true",
+            " force_one_managed_trade_per_symbol=", (m_force_one_managed_trade_per_symbol ? "true" : "false"));
+      if(m_internal_account_position_mode == UNSUPPORTED_ACCOUNT_MODE){
+         Print("[PO3_AIGate] [startup_reject] reason=netting_virtual_subposition_ledger_unavailable broker_margin_mode=",
+               IntegerToString((int)AccountInfoInteger(ACCOUNT_MARGIN_MODE)),
+               " virtual_subposition_ledger_available=false netting_policy=REJECT_STARTUP action=abort");
+         return false;
+      }
+      if(m_force_one_managed_trade_per_symbol)
+         Print("[PO3_AIGate] [account_position_mode] warning=explicit_netting_fallback_selected action=force_one_managed_trade_per_symbol analytics_independent_subpositions=false");
+      if(!MQLInfoInteger(MQL_TESTER)){
+         Print("[PO3_AIGate] [live_forward_mode] account_trade_mode=", m_account_position_mode,
+               " workload_mode=LIVE_FORWARD behavior_contract_hash=", m_ai.BehaviorContractHash(),
+               " contract_version=", LIVE_FORWARD_CONTRACT_VERSION,
+               " demo_real_equivalent=true");
+      }
+      if(MQLInfoInteger(MQL_TESTER) && InpUseAI){
+         Print("[PO3_AIGate] [tester_ai_mode] raw_value=", IntegerToString((int)InpTesterAiMode),
+               " raw_name=", _TesterAiModeName(InpTesterAiMode),
+               " effective_name=", _TesterAiModeName(_EffectiveTesterAiMode()),
+               " tester_ai_cache=", (InpTesterAiCache ? "true" : "false"),
+               " allow_live_wait_debug_trading=", (InpTesterAllowLiveWaitDebugTrading ? "true" : "false"));
+         if(_InvalidTesterCacheOnlyConfig()){
+            Print("[PO3_AIGate] [fatal_config] tester_ai_mode=cache_only requires InpTesterAiCache=true. No AI decisions can be produced. Aborting test.");
+            Print("[PO3_AIGate] [tester_ai_workflow] clean_backtest_requires_cache_replay=true");
+            Print("[PO3_AIGate] [tester_ai_workflow] Step 1: run RECORD_ONLY to export requests.");
+            Print("[PO3_AIGate] [tester_ai_workflow] Step 2: run python ai_gate.py / batch processor to fill cache.");
+            Print("[PO3_AIGate] [tester_ai_workflow] Step 3: rerun with CACHE_ONLY and InpTesterAiCache=true.");
+            return false;
+         }
+         if(_EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY){
+            Print("[PO3_AIGate] [tester_ai_workflow] clean_backtest_requires_cache_replay=true");
+            if(!_TesterAiCacheHasFiles()){
+               Print("[PO3_AIGate] [fatal_config] CACHE_ONLY has no tester cache files. Run RECORD_ONLY + Python cache exporter first.");
+               Print("[PO3_AIGate] [tester_ai_workflow] Step 1: run RECORD_ONLY to export requests.");
+               Print("[PO3_AIGate] [tester_ai_workflow] Step 2: run python ai_gate.py / batch processor to fill cache.");
+               Print("[PO3_AIGate] [tester_ai_workflow] Step 3: rerun with CACHE_ONLY and InpTesterAiCache=true.");
+               return false;
+            }
+            Print("[PO3_AIGate] [tester_ai_mode] cache_only_valid=true cache_enabled=true cache_dir=", _TesterAiCacheDir());
+         } else if(_EffectiveTesterAiMode() == TESTER_AI_RECORD_ONLY){
+            Print("[PO3_AIGate] [tester_ai_mode] record_only_active=true cache_lookup=false cache_export=true live_ai_calls=false trading=false backtest_safe=true");
+         } else if(_EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG){
+            Print("[PO3_AIGate] [tester_ai_mode] live_wait_debug_active=true trading_enabled=",
+                  (InpTesterAllowLiveWaitDebugTrading ? "true" : "false"),
+                  " warning=tester_live_ai_wait_not_backtest_safe");
+         }
+      }
       _EnsureSnapshotDirs();
       if(InpAnalyticsEnable) FolderCreate(_TradeResultsDir(), FILE_COMMON);
       FolderCreate(_PolicyDir(), FILE_COMMON);
@@ -7611,7 +11357,128 @@ public:
       FolderCreate(_AnalyticsJobsDir(), FILE_COMMON);
       m_trade.SetExpertMagicNumber(InpMagicNumber);
       m_trade.SetDeviationInPoints(InpMaxSlippagePts);
+
+      string startup_ledger_status = _CurrentLedgerIntegrityStatus();
+      bool active_analytics_authority_requested = (InpAnalyticsAutoActivate && !InpPolicyShadowMode);
+      bool active_data_policy_authority_requested = (InpRiskFactorGateEnable ||
+                                                      InpInvalidationAssetClassPolicyEnable ||
+                                                      InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE);
+      _Journal("[policy_authority_startup] ledger_integrity_status=" + startup_ledger_status
+               + " analytics_active_requested=" + (active_analytics_authority_requested ? "true" : "false")
+               + " data_policy_active_requested=" + (active_data_policy_authority_requested ? "true" : "false"));
+      if(startup_ledger_status != "CLEAN" && active_analytics_authority_requested){
+         _Journal("[startup_policy_manifest] policy_type=active status=blocked authority=blocked reason=ledger_not_clean");
+      }
+      if(startup_ledger_status != "CLEAN" && active_data_policy_authority_requested){
+         Print("[PO3_AIGate] [startup_reject] reason=active_policy_authority_requires_clean_ledger ledger_status=",
+               startup_ledger_status,
+               " risk_factor_enabled=", (InpRiskFactorGateEnable ? "true" : "false"),
+               " invalidation_enabled=", (InpInvalidationAssetClassPolicyEnable ? "true" : "false"),
+               " normalized_fvg_enforce=", (InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE ? "true" : "false"));
+         return false;
+      }
+
+      double aggregate_cap_money = 0.0;
+      double aggregate_pct_cap_money = 0.0;
+      string aggregate_cap_source = "none";
+      string aggregate_cap_reason = "";
+      bool aggregate_cap_valid = EffectiveAggregateRiskCap(aggregate_cap_money,
+                                                            aggregate_pct_cap_money,
+                                                            aggregate_cap_source,
+                                                            aggregate_cap_reason);
+      double risk_base_money = _AggregateRiskBaseMoney();
+      _Journal("[aggregate_risk_startup] enabled=" + (InpMaxTotalRiskEnable ? "true" : "false")
+               + " base_money=" + DoubleToString(risk_base_money, 2)
+               + " pct_cap=" + DoubleToString(InpMaxTotalRiskPct, 4)
+               + " pct_cap_money=" + DoubleToString(aggregate_pct_cap_money, 2)
+               + " configured_money_cap=" + DoubleToString(InpMaxTotalRiskMoney, 2)
+               + " effective_cap_money=" + DoubleToString(aggregate_cap_money, 2)
+               + " effective_source=" + aggregate_cap_source
+               + " valid=" + (aggregate_cap_valid ? "true" : "false")
+               + (StringLen(aggregate_cap_reason) > 0 ? " reason=" + aggregate_cap_reason : ""));
+      if(!MQLInfoInteger(MQL_TESTER) && InpRequireAggregateRiskCapLive && !aggregate_cap_valid){
+         Print("[PO3_AIGate] [startup_reject] reason=live_aggregate_risk_cap_required_but_invalid detail=", aggregate_cap_reason);
+         return false;
+      }
+
+      string risk_factor_policy_json = "";
+      bool risk_factor_policy_loaded = _ReadCommonText(InpRiskFactorPolicyFile, risk_factor_policy_json);
+      bool risk_factor_policy_valid = (risk_factor_policy_loaded &&
+                                       JsonGetString(risk_factor_policy_json, "schema_version", "") == RISK_FACTOR_SCHEMA_VERSION);
+      _Journal("[risk_factor_startup] enabled=" + (InpRiskFactorGateEnable ? "true" : "false")
+               + " required_live=" + (InpRiskFactorPolicyRequiredLive ? "true" : "false")
+               + " file=" + InpRiskFactorPolicyFile
+               + " exists=" + (risk_factor_policy_loaded ? "true" : "false")
+               + " schema_valid=" + (risk_factor_policy_valid ? "true" : "false")
+               + " required_schema=" + RISK_FACTOR_SCHEMA_VERSION);
+      if(InpRiskFactorGateEnable && !risk_factor_policy_valid){
+         Print("[PO3_AIGate] [startup_reject] reason=risk_factor_policy_missing_or_incompatible file=", InpRiskFactorPolicyFile);
+         return false;
+      }
+      if(!MQLInfoInteger(MQL_TESTER) && InpRiskFactorPolicyRequiredLive && !risk_factor_policy_valid){
+         Print("[PO3_AIGate] [startup_reject] reason=mandatory_live_risk_factor_policy_unavailable file=", InpRiskFactorPolicyFile);
+         return false;
+      }
+
+      string startup_cost_source = "";
+      int startup_cost_samples = 0;
+      double startup_cost_median = 0.0;
+      datetime startup_cost_from = 0;
+      datetime startup_cost_to = 0;
+      double startup_stressed_cost = BrokerCostEstimatePerLot(_Symbol,
+                                                               startup_cost_source,
+                                                               startup_cost_samples,
+                                                               startup_cost_median,
+                                                               startup_cost_from,
+                                                               startup_cost_to);
+      _Journal("[broker_cost_startup] symbol=" + _Symbol
+               + " source=" + startup_cost_source
+               + " sample_size=" + IntegerToString(startup_cost_samples)
+               + " median_per_lot=" + DoubleToString(startup_cost_median, 6)
+               + " stressed_per_lot=" + DoubleToString(startup_stressed_cost, 6)
+               + " model_version=" + COMMISSION_MODEL_SCHEMA_VERSION);
+      string normalized_fvg_policy_json = "";
+      bool normalized_fvg_policy_loaded = _ReadCommonText(InpNormalizedFvgAssetClassPolicyFile,
+                                                           normalized_fvg_policy_json);
+      bool normalized_fvg_policy_schema_valid = (normalized_fvg_policy_loaded &&
+                                                  JsonGetString(normalized_fvg_policy_json, "schema_version", "") == NORMALIZED_FVG_SCHEMA_VERSION &&
+                                                  StringLen(JsonGetObject(normalized_fvg_policy_json, "asset_classes", "")) > 0);
+      bool normalized_fvg_policy_authority_compatible = (normalized_fvg_policy_schema_valid &&
+                                                          JsonGetString(normalized_fvg_policy_json, "policy_scope", "asset_class") == "asset_class" &&
+                                                          JsonGetString(normalized_fvg_policy_json, "ledger_integrity_status", "") == "CLEAN" &&
+                                                          JsonGetString(normalized_fvg_policy_json, "taxonomy_version", "") == SETUP_TAXONOMY_VERSION);
+      _Journal("[normalized_fvg_startup] mode=" + IntegerToString((int)InpNormalizedFvgMode)
+               + " schema_version=" + NORMALIZED_FVG_SCHEMA_VERSION
+               + " policy_scope=asset_class shadow_default="
+               + (InpNormalizedFvgMode == NORMALIZED_FVG_SHADOW ? "true" : "false")
+               + " policy_file=" + InpNormalizedFvgAssetClassPolicyFile
+               + " policy_loaded=" + (normalized_fvg_policy_loaded ? "true" : "false")
+               + " policy_schema_valid=" + (normalized_fvg_policy_schema_valid ? "true" : "false")
+               + " policy_authority_compatible=" + (normalized_fvg_policy_authority_compatible ? "true" : "false")
+               + " minimum_clean_samples=" + IntegerToString(InpNormalizedFvgMinAssetClassSamples));
+      if(InpNormalizedFvgMode == NORMALIZED_FVG_ENFORCE && !normalized_fvg_policy_authority_compatible){
+         Print("[PO3_AIGate] [startup_reject] reason=normalized_fvg_enforce_policy_missing_incompatible_or_unclean file=",
+               InpNormalizedFvgAssetClassPolicyFile);
+         return false;
+      }
+      string invalidation_policy_json = "";
+      bool invalidation_policy_loaded = _ReadCommonText(InpInvalidationAssetClassPolicyFile,
+                                                         invalidation_policy_json);
+      bool invalidation_policy_valid = (invalidation_policy_loaded &&
+                                         JsonGetString(invalidation_policy_json, "schema_version", "") == INVALIDATION_POLICY_SCHEMA_VERSION &&
+                                         StringLen(JsonGetObject(invalidation_policy_json, "asset_classes", "")) > 0);
+      _Journal("[invalidation_policy_startup] enabled=" + (InpInvalidationAssetClassPolicyEnable ? "true" : "false")
+               + " file=" + InpInvalidationAssetClassPolicyFile
+               + " loaded=" + (invalidation_policy_loaded ? "true" : "false")
+               + " schema_valid=" + (invalidation_policy_valid ? "true" : "false")
+               + " required_schema=" + INVALIDATION_POLICY_SCHEMA_VERSION);
+      if(InpInvalidationAssetClassPolicyEnable && !invalidation_policy_valid){
+         Print("[PO3_AIGate] [startup_reject] reason=invalidation_asset_class_policy_missing_or_incompatible file=",
+               InpInvalidationAssetClassPolicyFile);
+         return false;
+      }
       _LoadActivePolicyFiles();
+      _WriteStartupPolicyManifest();
 
       TradePlan tmp[];
       if(m_state.LoadPlans(m_state.WatchlistPath(), tmp)) {
@@ -7629,13 +11496,35 @@ public:
                int n = ArraySize(req_ids);
                ArrayResize(req_ids, n+1);
                req_ids[n] = req_id;
-               _ArchivePendingArtifacts(req_id);
+               _ArchivePendingArtifacts(req_id, "shutdown");
             }
             _Journal("tester init clearing restored pending_ai requests=" + IntegerToString(ArraySize(req_ids))
                      + " candidates=" + IntegerToString(ArraySize(m_pending_ai)));
             ArrayResize(m_pending_ai, 0);
          }
          _PrunePlanArray(m_pending_ai, true);
+      }
+      if(m_state.LoadPlans(m_state.CounterfactualPendingPath(), tmp)){
+         _CopyPlans(m_counterfactual_pending, tmp);
+         for(int i=ArraySize(m_counterfactual_pending)-1; i>=0; i--){
+            if(m_counterfactual_pending[i].management_version == MANAGEMENT_SCHEMA_VERSION &&
+               m_counterfactual_pending[i].counterfactual_pending &&
+               StringLen(m_counterfactual_pending[i].trade_key) > 0) continue;
+            int last = ArraySize(m_counterfactual_pending) - 1;
+            if(i != last) m_counterfactual_pending[i] = m_counterfactual_pending[last];
+            ArrayResize(m_counterfactual_pending, last);
+         }
+      }
+      if(m_state.LoadPlans(m_state.ShadowPendingPath(), tmp)){
+         _CopyPlans(m_shadow_pending, tmp);
+         for(int i=ArraySize(m_shadow_pending)-1; i>=0; i--){
+            if(m_shadow_pending[i].shadow_candidate_schema_version == SHADOW_CANDIDATE_SCHEMA_VERSION &&
+               m_shadow_pending[i].shadow_outcome_status == "PENDING" &&
+               StringLen(m_shadow_pending[i].shadow_candidate_record_hash) > 0) continue;
+            int last = ArraySize(m_shadow_pending) - 1;
+            if(i != last) m_shadow_pending[i] = m_shadow_pending[last];
+            ArrayResize(m_shadow_pending, last);
+         }
       }
       PenaltyState penalty_tmp[];
       if(m_state.LoadPenaltyStates(m_state.PenaltyPath(), penalty_tmp)) { m_penalty.RestoreStates(penalty_tmp); }
@@ -7646,6 +11535,20 @@ public:
                + " entry_tf=" + IntegerToString((int)PO3EffectiveEntryTF())
                + " confirm_tf=" + IntegerToString((int)PO3EffectiveConfirmTF())
                + " preset=" + InpStrategyPreset);
+      _Journal("[runtime_inputs] InpEnableMPCTrading=" + (InpEnableMPCTrading ? "true" : "false")
+               + " InpEnableBucketRiskPolicy=" + (InpEnableBucketRiskPolicy ? "true" : "false")
+               + " InpBucketRiskPolicyFile=" + InpBucketRiskPolicyFile
+               + " InpAiVetoEnable=" + (InpAiVetoEnable ? "true" : "false")
+               + " InpAiMinFollowThroughProb=" + DoubleToString(InpAiMinFollowThroughProb, 4)
+               + " InpAiMaxInvalidationRisk=" + DoubleToString(InpAiMaxInvalidationRisk, 4)
+               + " InpAiMaxChopRisk=" + DoubleToString(InpAiMaxChopRisk, 4)
+               + " InpAiMaxPostEntryFailureRisk=" + DoubleToString(InpAiMaxPostEntryFailureRisk, 4)
+               + " InpAiMinFinalExpectancyScore=" + DoubleToString(InpAiMinFinalExpectancyScore, 4));
+      _Journal("[risk_controls] InpMaxTotalRiskEnable=" + (InpMaxTotalRiskEnable ? "true" : "false")
+               + " InpMaxTotalRiskMoney=" + DoubleToString(InpMaxTotalRiskMoney, 2)
+               + " InpDailyLossCapPct=" + DoubleToString(InpDailyLossCapPct, 4)
+               + " InpMaxOpenPositions=" + IntegerToString(InpMaxOpenPositions)
+               + " InpMaxTradesPerScan=" + IntegerToString(InpMaxTradesPerScan));
        if(_AllEntryFamiliesDisabled()){
          _Journal("configuration_error: all entry families disabled " + _EntryFamilyConfigSummary());
          return false;
@@ -7654,8 +11557,10 @@ public:
        _Journal("frequency_objective trades_per_day_min=" + IntegerToString(InpTargetTradesPerDayMin)
                 + " trades_per_day_max=" + IntegerToString(InpTargetTradesPerDayMax)
                 + " note=objective_only_valid_setups_are_never_forced");
-       _Journal("engine init watchlist=" + IntegerToString(ArraySize(m_watchlist))
+      _Journal("engine init watchlist=" + IntegerToString(ArraySize(m_watchlist))
                + " pending_ai=" + IntegerToString(ArraySize(m_pending_ai))
+               + " counterfactual_pending=" + IntegerToString(ArraySize(m_counterfactual_pending))
+               + " shadow_outcomes_pending=" + IntegerToString(ArraySize(m_shadow_pending))
                + " ai=" + (InpUseAI ? "on" : "off")
                + " scan_all=" + (InpScanAllMarketWatch ? "true" : "false")
                + " bus=" + InpBusRoot);
@@ -7669,14 +11574,108 @@ public:
    }
 
    void Deinit() {
-      // persist watchlist/pending
-      _LogFinalSummary();
+      // A decision pending at shutdown cannot be resumed against a later
+      // market state. Fail it closed and archive any remaining bus artifact.
+      string shutdown_req_ids[];
+      ArrayResize(shutdown_req_ids, 0);
+      AiDecision shutdown_decision;
+      ZeroMemory(shutdown_decision);
+      shutdown_decision.decision_state = "REJECT";
+      shutdown_decision.decision_quality_tier = "DEGRADED_NON_TRADING";
+      shutdown_decision.decision_schema_version = AI_DECISION_SCHEMA_VERSION;
+      for(int i=0; i<ArraySize(m_pending_ai); i++){
+         _WriteShadowDecisionUpdate(m_pending_ai[i], shutdown_decision,
+                                    "mql_shutdown_reject", "shutdown_pending_ai", false);
+         string req_id = m_pending_ai[i].req_id;
+         if(StringLen(req_id) == 0 || _HasStringValue(shutdown_req_ids, req_id)) continue;
+         int n = ArraySize(shutdown_req_ids);
+         ArrayResize(shutdown_req_ids, n + 1);
+         shutdown_req_ids[n] = req_id;
+         _ArchivePendingArtifacts(req_id, "shutdown");
+      }
+      if(ArraySize(shutdown_req_ids) > 0)
+         _Journal("[file_bus_recovery] shutdown_pending_requests=" + IntegerToString(ArraySize(shutdown_req_ids))
+                  + " action=archived_shutdown_and_failed_closed");
+      ArrayResize(m_pending_ai, 0);
+
+      // persist watchlist/research state
       _FinalizeClosedTrades();
+      _MaintainCounterfactualEvaluations();
+      _MaintainShadowCandidateOutcomes();
+      _LogFinalSummary();
       _PrunePlanArray(m_watchlist, false);
       _PrunePlanArray(m_pending_ai, true);
       m_state.SavePlans(m_state.WatchlistPath(), m_watchlist);
       m_state.SavePlans(m_state.PendingAiPath(), m_pending_ai);
+      _PersistResearchQueues();
       _PersistPenaltyStates();
+   }
+
+   void HandleTradeTransaction(const MqlTradeTransaction &trans) {
+      if(trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
+      if(!HistoryDealSelect(trans.deal)) return;
+      if((ulong)HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != InpMagicNumber) return;
+      ENUM_DEAL_ENTRY entry_kind = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+      if(entry_kind != DEAL_ENTRY_IN && entry_kind != DEAL_ENTRY_INOUT) return;
+
+      ulong order_ticket = (ulong)HistoryDealGetInteger(trans.deal, DEAL_ORDER);
+      long position_identifier = (long)HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
+      string symbol = HistoryDealGetString(trans.deal, DEAL_SYMBOL);
+      string comment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
+      if(HistoryOrderSelect(order_ticket)){
+         string order_comment = HistoryOrderGetString(order_ticket, ORDER_COMMENT);
+         if(StringLen(order_comment) > 0) comment = order_comment;
+      }
+
+      TradePlan meta;
+      bool have_meta = _ReadTradeMetaPath(_TradeOrderPath(order_ticket), meta);
+      if(!have_meta && StringLen(comment) > 0)
+         have_meta = _ReadTradeMetaPath(_TradeKeyPath(comment), meta);
+      if(!have_meta){
+         ZeroMemory(meta);
+         meta.symbol = symbol;
+         meta.trade_key = comment;
+         meta.broker_comment = comment;
+         meta.result_order_ticket = order_ticket;
+         meta.result_deal_ticket = trans.deal;
+         meta.position_id = position_identifier;
+         meta.broker_position_identifier = position_identifier;
+         meta.broker_position_ticket = _FindPositionTicketByIdentifier(position_identifier);
+         _QuarantineExecutionIdentity(meta, "missing_execution_metadata_for_entry_deal", order_ticket, trans.deal);
+         return;
+      }
+
+      bool pending_fill = (meta.narrative_state == "pending_order" ||
+                           meta.narrative_state == "pending_order_recovered");
+      string identity_reason = "";
+      if(!_ResolveExactExecutionIdentity(meta, order_ticket, trans.deal, meta.initial_volume, identity_reason)){
+         meta.position_id = position_identifier;
+         meta.broker_position_identifier = position_identifier;
+         meta.broker_position_ticket = _FindPositionTicketByIdentifier(position_identifier);
+         _QuarantineExecutionIdentity(meta, identity_reason, order_ticket, trans.deal);
+         return;
+      }
+      meta.narrative_state = "executed";
+      _CaptureEntryRiskContext(meta,
+                               HistoryDealGetDouble(trans.deal, DEAL_VOLUME),
+                               HistoryDealGetDouble(trans.deal, DEAL_PRICE),
+                               (meta.planned_sl > 0.0 ? meta.planned_sl : meta.sl));
+      _UpdateAnalyticsSnapshot(meta,
+                               meta.broker_position_ticket,
+                               SymbolInfoDouble(symbol, meta.is_buy ? SYMBOL_BID : SYMBOL_ASK),
+                               PositionSelectByTicket(meta.broker_position_ticket) ? PositionGetDouble(POSITION_VOLUME) : meta.initial_volume);
+      _WriteTradeMeta(meta, meta.broker_position_ticket);
+      if(pending_fill){
+         m_funnel_orders_filled++;
+         m_funnel_trades_opened++;
+         m_total_trades_opened++;
+         _RememberConsumedSweep(meta);
+         _Journal(symbol + " pending order filled with exact identity"
+                  + " order_ticket=" + IntegerToString((long)order_ticket)
+                  + " deal_ticket=" + IntegerToString((long)trans.deal)
+                  + " position_id=" + IntegerToString(position_identifier)
+                  + " candidate_hash=" + meta.candidate_hash);
+      }
    }
 
    bool EntryFreezeActive(string &reason) {
@@ -7684,6 +11683,7 @@ public:
    }
 
    void MaintainRolloverProtection() {
+      _MaintainBrokerSymbolSessionProtection();
       datetime now = _NowServerOrLocal();
       string reason = "";
       if(PO3PreCloseFlattenActive(now, reason)){
@@ -7753,9 +11753,7 @@ public:
             rep_indexes[idx] = i;
             continue;
          }
-         if(m_scan_candidates[i].expected_value_r > m_scan_candidates[rep_indexes[idx]].expected_value_r ||
-            (m_scan_candidates[i].expected_value_r == m_scan_candidates[rep_indexes[idx]].expected_value_r &&
-             m_scan_candidates[i].setup_score > m_scan_candidates[rep_indexes[idx]].setup_score)){
+         if(_CandidateRanksAhead(m_scan_candidates[i], m_scan_candidates[rep_indexes[idx]])){
             rep_indexes[idx] = i;
          }
       }
@@ -7800,7 +11798,7 @@ public:
             int setup_hits = _CountStringValue(selected_setups, rep.setup_class);
 
             double diversity_bonus = (setup_hits == 0 ? InpPortfolioSchedulerDiversityBonus : 0.0);
-            double score = rep.expected_value_r * InpPortfolioSchedulerEvWeight
+            double score = rep.net_reward_after_cost_r * InpPortfolioSchedulerEvWeight
                            + rep.setup_score * 0.02
                            - cluster_hits * InpPortfolioSchedulerCorrPenalty
                            - session_hits * InpPortfolioSchedulerSessionPenalty
@@ -7862,7 +11860,7 @@ public:
             m_scan_candidates[i].scheduler_reason = "portfolio_scheduler";
          } else {
             m_scan_candidates[i].portfolio_rank = 0;
-            m_scan_candidates[i].portfolio_score = m_scan_candidates[i].expected_value_r;
+            m_scan_candidates[i].portfolio_score = m_scan_candidates[i].net_reward_after_cost_r;
             m_scan_candidates[i].session_concentration = (double)_ExistingSessionCount(m_scan_candidates[i].po3.session_name);
             m_scan_candidates[i].usd_concentration = (double)_ExistingUsdCount(m_scan_candidates[i].usd_exposure_key);
             m_scan_candidates[i].cluster_concentration = (double)_ExistingClusterCount(m_scan_candidates[i].portfolio_cluster);
@@ -8090,6 +12088,7 @@ public:
       m_funnel_raw_fvgs += fvg_diag.raw_fvg_found;
       m_funnel_accepted_fvgs += fvg_diag.accepted;
       m_funnel_fvg_candidates_created += ArraySize(fvg_cands);
+      m_total_fvg_candidates_created += ArraySize(fvg_cands);
 
       bool added = false;
       for(int i=0; i<ArraySize(fvg_cands); i++){
@@ -8098,6 +12097,7 @@ public:
             ZeroMemory(p);
             string reject_reason = "";
             if(!_TryBuildCandidateFromBranch(base, fvg_cands[i], branches[b], p, reject_reason)){
+               _WriteRejectedShadowCandidate(base, fvg_cands[i], branches[b], reject_reason);
                if(reject_reason == "exclusive_breaker_retest_virgin_strong_origin_only")
                   continue;
                string reject_stage = "branch";
@@ -8105,7 +12105,7 @@ public:
                   StringFind(reject_reason, "synthetic_target") >= 0 || StringFind(reject_reason, "structural_stop") >= 0 ||
                   StringFind(reject_reason, "fvg_too_small") >= 0 || StringFind(reject_reason, "broker_distance") >= 0)
                   reject_stage = "plan_price";
-               else if(StringFind(reject_reason, "cost") >= 0 || StringFind(reject_reason, "net_expected") >= 0)
+               else if(StringFind(reject_reason, "cost") >= 0 || StringFind(reject_reason, "net_reward") >= 0)
                   reject_stage = "edge";
                _LogSetupReject(base.symbol, reject_stage, reject_reason,
                                "flow=" + flow_name
@@ -8114,6 +12114,7 @@ public:
                continue;
             }
             p.trade_key = _MakeTradeKey(p);
+            _WriteShadowCandidateRecord(p, "pre_ai_accept", "");
             _QueueScanCandidate(p);
             m_funnel_branch_candidates++;
             added = true;
@@ -8122,7 +12123,8 @@ public:
                      + " branch=" + p.entry_branch
                      + " setup_score=" + DoubleToString(p.setup_score, 2)
                      + " rr2=" + DoubleToString(_ExecutionRR2(p), 2)
-                     + " net_expected_r=" + DoubleToString(p.net_expected_r, 3)
+                     + " heuristic_quality_estimate=" + DoubleToString(p.heuristic_quality_estimate, 3)
+                     + " net_reward_after_cost_r=" + DoubleToString(p.net_reward_after_cost_r, 3)
                      + " execution_cost_r=" + DoubleToString(p.execution_cost_r, 3)
                      + " management_profile=" + p.management_profile);
          }
@@ -8163,6 +12165,7 @@ public:
    // Build plan for a symbol; returns true if plan created (queued either to AI, watchlist, or direct entry)
    bool EvaluateSymbol(const string symbol) {
       m_funnel_scans++;
+      m_total_scans++;
       if(!_SymbolEligible(symbol)){
          _LogSetupReject(symbol, "scan", "symbol_not_eligible", "");
          _Journal(symbol + " skipped: symbol not eligible");
@@ -8211,6 +12214,7 @@ public:
          return _EvaluateScalpFamilies(symbol);
       }
       m_funnel_po3_context_created++;
+      m_total_po3_context_created++;
       _Journal(symbol + " PO3 context created tier=" + po3.context_tier
                + " state=" + po3.po3_state
                + " structure=" + po3.structure_type
@@ -8305,6 +12309,7 @@ public:
       m_funnel_raw_fvgs += fvg_diag.raw_fvg_found;
       m_funnel_accepted_fvgs += fvg_diag.accepted;
       m_funnel_fvg_candidates_created += ArraySize(fvg_cands);
+      m_total_fvg_candidates_created += ArraySize(fvg_cands);
       _Journal(symbol + " FVG candidates created count=" + IntegerToString(ArraySize(fvg_cands)));
 
       bool added = false;
@@ -8329,6 +12334,7 @@ public:
             ZeroMemory(p);
             string reject_reason = "";
              if(!_TryBuildCandidateFromBranch(base, fvg_cands[i], branches[b], p, reject_reason)){
+                _WriteRejectedShadowCandidate(base, fvg_cands[i], branches[b], reject_reason);
                 if(reject_reason == "exclusive_breaker_retest_virgin_strong_origin_only")
                    continue;
                 if(StringFind(reject_reason, "branch_disabled_") == 0) branch_disabled_count++;
@@ -8357,6 +12363,7 @@ public:
             }
 
             p.trade_key = _MakeTradeKey(p);
+            _WriteShadowCandidateRecord(p, "pre_ai_accept", "");
             _Journal(symbol + " candidate " + IntegerToString(i)
                      + " branch=" + p.entry_branch
                      + " setup_class=" + p.setup_class
@@ -8454,12 +12461,12 @@ public:
                   _RememberAiCooldown(group_symbol, group_signature, "response_unreadable");
                   if(!InpAiStrict && InpAllowRuleOnlyFallback){
                      _Journal(group_symbol + " AI response unreadable req_id=" + req_ids[r] + " -> governed fallback");
-                     _FallbackPendingGroup(req_ids[r], "invalid_json");
+                     _RejectPendingGroupAsNonTrading(req_ids[r], "invalid_json");
                   } else {
                      _Journal(group_symbol + " AI response unreadable req_id=" + req_ids[r]
                               + " -> dropped "
                               + (InpAllowRuleOnlyFallback ? "strict mode" : "rule-only fallback disabled"));
-                     _ArchivePendingArtifacts(req_ids[r]);
+                     _ArchivePendingArtifacts(req_ids[r], "quarantined");
                      _RemovePendingGroup(req_ids[r]);
                   }
                   continue;
@@ -8472,16 +12479,31 @@ public:
                if(oldest_wall_request > 0)
                   wall_age_sec = (int)(_WallElapsedMs(oldest_wall_request) / 1000);
                int max_age = MathMax(0, InpTesterMaxAiResultAgeSimMinutes);
+               bool tester_runtime = _IsTesterRuntime();
                bool tester_blocking_wait = _TesterLiveAiBlockingWaitMode();
-               bool tester_stale_ai = (MQLInfoInteger(MQL_TESTER) &&
+               bool tester_live_wait_debug_mode = _TesterLiveWaitDebugMode();
+               bool tester_live_wait_debug_trading_disabled = (tester_live_wait_debug_mode &&
+                                                               !InpTesterAllowLiveWaitDebugTrading);
+               bool tester_live_wait_sim_time_jump = (tester_live_wait_debug_mode &&
+                                                      oldest_sim_request > 0 &&
+                                                      age_sim_min > max_age);
+               bool tester_live_wait_non_tradeable = (tester_live_wait_debug_trading_disabled ||
+                                                       tester_live_wait_sim_time_jump);
+               string tester_live_wait_non_tradeable_reason = "none";
+               if(tester_live_wait_debug_trading_disabled)
+                  tester_live_wait_non_tradeable_reason = "live_wait_debug_trading_disabled";
+               else if(tester_live_wait_sim_time_jump)
+                  tester_live_wait_non_tradeable_reason = "not_backtest_safe";
+               bool tester_stale_ai = (tester_runtime &&
                                        !tester_blocking_wait &&
                                        InpTesterRejectStaleAiResults &&
                                        oldest_sim_request > 0 &&
                                        age_sim_min > max_age);
                string freshness_action = "";
-               if(MQLInfoInteger(MQL_TESTER) && tester_blocking_wait) freshness_action = "accept_after_blocking_wait";
-               else freshness_action = (tester_stale_ai ? "reject" : (MQLInfoInteger(MQL_TESTER) && InpTesterFreezeAiExecutionSnapshot ? "snapshot_validate" : "accept"));
-               _Journal("[ai_freshness] tester=" + (MQLInfoInteger(MQL_TESTER) ? "true" : "false")
+               if(tester_live_wait_non_tradeable) freshness_action = "record_response_do_not_trade";
+               else if(tester_runtime && tester_blocking_wait) freshness_action = "accept_after_blocking_wait";
+               else freshness_action = (tester_stale_ai ? "reject" : (tester_runtime && InpTesterFreezeAiExecutionSnapshot ? "snapshot_validate" : "accept"));
+               _Journal("[ai_freshness] tester=" + (tester_runtime ? "true" : "false")
                         + " pause_scan=" + (tester_blocking_wait ? "true" : "false")
                         + " request_time=" + (oldest_sim_request > 0 ? TimeToString(oldest_sim_request, TIME_DATE|TIME_MINUTES) : "0")
                         + " advisory_time=" + TimeToString(advisory_sim, TIME_DATE|TIME_MINUTES)
@@ -8489,9 +12511,59 @@ public:
                         + " wall_age_sec=" + IntegerToString(wall_age_sec)
                         + " max=" + IntegerToString(max_age)
                         + " action=" + freshness_action
-                        + " sim_age_diagnostic_only=" + (tester_blocking_wait ? "true" : "false"));
-               if(MQLInfoInteger(MQL_TESTER) && tester_blocking_wait)
+                        + " sim_age_diagnostic_only=" + (tester_blocking_wait ? "true" : "false")
+                        + " live_mode_sim_age_ignored=" + (!tester_runtime ? "true" : "false"));
+               if(tester_runtime && tester_blocking_wait && !tester_live_wait_non_tradeable)
                   m_total_ai_results_accepted_after_blocking_wait++;
+               if(tester_live_wait_non_tradeable){
+                  m_funnel_ai_advisories++;
+                  m_total_ai_advisories++;
+                  if(tester_live_wait_sim_time_jump) m_total_tester_live_wait_non_tradeable_sim_jump++;
+                  if(tester_live_wait_debug_trading_disabled) m_total_tester_live_wait_debug_trading_disabled++;
+                  TradePlan record_group[];
+                  int record_count = _CollectPendingGroupPlans(req_ids[r], record_group);
+                  for(int si=0; si<record_count; si++){
+                     record_group[si].ai_advisory_time = advisory_sim;
+                     record_group[si].ai_result_age_sim_minutes = age_sim_min;
+                     record_group[si].tester_ai_result_stale = true;
+                  }
+                  string cache_signature = (record_count > 0 ? _TesterAiCacheSignature(record_group) : group_signature);
+                  bool stored = _RememberTesterAiDecision(cache_signature, dec, true);
+                  _Journal("[tester_ai_mode] mode=live_wait_debug"
+                           + " sim_age_min=" + IntegerToString(age_sim_min)
+                           + " wall_age_sec=" + IntegerToString(wall_age_sec)
+                           + " action=record_response_do_not_trade"
+                           + " reason=" + tester_live_wait_non_tradeable_reason
+                           + " allow_trading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false")
+                           + " sim_time_jump=" + (tester_live_wait_sim_time_jump ? "true" : "false"));
+                  _Journal("[ai_cache] stored_from_live_wait_debug=" + (stored ? "true" : "false")
+                           + " req_id=" + req_ids[r]
+                           + " signature=" + cache_signature);
+                  _Journal("[tester_ai_mode] live_wait_debug_response_recorded=true tradable=false");
+                  if(InpTesterFreezeAiExecutionSnapshot && record_count > 0){
+                     int diag_idx = dec.chosen_index;
+                     if(diag_idx < 0 || diag_idx >= record_count) diag_idx = 0;
+                     string current_precheck_reason = "";
+                     bool current_precheck = _WatchlistStillValidEx(record_group[diag_idx], current_precheck_reason);
+                     _Journal("[snapshot_diagnostic] target_validation_at_request_time=recorded_only"
+                              + " current_state_precheck=" + (current_precheck ? "pass" : "fail")
+                              + " reason=" + current_precheck_reason
+                              + " trading=false");
+                  }
+                  string tester_live_wait_reject_reason = (tester_live_wait_debug_trading_disabled ?
+                                                          "tester_live_wait_debug_trading_disabled" :
+                                                          "tester_live_wait_result_not_tradeable_due_to_sim_time_jump");
+                  _LogSetupReject(group_symbol, "tester_ai_workflow", tester_live_wait_reject_reason,
+                                  "req_id=" + req_ids[r]
+                                  + " age_sim_min=" + IntegerToString(age_sim_min)
+                                  + " wall_age_sec=" + IntegerToString(wall_age_sec)
+                                  + " max=" + IntegerToString(max_age)
+                                  + " allow_trading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false")
+                                  + " cached=" + (stored ? "true" : "false"));
+                  _ArchivePendingArtifacts(req_ids[r], "completed");
+                  _RemovePendingGroup(req_ids[r]);
+                  continue;
+               }
                if(tester_stale_ai){
                   m_funnel_ai_result_stale_in_tester++;
                   m_total_ai_results_rejected_stale++;
@@ -8506,7 +12578,7 @@ public:
                                   "req_id=" + req_ids[r]
                                   + " age_sim_min=" + IntegerToString(age_sim_min)
                                   + " max=" + IntegerToString(max_age));
-                  _ArchivePendingArtifacts(req_ids[r]);
+                  _ArchivePendingArtifacts(req_ids[r], "stale");
                   _RemovePendingGroup(req_ids[r]);
                   continue;
                }
@@ -8526,7 +12598,7 @@ public:
                   _LogSetupReject(group_symbol, "ai_wait_timeout", "ai_response_missing_file",
                                   "req_id=" + req_ids[r]
                                   + " elapsed_wall_sec=" + IntegerToString((int)(_WallElapsedMs(oldest_wall_request) / 1000)));
-                  _ArchivePendingArtifacts(req_ids[r]);
+                  _ArchivePendingArtifacts(req_ids[r], "timed_out");
                   _RemovePendingGroup(req_ids[r]);
                   continue;
                }
@@ -8536,7 +12608,7 @@ public:
                   if(MQLInfoInteger(MQL_TESTER) && InpLiveFailClosedOnAIFailure)
                      allow_fallback = false;
                   _RememberAiCooldown(group_symbol, group_signature, timeout_reason);
-                  if(allow_fallback) _FallbackPendingGroup(req_ids[r], "timeout");
+                  if(allow_fallback) _RejectPendingGroupAsNonTrading(req_ids[r], "timeout");
                   else {
                      if(MQLInfoInteger(MQL_TESTER))
                         m_total_tester_ai_wait_timeout++;
@@ -8549,7 +12621,7 @@ public:
                               + " reason=" + timeout_reason
                               + " -> dropped "
                               + (InpAllowRuleOnlyFallback ? "strict mode" : "rule-only fallback disabled"));
-                     _ArchivePendingArtifacts(req_ids[r]);
+                     _ArchivePendingArtifacts(req_ids[r], "timed_out");
                      _RemovePendingGroup(req_ids[r]);
                   }
                   continue;
@@ -8558,6 +12630,7 @@ public:
             }
 
          m_funnel_ai_advisories++;
+         m_total_ai_advisories++;
          TradePlan decision_group[];
          ArrayResize(decision_group, 0);
          for(int i=0; i<ArraySize(m_pending_ai); i++){
@@ -8569,97 +12642,139 @@ public:
             ArrayResize(decision_group, n + 1);
             decision_group[n] = m_pending_ai[i];
          }
-         if(ArraySize(decision_group) > 0)
-            _RememberTesterAiDecision(_TesterAiCacheSignature(decision_group), dec);
-
-         int chosen = dec.chosen_index;
-         if(chosen < 0 || chosen >= candidate_count) chosen = 0;
-         bool hard_veto = _AiHardVeto(dec);
-
-         TradePlan rule_best;
-         bool have_rule_best = false;
-         TradePlan ai_selected;
-         bool have_ai_selected = false;
-         string selected_reason = "";
-         for(int i=0; i<ArraySize(m_pending_ai); i++){
-            if(m_pending_ai[i].req_id != req_ids[r]) continue;
-            m_pending_ai[i].ai = dec;
-            if(StringLen(m_pending_ai[i].ai_decision_source) == 0)
-               m_pending_ai[i].ai_decision_source = (StringLen(dec.decision_source) > 0 ? dec.decision_source : "llm_blended");
-
-            string rule_reason = "";
-            bool rule_pass = _DeterministicExecutionGate(m_pending_ai[i], rule_reason, false);
-            if(rule_pass && (!have_rule_best ||
-               m_pending_ai[i].expected_value_r > rule_best.expected_value_r ||
-               (m_pending_ai[i].expected_value_r == rule_best.expected_value_r &&
-                m_pending_ai[i].setup_score > rule_best.setup_score))){
-               rule_best = m_pending_ai[i];
-               have_rule_best = true;
-               selected_reason = rule_reason;
-            }
-            if(m_pending_ai[i].candidate_index == chosen){
-               ai_selected = m_pending_ai[i];
-               have_ai_selected = rule_pass;
+         if(ArraySize(decision_group) > 0){
+            string decision_cache_signature = _TesterAiCacheSignature(decision_group);
+            bool force_live_wait_cache = (MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
+            bool stored_from_live_wait = _RememberTesterAiDecision(decision_cache_signature, dec, force_live_wait_cache);
+            if(force_live_wait_cache){
+               _Journal("[ai_cache] stored_from_live_wait_debug=" + (stored_from_live_wait ? "true" : "false")
+                        + " req_id=" + req_ids[r]
+                        + " signature=" + decision_cache_signature);
+               _Journal("[tester_ai_mode] live_wait_debug_response_recorded=true tradable=true");
             }
          }
+
+         string assessment_integrity_reason = "";
+         bool assessment_group_ok = _DecisionAssessmentsMatchGroup(dec, decision_group, assessment_integrity_reason);
+         bool strict_response_quality = (dec.decision_quality_tier == "FULL_STRUCTURED" || dec.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+         bool strict_schema_ok = (dec.mandatory_fields_complete &&
+                                  dec.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
+                                  dec.hierarchical_prior_schema_version == HIERARCHICAL_PRIOR_SCHEMA_VERSION &&
+                                  dec.repeatability_schema_version == REPEATABILITY_SCHEMA_VERSION &&
+                                  strict_response_quality && assessment_group_ok);
 
          TradePlan selected;
          bool have_selected = false;
-         if(have_ai_selected){
-            selected = ai_selected;
-            have_selected = true;
-         } else if(have_rule_best){
-            selected = rule_best;
-            have_selected = true;
+         int selected_matches = 0;
+         for(int i=0; i<ArraySize(decision_group); i++){
+            if(decision_group[i].candidate_index != dec.chosen_index) continue;
+            if(decision_group[i].candidate_id != dec.selected_candidate_id) continue;
+            if(decision_group[i].candidate_hash != dec.selected_candidate_hash) continue;
+            if(decision_group[i].request_execution_fingerprint != dec.request_execution_fingerprint) continue;
+            selected = decision_group[i];
+            selected_matches++;
          }
+         have_selected = (selected_matches == 1);
+         if(!have_selected && StringLen(assessment_integrity_reason) == 0)
+            assessment_integrity_reason = "candidate_hash_mismatch";
+
+         string deterministic_reason = "candidate_not_selected";
+         bool deterministic_pass = false;
+         if(have_selected)
+            deterministic_pass = _DeterministicExecutionGate(selected, deterministic_reason, false);
+
+         string ai_veto_reason = _AiVetoReason(dec);
+         bool hard_veto = (StringLen(ai_veto_reason) > 0);
+         if(hard_veto)
+            _Journal("[ai_veto] req_id=" + req_ids[r]
+                     + " reason=" + ai_veto_reason
+                     + " follow_through=" + DoubleToString(dec.follow_through_probability, 4)
+                     + " invalidation_risk=" + DoubleToString(dec.invalidation_risk, 4)
+                     + " chop_risk=" + DoubleToString(dec.chop_risk, 4)
+                     + " cost_risk=" + DoubleToString(dec.cost_risk, 4)
+                     + " post_entry_failure_risk=" + DoubleToString(dec.post_entry_failure_risk, 4)
+                     + " final_expectancy=" + DoubleToString(dec.final_trade_expectancy_score, 4));
 
          string ai_threshold_source = "InpMinAiScoreTrend";
-         double required_ai_score = (have_selected ? EffectiveAiScoreThreshold(selected, ai_threshold_source) : InpMinAiScoreTrend);
-         double required_ai_confidence = (have_selected ? _RequiredAiConfidence(selected) : InpMinAiConfidence);
-         bool ai_conf_ok = (dec.confidence >= required_ai_confidence);
-         bool ai_score_ok = (dec.score >= required_ai_score);
-         bool python_family_threshold_reject = (dec.reject_reason == "ai_score_below_family_threshold" ||
-                                                StringFind(dec.rejection_codes_json, "ai_score_below_family_threshold") >= 0);
-         bool raw_ai_ok = (dec.allow || python_family_threshold_reject);
-         string ai_threshold_reason = "ok";
-         if(!raw_ai_ok) ai_threshold_reason = "ai_raw_allow_false";
-         else if(!ai_score_ok) ai_threshold_reason = "ai_score_below_family_threshold";
-         else if(!ai_conf_ok) ai_threshold_reason = "ai_confidence_below_threshold";
+         double required_llm_quality_score = (have_selected ? EffectiveLlmQualityScoreThreshold(selected, ai_threshold_source) : InpMinAiScoreTrend);
+         // Repeatability can veto or abstain, but it can never disable a
+         // configured family floor and make the decision path more permissive.
+         bool llm_quality_floor_ok = (dec.llm_quality_score >= required_llm_quality_score);
+         bool state_approve = (dec.decision_state == "APPROVE");
+         bool full_ai_approval = (dec.python_final_allow && dec.model_raw_allow && state_approve);
+         bool risk_multiplier_ok = (dec.suggested_risk_multiplier > 0.0 && dec.suggested_risk_multiplier <= 1.0);
+         string reject_reason = "ok";
+         if(!strict_schema_ok)
+            reject_reason = (strict_response_quality ? "ai_quality_schema_incomplete" : "degraded_ai_response_non_trading");
+         else if(!have_selected) reject_reason = "candidate_hash_mismatch";
+         else if(!dec.repeatability_trading_eligible) reject_reason = "model_prompt_decision_non_repeatable";
+         else if(dec.decision_state == "ABSTAIN") reject_reason = "ai_abstain";
+         else if(!state_approve || !dec.model_raw_allow || !dec.python_final_allow) reject_reason = "ai_raw_allow_false";
+         else if(!risk_multiplier_ok) reject_reason = "resolved_risk_multiplier_zero";
+         else if(hard_veto) reject_reason = "ai_veto";
+         else if(!llm_quality_floor_ok) reject_reason = "llm_quality_score_below_family_threshold";
+         else if(!deterministic_pass) reject_reason = deterministic_reason;
 
-         dec.score_threshold = required_ai_score;
-         dec.threshold_source = ai_threshold_source;
-         dec.threshold_passed = ai_score_ok;
-         dec.reject_reason = (ai_threshold_reason == "ok" ? "" : ai_threshold_reason);
-         dec.global_score_as_hard_floor = InpGlobalAiScoreAsHardFloor;
+         dec.llm_quality_score_threshold = required_llm_quality_score;
+         dec.llm_quality_threshold_source = ai_threshold_source;
+         dec.llm_quality_threshold_passed = llm_quality_floor_ok;
+         dec.llm_quality_reject_reason = (reject_reason == "ok" ? "" : reject_reason);
+         dec.global_llm_quality_as_hard_floor = InpGlobalAiScoreAsHardFloor;
+         bool allow = (reject_reason == "ok" && full_ai_approval);
+         dec.mql_final_allow = false;
 
-         bool allow = (have_selected && !hard_veto && ai_conf_ok && ai_score_ok && raw_ai_ok);
-         if(have_selected && !hard_veto && !allow && ai_threshold_reason != "ai_score_below_family_threshold" && !InpAiStrict && InpAllowRuleOnlyFallback){
-            TradePlan fallback_selected = selected;
-            if(_ApplyRuleFallback(fallback_selected, ai_threshold_reason)){
-               selected = fallback_selected;
-               allow = true;
-            }
-         }
+         _Journal("[decision_authority] model_raw_allow=" + (dec.model_raw_allow ? "true" : "false")
+                  + " python_final_allow=" + (dec.python_final_allow ? "true" : "false")
+                  + " mql_final_allow=false"
+                  + " python_reasons=" + dec.reasons_json
+                  + " mql_reasons=" + (reject_reason == "ok" ? "pending_final_mql_execution_gates" : reject_reason));
+
+         _Journal("[decision_scores] req_id=" + req_ids[r]
+                  + " candidate_id=" + dec.selected_candidate_id
+                  + " candidate_hash=" + dec.selected_candidate_hash
+                  + " rule_score=" + DoubleToString(dec.rule_score, 4)
+                  + " llm_quality_score=" + DoubleToString(dec.llm_quality_score, 4)
+                  + " blended_legacy_score=" + DoubleToString(dec.blended_legacy_score, 4)
+                  + " calibrated_win_probability=unavailable"
+                  + " expected_net_r=unavailable"
+                  + " llm_self_reported_confidence=" + DoubleToString(dec.llm_self_reported_confidence, 4)
+                  + " legacy_agreement_confidence=" + DoubleToString(dec.legacy_agreement_confidence, 4)
+                  + " legacy_fields_trade_authority=false");
+         _Journal("[repeatability_authority] req_id=" + req_ids[r]
+                  + " schema=" + dec.repeatability_schema_version
+                  + " status=" + dec.repeatability_status
+                  + " score_threshold_authority=" + (dec.repeatability_score_threshold_authority ? "true" : "false")
+                  + " trading_eligible=" + (dec.repeatability_trading_eligible ? "true" : "false")
+                  + " group_key=" + dec.repeatability_group_key);
+         if(dec.decision_state == "ABSTAIN")
+            _Journal("[ai_abstain] candidate_id=" + dec.selected_candidate_id
+                     + " candidate_hash=" + dec.selected_candidate_hash
+                     + " reason=" + dec.reasons_json);
          _Journal(group_symbol + " AI advisory req_id=" + req_ids[r]
-                  + " raw_allow=" + (dec.allow ? "true" : "false")
+                  + " raw_allow=" + (dec.raw_allow ? "true" : "false")
+                  + " decision_state=" + dec.decision_state
+                  + " decision_quality_tier=" + dec.decision_quality_tier
                   + " hard_veto=" + (hard_veto ? "true" : "false")
-                  + " threshold_reason=" + ai_threshold_reason
+                  + " threshold_reason=" + reject_reason
                   + " final_allow=" + (allow ? "true" : "false")
-                  + " score=" + DoubleToString(dec.score, 2)
-                  + " required_score=" + DoubleToString(required_ai_score, 2)
-                  + " threshold_source=" + ai_threshold_source
-                  + " conf=" + DoubleToString(dec.confidence, 2)
-                  + " required_conf=" + DoubleToString(required_ai_confidence, 2)
-                  + " chosen=" + IntegerToString(chosen)
+                  + " llm_quality_score=" + DoubleToString(dec.llm_quality_score, 2)
+                  + " required_llm_quality_score=" + DoubleToString(required_llm_quality_score, 2)
+                  + " llm_self_reported_confidence_diagnostic=" + DoubleToString(dec.llm_self_reported_confidence, 2)
+                  + " confidence_trade_authority=false"
+                  + " chosen=" + IntegerToString(dec.chosen_index)
+                  + " candidate_hash_match=" + (have_selected ? "true" : "false")
+                  + " assessment_group_ok=" + (assessment_group_ok ? "true" : "false")
                   + " decision_source=" + dec.decision_source);
-         if(have_selected){
-            _Journal(group_symbol + " family_threshold family=" + selected.setup_family
-                     + " class=" + selected.setup_class
-                     + " branch=" + selected.entry_branch
-                     + " score=" + DoubleToString(dec.score, 2)
-                     + " threshold=" + DoubleToString(required_ai_score, 2)
-                     + " source=" + ai_threshold_source
-                     + " pass=" + (ai_score_ok ? "true" : "false"));
+
+         for(int shadow_idx=0; shadow_idx<ArraySize(decision_group); shadow_idx++){
+            bool shadow_selected = (have_selected &&
+                                    decision_group[shadow_idx].candidate_hash == dec.selected_candidate_hash);
+            string shadow_stage = (shadow_selected
+                                   ? (allow ? "python_approved_mql_pending" : "python_rejected")
+                                   : "python_not_selected");
+            string shadow_reason = (shadow_selected ? reject_reason : "candidate_not_selected_by_python");
+            _WriteShadowDecisionUpdate(decision_group[shadow_idx], dec, shadow_stage,
+                                       shadow_reason == "ok" ? "" : shadow_reason, false);
          }
 
          if(allow){
@@ -8670,14 +12785,47 @@ public:
             selected.ai_requested_wall_ms = 0;
             selected.last_confirm_bar_time = _LastClosedBarTime(selected.symbol, selected.confirm_tf);
             selected.ai_decision_id = dec.decision_id;
-            if(StringLen(selected.ai_decision_source) == 0){
-               if(StringLen(dec.decision_source) > 0) selected.ai_decision_source = dec.decision_source;
-               else selected.ai_decision_source = "llm_blended";
-            }
-            if(!dec.allow && selected.ai_decision_source == "llm_blended") selected.ai_decision_source = "score_override";
+            selected.ai_decision_source = dec.decision_source;
             selected.ai = dec;
+            selected.model_raw_allow = dec.model_raw_allow;
+            selected.python_final_allow = dec.python_final_allow;
+            selected.mql_final_allow = false;
+            selected.decision_field_authority_json = dec.decision_field_authority_json;
+            selected.python_decision_reasons = dec.reasons_json;
+            selected.mql_decision_reasons = "pending_final_mql_execution_gates";
+            selected.reasoning_configuration = dec.reasoning_configuration;
+            selected.bucket_prior_hash = dec.bucket_prior_hash;
+            selected.calibration_artifact_id = dec.calibration_artifact_id;
+            selected.repeatability_artifact_id = dec.repeatability_authority_hash;
+            selected.request_fingerprint = dec.request_fingerprint;
+            selected.response_fingerprint = dec.response_fingerprint;
+            selected.hierarchical_prior_artifact_hash = dec.hierarchical_prior_artifact_hash;
+            selected.hierarchical_prior_schema_version = dec.hierarchical_prior_schema_version;
+            selected.repeatability_status = dec.repeatability_status;
+            selected.repeatability_score_threshold_authority = dec.repeatability_score_threshold_authority;
+            selected.repeatability_trading_eligible = dec.repeatability_trading_eligible;
+            selected.repeatability_group_key = dec.repeatability_group_key;
+            selected.repeatability_authority_hash = dec.repeatability_authority_hash;
+            selected.ai_selected_candidate_hash = dec.selected_candidate_hash;
+            selected.candidate_hash_match = (selected.candidate_hash == selected.ai_selected_candidate_hash);
+            string expected_assessed_fingerprint = _AssessedFingerprintFromDecision(selected, dec);
+            if(!selected.candidate_hash_match || expected_assessed_fingerprint != dec.assessed_execution_fingerprint){
+               _WriteShadowDecisionUpdate(selected, dec, "mql_rejected_decision_integrity",
+                                          (!selected.candidate_hash_match ? "candidate_hash_mismatch" : "execution_fingerprint_mismatch"), false);
+               _LogSetupReject(group_symbol, "decision_integrity",
+                               (!selected.candidate_hash_match ? "candidate_hash_mismatch" : "execution_fingerprint_mismatch"),
+                               "ai_selected_candidate_hash=" + dec.selected_candidate_hash
+                               + " executed_candidate_hash=" + selected.candidate_hash
+                               + " request_execution_fingerprint=" + selected.request_execution_fingerprint
+                               + " expected_assessed_execution_fingerprint=" + expected_assessed_fingerprint
+                               + " received_assessed_execution_fingerprint=" + dec.assessed_execution_fingerprint);
+               _RemovePendingGroup(req_ids[r]);
+               continue;
+            }
             string ai_target_reason = "";
             if(!_ApplyAiTargetArbitration(selected, dec, ai_target_reason)){
+               _WriteShadowDecisionUpdate(selected, dec, "mql_rejected_target_arbitration",
+                                          ai_target_reason, false);
                if(ai_target_reason == "invalid_ai_target_arbitration_response")
                   m_funnel_invalid_ai_target_arbitration_response++;
                _RememberAiCooldown(group_symbol, group_signature, ai_target_reason);
@@ -8693,6 +12841,55 @@ public:
                _RemovePendingGroup(req_ids[r]);
                continue;
             }
+            double tick_size = SymbolInfoDouble(selected.symbol, SYMBOL_TRADE_TICK_SIZE);
+            if(tick_size <= 0.0) tick_size = SymbolInfoDouble(selected.symbol, SYMBOL_POINT);
+            if(tick_size <= 0.0) tick_size = 0.00001;
+            double assessed_price_tolerance = 2.0 * tick_size;
+            if(MathAbs(selected.entry_est - dec.assessed_entry) > assessed_price_tolerance ||
+               MathAbs(selected.sl - dec.assessed_sl) > assessed_price_tolerance ||
+               MathAbs(selected.tp1 - dec.assessed_tp1) > assessed_price_tolerance ||
+               MathAbs(selected.tp2 - dec.assessed_tp2) > assessed_price_tolerance ||
+               MathAbs(selected.tp2 - dec.selected_target_price) > assessed_price_tolerance){
+               string changed = "";
+               if(MathAbs(selected.entry_est - dec.assessed_entry) > assessed_price_tolerance) _AppendChangedComponent(changed, "entry");
+               if(MathAbs(selected.sl - dec.assessed_sl) > assessed_price_tolerance) _AppendChangedComponent(changed, "sl");
+               if(MathAbs(selected.tp1 - dec.assessed_tp1) > assessed_price_tolerance) _AppendChangedComponent(changed, "tp1");
+               if(MathAbs(selected.tp2 - dec.assessed_tp2) > assessed_price_tolerance) _AppendChangedComponent(changed, "tp2");
+               _WriteShadowDecisionUpdate(selected, dec, "mql_rejected_execution_fingerprint",
+                                          "execution_fingerprint_mismatch:" + changed, false);
+               _LogSetupReject(group_symbol, "decision_integrity", "execution_fingerprint_mismatch",
+                               "changed_components=" + changed
+                               + " assessed_execution_fingerprint=" + dec.assessed_execution_fingerprint);
+               _RemovePendingGroup(req_ids[r]);
+               continue;
+            }
+            selected.assessed_execution_fingerprint = dec.assessed_execution_fingerprint;
+            selected.assessed_entry = dec.assessed_entry;
+            selected.assessed_sl = dec.assessed_sl;
+            selected.assessed_tp1 = dec.assessed_tp1;
+            selected.assessed_tp2 = dec.assessed_tp2;
+            double assessed_risk = MathAbs(dec.assessed_entry - dec.assessed_sl);
+            selected.assessed_net_rr = (assessed_risk > 0.0 ? _RewardToTarget(selected.is_buy, dec.assessed_entry, dec.assessed_tp2) / assessed_risk : 0.0);
+            selected.assessed_spread_r = selected.spread_r;
+            selected.assessed_slippage_r = selected.slippage_r;
+            selected.assessed_execution_cost_r = selected.execution_cost_r;
+            selected.assessed_symbol = selected.symbol;
+            selected.assessed_is_buy = selected.is_buy;
+            selected.assessed_setup_code = selected.model_code;
+            selected.assessed_setup_family = selected.setup_family;
+            selected.assessed_entry_branch = selected.entry_branch;
+            selected.assessed_source_t_sweep = selected.source_t_sweep;
+            selected.assessed_source_t_disp = selected.source_t_disp;
+            selected.assessed_source_t_bos = selected.source_t_bos;
+            selected.assessed_target_source = selected.target_source;
+            selected.assessed_target_model = selected.target_model;
+            selected.assessed_obstacle_kind = selected.obstacle_kind;
+            selected.assessed_obstacle_tf = selected.obstacle_tf;
+            selected.assessed_obstacle_price = selected.obstacle_price;
+            selected.assessed_decision_input_hash = m_ai.DecisionHash();
+            selected.assessed_strategy_schema_version = ENGINE_INPUT_SCHEMA;
+            _PopulateCohortMetadata(selected);
+            _WriteShadowDecisionUpdate(selected, dec, "python_approved_target_applied", "", false);
             _Journal(selected.symbol + " deterministic gate approved candidate=" + IntegerToString(selected.candidate_index)
                      + " setup_score=" + DoubleToString(selected.setup_score, 2)
                      + " source=" + selected.ai_decision_source
@@ -8701,22 +12898,24 @@ public:
                      + " target_reason=" + selected.target_decision_reason);
             _AddToWatchlist(selected);
          } else {
-            string reject_reason = (have_selected ? ai_threshold_reason : "no_rule_candidate");
-            if(hard_veto && reject_reason == "ok") reject_reason = "llm_veto";
             _RememberAiCooldown(group_symbol, group_signature, reject_reason);
-            _LogSetupReject(group_symbol, "ai", reject_reason,
-                            "score=" + DoubleToString(dec.score, 2)
-                            + " required_score=" + DoubleToString(required_ai_score, 2)
-                            + " threshold=" + DoubleToString(required_ai_score, 2)
+            string reject_stage = ((reject_reason == "candidate_hash_mismatch" ||
+                                    reject_reason == "ai_quality_schema_incomplete" ||
+                                    reject_reason == "degraded_ai_response_non_trading") ? "decision_integrity" : "ai");
+            _LogSetupReject(group_symbol, reject_stage, reject_reason,
+                            "llm_quality_score=" + DoubleToString(dec.llm_quality_score, 2)
+                            + " required_llm_quality_score=" + DoubleToString(required_llm_quality_score, 2)
                             + " source=" + ai_threshold_source
                             + " family=" + (have_selected ? selected.setup_family : "")
                             + " class=" + (have_selected ? selected.setup_class : "")
                             + " branch=" + (have_selected ? selected.entry_branch : "")
-                            + " confidence=" + DoubleToString(dec.confidence, 2)
-                            + " required_confidence=" + DoubleToString(required_ai_confidence, 2)
-                            + " hard_veto=" + IntegerToString(hard_veto ? 1 : 0));
+                            + " llm_self_reported_confidence_diagnostic=" + DoubleToString(dec.llm_self_reported_confidence, 2)
+                            + " hard_veto=" + IntegerToString(hard_veto ? 1 : 0)
+                            + " reason_detail=" + ai_veto_reason
+                            + " assessment_integrity_reason=" + assessment_integrity_reason
+                            + " ai_selected_candidate_hash=" + dec.selected_candidate_hash);
             _Journal(group_symbol + " AI/rule reject req_id=" + req_ids[r] + " reasons=" + dec.reasons_json
-                     + " rule_reason=" + selected_reason + " reject=" + reject_reason);
+                     + " deterministic_reason=" + deterministic_reason + " reject=" + reject_reason);
          }
 
          _RemovePendingGroup(req_ids[r]);
@@ -9063,7 +13262,23 @@ public:
          datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
 
          TradePlan meta;
-         if(!_SymbolEligible(sym) || !_LoadTradeMeta(ticket, sym, comment, meta)) continue;
+         if(!_SymbolEligible(sym)) continue;
+         string position_identity_reason = "";
+         if(!_LoadAndResolvePositionMeta(ticket, sym, comment, meta, position_identity_reason)){
+            TradePlan quarantined;
+            ZeroMemory(quarantined);
+            long live_position_id = (long)PositionGetInteger(POSITION_IDENTIFIER);
+            _NormalizeRecoveredExposureMeta(quarantined, sym, is_buy, entry, sl, tp, vol, opened, comment,
+                                            live_position_id, false);
+            quarantined.broker_position_ticket = ticket;
+            quarantined.broker_position_identifier = live_position_id;
+            _QuarantineExecutionIdentity(quarantined,
+                                         "live_position_attribution_unavailable:" + position_identity_reason,
+                                         0,
+                                         0);
+            continue;
+         }
+         if(meta.execution_identity_quarantined || !meta.execution_identity_verified) continue;
 
           bool pending_fill_detected = (meta.narrative_state == "pending_order" || meta.narrative_state == "pending_order_recovered");
           double px = SymbolInfoDouble(sym, is_buy ? SYMBOL_BID : SYMBOL_ASK);
@@ -9074,6 +13289,7 @@ public:
              meta.narrative_state = "executed";
              m_funnel_orders_filled++;
              m_funnel_trades_opened++;
+             m_total_trades_opened++;
              _RememberConsumedSweep(meta);
              _Journal(sym + " pending order filled ticket=" + IntegerToString((int)ticket)
                       + " entry=" + _FmtPrice(sym, meta.filled_entry)
@@ -9094,13 +13310,26 @@ public:
              bool partial_ok = true;
              double partial_pct = (meta.tp1_partial_pct > 0 ? meta.tp1_partial_pct : InpTP1PartialPct);
              if(partial_pct > 0 && partial_pct < 0.99){
-                double vol_cut = _ClampVolToStep(sym, vol * partial_pct);
-                double vmin = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
-                if(vol_cut >= vmin && vol - vol_cut >= vmin){
-                   partial_ok = m_trade.PositionClosePartial(ticket, vol_cut);
+                VolumeNormalizationResult close_norm = NormalizeClosingVolume(sym,
+                                                                               vol * partial_pct,
+                                                                               vol,
+                                                                               InpClosingVolumeAllowCloseAllBelowMinimum);
+                if(close_norm.action == "close_all")
+                   partial_ok = m_trade.PositionClose(ticket);
+                else if(close_norm.normalized_volume > 0.0)
+                   partial_ok = m_trade.PositionClosePartial(ticket, close_norm.normalized_volume);
+                else {
+                   partial_ok = false;
+                   _Journal("[closing_volume] stage=tp1 ticket=" + IntegerToString((long)ticket)
+                            + " requested=" + DoubleToString(close_norm.requested_volume, 8)
+                            + " normalized=" + DoubleToString(close_norm.normalized_volume, 8)
+                            + " residual=" + DoubleToString(close_norm.residual_volume, 8)
+                            + " action=" + close_norm.action
+                            + " reason=" + close_norm.reason);
                 }
              }
              if(partial_ok){
+                _CaptureManagementDecisionSnapshot(meta, "tp1_partial_or_close", px, sl, tp);
                 meta.tp1_done = true;
                 _Journal(sym + " TP1 handled ticket=" + IntegerToString((int)ticket)
                          + " partial=" + (partial_ok ? "true" : "false"));
@@ -9133,6 +13362,8 @@ public:
                 new_sl += (is_buy ? offset : -offset);
                 if((is_buy && new_sl > sl) || (!is_buy && new_sl < sl)){
                    bool be_ok = m_trade.PositionModify(ticket, new_sl, tp);
+                   if(be_ok)
+                      _CaptureManagementDecisionSnapshot(meta, "breakeven_stop_modify", px, sl, tp);
                    _Journal(sym + " breakeven time-gated ticket=" + IntegerToString((int)ticket)
                             + " minutes_open=" + IntegerToString(minutes_open)
                             + " mfe_r=" + DoubleToString(meta.mfe_r, 2)
@@ -9146,10 +13377,56 @@ public:
 
       // Penalties
       m_penalty.Tick(m_trade);
+      for(int state_i=PositionsTotal()-1; state_i>=0; state_i--){
+         ulong state_ticket = PositionGetTicket(state_i);
+         if(!PositionMatchesMagic(state_ticket)) continue;
+         string state_symbol = PositionGetString(POSITION_SYMBOL);
+         long state_position_id = (long)PositionGetInteger(POSITION_IDENTIFIER);
+         PenaltyState penalty_state;
+         if(!m_penalty.GetState(state_position_id, state_symbol, penalty_state)) continue;
+         TradePlan state_meta;
+         string state_meta_reason = "";
+         if(!_LoadAndResolvePositionMeta(state_ticket,
+                                         state_symbol,
+                                         PositionGetString(POSITION_COMMENT),
+                                         state_meta,
+                                         state_meta_reason)) continue;
+         state_meta.management_version = penalty_state.management_version;
+         state_meta.management_previous_state = penalty_state.previous_state;
+         state_meta.management_state = penalty_state.current_state;
+         state_meta.management_transition_time = penalty_state.transition_time;
+         state_meta.management_transition_reason = penalty_state.transition_reason;
+         state_meta.management_evidence_snapshot_json = penalty_state.evidence_snapshot_json;
+         state_meta.management_action_executed = penalty_state.action_executed;
+         state_meta.management_action_id = penalty_state.action_id;
+         state_meta.invalidation_confirmation_mode = penalty_state.confirmation_mode;
+         state_meta.invalidation_reference_timeframe = penalty_state.confirmation_timeframe;
+         state_meta.invalidation_trigger_level = penalty_state.confirmation_trigger_level;
+         state_meta.invalidation_spread = penalty_state.confirmation_spread;
+         state_meta.invalidation_buffer = penalty_state.confirmation_buffer;
+         state_meta.invalidation_first_breach_time = penalty_state.first_breach_time;
+         state_meta.invalidation_confirmed_time = penalty_state.confirmed_time;
+         state_meta.invalidation_confirming_bar = penalty_state.confirming_bar;
+         state_meta.mfe_price = penalty_state.mfe_price;
+         state_meta.mae_price = penalty_state.mae_price;
+         state_meta.penalty_reductions_count = MathMax(state_meta.penalty_reductions_count, penalty_state.strikes);
+         if(StringLen(penalty_state.action_executed) > 0){
+            double state_px = SymbolInfoDouble(state_symbol,
+                                               PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? SYMBOL_BID : SYMBOL_ASK);
+            _CaptureManagementDecisionSnapshot(state_meta,
+                                               penalty_state.action_executed,
+                                               state_px,
+                                               (state_meta.planned_sl > 0.0 ? state_meta.planned_sl : state_meta.sl),
+                                               (state_meta.planned_tp2 > 0.0 ? state_meta.planned_tp2 : state_meta.tp2));
+         }
+         _WriteTradeMeta(state_meta, state_ticket);
+      }
       if(m_last_penalty_persist == 0 || (TimeLocal() - m_last_penalty_persist) >= 15){
          _PersistPenaltyStates();
       }
       _FinalizeClosedTrades();
+      _MaintainCounterfactualEvaluations();
+      _MaintainShadowCandidateOutcomes();
    }
 
    void Persist() {
@@ -9157,6 +13434,7 @@ public:
       _PrunePlanArray(m_pending_ai, true);
       m_state.SavePlans(m_state.WatchlistPath(), m_watchlist);
       m_state.SavePlans(m_state.PendingAiPath(), m_pending_ai);
+      _PersistResearchQueues();
       _PersistPenaltyStates();
    }
 

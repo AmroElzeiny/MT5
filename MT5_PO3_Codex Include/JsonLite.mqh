@@ -15,6 +15,78 @@ int _JsonSkipWs(const string json, int pos) {
    return pos;
 }
 
+bool _JsonIsHex(const ushort c) {
+   return ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+}
+
+// Validates the complete JSON transport envelope before any key lookup.  The
+// field readers below remain deliberately small, but they never receive a
+// partial/trailing document or malformed Unicode sequence.
+bool JsonValidateDocumentStrict(const string json, string &reason) {
+   reason = "";
+   int len = (int)StringLen(json);
+   int pos = _JsonSkipWs(json, 0);
+   if(pos >= len || (ushort)StringGetCharacter(json, pos) != '{'){
+      reason = "json_root_not_object";
+      return false;
+   }
+   int object_depth = 0;
+   int array_depth = 0;
+   bool in_string = false;
+   bool escaped = false;
+   int root_end = -1;
+   for(int i=pos; i<len; i++){
+      ushort c = (ushort)StringGetCharacter(json, i);
+      if(in_string){
+         if(escaped){
+            if(c == 'u'){
+               if(i + 4 >= len){ reason = "json_unicode_escape_truncated"; return false; }
+               for(int h=1; h<=4; h++){
+                  if(!_JsonIsHex((ushort)StringGetCharacter(json, i+h))){
+                     reason = "json_unicode_escape_invalid";
+                     return false;
+                  }
+               }
+               i += 4;
+            } else if(c != '"' && c != '\\' && c != '/' && c != 'b' && c != 'f' &&
+                      c != 'n' && c != 'r' && c != 't'){
+               reason = "json_escape_invalid";
+               return false;
+            }
+            escaped = false;
+            continue;
+         }
+         if(c == '\\'){ escaped = true; continue; }
+         if(c == '"'){ in_string = false; continue; }
+         if(c < 0x20){ reason = "json_control_character_invalid"; return false; }
+         if(c >= 0xD800 && c <= 0xDBFF){
+            if(i + 1 >= len){ reason = "json_unicode_high_surrogate_unpaired"; return false; }
+            ushort low = (ushort)StringGetCharacter(json, i+1);
+            if(low < 0xDC00 || low > 0xDFFF){ reason = "json_unicode_high_surrogate_unpaired"; return false; }
+            i++;
+            continue;
+         }
+         if(c >= 0xDC00 && c <= 0xDFFF){ reason = "json_unicode_low_surrogate_unpaired"; return false; }
+         continue;
+      }
+      if(c == '"'){ in_string = true; continue; }
+      if(c == '{') object_depth++;
+      else if(c == '}'){
+         object_depth--;
+         if(object_depth < 0){ reason = "json_object_depth_invalid"; return false; }
+         if(object_depth == 0 && array_depth == 0){ root_end = i; break; }
+      } else if(c == '[') array_depth++;
+      else if(c == ']'){
+         array_depth--;
+         if(array_depth < 0){ reason = "json_array_depth_invalid"; return false; }
+      }
+   }
+   if(in_string || escaped){ reason = "json_string_unterminated"; return false; }
+   if(root_end < 0 || object_depth != 0 || array_depth != 0){ reason = "json_document_incomplete"; return false; }
+   if(_JsonSkipWs(json, root_end + 1) != len){ reason = "json_trailing_content"; return false; }
+   return true;
+}
+
 string JsonEscape(const string s) {
    string out = s;
    StringReplace(out, "\\", "\\\\");
@@ -198,6 +270,147 @@ bool JsonGetBool(const string json, const string key, const bool def=false) {
    if(StringFind(tail, "true")==0) return true;
    if(StringFind(tail, "false")==0) return false;
    return def;
+}
+
+bool _JsonLocateTopLevelKeyValue(const string json, const string key, int &value_pos, int &key_count) {
+   value_pos = -1;
+   key_count = 0;
+   int len = (int)StringLen(json);
+   int depth_object = 0;
+   int depth_array = 0;
+   bool in_string = false;
+   bool esc = false;
+   for(int i=0; i<len; i++){
+      ushort c = (ushort)StringGetCharacter(json, i);
+      if(in_string){
+         if(esc){ esc = false; continue; }
+         if(c == '\\'){ esc = true; continue; }
+         if(c == '"') in_string = false;
+         continue;
+      }
+      if(c == '"'){
+         if(depth_object == 1 && depth_array == 0){
+            string token;
+            int end_pos = -1;
+            if(!_JsonReadString(json, i, token, end_pos)) return false;
+            int colon = _JsonSkipWs(json, end_pos + 1);
+            if(token == key && colon < len && (ushort)StringGetCharacter(json, colon) == ':'){
+               key_count++;
+               if(value_pos < 0) value_pos = _JsonSkipWs(json, colon + 1);
+            }
+            i = end_pos;
+            continue;
+         }
+         in_string = true;
+         continue;
+      }
+      if(c == '{') depth_object++;
+      else if(c == '}') depth_object--;
+      else if(c == '[') depth_array++;
+      else if(c == ']') depth_array--;
+   }
+   return (value_pos >= 0 && key_count == 1);
+}
+
+int JsonTopLevelKeyCount(const string json, const string key) {
+   int pos = -1;
+   int count = 0;
+   _JsonLocateTopLevelKeyValue(json, key, pos, count);
+   return count;
+}
+
+bool JsonValueIsNullStrict(const string json, const string key) {
+   int pos = -1;
+   int count = 0;
+   if(!_JsonLocateTopLevelKeyValue(json, key, pos, count)) return false;
+   return (StringFind(StringSubstr(json, pos, 4), "null") == 0);
+}
+
+bool JsonGetStringStrict(const string json, const string key, string &out, const bool allow_empty=false) {
+   int pos = -1;
+   int count = 0;
+   if(!_JsonLocateTopLevelKeyValue(json, key, pos, count)) return false;
+   int end_pos = -1;
+   if(!_JsonReadString(json, pos, out, end_pos)) return false;
+   return (allow_empty || StringLen(out) > 0);
+}
+
+bool JsonGetBoolStrict(const string json, const string key, bool &out) {
+   int pos = -1;
+   int count = 0;
+   if(!_JsonLocateTopLevelKeyValue(json, key, pos, count)) return false;
+   string tail = StringSubstr(json, pos, 5);
+   if(StringFind(tail, "true") == 0){ out = true; return true; }
+   if(StringFind(tail, "false") == 0){ out = false; return true; }
+   return false;
+}
+
+bool JsonGetNumberStrict(const string json, const string key, double &out) {
+   int start = -1;
+   int count = 0;
+   if(!_JsonLocateTopLevelKeyValue(json, key, start, count)) return false;
+   int len = (int)StringLen(json);
+   int end = start;
+   while(end < len){
+      ushort c = (ushort)StringGetCharacter(json, end);
+      if((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'){
+         end++;
+         continue;
+      }
+      break;
+   }
+   if(end <= start) return false;
+   int after = _JsonSkipWs(json, end);
+   if(after < len){
+      ushort delim = (ushort)StringGetCharacter(json, after);
+      if(delim != ',' && delim != '}' && delim != ']') return false;
+   }
+   string token = StringSubstr(json, start, end - start);
+   out = StringToDouble(token);
+   return MathIsValidNumber(out);
+}
+
+bool JsonGetObjectStrict(const string json, const string key, string &out) {
+   int pos = -1;
+   int count = 0;
+   if(!_JsonLocateTopLevelKeyValue(json, key, pos, count)) return false;
+   int end_pos = -1;
+   return _JsonReadComposite(json, pos, '{', '}', out, end_pos);
+}
+
+bool JsonGetArrayStrict(const string json, const string key, string &out) {
+   int pos = -1;
+   int count = 0;
+   if(!_JsonLocateTopLevelKeyValue(json, key, pos, count)) return false;
+   int end_pos = -1;
+   return _JsonReadComposite(json, pos, '[', ']', out, end_pos);
+}
+
+bool JsonArrayGetObject(const string array_json, const int wanted_index, string &out) {
+   out = "";
+   if(wanted_index < 0) return false;
+   int len = (int)StringLen(array_json);
+   int index = 0;
+   for(int pos=1; pos<len-1; ){
+      pos = _JsonSkipWs(array_json, pos);
+      while(pos < len && (ushort)StringGetCharacter(array_json, pos) == ',') pos = _JsonSkipWs(array_json, pos + 1);
+      if(pos >= len || (ushort)StringGetCharacter(array_json, pos) == ']') break;
+      if((ushort)StringGetCharacter(array_json, pos) != '{') return false;
+      int end_pos = -1;
+      string item;
+      if(!_JsonReadComposite(array_json, pos, '{', '}', item, end_pos)) return false;
+      if(index == wanted_index){ out = item; return true; }
+      index++;
+      pos = end_pos + 1;
+   }
+   return false;
+}
+
+int JsonArrayObjectCount(const string array_json) {
+   int count = 0;
+   string item;
+   while(JsonArrayGetObject(array_json, count, item)) count++;
+   return count;
 }
 
 #endif

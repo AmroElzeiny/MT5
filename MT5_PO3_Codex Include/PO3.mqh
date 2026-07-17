@@ -843,6 +843,24 @@ private:
    }
 
 public:
+   string SessionNameAt(const datetime server_time) const {
+      datetime t = (server_time > 0 ? server_time : TimeCurrent());
+      return _SessionName(t);
+   }
+
+   string SessionCodeAt(const datetime server_time) const {
+      return _SessionCode(SessionNameAt(server_time));
+   }
+
+   bool IsKillzoneAt(const datetime server_time) const {
+      datetime t = (server_time > 0 ? server_time : TimeCurrent());
+      return _IsKillZone(t);
+   }
+
+   string KillzoneCodeAt(const datetime server_time) const {
+      return (IsKillzoneAt(server_time) ? "K" : "NK");
+   }
+
    void PopulateSessionContext(const string symbol, const datetime server_time, PO3Context &ctx) const {
       datetime anchor = (server_time > 0 ? server_time : TimeCurrent());
       datetime anchor_utc = _ToUtc(anchor);
