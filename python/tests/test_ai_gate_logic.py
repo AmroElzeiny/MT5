@@ -1,18 +1,22 @@
 import unittest
 
+import ai_gate
+
 from ai_gate import (
     Decision,
     _compact_model_payload,
     _hard_model_rejection_codes,
     _normalize_advisory_metadata,
-    _runtime_min_confidence,
+    _runtime_inputs,
 )
 
 
 class AIGateLogicTests(unittest.TestCase):
-    def test_mt5_confidence_setting_is_authoritative(self) -> None:
-        payload = {"runtime": {"min_ai_confidence": 0.35}}
-        self.assertEqual(_runtime_min_confidence(payload), 0.35)
+    def test_legacy_confidence_setting_is_diagnostic_only(self) -> None:
+        payload = {"runtime_inputs": {"min_ai_confidence": 0.35}}
+        runtime = _runtime_inputs(payload)
+        self.assertEqual(runtime["legacy_min_ai_confidence_diagnostic"], 0.35)
+        self.assertFalse(hasattr(ai_gate, "_runtime_min_confidence"))
 
     def test_optional_snapshot_failures_are_not_trade_rejections(self) -> None:
         payload = {"runtime": {"require_snapshots": False}}

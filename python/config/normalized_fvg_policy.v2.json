@@ -1,0 +1,17 @@
+{
+  "schema_version": "20260717_normalized_fvg_v2",
+  "policy_version": "20260717_asset_class_shadow_unavailable_v1",
+  "policy_scope": "asset_class",
+  "authority": "SHADOW_ONLY",
+  "calibration_status": "UNAVAILABLE_NO_CLEAN_ASSET_CLASS_OUTCOMES",
+  "ledger_integrity_status": "QUARANTINED",
+  "taxonomy_version": "20260716_setup_taxonomy_v1",
+  "asset_classes": {
+    "crypto": {"minimum_ticks": 1, "spread_multiple": 1.0, "atr_fraction": 0.01, "session_noise_fraction": 0.10, "clean_sample_size": 0},
+    "energy": {"minimum_ticks": 1, "spread_multiple": 1.0, "atr_fraction": 0.01, "session_noise_fraction": 0.10, "clean_sample_size": 0},
+    "fx": {"minimum_ticks": 1, "spread_multiple": 1.0, "atr_fraction": 0.01, "session_noise_fraction": 0.10, "clean_sample_size": 0},
+    "indices": {"minimum_ticks": 1, "spread_multiple": 1.0, "atr_fraction": 0.01, "session_noise_fraction": 0.10, "clean_sample_size": 0},
+    "metals": {"minimum_ticks": 1, "spread_multiple": 1.0, "atr_fraction": 0.01, "session_noise_fraction": 0.10, "clean_sample_size": 0},
+    "other": {"minimum_ticks": 1, "spread_multiple": 1.0, "atr_fraction": 0.01, "session_noise_fraction": 0.10, "clean_sample_size": 0}
+  }
+}

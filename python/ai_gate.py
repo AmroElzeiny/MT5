@@ -19,18 +19,92 @@ import argparse
 import base64
 import inspect
 import json
+import math
 import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Tuple
 
+from architecture_contracts import (
+    ARCHITECTURE_CONTRACT_VERSION,
+    COHORT_SCHEMA_VERSION,
+    FILE_BUS_LIFECYCLE_VERSION,
+    HIERARCHICAL_OUTCOME_MODEL_VERSION,
+    LIVE_FORWARD,
+    LIVE_FORWARD_CONTRACT_VERSION,
+    POLICY_MANIFEST_SCHEMA_VERSION,
+    SEMANTIC_CACHE_SCHEMA_VERSION,
+    FileBusLifecycle,
+    PolicySpec,
+    build_startup_policy_manifest,
+    decision_field_authority_manifest,
+    live_forward_behavior_contract,
+    resolve_multiplier,
+    response_binding_hash,
+    semantic_cache_invalidation_reasons,
+    semantic_cache_row,
+    semantic_cache_state,
+    strict_json_loads,
+    workload_mode as canonical_workload_mode,
+)
+from decision_integrity import (
+    AI_DECISION_SCHEMA_VERSION,
+    AI_PROMPT_CONTRACT_VERSION,
+    AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+    DECISION_ABSTAIN,
+    DECISION_APPROVE,
+    DECISION_REJECT,
+    DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+    DECISION_QUALITY_DEGRADED_NON_TRADING,
+    DECISION_QUALITY_FULL_STRUCTURED,
+    DECISION_QUALITY_RULE_ONLY_NON_TRADING,
+    RESPONSE_CACHE_FULL_STRUCTURED,
+    RESPONSE_DEGRADED_NON_TRADING,
+    RESPONSE_FULL_STRUCTURED,
+    RESPONSE_RULE_ONLY_NON_TRADING,
+    assessed_execution_fingerprint as deterministic_assessed_execution_fingerprint,
+    candidate_hash as deterministic_candidate_hash,
+    response_can_trade,
+    validate_candidate_assessment,
+    validate_decision_envelope,
+)
+from governance_contracts import (
+    CALIBRATION_CONTRACT_VERSION,
+    SETUP_TAXONOMY_VERSION,
+    SetupTaxonomy,
+    classify_setup_taxonomy,
+)
 from openai_usage_logger import log_openai_usage, set_openai_usage_bus
 from po3_env import load_dotenv
+from runtime_governance import (
+    DECISION_NON_REPEATABLE,
+    HIERARCHICAL_PRIOR_SCHEMA_VERSION,
+    INVALIDATION_POLICY_SCHEMA_VERSION,
+    MANAGEMENT_SCHEMA_VERSION,
+    NORMALIZED_FVG_SCHEMA_VERSION,
+    INSUFFICIENT_SAMPLE,
+    REPEATABILITY_SCHEMA_VERSION,
+    RISK_FACTOR_SCHEMA_VERSION,
+    REPEATABLE,
+    SCORE_NON_REPEATABLE,
+    UNAVAILABLE,
+    RepeatabilityThresholds,
+    atomic_write_json as governance_atomic_write_json,
+    audit_prior_artifact,
+    canonical_hash,
+    evaluate_repeatability,
+    priors_for_candidate,
+    repeatability_authority,
+    request_fingerprint,
+    resolve_project_path,
+    response_fingerprint,
+    runtime_governance_versions,
+)
 
 # The bot should follow this project's .env even when PowerShell has an older
 # OPENAI_API_KEY cached in the parent environment.
@@ -133,7 +207,7 @@ class AIGateRuntimeConfig:
     fallback_models: list[str]
     reasoning_effort: str
     max_output_tokens: int
-    min_confidence: float
+    legacy_min_self_reported_confidence_diagnostic: float
     prompt_cache_enable: bool
     prompt_cache_key: str
     prompt_cache_retention: str
@@ -160,6 +234,20 @@ class AIGateRuntimeConfig:
     enable_snapshots: bool
     cost_report_enable: bool
     cost_report_file: Path
+    live_bucket_priors_file: Path
+    require_live_bucket_priors: bool
+    live_bucket_priors_max_age_days: int
+    request_response_fingerprint_file: Path
+    shadow_repeat_enable: bool
+    shadow_repeat_sample_rate: float
+    shadow_repeat_count: int
+    shadow_repeat_min_evaluated_candidates: int
+    shadow_repeat_max_score_stddev: float
+    shadow_repeat_min_decision_agreement: float
+    shadow_repeat_min_chosen_candidate_agreement: float
+    shadow_repeat_min_veto_agreement: float
+    shadow_repeat_min_target_choice_agreement: float
+    shadow_repeat_artifact_file: Path
     validation_warnings: tuple[str, ...] = ()
 
     @classmethod
@@ -190,21 +278,32 @@ class AIGateRuntimeConfig:
             warnings.append("AI_PROMPT_CACHE_RETENTION=invalid")
             prompt_retention = "24h"
 
+        legacy_confidence_raw = _env_lookup(
+            env,
+            ("AI_LEGACY_MIN_SELF_REPORTED_CONFIDENCE_DIAGNOSTIC", "AI_MIN_CONFIDENCE"),
+            "0.45",
+        )
+        try:
+            legacy_confidence_diagnostic = max(0.0, min(1.0, float(legacy_confidence_raw)))
+        except Exception:
+            warnings.append("AI_LEGACY_MIN_SELF_REPORTED_CONFIDENCE_DIAGNOSTIC=invalid")
+            legacy_confidence_diagnostic = 0.45
+
         return cls(
             model=model,
             fallback_models=fallback_models,
             reasoning_effort=effort,
             max_output_tokens=_env_int(env, "AI_MAX_OUTPUT_TOKENS", 25000, warnings, min_value=1024, max_value=128000),
-            min_confidence=_env_float(env, "AI_MIN_CONFIDENCE", 0.45, warnings, min_value=0.0, max_value=1.0),
+            legacy_min_self_reported_confidence_diagnostic=legacy_confidence_diagnostic,
             prompt_cache_enable=_env_bool(env, "AI_PROMPT_CACHE_ENABLE", True, warnings, safe_default=False),
             prompt_cache_key=prompt_key,
             prompt_cache_retention=prompt_retention,
             decision_cache_enable=_env_bool(env, "AI_DECISION_CACHE_ENABLE", True, warnings, safe_default=False),
             decision_cache_ttl_sec=_env_int(env, "AI_DECISION_CACHE_TTL_SEC", 1800, warnings, min_value=30, max_value=86400),
-            decision_cache_file=Path(_env_lookup(env, ("AI_DECISION_CACHE_FILE",), "data/ai_decision_cache.jsonl")),
+            decision_cache_file=resolve_project_path(_env_lookup(env, ("AI_DECISION_CACHE_FILE",), "data/ai_decision_cache.jsonl")),
             use_batch_api=_env_bool(env, "AI_USE_BATCH_API", False, warnings, safe_default=False),
             batch_only_for_backtest=_env_bool(env, "AI_BATCH_ONLY_FOR_BACKTEST", True, warnings, safe_default=True),
-            batch_output_dir=Path(_env_lookup(env, ("AI_BATCH_OUTPUT_DIR",), "data/ai_batch")),
+            batch_output_dir=resolve_project_path(_env_lookup(env, ("AI_BATCH_OUTPUT_DIR",), "data/ai_batch")),
             batch_max_pending=_env_int(env, "AI_BATCH_MAX_PENDING", 1000, warnings, min_value=1, max_value=100000),
             use_flex=_env_bool(env, "AI_USE_FLEX", False, warnings, safe_default=False),
             allow_flex_for_live=_env_bool(env, "AI_ALLOW_FLEX_FOR_LIVE", False, warnings, safe_default=False),
@@ -221,7 +320,25 @@ class AIGateRuntimeConfig:
             log_skipped_calls=_env_bool(env, "AI_LOG_SKIPPED_CALLS", True, warnings, safe_default=True),
             enable_snapshots=_env_bool(env, "AI_ENABLE_SNAPSHOTS", False, warnings, safe_default=False),
             cost_report_enable=_env_bool(env, "AI_COST_REPORT_ENABLE", True, warnings, safe_default=True),
-            cost_report_file=Path(_env_lookup(env, ("AI_COST_REPORT_FILE",), "logs/ai_cost_report.jsonl")),
+            cost_report_file=resolve_project_path(_env_lookup(env, ("AI_COST_REPORT_FILE",), "logs/ai_cost_report.jsonl")),
+            live_bucket_priors_file=resolve_project_path(_env_lookup(env, ("AI_LIVE_BUCKET_PRIORS_FILE",), "data/live_bucket_priors.json")),
+            require_live_bucket_priors=_env_bool(env, "AI_REQUIRE_LIVE_BUCKET_PRIORS", False, warnings, safe_default=True),
+            live_bucket_priors_max_age_days=_env_int(env, "AI_LIVE_BUCKET_PRIORS_MAX_AGE_DAYS", 30, warnings, min_value=1, max_value=3650),
+            request_response_fingerprint_file=resolve_project_path(
+                _env_lookup(env, ("AI_REQUEST_RESPONSE_FINGERPRINT_FILE",), "logs/ai_request_response_fingerprints.jsonl")
+            ),
+            shadow_repeat_enable=_env_bool(env, "AI_SHADOW_REPEAT_ENABLE", False, warnings, safe_default=False),
+            shadow_repeat_sample_rate=_env_float(env, "AI_SHADOW_REPEAT_SAMPLE_RATE", 0.02, warnings, min_value=0.0, max_value=1.0),
+            shadow_repeat_count=_env_int(env, "AI_SHADOW_REPEAT_COUNT", 3, warnings, min_value=2, max_value=20),
+            shadow_repeat_min_evaluated_candidates=_env_int(env, "AI_SHADOW_REPEAT_MIN_EVALUATED_CANDIDATES", 30, warnings, min_value=2, max_value=100000),
+            shadow_repeat_max_score_stddev=_env_float(env, "AI_SHADOW_REPEAT_MAX_SCORE_STDDEV", 0.75, warnings, min_value=0.0, max_value=10.0),
+            shadow_repeat_min_decision_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_DECISION_AGREEMENT", 0.90, warnings, min_value=0.0, max_value=1.0),
+            shadow_repeat_min_chosen_candidate_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_CHOSEN_CANDIDATE_AGREEMENT", 0.90, warnings, min_value=0.0, max_value=1.0),
+            shadow_repeat_min_veto_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_VETO_AGREEMENT", 0.90, warnings, min_value=0.0, max_value=1.0),
+            shadow_repeat_min_target_choice_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_TARGET_CHOICE_AGREEMENT", 0.85, warnings, min_value=0.0, max_value=1.0),
+            shadow_repeat_artifact_file=resolve_project_path(
+                _env_lookup(env, ("AI_SHADOW_REPEAT_ARTIFACT_FILE",), "data/ai_repeatability_artifact.json")
+            ),
             validation_warnings=tuple(warnings),
         )
 
@@ -231,7 +348,7 @@ class AIGateRuntimeConfig:
             "fallback_models": self.fallback_models,
             "reasoning_effort": self.reasoning_effort,
             "max_output_tokens": self.max_output_tokens,
-            "min_confidence": self.min_confidence,
+            "legacy_min_self_reported_confidence_diagnostic": self.legacy_min_self_reported_confidence_diagnostic,
             "prompt_cache_enable": self.prompt_cache_enable,
             "prompt_cache_key": self.prompt_cache_key if self.prompt_cache_enable else "",
             "prompt_cache_retention": self.prompt_cache_retention if self.prompt_cache_enable else "",
@@ -258,6 +375,20 @@ class AIGateRuntimeConfig:
             "enable_snapshots": self.enable_snapshots,
             "cost_report_enable": self.cost_report_enable,
             "cost_report_file": str(self.cost_report_file),
+            "live_bucket_priors_file": str(self.live_bucket_priors_file),
+            "require_live_bucket_priors": self.require_live_bucket_priors,
+            "live_bucket_priors_max_age_days": self.live_bucket_priors_max_age_days,
+            "request_response_fingerprint_file": str(self.request_response_fingerprint_file),
+            "shadow_repeat_enable": self.shadow_repeat_enable,
+            "shadow_repeat_sample_rate": self.shadow_repeat_sample_rate,
+            "shadow_repeat_count": self.shadow_repeat_count,
+            "shadow_repeat_min_evaluated_candidates": self.shadow_repeat_min_evaluated_candidates,
+            "shadow_repeat_max_score_stddev": self.shadow_repeat_max_score_stddev,
+            "shadow_repeat_min_decision_agreement": self.shadow_repeat_min_decision_agreement,
+            "shadow_repeat_min_chosen_candidate_agreement": self.shadow_repeat_min_chosen_candidate_agreement,
+            "shadow_repeat_min_veto_agreement": self.shadow_repeat_min_veto_agreement,
+            "shadow_repeat_min_target_choice_agreement": self.shadow_repeat_min_target_choice_agreement,
+            "shadow_repeat_artifact_file": str(self.shadow_repeat_artifact_file),
             "validation_warnings": list(self.validation_warnings),
         }
 
@@ -280,12 +411,14 @@ REQUEST_LOCK_STALE_SEC = max(300, int(os.getenv("AI_REQUEST_LOCK_STALE_SEC", "18
 REQUEST_STABLE_MS = max(20, int(os.getenv("AI_REQUEST_STABLE_MS", "120")))
 RESP_ENCODING = os.getenv("AI_RESPONSE_ENCODING", "utf-16")
 ANALYTICS_AUTO_ACTIVATE = os.getenv("ANALYTICS_AUTO_ACTIVATE", "false").strip().lower() in {"1", "true", "yes", "on"}
-AI_GATE_MODEL_VERSION = "po3-narrative-auditor-20260615b"
-AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260629_target_rebuild_v2"
-AI_PROMPT_CONTRACT_VERSION = "20260629_target_arbitration_explain_v2"
+AI_GATE_MODEL_VERSION = "po3-candidate-integrity-20260714"
+LIVE_BUCKET_PRIORS_FILE = AI_CONFIG.live_bucket_priors_file
 LOG_FILE = None  # will be set in main() once the bus path is known
 _UNSUPPORTED_OPENAI_KWARGS_LOGGED: set[str] = set()
 _AI_RUNTIME_CONFIG_LOGGED = False
+_REPEATABILITY_LOCK = Lock()
+_FINGERPRINT_LOG_LOCK = Lock()
+FILE_BUS_LIFECYCLE: FileBusLifecycle | None = None
 
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -299,30 +432,282 @@ def log(msg: str) -> None:
             pass
 
 
+def _archive_request_terminal(path: Path, state: str, reason: str) -> tuple[bool, str]:
+    lifecycle = FILE_BUS_LIFECYCLE
+    if lifecycle is not None and path.exists():
+        try:
+            lifecycle.archive(path, state, reason=reason)
+            return True, state
+        except Exception as exc:
+            log(f"[file_bus] terminal_archive_failed file={path.name} state={state} error={exc}")
+    return _try_move_to_stale(path, path.parent.parent / "stale")
+
+
+def _move_claimed_request_to_processing(path: Path) -> Path:
+    lifecycle = FILE_BUS_LIFECYCLE
+    if lifecycle is None:
+        return path
+    return lifecycle.claim(path)
+
+
+def _append_fingerprint_record(record: Mapping[str, Any]) -> None:
+    path = AI_CONFIG.request_response_fingerprint_file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _FINGERPRINT_LOG_LOCK:
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(dict(record), sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
+            handle.flush()
+
+
+def _repeatability_thresholds() -> RepeatabilityThresholds:
+    return RepeatabilityThresholds(
+        minimum_evaluated_candidates=AI_CONFIG.shadow_repeat_min_evaluated_candidates,
+        maximum_score_stddev=AI_CONFIG.shadow_repeat_max_score_stddev,
+        minimum_decision_agreement=AI_CONFIG.shadow_repeat_min_decision_agreement,
+        minimum_chosen_candidate_agreement=AI_CONFIG.shadow_repeat_min_chosen_candidate_agreement,
+        minimum_veto_agreement=AI_CONFIG.shadow_repeat_min_veto_agreement,
+        minimum_target_choice_agreement=AI_CONFIG.shadow_repeat_min_target_choice_agreement,
+    )
+
+
+def _repeatability_group_fields(model: str, quality_tier: str) -> Dict[str, str]:
+    return {
+        "model": str(model or AI_CONFIG.model),
+        "reasoning_effort": AI_CONFIG.reasoning_effort,
+        "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        "target_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        "decision_quality_tier": str(quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+    }
+
+
+def _repeatability_group_key(model: str, quality_tier: str) -> str:
+    return canonical_hash(_repeatability_group_fields(model, quality_tier))
+
+
+def _load_repeatability_artifact() -> Dict[str, Any]:
+    path = AI_CONFIG.shadow_repeat_artifact_file
+    if not path.is_file():
+        return {
+            "schema_version": REPEATABILITY_SCHEMA_VERSION,
+            "groups": {},
+            "generated_at": "",
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("schema_version") == REPEATABILITY_SCHEMA_VERSION:
+            return data
+    except Exception as exc:
+        log(f"[repeatability] artifact_load_failed path={path} error={exc}")
+    return {
+        "schema_version": REPEATABILITY_SCHEMA_VERSION,
+        "groups": {},
+        "generated_at": "",
+    }
+
+
+def _repeatability_authority_for(model: str, quality_tier: str) -> Dict[str, Any]:
+    artifact = _load_repeatability_artifact()
+    groups = artifact.get("groups") if isinstance(artifact.get("groups"), dict) else {}
+    group = groups.get(_repeatability_group_key(model, quality_tier))
+    authority = repeatability_authority(group if isinstance(group, dict) else None)
+    authority["group_key"] = _repeatability_group_key(model, quality_tier)
+    return authority
+
+
+def _decision_repeatability_view(decision: "Decision") -> Dict[str, Any]:
+    return {
+        "id": decision.decision_id,
+        "model_version": decision.model_version,
+        "decision_quality_tier": decision.decision_quality_tier,
+        "decision_state": decision.decision_state,
+        "selected_candidate_id": decision.selected_candidate_id,
+        "selected_candidate_hash": decision.selected_candidate_hash,
+        "chosen_index": decision.chosen_index,
+        "veto_enabled": decision.veto_enabled,
+        "veto_reason": decision.veto_reason,
+        "llm_quality_score": decision.llm_quality_score,
+        "suggested_risk_multiplier": decision.suggested_risk_multiplier,
+        "chosen_target_model": decision.chosen_target_model,
+        "target_arbitration": decision.target_arbitration or {},
+        "candidate_assessments": decision.candidate_assessments or [],
+    }
+
+
+def _update_repeatability_artifact(
+    payload: Dict[str, Any],
+    primary: "Decision",
+    repeated: List["Decision"],
+) -> None:
+    responses = [_decision_repeatability_view(primary)] + [_decision_repeatability_view(item) for item in repeated]
+    model = str(primary.model_version or AI_CONFIG.model)
+    quality_tier = str(primary.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED)
+    per_candidate_thresholds = RepeatabilityThresholds(
+        minimum_evaluated_candidates=max(2, len(responses)),
+        maximum_score_stddev=AI_CONFIG.shadow_repeat_max_score_stddev,
+        minimum_decision_agreement=AI_CONFIG.shadow_repeat_min_decision_agreement,
+        minimum_chosen_candidate_agreement=AI_CONFIG.shadow_repeat_min_chosen_candidate_agreement,
+        minimum_veto_agreement=AI_CONFIG.shadow_repeat_min_veto_agreement,
+        minimum_target_choice_agreement=AI_CONFIG.shadow_repeat_min_target_choice_agreement,
+    )
+    observation = evaluate_repeatability(
+        responses,
+        model=model,
+        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+        target_schema_version=AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        decision_quality_tier=quality_tier,
+        thresholds=per_candidate_thresholds,
+    )
+    observation["request_id"] = str(payload.get("id") or "")
+    observation["candidate_contract_hash"] = canonical_hash(
+        [
+            {
+                "candidate_id": candidate.get("candidate_id"),
+                "candidate_hash": candidate.get("candidate_hash"),
+                "request_execution_fingerprint": candidate.get("request_execution_fingerprint"),
+            }
+            for candidate in payload.get("candidates", [])
+            if isinstance(candidate, dict)
+        ]
+    )
+    group_key = _repeatability_group_key(model, quality_tier)
+    with _REPEATABILITY_LOCK:
+        artifact = _load_repeatability_artifact()
+        groups = artifact.setdefault("groups", {})
+        group = groups.get(group_key) if isinstance(groups.get(group_key), dict) else {}
+        observations = group.get("observations") if isinstance(group.get("observations"), list) else []
+        observations.append(observation)
+        observations = observations[-1000:]
+        metric_names = (
+            "llm_quality_score_stddev",
+            "decision_agreement_rate",
+            "chosen_candidate_agreement_rate",
+            "veto_agreement_rate",
+            "risk_multiplier_stddev",
+            "target_choice_agreement_rate",
+            "response_fingerprint_uniqueness",
+        )
+        aggregate_metrics = {
+            name: statistics.fmean(float(item.get("metrics", {}).get(name, 0.0)) for item in observations)
+            for name in metric_names
+        }
+        thresholds = _repeatability_thresholds()
+        evaluated_candidates = len(observations)
+        if evaluated_candidates < thresholds.minimum_evaluated_candidates:
+            status = INSUFFICIENT_SAMPLE
+        elif (
+            aggregate_metrics["decision_agreement_rate"] < thresholds.minimum_decision_agreement
+            or aggregate_metrics["chosen_candidate_agreement_rate"] < thresholds.minimum_chosen_candidate_agreement
+            or aggregate_metrics["veto_agreement_rate"] < thresholds.minimum_veto_agreement
+            or aggregate_metrics["target_choice_agreement_rate"] < thresholds.minimum_target_choice_agreement
+        ):
+            status = DECISION_NON_REPEATABLE
+        elif aggregate_metrics["llm_quality_score_stddev"] > thresholds.maximum_score_stddev:
+            status = SCORE_NON_REPEATABLE
+        else:
+            status = REPEATABLE
+        group = {
+            **_repeatability_group_fields(model, quality_tier),
+            "status": status,
+            "evaluated_candidates": evaluated_candidates,
+            "thresholds": asdict(thresholds),
+            "metrics": aggregate_metrics,
+            "observations": observations,
+            # Repeatability may remove authority, but it may never disable a
+            # configured family floor and thereby make trading easier.
+            "score_threshold_authority": status == REPEATABLE,
+            "trading_eligible": status not in {SCORE_NON_REPEATABLE, DECISION_NON_REPEATABLE},
+            "updated_at": int(time.time()),
+        }
+        group["artifact_hash"] = canonical_hash({key: value for key, value in group.items() if key != "observations"})
+        groups[group_key] = group
+        artifact["schema_version"] = REPEATABILITY_SCHEMA_VERSION
+        artifact["generated_at"] = int(time.time())
+        artifact["artifact_hash"] = canonical_hash({"schema_version": artifact["schema_version"], "groups": groups})
+        governance_atomic_write_json(AI_CONFIG.shadow_repeat_artifact_file, artifact)
+    log(
+        f"[repeatability] group={group_key[:12]} model={model} status={status} "
+        f"evaluated_candidates={evaluated_candidates} score_stddev={aggregate_metrics['llm_quality_score_stddev']:.4f} "
+        f"decision_agreement={aggregate_metrics['decision_agreement_rate']:.4f} "
+        f"chosen_agreement={aggregate_metrics['chosen_candidate_agreement_rate']:.4f} "
+        f"veto_agreement={aggregate_metrics['veto_agreement_rate']:.4f}"
+    )
+
+
+def _shadow_repeat_sampled(payload: Dict[str, Any]) -> bool:
+    if not AI_CONFIG.shadow_repeat_enable or AI_CONFIG.shadow_repeat_sample_rate <= 0:
+        return False
+    request_id = str(payload.get("id") or canonical_hash(payload))
+    bucket = int(sha256(request_id.encode("utf-8")).hexdigest()[:12], 16) / float(0xFFFFFFFFFFFF)
+    return bucket < AI_CONFIG.shadow_repeat_sample_rate
+
+
+def _run_shadow_repeat_evaluation(payload: Dict[str, Any], primary: "Decision") -> None:
+    if not _shadow_repeat_sampled(payload):
+        return
+    repeated: List[Decision] = []
+    for repeat_index in range(max(0, AI_CONFIG.shadow_repeat_count - 1)):
+        shadow_payload = json.loads(json.dumps(payload))
+        shadow_payload["shadow_repeat"] = {
+            "enabled": True,
+            "repeat_index": repeat_index + 1,
+            "primary_request_id": str(payload.get("id") or ""),
+            "trading_authority": False,
+            "cache_eligible": False,
+        }
+        try:
+            repeated.append(_score_setup_openai(shadow_payload))
+        except Exception as exc:
+            log(f"[repeatability] shadow_repeat_failed request_id={payload.get('id')} index={repeat_index + 1} error={exc}")
+    if repeated:
+        _update_repeatability_artifact(payload, primary, repeated)
+
+
+def _apply_repeatability_authority(
+    decision: "Decision", authority: Dict[str, Any] | None = None
+) -> "Decision":
+    authority = authority or _repeatability_authority_for(
+        str(decision.model_version or AI_CONFIG.model),
+        str(decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+    )
+    if authority["status"] in {SCORE_NON_REPEATABLE, DECISION_NON_REPEATABLE}:
+        decision.allow = False
+        decision.raw_allow = False
+        decision.decision_state = DECISION_ABSTAIN
+        decision.decision_source = "repeatability_authority_gate"
+        if decision.rejection_codes is None:
+            decision.rejection_codes = []
+        repeatability_code = (
+            "model_prompt_score_non_repeatable"
+            if authority["status"] == SCORE_NON_REPEATABLE
+            else "model_prompt_decision_non_repeatable"
+        )
+        for code in ("ai_abstain", repeatability_code):
+            if code not in decision.rejection_codes:
+                decision.rejection_codes.append(code)
+        decision.suggested_risk_multiplier = 0.0
+    if isinstance(decision.reasons, dict):
+        decision.reasons["repeatability_authority"] = authority
+    return decision
+
+
 def _payload_workload_mode(payload: Dict[str, Any] | None) -> str:
     payload = payload or {}
-    runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
-    explicit = str(
-        runtime.get("workload_mode")
-        or runtime.get("mode")
-        or payload.get("workload_mode")
-        or payload.get("mode")
-        or ""
-    ).strip().lower()
-    if explicit in {"backtest", "replay", "research", "analytics", "live"}:
-        return explicit
-    if str(runtime.get("tester") or "").strip().lower() in {"1", "true", "yes", "on"} or runtime.get("tester") is True:
+    mode = canonical_workload_mode(payload)
+    if mode == LIVE_FORWARD:
+        return LIVE_FORWARD
+    if mode in {"TESTER_AI_RECORD_ONLY", "TESTER_AI_CACHE_ONLY", "TESTER_AI_LIVE_WAIT_DEBUG"}:
         return "backtest"
-    account_mode = str(runtime.get("account_trade_mode") or "").strip().lower()
-    if account_mode in {"real", "demo", "contest", "live"}:
-        return "live"
-    # Fail safe: file-bus trade approvals are treated as live unless explicitly
-    # marked as backtest/replay/research/analytics.
-    return "live"
+    if mode in {"backtest", "replay", "research", "analytics"}:
+        return mode
+    # Fail safe: an unclassified file-bus approval gets the strict forward
+    # contract, never a more permissive research contract.
+    return LIVE_FORWARD
 
 
 def _is_live_payload(payload: Dict[str, Any] | None) -> bool:
-    return _payload_workload_mode(payload) == "live"
+    return _payload_workload_mode(payload) == LIVE_FORWARD
 
 
 def _log_ai_runtime_config_once() -> None:
@@ -336,6 +721,12 @@ def _log_ai_runtime_config_once() -> None:
         + str(AI_CONFIG.prompt_cache_enable).lower()
         + f" prompt_cache_key={AI_CONFIG.prompt_cache_key if AI_CONFIG.prompt_cache_enable else ''}"
         + f" prompt_cache_retention={AI_CONFIG.prompt_cache_retention if AI_CONFIG.prompt_cache_enable else ''}"
+    )
+    forward = live_forward_behavior_contract()
+    log(
+        "[live_forward_mode]"
+        f" workload_mode={LIVE_FORWARD} behavior_contract_hash={forward['behavior_contract_hash']}"
+        " demo_real_equivalent=true account_destination_only_difference=true"
     )
 
 
@@ -384,7 +775,10 @@ def read_json_any_encoding(path: Path) -> Dict[str, Any]:
         # default (most common)
         text = raw.decode("utf-8")
 
-    return json.loads(text)
+    value = strict_json_loads(text)
+    if not isinstance(value, dict):
+        raise ValueError("file_bus_json_root_must_be_object")
+    return value
 
 def _openai_client(timeout_sec: float | None = None):
     if not OPENAI_API_KEY:
@@ -599,6 +993,161 @@ def _ascii_compact(text: str, max_len: int = 480) -> str:
         text = text[: max_len - 3].rstrip() + "..."
     return text or "no_reason"
 
+_LIVE_BUCKET_PRIORS_CACHE: tuple[float, Dict[str, Any]] = (0.0, {})
+_PRIOR_STARTUP_AUDIT: Dict[str, Any] = {}
+
+def _live_bucket_priors_path() -> Path:
+    return resolve_project_path(LIVE_BUCKET_PRIORS_FILE)
+
+
+def _refresh_prior_startup_audit() -> Dict[str, Any]:
+    global _PRIOR_STARTUP_AUDIT
+    audit = audit_prior_artifact(
+        _live_bucket_priors_path(),
+        mandatory=AI_CONFIG.require_live_bucket_priors,
+        max_age_days=AI_CONFIG.live_bucket_priors_max_age_days,
+    )
+    _PRIOR_STARTUP_AUDIT = audit
+    log(
+        "[prior_startup_audit] "
+        f"absolute_path={audit.get('absolute_path')} exists={str(bool(audit.get('exists'))).lower()} "
+        f"hash={audit.get('hash') or ''} mtime={audit.get('mtime')} "
+        f"prior_version={audit.get('prior_version') or ''} data_window={json.dumps(audit.get('data_window') or {}, separators=(',', ':'))} "
+        f"bucket_count={int(audit.get('bucket_count') or 0)} rejected_count={int(audit.get('rejected_count') or 0)} "
+        f"status={audit.get('status')} mandatory={str(AI_CONFIG.require_live_bucket_priors).lower()}"
+    )
+    return audit
+
+def _load_live_bucket_priors() -> Dict[str, Any]:
+    global _LIVE_BUCKET_PRIORS_CACHE
+    path = _live_bucket_priors_path()
+    try:
+        mtime = path.stat().st_mtime
+    except Exception:
+        return {}
+    cached_mtime, cached = _LIVE_BUCKET_PRIORS_CACHE
+    if cached_mtime == mtime:
+        return cached
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            isinstance(data, dict)
+            and data.get("schema_version") == HIERARCHICAL_PRIOR_SCHEMA_VERSION
+            and data.get("ledger_integrity_status") == "clean_only"
+        ):
+            _LIVE_BUCKET_PRIORS_CACHE = (mtime, data)
+            return data
+    except Exception as exc:
+        log(f"[ai_gate] live_bucket_priors_load_failed path={path} error={exc}")
+    return {}
+
+def _setup_code_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    code = str(_get_any(item, ["setup_code", "model_code"], payload.get("setup_code") or payload.get("model_code")) or "").strip().upper()
+    if code:
+        return code
+    comment = str(_get_any(item, ["broker_comment"], payload.get("broker_comment")) or "").strip().upper()
+    if "-" in comment:
+        prefix = comment.split("-", 1)[0]
+        if prefix:
+            return prefix
+    family = _norm_text(str(_get_any(item, ["setup_family", "setup_class", "entry_branch"], "") or ""))
+    if "micro" in family:
+        return "MPC"
+    return "UNK"
+
+def _session_bucket_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    po3 = _as_dict(payload.get("po3"))
+    code = _setup_code_for_item(item, payload)
+    session = str(_get_any(item, ["session_code"], _get_any(po3, ["session_code"], "")) or "").strip().upper()
+    if not session:
+        session_name = _norm_text(_get_any(item, ["session_name"], _get_any(po3, ["session_name"], "")) or "")
+        if "london" in session_name:
+            session = "LON"
+        elif "new" in session_name or "ny" in session_name:
+            session = "NY"
+        elif "asia" in session_name:
+            session = "ASIA"
+        else:
+            session = "OFF"
+    killzone = str(_get_any(item, ["killzone_code"], "") or "").strip().upper()
+    if not killzone:
+        in_killzone = _boolish(_get_any(item, ["in_killzone"], _get_any(po3, ["in_killzone"], False)), False)
+        killzone = "K" if in_killzone else "NK"
+    return f"{code}-{session}-{killzone}"
+
+def _bucket_prior_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    artifact = _load_live_bucket_priors()
+    setup_code = _setup_code_for_item(item, payload)
+    session_bucket = _session_bucket_for_item(item, payload)
+    symbol = str(payload.get("symbol") or item.get("symbol") or "").upper()
+    if not artifact:
+        return {
+            "schema_version": HIERARCHICAL_PRIOR_SCHEMA_VERSION,
+            "artifact_hash": "",
+            "available": False,
+            "setup_code": setup_code,
+            "session_bucket": session_bucket,
+            "symbol": symbol,
+            "hierarchy": {},
+        }
+    po3 = _as_dict(payload.get("po3"))
+    merged = {
+        **item,
+        "symbol": symbol,
+        "setup_code": setup_code,
+        "setup_family": _get_any(item, ["setup_family", "setup_class"], setup_code),
+        "session": _get_any(item, ["session_name", "session_code"], _get_any(po3, ["session_name", "session_code"], "OFF")),
+        "killzone": _get_any(item, ["killzone_code"], "K" if _boolish(_get_any(po3, ["in_killzone"], False), False) else "NK"),
+        "entry_branch": _get_any(item, ["entry_branch", "entry_model"], "unknown"),
+        "asset_class": _get_any(item, ["asset_class"], ""),
+    }
+    result = priors_for_candidate(artifact, merged)
+    result.update(
+        {
+            "available": True,
+            "setup_code": setup_code,
+            "session_bucket": session_bucket,
+            "symbol": symbol,
+        }
+    )
+    return result
+
+def _bucket_prior_hash_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    prior = _bucket_prior_for_item(item, payload)
+    if not prior or not prior.get("available"):
+        return ""
+    return str(prior.get("candidate_prior_hash") or canonical_hash(prior))
+
+
+def _mandatory_live_prior_rejection(payload: Dict[str, Any], best_index: int) -> "Decision | None":
+    if not AI_CONFIG.require_live_bucket_priors or not _is_live_payload(payload):
+        return None
+    audit = _PRIOR_STARTUP_AUDIT or _refresh_prior_startup_audit()
+    if audit.get("status") == "ready" and audit.get("trading_eligible"):
+        return None
+    log(
+        "[startup_reject] reason=mandatory_live_priors_unavailable "
+        f"status={audit.get('status')} path={audit.get('absolute_path')}"
+    )
+    return Decision(
+        allow=False,
+        raw_allow=False,
+        score=0.0,
+        confidence=0.0,
+        chosen_index=best_index,
+        decision_state=DECISION_REJECT,
+        decision_quality_tier=DECISION_QUALITY_RULE_ONLY_NON_TRADING,
+        mandatory_fields_complete=False,
+        missing_mandatory_fields=["hierarchical_live_bucket_priors"],
+        reasons={"prior_startup_audit": audit},
+        decision_source="mandatory_prior_hard_gate",
+        rejection_codes=["mandatory_live_priors_unavailable"],
+        narrative_state="rejected_before_ai",
+        invalidation_risks=["prior_evidence_unavailable"],
+        suggested_risk_multiplier=0.0,
+        model_version=AI_GATE_MODEL_VERSION,
+    )
+
 
 def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     po3 = _as_dict(payload.get("po3"))
@@ -659,6 +1208,8 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "news_risk": regime.get("news_risk"),
         },
         "plan": {
+            "setup_code": _setup_code_for_item(plan, payload),
+            "bucket_prior": _bucket_prior_for_item(plan, payload),
             "entry_est": plan.get("entry_est"),
             "entry_model": plan.get("entry_model"),
             "entry_branch": plan.get("entry_branch"),
@@ -671,9 +1222,11 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "tp2": plan.get("tp2"),
             "rr2": plan.get("rr2"),
             "effective_rr2": plan.get("effective_rr2"),
-            "setup_score": plan.get("setup_score"),
             "setup_family": plan.get("setup_family"),
             "setup_class": plan.get("setup_class"),
+            "setup_taxonomy_version": plan.get("setup_taxonomy_version"),
+            "setup_taxonomy_enum": plan.get("setup_taxonomy_enum"),
+            "taxonomy_mapping_source": plan.get("taxonomy_mapping_source"),
             "fvg_execution_class": plan.get("fvg_execution_class"),
             "management_profile": plan.get("management_profile"),
             "target_model": plan.get("target_model"),
@@ -681,9 +1234,6 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "execution_cost_r": plan.get("execution_cost_r"),
             "slippage_r": plan.get("slippage_r"),
             "commission_r": plan.get("commission_r"),
-            "gross_expected_r": plan.get("gross_expected_r"),
-            "net_expected_r": plan.get("net_expected_r"),
-            "expected_value_r": plan.get("expected_value_r"),
             "runner_trade": plan.get("runner_trade"),
             "runner_downgraded": plan.get("runner_downgraded"),
             "runner_downgrade_reason": plan.get("runner_downgrade_reason"),
@@ -760,6 +1310,9 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             continue
         compact["candidates"].append({
             "candidate_index": cand.get("candidate_index"),
+            "setup_code": _setup_code_for_item(cand, payload),
+            "is_mpc": cand.get("is_mpc"),
+            "bucket_prior": _bucket_prior_for_item(cand, payload),
             "entry_model": cand.get("entry_model"),
             "entry_branch": cand.get("entry_branch"),
             "configured_stop_model": cand.get("configured_stop_model") or payload.get("configured_stop_model"),
@@ -773,9 +1326,11 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "rr2": cand.get("rr2"),
             "effective_rr2": cand.get("effective_rr2"),
             "liquidity_rr": cand.get("liquidity_rr"),
-            "setup_score": cand.get("setup_score"),
             "setup_family": cand.get("setup_family"),
             "setup_class": cand.get("setup_class"),
+            "setup_taxonomy_version": cand.get("setup_taxonomy_version"),
+            "setup_taxonomy_enum": cand.get("setup_taxonomy_enum"),
+            "taxonomy_mapping_source": cand.get("taxonomy_mapping_source"),
             "fvg_execution_class": cand.get("fvg_execution_class"),
             "management_profile": cand.get("management_profile"),
             "target_model": cand.get("target_model"),
@@ -783,9 +1338,6 @@ def _compact_model_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "execution_cost_r": cand.get("execution_cost_r"),
             "slippage_r": cand.get("slippage_r"),
             "commission_r": cand.get("commission_r"),
-            "gross_expected_r": cand.get("gross_expected_r"),
-            "net_expected_r": cand.get("net_expected_r"),
-            "expected_value_r": cand.get("expected_value_r"),
             "runner_trade": cand.get("runner_trade"),
             "runner_downgraded": cand.get("runner_downgraded"),
             "runner_downgrade_reason": cand.get("runner_downgrade_reason"),
@@ -983,8 +1535,8 @@ def _request_decision_text_fallback(
 ) -> Any:
     fallback_system = (
         system_msg
-        + " Return only one minified JSON object with keys allow, score, chosen_index, confidence, reasons. "
-        "Omit optional arrays. Keep reasons under 80 ASCII characters. No markdown."
+        + " Return one minified JSON object matching the complete structured schema exactly. "
+        "Do not omit fields or use defaults. Keep text fields concise ASCII. No markdown."
     )
     reasoning = _reasoning_config_for_model(model_name)
     request_kwargs: Dict[str, Any] = {
@@ -1039,7 +1591,6 @@ def _minimal_fallback_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "sl": plan.get("sl"),
             "tp2": plan.get("tp2"),
             "rr2": plan.get("rr2"),
-            "setup_score": plan.get("setup_score"),
         },
     }
 
@@ -1056,8 +1607,8 @@ def _request_minimal_decision_text_fallback(
     minimal_payload = _minimal_fallback_payload(payload)
     minimal_system = (
         "You are a strict PO3 trade gate. "
-        "Return only one minified JSON object with keys allow, score, chosen_index, confidence, reasons. "
-        "Omit optional arrays. Keep reasons under 80 ASCII characters. No markdown."
+        "Return only a non-trading diagnostic JSON object with allow=false and a concise error reason. "
+        "No markdown."
     )
     minimal_user = (
         "Evaluate this PO3 setup summary and return only JSON: "
@@ -1090,67 +1641,223 @@ def _request_minimal_decision_text_fallback(
     return _parse_decision_text(_response_output_text(resp), schema)
 
 
+def _degraded_non_trading_decision(
+    payload: Dict[str, Any],
+    reason: str,
+    *,
+    missing: list[str] | None = None,
+    invalid: list[str] | None = None,
+    source: str = "degraded_ai_response",
+) -> "Decision":
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    first = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
+    return Decision(
+        allow=False,
+        raw_allow=False,
+        score=0.0,
+        chosen_index=int(first.get("candidate_index") or 0),
+        confidence=0.0,
+        decision_state=DECISION_REJECT,
+        decision_quality_tier=DECISION_QUALITY_DEGRADED_NON_TRADING,
+        mandatory_fields_complete=False,
+        missing_mandatory_fields=list(missing or []),
+        invalid_mandatory_fields=list(invalid or []),
+        selected_candidate_id=str(first.get("candidate_id") or ""),
+        selected_candidate_hash=str(first.get("candidate_hash") or ""),
+        request_execution_fingerprint=str(first.get("request_execution_fingerprint") or ""),
+        assessed_execution_fingerprint=str(first.get("assessed_execution_fingerprint") or ""),
+        candidate_assessments=[],
+        reasons=reason,
+        decision_source=source,
+        rejection_codes=["ai_quality_schema_incomplete", "degraded_ai_response_non_trading"],
+        narrative_state="degraded_non_trading",
+        invalidation_risks=["ai_decision_contract_invalid"],
+        missing_confirmations=list(missing or []),
+        suggested_risk_multiplier=0.0,
+        model_version=AI_GATE_MODEL_VERSION,
+        rule_score=0.0,
+        llm_quality_score=0.0,
+        blended_legacy_score=0.0,
+        legacy_agreement_confidence=0.0,
+        llm_self_reported_confidence=0.0,
+        calibration_available=False,
+    )
+
+
 def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
-    """
-    Uses OpenAI Responses API + Structured Outputs to return:
-    {allow: bool, score: 0..10, chosen_index: int, reasons: dict}
-    """
+    """Score every candidate independently in one strict structured response."""
     try:
         from pydantic import BaseModel, Field
     except ImportError as e:
         raise RuntimeError("Missing dependency 'pydantic'. Install: pip install pydantic") from e
 
     class TargetComparisonItem(BaseModel):
-        usable: bool = Field(default=False)
-        reason: str = Field(default="", max_length=180)
-        risk: str = Field(default="", max_length=120)
-        expected_role: str = Field(default="reject", max_length=32)
+        usable: bool
+        reason: str = Field(max_length=180)
+        risk: str = Field(max_length=120)
+        expected_role: str = Field(max_length=32)
 
     class TargetComparison(BaseModel):
-        liquidity_target: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
-        partial_before_obstacle_then_liquidity: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
-        capped_before_obstacle: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
-        synthetic_rr_fallback: TargetComparisonItem = Field(default_factory=TargetComparisonItem)
+        liquidity_target: TargetComparisonItem
+        partial_before_obstacle_then_liquidity: TargetComparisonItem
+        capped_before_obstacle: TargetComparisonItem
+        synthetic_rr_capped_to_max_distance: TargetComparisonItem
+        synthetic_rr_fallback: TargetComparisonItem
 
     class TargetArbitrationDecision(BaseModel):
-        target_arbitration_schema_version: str = Field(default=AI_TARGET_ARBITRATION_SCHEMA_VERSION, max_length=48)
-        prompt_contract_version: str = Field(default=AI_PROMPT_CONTRACT_VERSION, max_length=48)
-        arbitration_required: bool = Field(default=False)
-        chosen_target_model: str = Field(default="current_plan", max_length=64)
-        chosen_tp1: float = Field(default=0.0)
-        chosen_tp2: float = Field(default=0.0)
-        chosen_rr1: float = Field(default=0.0)
-        chosen_rr2: float = Field(default=0.0)
-        rejected_target_models: list[str] = Field(default_factory=list, max_length=4)
-        blocker_kind: str = Field(default="", max_length=64)
-        blocker_severity: float = Field(default=-1.0, ge=-1.0, le=10.0)
-        blocker_class: str = Field(default="unknown", max_length=24)
-        blocker_is_trade_killer: bool = Field(default=False)
-        why_not_liquidity_target: str = Field(default="", max_length=160)
-        why_not_partial_before_obstacle: str = Field(default="", max_length=160)
-        why_not_capped_before_obstacle: str = Field(default="", max_length=160)
-        why_not_synthetic_fallback: str = Field(default="", max_length=160)
-        target_decision_reason: str = Field(default="", max_length=160)
-        target_comparison: TargetComparison = Field(default_factory=TargetComparison)
+        target_arbitration_schema_version: str = Field(max_length=64)
+        prompt_contract_version: str = Field(max_length=64)
+        arbitration_required: bool
+        chosen_target_model: str = Field(max_length=64)
+        chosen_tp1: float
+        chosen_tp2: float
+        chosen_rr1: float
+        chosen_rr2: float
+        rejected_target_models: list[str] = Field(max_length=6)
+        blocker_kind: str = Field(max_length=64)
+        blocker_severity: float = Field(ge=-1.0, le=10.0)
+        blocker_class: str = Field(max_length=24)
+        blocker_is_trade_killer: bool
+        why_not_liquidity_target: str = Field(max_length=160)
+        why_not_partial_before_obstacle: str = Field(max_length=160)
+        why_not_capped_before_obstacle: str = Field(max_length=160)
+        why_not_synthetic_fallback: str = Field(max_length=160)
+        target_decision_reason: str = Field(max_length=160)
+        target_comparison: TargetComparison
 
-    class AIGateDecision(BaseModel):
+    class VetoDecision(BaseModel):
+        enabled: bool
+        reason: str = Field(max_length=160)
+
+    class CandidateAssessment(BaseModel):
         model_config = {"protected_namespaces": ()}
-        allow: bool
-        score: float = Field(ge=0.0, le=10.0)
-        chosen_index: int = Field(ge=0)
-        confidence: float = Field(ge=0.0, le=1.0)
-        reasons: str = Field(default="", max_length=160)
-        rejection_codes: list[str] = Field(default_factory=list, max_length=4)
-        narrative_state: str = Field(default="audited", max_length=48)
-        invalidation_risks: list[str] = Field(default_factory=list, max_length=4)
-        missing_confirmations: list[str] = Field(default_factory=list, max_length=4)
-        suggested_risk_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
-        model_version: str = Field(default=AI_GATE_MODEL_VERSION)
-        target_arbitration: TargetArbitrationDecision = Field(default_factory=TargetArbitrationDecision)
+        candidate_index: int = Field(ge=0)
+        candidate_id: str = Field(min_length=1, max_length=160)
+        candidate_hash: str = Field(min_length=8, max_length=128)
+        request_execution_fingerprint: str = Field(min_length=8, max_length=128)
+        setup_taxonomy_version: str = Field(min_length=1, max_length=80)
+        setup_taxonomy_enum: str = Field(min_length=1, max_length=80)
+        taxonomy_mapping_source: str = Field(min_length=1, max_length=80)
+        rule_score: float = Field(ge=0.0, le=10.0)
+        llm_quality_score: float = Field(ge=0.0, le=10.0)
+        blended_legacy_score: float = Field(ge=0.0, le=10.0)
+        legacy_agreement_confidence: float = Field(ge=0.0, le=1.0)
+        llm_self_reported_confidence: float = Field(ge=0.0, le=1.0)
+        calibrated_win_probability: float | None
+        expected_net_r: float | None
+        oos_predicted_probability: float | None
+        calibration_bucket: str = Field(max_length=80)
+        calibration_sample_size: int = Field(ge=0)
+        calibration_lower_bound: float | None
+        calibration_upper_bound: float | None
+        calibration_model_version: str = Field(max_length=80)
+        calibration_data_window_start: str = Field(max_length=40)
+        calibration_data_window_end: str = Field(max_length=40)
+        calibration_available: bool
+        raw_allow: bool
+        decision_state: str = Field(max_length=16)
+        structure_quality_score: float = Field(ge=0.0, le=10.0)
+        entry_timing_score: float = Field(ge=0.0, le=10.0)
+        follow_through_probability: float = Field(ge=0.0, le=1.0)
+        invalidation_risk: float = Field(ge=0.0, le=1.0)
+        chop_risk: float = Field(ge=0.0, le=1.0)
+        cost_risk: float = Field(ge=0.0, le=1.0)
+        symbol_bucket_risk: float = Field(ge=0.0, le=1.0)
+        session_bucket_risk: float = Field(ge=0.0, le=1.0)
+        post_entry_failure_risk: float = Field(ge=0.0, le=1.0)
+        final_trade_expectancy_score: float = Field(ge=0.0, le=10.0)
+        veto: VetoDecision
+        bucket_prior_override_justification: str = Field(max_length=180)
+        reasons: str = Field(max_length=240)
+        rejection_codes: list[str] = Field(max_length=8)
+        narrative_state: str = Field(max_length=48)
+        invalidation_risks: list[str] = Field(max_length=8)
+        missing_confirmations: list[str] = Field(max_length=8)
+        suggested_risk_multiplier: float = Field(ge=0.0, le=1.0)
+        selected_target_identity: str = Field(min_length=1, max_length=80)
+        selected_target_price: float
+        entry: float
+        sl: float
+        tp1: float
+        tp2: float
+        assessed_execution_fingerprint: str = Field(min_length=8, max_length=128)
+        model_version: str = Field(min_length=1, max_length=100)
+        target_arbitration: TargetArbitrationDecision
+
+    class AIGateEnvelope(BaseModel):
+        decision_schema_version: str = Field(max_length=64)
+        decision_quality_tier: str = Field(max_length=48)
+        response_quality: str | None = Field(default=None, max_length=48)
+        selected_candidate_id: str = Field(min_length=1, max_length=160)
+        selected_candidate_hash: str = Field(min_length=8, max_length=128)
+        candidate_assessments: list[CandidateAssessment] = Field(min_length=1)
+        reasons: str = Field(max_length=240)
 
     client = _openai_client(_openai_timeout_for_payload(payload))
-    candidates = payload.get("candidates") or []
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    contract_missing: list[str] = []
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            contract_missing.append(f"candidates[{index}]")
+            continue
+        for field in (
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_version",
+            "setup_taxonomy_enum",
+            "taxonomy_mapping_source",
+        ):
+            if not str(candidate.get(field) or ""):
+                contract_missing.append(f"candidates[{index}].{field}")
+    if not candidates:
+        contract_missing.append("candidates[]")
+    if contract_missing:
+        return _degraded_non_trading_decision(
+            payload,
+            "candidate integrity contract missing before OpenAI",
+            missing=contract_missing,
+            source="request_contract_reject",
+        )
+
     model_payload = _compact_model_payload(payload)
+    model_candidates = model_payload.get("candidates") if isinstance(model_payload.get("candidates"), list) else []
+    enriched_candidates: list[Dict[str, Any]] = []
+    for index, candidate in enumerate(candidates):
+        single_payload = dict(payload)
+        single_payload["candidates"] = [candidate]
+        single_payload["plan"] = candidate
+        candidate_rule_score, candidate_rule_notes = _rule_score(single_payload)
+        compact_candidate = dict(model_candidates[index]) if index < len(model_candidates) and isinstance(model_candidates[index], dict) else dict(candidate)
+        compact_candidate.update(
+            {
+                "candidate_index": int(candidate.get("candidate_index", index)),
+                "candidate_id": str(candidate.get("candidate_id")),
+                "candidate_hash": str(candidate.get("candidate_hash")),
+                "request_execution_fingerprint": str(candidate.get("request_execution_fingerprint")),
+                "assessed_execution_fingerprint": str(candidate.get("assessed_execution_fingerprint")),
+                "setup_taxonomy_version": str(candidate.get("setup_taxonomy_version")),
+                "setup_taxonomy_enum": str(candidate.get("setup_taxonomy_enum")),
+                "taxonomy_mapping_source": str(candidate.get("taxonomy_mapping_source")),
+                "rule_score": round(float(candidate_rule_score), 4),
+                "rule_notes": str(candidate_rule_notes),
+            }
+        )
+        enriched_candidates.append(compact_candidate)
+    model_payload["candidates"] = enriched_candidates
+    model_payload["decision_schema_version"] = AI_DECISION_SCHEMA_VERSION
+    model_payload["target_arbitration_schema_version"] = AI_TARGET_ARBITRATION_SCHEMA_VERSION
+    model_payload["prompt_contract_version"] = AI_PROMPT_CONTRACT_VERSION
+    model_payload["workload_mode"] = _payload_workload_mode(payload)
+    model_payload["authority_contract"] = {
+        "deterministic": "candidate_entry_sl_tp_cost_broker_risk_session_fingerprint",
+        "statistical": "empirical_probability_expected_r_time_to_event_shadow_only_until_validated",
+        "llm": "anomaly_contradiction_missing_data_veto_and_narrative_only",
+        "portfolio": "aggregate_risk_factor_exposure",
+        "management": "independently_validated_exit_policy",
+        "architecture_contract_version": ARCHITECTURE_CONTRACT_VERSION,
+    }
+
     snapshot_parts, snapshot_notes = _snapshot_parts(payload)
     symbol = str(payload.get("symbol", "") or "unknown_symbol")
     request_id = str(payload.get("id") or "")
@@ -1159,15 +1866,21 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
 
     runtime = _as_dict(payload.get("runtime"))
     snapshots_required = _runtime_bool(runtime.get("require_snapshots"), False)
-    system_msg = """You are a discretionary but disciplined narrative auditor for a PO3 + FVG intraday setup. Be intelligent and contextual, but use the same professional checklist each time: real liquidity sweep versus ordinary breakout, displacement quality, BOS/MSS/CHOCH after displacement, FVG location in the impulse leg, mitigation and invalidation state, entry quality, stop placement, RR after spread/slippage/commission, and nearby opposing liquidity or imbalance.
+    system_msg = f"""You are a disciplined PO3 + FVG trade auditor. Assess every candidate independently. Never copy a score, veto, target choice, confidence, or risk multiplier between candidates. Candidate identity is immutable: echo candidate_index, candidate_id, candidate_hash, and request_execution_fingerprint exactly from that candidate. Return entry and SL unchanged. Return TP1, TP2, selected_target_identity, and selected_target_price for the target model you actually assessed. assessed_execution_fingerprint is mandatory but Python replaces it with a deterministic hash of the normalized assessed plan before trading.
 
 Structured MT5 fields are primary evidence; chart snapshots are supporting evidence. Missing or failed chart captures are not a rejection when runtime.require_snapshots is false. The field opposing_clearance_score is favorable when high and means a nearby obstruction when low.
 
-Do not reject because a configured stop model is named structural_sweep, structural_swing, or fvg_edge. Judge the actual prices: entry, SL, TP, RR, obstacle distance, cost in R, and whether the narrative remains valid. A wider structural stop lowers RR; it is not by itself an invalid pattern. Treat an opposing imbalance before target as a risk/quality issue unless the payload clearly marks it as a hard block or the target/RR/evidence becomes unrealistic.
+Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is mixed, timing/follow-through is unclear, data is incomplete, a prior is statistically weak, target choice is unstable, or the assessed plan may not survive execution. ABSTAIN is never a reduced-risk approval. raw_allow must agree with decision_state: true only for APPROVE.
 
-Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Fill target_arbitration_schema_version and prompt_contract_version with the exact current constants. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, and reject by filling target_comparison for all four choices with usable, reason, risk, and expected_role. Do not choose synthetic_rr_fallback just because an obstacle exists. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose synthetic_rr_fallback only if liquidity, partial, and capped choices are all worse. If choosing synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
+Score semantics are strict. rule_score is the supplied deterministic score. llm_quality_score is your 0..10 technical-quality assessment. blended_legacy_score and legacy_agreement_confidence are diagnostic compatibility fields only and have no trade authority. llm_self_reported_confidence is your uncertainty report, not a probability. There is no validated out-of-sample calibration yet: calibration_available=false; calibrated_win_probability, expected_net_r, oos_predicted_probability, calibration bounds must be null; calibration strings empty and sample size zero. Never fabricate probability or expected R.
 
-Prefer the candidate with the strongest complete story and execution quality, not merely the highest numeric setup_score. Return one chosen candidate index plus machine-readable rejection_codes, invalidation_risks, and missing_confirmations. If evidence is mixed, lower confidence or suggested_risk_multiplier instead of flipping allow/no on a minor ambiguity. Scores above 8 should be rare and reserved for clean sweep-displacement-structure-FVG-target alignment. Keep reasons plain ASCII and concise."""
+Fill every veto/risk/expectancy field. These uncalibrated assessments may reject but may not positively authorize a trade. Your authority is limited to anomaly, contradiction, missing-data, and narrative vetoes. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. Set veto.enabled=true with a specific reason for weak follow-through, high invalidation/chop/cost/post-entry-failure risk, unresolved target instability, or incomplete evidence. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
+
+Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Fill target_arbitration_schema_version and prompt_contract_version with the exact current constants. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
+
+Echo setup_taxonomy_version, setup_taxonomy_enum, and taxonomy_mapping_source exactly for each candidate. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
+
+Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and one selected candidate id/hash that exactly identifies an item in that array. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score is not compressed or capped. Scores above 8 should be rare but must be returned unchanged. Keep text concise ASCII."""
     snapshot_status = ", ".join(snapshot_notes) if snapshot_notes else "none"
     user_text = (
         "PO3 gate request. "
@@ -1187,7 +1900,7 @@ Prefer the candidate with the strongest complete story and execution quality, no
             log(f"[ai_gate] Using model={model_name} reasoning_effort={reasoning['effort']}")
         for budget in _token_budgets_for_model(model_name):
             try:
-                text_format = _responses_text_format_param(AIGateDecision)
+                text_format = _responses_text_format_param(AIGateEnvelope)
                 request_kwargs: Dict[str, Any] = {
                     "model": model_name,
                     "instructions": system_msg,
@@ -1199,7 +1912,7 @@ Prefer the candidate with the strongest complete story and execution quality, no
                 if text_format is not None:
                     request_kwargs["text"] = {"format": text_format, "verbosity": "low"}
                 else:
-                    request_kwargs["text_format"] = AIGateDecision
+                    request_kwargs["text_format"] = AIGateEnvelope
                     request_kwargs["text"] = {"verbosity": "low"}
                 if reasoning:
                     request_kwargs["reasoning"] = reasoning
@@ -1227,11 +1940,11 @@ Prefer the candidate with the strongest complete story and execution quality, no
                     max_output_tokens=budget,
                     extra={"symbol": symbol, "snapshot_count": len(snapshot_parts), "service_tier": service_tier, "flex_used": flex_used},
                 )
-                out = _parse_structured_decision(resp, AIGateDecision)
+                out = _parse_structured_decision(resp, AIGateEnvelope)
                 _write_ai_cost_report(
                     payload,
                     request_id=request_id,
-                    decision_source="llm_blended",
+                    decision_source="llm_full_structured",
                     model=model_name,
                     reasoning_effort=reasoning.get("effort", "") if reasoning else "",
                     service_tier=service_tier,
@@ -1243,88 +1956,267 @@ Prefer the candidate with the strongest complete story and execution quality, no
                     openai_called=True,
                     skip_reason="",
                 )
-                return Decision(
-                    allow=bool(out.allow),
-                    score=float(out.score),
-                    chosen_index=int(out.chosen_index),
-                    confidence=float(out.confidence),
-                    reasons=f"model={model_name}; tokens={budget}; snapshots={len(snapshot_parts)}; {str(out.reasons or '').strip()}",
-                    decision_source="llm_blended",
-                    rejection_codes=list(out.rejection_codes or []),
-                    narrative_state=str(out.narrative_state or "audited"),
-                    invalidation_risks=list(out.invalidation_risks or []),
-                    missing_confirmations=list(out.missing_confirmations or []),
-                    suggested_risk_multiplier=float(out.suggested_risk_multiplier),
-                    model_version=str(out.model_version or AI_GATE_MODEL_VERSION),
-                    **_target_kwargs_from_model(getattr(out, "target_arbitration", None)),
+                raw_envelope = out.model_dump()
+                validation = validate_decision_envelope(raw_envelope, candidates)
+                if not validation.valid:
+                    log(
+                        "[ai_schema_validation] valid=false"
+                        f" decision_schema_version={raw_envelope.get('decision_schema_version', '')}"
+                        f" missing_fields={','.join(validation.missing_fields)}"
+                        f" invalid_fields={','.join(validation.invalid_fields)}"
+                    )
+                    return _degraded_non_trading_decision(
+                        payload,
+                        "strict AI candidate schema validation failed",
+                        missing=list(validation.missing_fields),
+                        invalid=list(validation.invalid_fields),
+                    )
+
+                candidate_by_hash = {
+                    str(candidate.get("candidate_hash")): candidate
+                    for candidate in candidates
+                }
+                rule_by_hash = {
+                    str(candidate.get("candidate_hash")): float(enriched_candidates[index]["rule_score"])
+                    for index, candidate in enumerate(candidates)
+                }
+                assessments: list[Dict[str, Any]] = []
+                for assessment in raw_envelope["candidate_assessments"]:
+                    canonical = dict(assessment)
+                    assessment_hash = str(canonical["candidate_hash"])
+                    statistical_authority_violations: list[str] = []
+                    for field in (
+                        "calibrated_win_probability",
+                        "expected_net_r",
+                        "oos_predicted_probability",
+                        "calibration_lower_bound",
+                        "calibration_upper_bound",
+                    ):
+                        if canonical.get(field) is not None:
+                            statistical_authority_violations.append(
+                                f"candidate[{assessment_hash}].{field}_llm_authority_forbidden"
+                            )
+                    if bool(canonical.get("calibration_available")):
+                        statistical_authority_violations.append(
+                            f"candidate[{assessment_hash}].calibration_available_llm_authority_forbidden"
+                        )
+                    for field in (
+                        "calibration_bucket",
+                        "calibration_model_version",
+                        "calibration_data_window_start",
+                        "calibration_data_window_end",
+                    ):
+                        if str(canonical.get(field) or ""):
+                            statistical_authority_violations.append(
+                                f"candidate[{assessment_hash}].{field}_llm_authority_forbidden"
+                            )
+                    if int(canonical.get("calibration_sample_size") or 0) != 0:
+                        statistical_authority_violations.append(
+                            f"candidate[{assessment_hash}].calibration_sample_size_llm_authority_forbidden"
+                        )
+                    if statistical_authority_violations:
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "LLM attempted to populate statistical-authority fields",
+                            invalid=statistical_authority_violations,
+                            source="layered_authority_reject",
+                        )
+                    candidate = candidate_by_hash[assessment_hash]
+                    rule_value = rule_by_hash[assessment_hash]
+                    tick = max(
+                        abs(float(candidate.get("symbol_tick_size") or 0.0)),
+                        10.0 ** (-max(0, int(candidate.get("symbol_digits") or 5))),
+                    )
+                    if abs(float(canonical["entry"]) - float(candidate.get("entry_est") or 0.0)) > 2.0 * tick:
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "AI changed candidate entry outside the immutable plan",
+                            invalid=[f"candidate[{assessment_hash}].entry"],
+                        )
+                    if abs(float(canonical["sl"]) - float(candidate.get("sl") or 0.0)) > 2.0 * tick:
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "AI changed candidate stop outside the immutable plan",
+                            invalid=[f"candidate[{assessment_hash}].sl"],
+                        )
+                    canonical["entry"] = float(candidate.get("entry_est") or 0.0)
+                    canonical["sl"] = float(candidate.get("sl") or 0.0)
+                    arbitration = _as_dict(canonical.get("target_arbitration"))
+                    chosen_model = str(arbitration.get("chosen_target_model") or "")
+                    chosen_tp1 = float(arbitration.get("chosen_tp1") or 0.0)
+                    chosen_tp2 = float(arbitration.get("chosen_tp2") or 0.0)
+                    selected_identity = str(canonical.get("selected_target_identity") or "")
+                    state = str(canonical.get("decision_state") or "").upper()
+                    if state == DECISION_APPROVE:
+                        if _norm_text(selected_identity) != _norm_text(chosen_model):
+                            return _degraded_non_trading_decision(
+                                payload,
+                                "selected target identity does not match target arbitration",
+                                invalid=[f"candidate[{assessment_hash}].selected_target_identity"],
+                            )
+                        if chosen_tp2 <= 0.0 or abs(float(canonical["selected_target_price"]) - chosen_tp2) > 2.0 * tick:
+                            return _degraded_non_trading_decision(
+                                payload,
+                                "selected target price does not match target arbitration",
+                                invalid=[f"candidate[{assessment_hash}].selected_target_price"],
+                            )
+                    canonical["selected_target_identity"] = chosen_model or selected_identity
+                    canonical["selected_target_price"] = chosen_tp2 if chosen_tp2 > 0.0 else float(canonical["selected_target_price"])
+                    canonical["tp1"] = chosen_tp1 if chosen_tp1 > 0.0 else float(candidate.get("tp1") or canonical["tp1"])
+                    canonical["tp2"] = chosen_tp2 if chosen_tp2 > 0.0 else float(candidate.get("tp2") or canonical["tp2"])
+                    quality = float(canonical["llm_quality_score"])
+                    blended = max(0.0, min(10.0, 0.72 * rule_value + 0.28 * quality))
+                    agreement = max(0.0, min(1.0, 1.0 - abs(rule_value - quality) / 6.0))
+                    legacy_confidence = max(
+                        0.0,
+                        min(1.0, 0.65 * agreement + 0.35 * float(canonical["llm_self_reported_confidence"])),
+                    )
+                    canonical["rule_score"] = round(rule_value, 4)
+                    canonical["blended_legacy_score"] = round(blended, 4)
+                    canonical["legacy_agreement_confidence"] = round(legacy_confidence, 4)
+                    canonical["calibration_available"] = False
+                    canonical["calibrated_win_probability"] = None
+                    canonical["expected_net_r"] = None
+                    canonical["oos_predicted_probability"] = None
+                    canonical["calibration_bucket"] = ""
+                    canonical["calibration_sample_size"] = 0
+                    canonical["calibration_lower_bound"] = None
+                    canonical["calibration_upper_bound"] = None
+                    canonical["calibration_model_version"] = ""
+                    canonical["calibration_data_window_start"] = ""
+                    canonical["calibration_data_window_end"] = ""
+                    canonical["request_execution_fingerprint"] = str(candidate.get("request_execution_fingerprint") or "")
+                    canonical["assessed_execution_fingerprint"] = deterministic_assessed_execution_fingerprint(candidate, canonical)
+                    assessments.append(canonical)
+
+                selected_hash = str(raw_envelope["selected_candidate_hash"])
+                selected = next(a for a in assessments if str(a["candidate_hash"]) == selected_hash)
+                selected_index = int(selected["candidate_index"])
+                state = str(selected["decision_state"]).upper()
+                multiplier_resolution = resolve_multiplier(
+                    selected.get("suggested_risk_multiplier"),
+                    present="suggested_risk_multiplier" in selected,
+                    optional=False,
+                    source="ai_decision",
                 )
+                risk_multiplier = float(multiplier_resolution.resolved_value or 0.0)
+                veto = _as_dict(selected.get("veto"))
+                allow = bool(
+                    response_can_trade(RESPONSE_FULL_STRUCTURED, state, risk_multiplier)
+                    and bool(selected["raw_allow"])
+                    and not bool(veto.get("enabled"))
+                    and multiplier_resolution.valid
+                    and not multiplier_resolution.blocked
+                )
+                if state == DECISION_ABSTAIN:
+                    log(
+                        f"[ai_abstain] candidate_id={selected['candidate_id']}"
+                        f" candidate_hash={selected_hash} reason={selected.get('reasons', '')}"
+                    )
+                target_kwargs = _target_kwargs_from_dict(_as_dict(selected.get("target_arbitration")))
+                decision = Decision(
+                    allow=allow,
+                    raw_allow=bool(selected["raw_allow"]),
+                    score=float(selected["llm_quality_score"]),
+                    chosen_index=selected_index,
+                    confidence=float(selected["llm_self_reported_confidence"]),
+                    decision_state=state,
+                    decision_quality_tier=DECISION_QUALITY_FULL_STRUCTURED,
+                    mandatory_fields_complete=True,
+                    missing_mandatory_fields=[],
+                    invalid_mandatory_fields=[],
+                    selected_candidate_id=str(selected["candidate_id"]),
+                    selected_candidate_hash=selected_hash,
+                    request_execution_fingerprint=str(selected["request_execution_fingerprint"]),
+                    assessed_execution_fingerprint=str(selected["assessed_execution_fingerprint"]),
+                    selected_target_identity=str(selected["selected_target_identity"]),
+                    selected_target_price=float(selected["selected_target_price"]),
+                    assessed_entry=float(selected["entry"]),
+                    assessed_sl=float(selected["sl"]),
+                    assessed_tp1=float(selected["tp1"]),
+                    assessed_tp2=float(selected["tp2"]),
+                    candidate_assessments=assessments,
+                    rule_score=float(selected["rule_score"]),
+                    llm_quality_score=float(selected["llm_quality_score"]),
+                    blended_legacy_score=float(selected["blended_legacy_score"]),
+                    legacy_agreement_confidence=float(selected["legacy_agreement_confidence"]),
+                    llm_self_reported_confidence=float(selected["llm_self_reported_confidence"]),
+                    calibrated_win_probability=None,
+                    expected_net_r=None,
+                    oos_predicted_probability=None,
+                    calibration_available=False,
+                    reasons=f"model={model_name}; tokens={budget}; snapshots={len(snapshot_parts)}; {selected.get('reasons', '')}",
+                    decision_source="llm_full_structured",
+                    rejection_codes=list(selected.get("rejection_codes") or []),
+                    narrative_state=str(selected.get("narrative_state") or "audited"),
+                    invalidation_risks=list(selected.get("invalidation_risks") or []),
+                    missing_confirmations=list(selected.get("missing_confirmations") or []),
+                    suggested_risk_multiplier=risk_multiplier,
+                    model_version=str(selected.get("model_version") or AI_GATE_MODEL_VERSION),
+                    structure_quality_score=float(selected["structure_quality_score"]),
+                    entry_timing_score=float(selected["entry_timing_score"]),
+                    follow_through_probability=float(selected["follow_through_probability"]),
+                    invalidation_risk=float(selected["invalidation_risk"]),
+                    chop_risk=float(selected["chop_risk"]),
+                    cost_risk=float(selected["cost_risk"]),
+                    symbol_bucket_risk=float(selected["symbol_bucket_risk"]),
+                    session_bucket_risk=float(selected["session_bucket_risk"]),
+                    post_entry_failure_risk=float(selected["post_entry_failure_risk"]),
+                    final_trade_expectancy_score=float(selected["final_trade_expectancy_score"]),
+                    veto_enabled=bool(veto.get("enabled")),
+                    veto_reason=str(veto.get("reason") or ""),
+                    bucket_prior_override_justification=str(selected.get("bucket_prior_override_justification") or ""),
+                    **target_kwargs,
+                )
+                log(
+                    "[decision_scores]"
+                    f" rule_score={decision.rule_score:.4f}"
+                    f" llm_quality_score={decision.llm_quality_score:.4f}"
+                    f" blended_legacy_score={decision.blended_legacy_score:.4f}"
+                    " calibrated_win_probability=unavailable expected_net_r=unavailable"
+                    f" llm_self_reported_confidence={decision.llm_self_reported_confidence:.4f}"
+                )
+                log(
+                    "[ai_schema_validation] valid=true"
+                    f" decision_schema_version={AI_DECISION_SCHEMA_VERSION}"
+                    f" candidate_count={len(assessments)} selected_candidate_hash={selected_hash}"
+                )
+                return decision
             except Exception as e:
                 if _needs_compact_json_retry(e):
                     try:
-                        log(f"[ai_gate] Structured output incomplete/invalid for model {model_name} with max_output_tokens={budget}; trying compact same-model JSON fallback.")
+                        log(f"[ai_gate] Structured output incomplete/invalid for model {model_name} with max_output_tokens={budget}; trying full-schema compact JSON fallback.")
                         out = _request_decision_text_fallback(
                             client,
                             model_name=model_name,
                             system_msg=system_msg,
                             user_content=user_content,
                             budget=budget,
-                            schema=AIGateDecision,
+                            schema=AIGateEnvelope,
                             request_id=request_id,
                             payload=payload,
                         )
-                        return Decision(
-                            allow=bool(out.allow),
-                            score=float(out.score),
-                            chosen_index=int(out.chosen_index),
-                            confidence=float(out.confidence),
-                            reasons=f"model={model_name}; mode=json_text_fallback; tokens={budget}; snapshots={len(snapshot_parts)}; {str(out.reasons or '').strip()}",
-                            decision_source="llm_blended",
-                            rejection_codes=list(out.rejection_codes or []),
-                            narrative_state=str(out.narrative_state or "audited"),
-                            invalidation_risks=list(out.invalidation_risks or []),
-                            missing_confirmations=list(out.missing_confirmations or []),
-                            suggested_risk_multiplier=float(out.suggested_risk_multiplier),
-                            model_version=str(out.model_version or AI_GATE_MODEL_VERSION),
-                            **_target_kwargs_from_model(getattr(out, "target_arbitration", None)),
-                        )
+                        raw_fallback = out.model_dump()
+                        validation = validate_decision_envelope(raw_fallback, candidates)
+                        if not validation.valid:
+                            return _degraded_non_trading_decision(
+                                payload,
+                                "full-schema JSON fallback failed validation",
+                                missing=list(validation.missing_fields),
+                                invalid=list(validation.invalid_fields),
+                            )
+                        # Re-run the normal path on the next model attempt rather than
+                        # granting trade authority to a separately interpreted object.
+                        errors.append(f"{model_name}@{budget}: full-schema JSON fallback requires structured retry")
+                        continue
                     except Exception as fallback_error:
-                        try:
-                            log(
-                                f"[ai_gate] JSON-text fallback empty/failed for model {model_name} with max_output_tokens={budget}; "
-                                "trying minimal same-model JSON fallback."
-                            )
-                            out = _request_minimal_decision_text_fallback(
-                                client,
-                                model_name=model_name,
-                                payload=payload,
-                                budget=budget,
-                                schema=AIGateDecision,
-                                request_id=request_id,
-                            )
-                            return Decision(
-                                allow=bool(out.allow),
-                                score=float(out.score),
-                                chosen_index=int(out.chosen_index),
-                                confidence=float(out.confidence),
-                                reasons=f"model={model_name}; mode=json_minimal_fallback; tokens={budget}; snapshots={len(snapshot_parts)}; {str(out.reasons or '').strip()}",
-                                decision_source="llm_blended",
-                                rejection_codes=list(out.rejection_codes or []),
-                                narrative_state=str(out.narrative_state or "audited"),
-                                invalidation_risks=list(out.invalidation_risks or []),
-                                missing_confirmations=list(out.missing_confirmations or []),
-                                suggested_risk_multiplier=float(out.suggested_risk_multiplier),
-                                model_version=str(out.model_version or AI_GATE_MODEL_VERSION),
-                                **_target_kwargs_from_model(getattr(out, "target_arbitration", None)),
-                            )
-                        except Exception as minimal_error:
-                            errors.append(f"{model_name}@{budget}: {e}")
-                            errors.append(f"{model_name}@{budget}: json_text_fallback failed: {fallback_error}")
-                            errors.append(f"{model_name}@{budget}: json_minimal_fallback failed: {minimal_error}")
-                            log(
-                                f"[ai_gate] Compact JSON recovery failed for model {model_name} with max_output_tokens={budget}; "
-                                "the gate will fall back to rule-only scoring if no later attempt succeeds."
-                            )
-                            continue
+                        errors.append(f"{model_name}@{budget}: {e}")
+                        errors.append(f"{model_name}@{budget}: full_schema_json_fallback failed: {fallback_error}")
+                        log(
+                            f"[ai_gate] Full-schema JSON recovery failed for model {model_name} with max_output_tokens={budget}; "
+                            "no minimal trading fallback will be used."
+                        )
+                        continue
                 msg = f"{model_name}@{budget}: {e}"
                 errors.append(msg)
                 log(f"[ai_gate] OpenAI call failed for model {model_name} with max_output_tokens={budget}: {e}")
@@ -1336,23 +2228,75 @@ Prefer the candidate with the strongest complete story and execution quality, no
 @dataclass
 class Decision:
     allow: bool
-    score: float  # 0..10
+    # Migration aliases only. score is mirrored from llm_quality_score and
+    # confidence from llm_self_reported_confidence for old diagnostics.
+    score: float
+    raw_allow: bool = False
+    model_raw_allow: bool | None = None
+    python_final_allow: bool | None = None
+    mql_final_allow: bool | None = None
     chosen_index: int = 0
     confidence: float = 0.0
+    decision_state: str = DECISION_REJECT
+    decision_quality_tier: str = DECISION_QUALITY_DEGRADED_NON_TRADING
+    decision_schema_version: str = AI_DECISION_SCHEMA_VERSION
+    mandatory_fields_complete: bool = False
+    missing_mandatory_fields: list[str] | None = None
+    invalid_mandatory_fields: list[str] | None = None
+    selected_candidate_id: str = ""
+    selected_candidate_hash: str = ""
+    request_execution_fingerprint: str = ""
+    assessed_execution_fingerprint: str = ""
+    selected_target_identity: str = ""
+    selected_target_price: float = 0.0
+    assessed_entry: float = 0.0
+    assessed_sl: float = 0.0
+    assessed_tp1: float = 0.0
+    assessed_tp2: float = 0.0
+    candidate_assessments: list[Dict[str, Any]] | None = None
+    rule_score: float = 0.0
+    llm_quality_score: float = 0.0
+    blended_legacy_score: float = 0.0
+    legacy_agreement_confidence: float = 0.0
+    llm_self_reported_confidence: float = 0.0
+    calibrated_win_probability: float | None = None
+    expected_net_r: float | None = None
+    oos_predicted_probability: float | None = None
+    calibration_bucket: str = ""
+    calibration_sample_size: int = 0
+    calibration_lower_bound: float | None = None
+    calibration_upper_bound: float | None = None
+    calibration_model_version: str = ""
+    calibration_data_window_start: str = ""
+    calibration_data_window_end: str = ""
+    calibration_available: bool = False
     reasons: Dict[str, Any] | str = ""
     decision_source: str = ""
     rejection_codes: list[str] | None = None
     narrative_state: str = ""
     invalidation_risks: list[str] | None = None
     missing_confirmations: list[str] | None = None
-    suggested_risk_multiplier: float = 1.0
+    suggested_risk_multiplier: float | None = None
     model_version: str = AI_GATE_MODEL_VERSION
     decision_id: str = ""
-    ai_score_threshold: float = 0.0
-    ai_threshold_source: str = ""
-    global_ai_score_as_hard_floor: bool = False
-    ai_threshold_passed: bool = True
-    ai_reject_reason: str = ""
+    llm_quality_score_threshold: float = 0.0
+    llm_quality_threshold_source: str = ""
+    global_llm_quality_as_hard_floor: bool = False
+    llm_quality_threshold_passed: bool = False
+    llm_quality_reject_reason: str = ""
+    structure_quality_score: float = 0.0
+    entry_timing_score: float = 0.0
+    follow_through_probability: float = 0.0
+    invalidation_risk: float = 1.0
+    chop_risk: float = 1.0
+    cost_risk: float = 1.0
+    symbol_bucket_risk: float = 1.0
+    session_bucket_risk: float = 1.0
+    post_entry_failure_risk: float = 1.0
+    final_trade_expectancy_score: float = 0.0
+    veto_enabled: bool = False
+    veto_reason: str = ""
+    bucket_prior_override_justification: str = ""
     target_arbitration: Dict[str, Any] | None = None
     chosen_target_model: str = ""
     chosen_tp1: float = 0.0
@@ -1377,8 +2321,31 @@ class Decision:
     prompt_contract_version: str = AI_PROMPT_CONTRACT_VERSION
     target_comparison_json: str = "{}"
 
+    @property
+    def response_quality(self) -> str:
+        """Read-only compatibility alias; never an independent authority."""
+
+        return self.decision_quality_tier
+
 def _as_dict(x: Any) -> Dict[str, Any]:
     return x if isinstance(x, dict) else {}
+
+
+def _synchronize_decision_authority_fields(decision: Decision) -> Decision:
+    """Keep the three decision stages explicit without inventing MQL authority."""
+
+    decision.model_raw_allow = bool(
+        decision.raw_allow if decision.model_raw_allow is None else decision.model_raw_allow
+    )
+    decision.raw_allow = bool(decision.model_raw_allow)
+    decision.python_final_allow = bool(
+        decision.allow if decision.python_final_allow is None else decision.python_final_allow
+    )
+    decision.allow = bool(decision.python_final_allow)
+    # Python cannot claim the downstream MQL result. It remains unavailable
+    # until the EA applies candidate, freshness, risk, session, and broker gates.
+    decision.mql_final_allow = None
+    return decision
 
 def _get_any(d: Dict[str, Any], keys: list[str], default: Any = None) -> Any:
     for k in keys:
@@ -1419,11 +2386,31 @@ def _target_arbitration_required(payload: Dict[str, Any], item: Dict[str, Any] |
     item = item if isinstance(item, dict) else {}
     plan = _as_dict(payload.get("plan"))
     candidates = _target_candidates(payload, item)
-    return (
+    if (
         _boolish(item.get("target_arbitration_required"), False)
         or _boolish(plan.get("target_arbitration_required"), False)
         or _boolish(candidates.get("arbitration_required"), False)
+    ):
+        return True
+    obstacle = _norm_text(
+        _get_any(candidates, ["obstacle_kind"], _get_any(item, ["obstacle_kind"], _get_any(plan, ["obstacle_kind"], "")))
     )
+    target_source = _norm_text(
+        _get_any(item, ["target_source", "tp_model", "target_model"], _get_any(plan, ["target_source", "tp_model", "target_model"], ""))
+    )
+    liquidity = _target_candidate_option(candidates, "liquidity_target", "real_liquidity", "real_liquidity_target")
+    capped = _target_candidate_option(candidates, "capped_before_obstacle")
+    if _has_real_liquidity_target_candidate(payload, item) and obstacle:
+        return True
+    if _boolish(capped.get("available"), False) or _floatish(_get_any(capped, ["tp2", "tp", "target"], 0.0), 0.0) > 0:
+        return True
+    if "synthetic_rr_fallback" in target_source and obstacle:
+        return True
+    if obstacle in {"crossed_opposing_imbalance", "crossed_htf_opposing_imbalance", "opposing_imbalance"}:
+        return True
+    if "opposing" in obstacle or "imbalance" in obstacle:
+        return True
+    return False
 
 def _has_real_liquidity_target_candidate(payload: Dict[str, Any], item: Dict[str, Any] | None = None) -> bool:
     item = item if isinstance(item, dict) else {}
@@ -1458,21 +2445,317 @@ def _compact_target_candidates(candidates: Dict[str, Any]) -> Dict[str, Any]:
         "effective_fallback_rr": candidates.get("effective_fallback_rr"),
         "blocker_features": candidates.get("blocker_features") if isinstance(candidates.get("blocker_features"), dict) else {},
     }
-    for key in ("liquidity_target", "capped_before_obstacle", "synthetic_rr_fallback"):
+    for key in (
+        "liquidity_target",
+        "partial_before_obstacle_then_liquidity",
+        "capped_before_obstacle",
+        "synthetic_rr_fallback",
+        "synthetic_rr_capped_to_max_distance",
+    ):
         option = candidates.get(key)
         if isinstance(option, dict):
             out[key] = {
                 "available": option.get("available"),
                 "model": option.get("model"),
+                "tp": option.get("tp"),
+                "tp1": option.get("tp1"),
+                "rr": option.get("rr"),
+                "rr1": option.get("rr1"),
                 "tp2": option.get("tp2"),
                 "rr2": option.get("rr2"),
+                "configured_rr": option.get("configured_rr"),
                 "effective_rr2": option.get("effective_rr2"),
+                "reward_distance_price": option.get("reward_distance_price"),
+                "max_allowed_distance": option.get("max_allowed_distance"),
+                "exceeds_max_target_distance": option.get("exceeds_max_target_distance"),
+                "min_rr_pass": option.get("min_rr_pass"),
+                "max_rr_pass": option.get("max_rr_pass"),
+                "feasible_for_tp2": option.get("feasible_for_tp2"),
+                "feasible_for_tp1_only": option.get("feasible_for_tp1_only"),
+                "infeasible_reason": option.get("infeasible_reason"),
+                "reason": option.get("reason"),
                 "valid_structurally": option.get("valid_structurally"),
                 "blocked_by_obstacle": option.get("blocked_by_obstacle"),
                 "partial_allowed": option.get("partial_allowed"),
                 "crosses_obstacle": option.get("crosses_obstacle"),
             }
     return out
+
+def _target_model_aliases(model: str) -> set[str]:
+    m = _norm_text(model)
+    aliases = {m} if m else set()
+    if m in {"fallback", "synthetic"} or "synthetic_rr_fallback" in m:
+        aliases.update({"synthetic_rr_fallback", "ai_selected_synthetic_rr_fallback"})
+    if "synthetic_rr_capped" in m:
+        aliases.update({"synthetic_rr_capped_to_max_distance", "ai_selected_synthetic_rr_capped_to_max_distance"})
+    if "partial_before_obstacle" in m or "partial_then_liquidity" in m:
+        aliases.update({"partial_before_obstacle_then_liquidity", "partial_then_liquidity"})
+    if "capped_before" in m or "cap_before" in m:
+        aliases.update({"capped_before_obstacle", "ai_selected_capped_before_obstacle"})
+    if "liquidity" in m:
+        aliases.update({"liquidity_target", "real_liquidity_target", "ai_selected_liquidity_target"})
+    return aliases
+
+def _target_option_feasible(option: Dict[str, Any]) -> bool:
+    if not isinstance(option, dict) or not option:
+        return False
+    available = _boolish(option.get("available"), True)
+    feasible = _boolish(option.get("feasible_for_tp2"), available)
+    reason = str(option.get("infeasible_reason") or "").strip()
+    direction_valid = _boolish(option.get("target_direction_valid"), True)
+    already_reached = _boolish(option.get("target_already_reached"), False)
+    exceeds_max = _boolish(option.get("exceeds_max_target_distance"), False)
+    max_distance_pass = _boolish(option.get("max_distance_pass"), not exceeds_max)
+    return bool(available and feasible and not reason and direction_valid and not already_reached and not exceeds_max and max_distance_pass)
+
+def _target_option_price_rr(option: Dict[str, Any]) -> tuple[float, float]:
+    return (
+        _floatish(_get_any(option, ["tp2", "tp", "target", "price"], 0.0), 0.0),
+        _floatish(_get_any(option, ["rr2", "rr", "effective_rr2"], 0.0), 0.0),
+    )
+
+def _target_blocker_is_killer(target_candidates: Dict[str, Any]) -> bool:
+    blocker = _as_dict(target_candidates.get("blocker_features"))
+    cls = _norm_text(
+        _get_any(
+            blocker,
+            ["blocker_class", "obstacle_class", "class"],
+            _get_any(target_candidates, ["blocker_class", "obstacle_class"], ""),
+        )
+    )
+    severity = _floatish(
+        _get_any(
+            blocker,
+            ["blocker_severity", "obstacle_severity", "severity"],
+            _get_any(target_candidates, ["blocker_severity"], 0.0),
+        ),
+        0.0,
+    )
+    return cls in {"killer", "kill"} or _boolish(_get_any(blocker, ["blocker_is_trade_killer", "is_trade_killer"], False), False) or severity >= 8.0
+
+def _apply_target_choice_to_decision(decision: Decision, model: str, option: Dict[str, Any], reason: str) -> Decision:
+    tp, rr = _target_option_price_rr(option)
+    tp1 = _floatish(_get_any(option, ["tp1", "partial_tp"], decision.chosen_tp1), 0.0)
+    rr1 = _floatish(_get_any(option, ["rr1", "partial_rr"], decision.chosen_rr1), 0.0)
+    decision.chosen_target_model = model
+    decision.chosen_tp1 = tp1
+    decision.chosen_tp2 = tp
+    decision.chosen_rr1 = rr1
+    decision.chosen_rr2 = rr
+    decision.target_decision_reason = (decision.target_decision_reason + " | " if decision.target_decision_reason else "") + reason
+    if isinstance(decision.target_arbitration, dict):
+        decision.target_arbitration["chosen_target_model"] = model
+        decision.target_arbitration["chosen_tp1"] = tp1
+        decision.target_arbitration["chosen_tp2"] = tp
+        decision.target_arbitration["chosen_rr1"] = rr1
+        decision.target_arbitration["chosen_rr2"] = rr
+        decision.target_arbitration["target_decision_reason"] = decision.target_decision_reason
+    return decision
+
+def _reject_no_feasible_target(decision: Decision) -> Decision:
+    decision.allow = False
+    if decision.rejection_codes is None:
+        decision.rejection_codes = []
+    if "no_feasible_target" not in decision.rejection_codes:
+        decision.rejection_codes.append("no_feasible_target")
+    decision.llm_quality_reject_reason = "no_feasible_target"
+    if isinstance(decision.reasons, dict):
+        decision.reasons["target_choice_reject"] = "no_feasible_target"
+    else:
+        decision.reasons = {"ai_reasons": decision.reasons, "target_choice_reject": "no_feasible_target"}
+    return decision
+
+def _validate_ai_target_choice_against_feasibility(payload: Dict[str, Any], decision: Decision, chosen_index: int) -> Decision:
+    candidates_list = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    item = candidates_list[chosen_index] if 0 <= chosen_index < len(candidates_list) and isinstance(candidates_list[chosen_index], dict) else _as_dict(payload.get("plan"))
+    tc = _target_candidates(payload, item)
+    if not tc:
+        return decision
+    chosen = _norm_text(decision.chosen_target_model)
+    if not chosen or chosen in {"current", "current_plan", "keep_current"}:
+        return decision
+    feasible_by_key: Dict[str, Dict[str, Any]] = {}
+    for key, option in tc.items():
+        if isinstance(option, dict) and _target_option_feasible(option):
+            feasible_by_key[_norm_text(key)] = option
+            model = _norm_text(str(option.get("model") or ""))
+            if model:
+                feasible_by_key[model] = option
+    chosen_aliases = _target_model_aliases(chosen)
+    feasible = any(alias in feasible_by_key for alias in chosen_aliases)
+    log(f"[ai_target_choice_validation] chosen={chosen} feasible={str(feasible).lower()}")
+    if feasible:
+        return decision
+    priority = [
+        ("partial_before_obstacle_then_liquidity", "partial-before-obstacle TP1 with valid liquidity TP2"),
+        ("liquidity_target", "liquidity target feasible and blocker is not killer"),
+        ("capped_before_obstacle", "capped-before-obstacle target feasible"),
+        ("synthetic_rr_capped_to_max_distance", "raw configured target infeasible; capped target is feasible"),
+        ("synthetic_rr_fallback", "synthetic fallback feasible"),
+    ]
+    blocker_killer = _target_blocker_is_killer(tc)
+    for model, reason in priority:
+        if model == "liquidity_target" and blocker_killer:
+            continue
+        option = _target_candidate_option(tc, model)
+        if _target_option_feasible(option):
+            log(f"[ai_target_choice_validation] chosen={chosen} feasible=false action=rewrite to={model}")
+            return _apply_target_choice_to_decision(decision, model, option, reason)
+    log(f"[ai_target_choice_validation] chosen={chosen} feasible=false reject_reason=no_feasible_target")
+    return _reject_no_feasible_target(decision)
+
+
+def _synchronize_selected_assessment_contract(payload: Dict[str, Any], decision: Decision) -> Decision:
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    candidate = next(
+        (
+            item
+            for item in candidates
+            if isinstance(item, dict)
+            and str(item.get("candidate_hash") or "") == decision.selected_candidate_hash
+            and str(item.get("candidate_id") or "") == decision.selected_candidate_id
+        ),
+        None,
+    )
+    if candidate is None:
+        decision.allow = False
+        decision.mandatory_fields_complete = False
+        decision.llm_quality_reject_reason = "candidate_hash_mismatch"
+        return decision
+    assessments = list(decision.candidate_assessments or [])
+    selected = next(
+        (
+            item
+            for item in assessments
+            if isinstance(item, dict)
+            and str(item.get("candidate_hash") or "") == decision.selected_candidate_hash
+        ),
+        None,
+    )
+    if selected is None:
+        decision.allow = False
+        decision.mandatory_fields_complete = False
+        decision.llm_quality_reject_reason = "ai_quality_schema_incomplete"
+        return decision
+
+    entry = float(candidate.get("entry_est") or 0.0)
+    sl = float(candidate.get("sl") or 0.0)
+    tp1 = float(decision.chosen_tp1 if decision.chosen_tp1 > 0.0 else candidate.get("tp1") or 0.0)
+    tp2 = float(decision.chosen_tp2 if decision.chosen_tp2 > 0.0 else candidate.get("tp2") or 0.0)
+    target_identity = str(decision.chosen_target_model or selected.get("selected_target_identity") or "")
+    request_fingerprint = str(candidate.get("request_execution_fingerprint") or "")
+    selected.update(
+        {
+            "candidate_index": int(decision.chosen_index),
+            "candidate_id": decision.selected_candidate_id,
+            "candidate_hash": decision.selected_candidate_hash,
+            "request_execution_fingerprint": request_fingerprint,
+            "selected_target_identity": target_identity,
+            "selected_target_price": tp2,
+            "entry": entry,
+            "sl": sl,
+            "tp1": tp1,
+            "tp2": tp2,
+        }
+    )
+    if isinstance(selected.get("target_arbitration"), dict):
+        selected["target_arbitration"].update(
+            {
+                "chosen_target_model": target_identity,
+                "chosen_tp1": tp1,
+                "chosen_tp2": tp2,
+                "chosen_rr1": float(decision.chosen_rr1),
+                "chosen_rr2": float(decision.chosen_rr2),
+                "target_decision_reason": str(decision.target_decision_reason or ""),
+            }
+        )
+    selected["assessed_execution_fingerprint"] = deterministic_assessed_execution_fingerprint(candidate, selected)
+    decision.request_execution_fingerprint = request_fingerprint
+    decision.assessed_execution_fingerprint = str(selected["assessed_execution_fingerprint"])
+    decision.selected_target_identity = target_identity
+    decision.selected_target_price = tp2
+    decision.assessed_entry = entry
+    decision.assessed_sl = sl
+    decision.assessed_tp1 = tp1
+    decision.assessed_tp2 = tp2
+    decision.candidate_assessments = assessments
+    return decision
+
+
+def _synchronize_candidate_authority_fields(decision: Decision) -> Decision:
+    decision = _synchronize_decision_authority_fields(decision)
+    assessments = list(decision.candidate_assessments or [])
+    for assessment in assessments:
+        if not isinstance(assessment, dict):
+            continue
+        model_allow = bool(assessment.get("raw_allow", False))
+        assessment["model_raw_allow"] = model_allow
+        if str(assessment.get("candidate_hash") or "") == decision.selected_candidate_hash:
+            assessment["python_final_allow"] = bool(decision.python_final_allow)
+        else:
+            # Non-selected candidates have an independent model assessment but
+            # were not chosen by Python, so they carry no final authority.
+            assessment["python_final_allow"] = False
+        assessment["mql_final_allow"] = None
+        assessment["authority_sources"] = {
+            "entry_sl_tp": "deterministic",
+            "broker_feasibility": "deterministic",
+            "llm_quality_score": "llm_diagnostic",
+            "veto": "llm",
+            "calibrated_probability": "statistical_unavailable",
+            "expected_net_r": "statistical_unavailable",
+            "risk_size": "deterministic_portfolio",
+        }
+    decision.candidate_assessments = assessments
+    return decision
+
+def _runtime_threshold_float(payload: Dict[str, Any], key: str, default: float) -> float:
+    runtime_inputs = _runtime_inputs(payload)
+    return _floatish(runtime_inputs.get(key), default)
+
+def _apply_ai_veto_gate(payload: Dict[str, Any], decision: Decision) -> Decision:
+    runtime_inputs = _runtime_inputs(payload)
+    if not _boolish(runtime_inputs.get("ai_veto_enable"), True):
+        return decision
+    reason = ""
+    if decision.veto_enabled:
+        reason = f"model_veto:{decision.veto_reason or 'veto_enabled'}"
+    elif decision.follow_through_probability < _runtime_threshold_float(payload, "ai_min_follow_through_prob", 0.58):
+        reason = "follow_through_probability"
+    elif decision.invalidation_risk > _runtime_threshold_float(payload, "ai_max_invalidation_risk", 0.62):
+        reason = "invalidation_risk"
+    elif decision.chop_risk > _runtime_threshold_float(payload, "ai_max_chop_risk", 0.65):
+        reason = "chop_risk"
+    elif decision.post_entry_failure_risk > _runtime_threshold_float(payload, "ai_max_post_entry_failure_risk", 0.62):
+        reason = "post_entry_failure_risk"
+    elif decision.final_trade_expectancy_score < _runtime_threshold_float(payload, "ai_min_final_expectancy_score", 6.80):
+        reason = "final_trade_expectancy_score"
+    if not reason:
+        return decision
+    decision.allow = False
+    decision.llm_quality_reject_reason = "ai_veto"
+    if decision.rejection_codes is None:
+        decision.rejection_codes = []
+    if "ai_veto" not in decision.rejection_codes:
+        decision.rejection_codes.append("ai_veto")
+    if isinstance(decision.reasons, dict):
+        decision.reasons["ai_veto"] = reason
+        decision.reasons["follow_through_probability"] = round(decision.follow_through_probability, 4)
+        decision.reasons["invalidation_risk"] = round(decision.invalidation_risk, 4)
+        decision.reasons["chop_risk"] = round(decision.chop_risk, 4)
+        decision.reasons["post_entry_failure_risk"] = round(decision.post_entry_failure_risk, 4)
+    else:
+        decision.reasons = {"ai_reasons": decision.reasons, "ai_veto": reason}
+    log(
+        "[ai_veto]"
+        f" req_id={payload.get('id') or ''}"
+        f" reason={reason}"
+        f" follow_through={decision.follow_through_probability:.4f}"
+        f" invalidation_risk={decision.invalidation_risk:.4f}"
+        f" chop_risk={decision.chop_risk:.4f}"
+        f" post_entry_failure_risk={decision.post_entry_failure_risk:.4f}"
+    )
+    return decision
 
 def _floatish(value: Any, default: float = 0.0) -> float:
     try:
@@ -1537,6 +2820,33 @@ def _target_kwargs_from_model(model_obj: Any) -> Dict[str, Any]:
         return _target_kwargs_from_dict(model_obj)
     return _target_kwargs_from_dict({})
 
+def _ai_quality_kwargs_from_model(model_obj: Any) -> Dict[str, Any]:
+    data: Dict[str, Any] = {}
+    if hasattr(model_obj, "model_dump"):
+        try:
+            data = model_obj.model_dump()
+        except Exception:
+            data = {}
+    elif isinstance(model_obj, dict):
+        data = model_obj
+    veto = data.get("veto") if isinstance(data.get("veto"), dict) else {}
+    return {
+        "raw_allow": _boolish(data.get("raw_allow"), _boolish(data.get("allow"), True)),
+        "structure_quality_score": _floatish(data.get("structure_quality_score"), 6.5),
+        "entry_timing_score": _floatish(data.get("entry_timing_score"), 6.5),
+        "follow_through_probability": _floatish(data.get("follow_through_probability"), 0.65),
+        "invalidation_risk": _floatish(data.get("invalidation_risk"), 0.50),
+        "chop_risk": _floatish(data.get("chop_risk"), 0.50),
+        "cost_risk": _floatish(data.get("cost_risk"), 0.50),
+        "symbol_bucket_risk": _floatish(data.get("symbol_bucket_risk"), 0.50),
+        "session_bucket_risk": _floatish(data.get("session_bucket_risk"), 0.50),
+        "post_entry_failure_risk": _floatish(data.get("post_entry_failure_risk"), 0.50),
+        "final_trade_expectancy_score": _floatish(data.get("final_trade_expectancy_score"), 7.0),
+        "veto_enabled": _boolish(data.get("veto_enabled"), _boolish(veto.get("enabled"), False)),
+        "veto_reason": str(data.get("veto_reason") or veto.get("reason") or ""),
+        "bucket_prior_override_justification": str(data.get("bucket_prior_override_justification") or ""),
+    }
+
 
 def _json_object_from_text(text: Any) -> Dict[str, Any]:
     if isinstance(text, dict):
@@ -1574,10 +2884,7 @@ def _response_usage_tokens(response: Any) -> tuple[Any, Any]:
 
 
 def _cost_report_path() -> Path:
-    path = AI_CONFIG.cost_report_file
-    if path.is_absolute():
-        return path
-    return Path.cwd() / path
+    return resolve_project_path(AI_CONFIG.cost_report_file)
 
 
 def _write_ai_cost_report(
@@ -1597,9 +2904,9 @@ def _write_ai_cost_report(
     skip_reason: str = "",
     input_tokens: Any = None,
     output_tokens: Any = None,
-    ai_score_threshold: Any = None,
-    ai_threshold_source: str = "",
-    ai_threshold_passed: Any = None,
+    llm_quality_score_threshold: Any = None,
+    llm_quality_threshold_source: str = "",
+    llm_quality_threshold_passed: Any = None,
 ) -> None:
     if not AI_CONFIG.cost_report_enable:
         return
@@ -1631,9 +2938,9 @@ def _write_ai_cost_report(
             "estimated_cost": None,
             "openai_called": bool(openai_called),
             "skip_reason": str(skip_reason or ""),
-            "ai_score_threshold": ai_score_threshold,
-            "ai_threshold_source": str(ai_threshold_source or ""),
-            "ai_threshold_passed": ai_threshold_passed,
+            "llm_quality_score_threshold": llm_quality_score_threshold,
+            "llm_quality_threshold_source": str(llm_quality_threshold_source or ""),
+            "llm_quality_threshold_passed": llm_quality_threshold_passed,
             "target_arbitration_required": _target_arbitration_required(payload, first_cand or plan),
             "target_candidates": _compact_target_candidates(_target_candidates(payload, first_cand or plan)),
         }
@@ -1645,8 +2952,33 @@ def _write_ai_cost_report(
         log(f"[ai_gate] cost_report_write_failed error={exc}")
 
 
+RUNTIME_INPUT_MIGRATION_ALIASES = {
+    "min_llm_quality_score_trend": "min_ai_score_trend",
+    "llm_quality_score_full_po3": "ai_score_full_po3",
+    "llm_quality_score_micro_po3": "ai_score_micro_po3",
+    "llm_quality_score_continuation": "ai_score_continuation",
+    "llm_quality_score_range": "ai_score_range",
+    "llm_quality_score_failed_breakout": "ai_score_failed_breakout",
+    "global_llm_quality_as_hard_floor": "global_ai_score_as_hard_floor",
+    "legacy_min_ai_confidence_diagnostic": "min_ai_confidence",
+}
+_RUNTIME_INPUT_MIGRATION_LOGGED: set[str] = set()
+
+
 def _runtime_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return _as_dict(payload.get("runtime_inputs"))
+    runtime_inputs = dict(_as_dict(payload.get("runtime_inputs")))
+    for canonical, legacy in RUNTIME_INPUT_MIGRATION_ALIASES.items():
+        if canonical in runtime_inputs or legacy not in runtime_inputs:
+            continue
+        runtime_inputs[canonical] = runtime_inputs[legacy]
+        if legacy not in _RUNTIME_INPUT_MIGRATION_LOGGED:
+            _RUNTIME_INPUT_MIGRATION_LOGGED.add(legacy)
+            authority = "diagnostic_only" if canonical == "legacy_min_ai_confidence_diagnostic" else "llm_quality_threshold_alias"
+            log(
+                "[runtime_input_migration]"
+                f" legacy_field={legacy} canonical_field={canonical} authority={authority}"
+            )
+    return runtime_inputs
 
 
 AI_GATE_COUNTERS: Dict[str, int] = {
@@ -1678,6 +3010,9 @@ CRITICAL_RUNTIME_INPUT_KEYS = [
     "newyork_killzone_start_minute",
     "newyork_killzone_end_hour",
     "newyork_killzone_end_minute",
+    "enable_mpc_trading",
+    "enable_bucket_risk_policy",
+    "bucket_risk_policy_file",
     "suppress_micro_bisi_sibi_edge",
     "suppress_stale_fvg_branches",
     "suppress_touched_continuation_unless_retested",
@@ -1699,26 +3034,46 @@ CRITICAL_RUNTIME_INPUT_KEYS = [
     "min_live_rr2",
     "fallback_rr2",
     "fallback_rr_buffer_r",
+    "tester_ai_cache",
+    "tester_ai_mode",
+    "tester_allow_live_wait_debug_trading",
     "standard_trade_liquidity_rr_floor",
     "max_target_atr_mult",
     "max_target_adr_frac",
     "obstacle_reject_r",
     "use_ai",
     "ai_strict",
-    "min_ai_score_trend",
-    "ai_score_full_po3",
-    "ai_score_micro_po3",
-    "ai_score_continuation",
-    "ai_score_range",
-    "ai_score_failed_breakout",
-    "global_ai_score_as_hard_floor",
-    "min_ai_confidence",
+    "min_llm_quality_score_trend",
+    "ai_veto_enable",
+    "ai_min_follow_through_prob",
+    "ai_max_invalidation_risk",
+    "ai_max_chop_risk",
+    "ai_max_post_entry_failure_risk",
+    "ai_min_final_expectancy_score",
+    "llm_quality_score_full_po3",
+    "llm_quality_score_micro_po3",
+    "llm_quality_score_continuation",
+    "llm_quality_score_range",
+    "llm_quality_score_failed_breakout",
+    "global_llm_quality_as_hard_floor",
+    "legacy_min_ai_confidence_diagnostic",
     "use_snapshot_ai",
     "require_snapshots",
     "exclusive_trading_enabled",
     "virtual_ledger_mode",
     "backend_pnl_mode",
 ]
+
+# Workflow/debug-only tester controls must not enter the AI decision cache key.
+# RECORD_ONLY or LIVE_WAIT_DEBUG responses must replay in CACHE_ONLY for the
+# same market setup; MQL may still include these values in runtime_input_hash
+# and logs for diagnostics.
+AI_DECISION_CACHE_SIGNATURE_IGNORED_FIELDS = {
+    "runtime_input_hash",
+    "inp_tester_ai_cache",
+    "inp_tester_ai_mode",
+    "inp_tester_allow_live_wait_debug_trading",
+}
 
 
 def _bucket_float(value: Any, step: float = 0.0001) -> Any:
@@ -1758,10 +3113,43 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         + _floatish(_get_any(merged, ["commission_r"], 0.0), 0.0)
     )
     spread_r = _get_any(merged, ["spread_r"], _get_any(payload, ["spread_r"], None))
+    snapshot_metadata = _as_dict(payload.get("snapshot_metadata"))
+    candidate_contracts = []
+    for candidate in payload.get("candidates") if isinstance(payload.get("candidates"), list) else []:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_contracts.append(
+            {
+                "candidate_index": int(candidate.get("candidate_index") or 0),
+                "candidate_id": str(candidate.get("candidate_id") or ""),
+                "candidate_hash": str(candidate.get("candidate_hash") or ""),
+                "request_execution_fingerprint": str(candidate.get("request_execution_fingerprint") or ""),
+                "target_candidates": _compact_target_candidates(_target_candidates(payload, candidate)),
+            }
+        )
+    candidate_contract_blob = json.dumps(candidate_contracts, sort_keys=True, separators=(",", ":"))
+    prior_artifact = _load_live_bucket_priors()
+    repeatability_artifact = _load_repeatability_artifact()
+    repeatability_groups = repeatability_artifact.get("groups") if isinstance(repeatability_artifact.get("groups"), dict) else {}
+    repeatability_group = repeatability_groups.get(
+        _repeatability_group_key(AI_CONFIG.model, DECISION_QUALITY_FULL_STRUCTURED), {}
+    )
     fields = {
+        "semantic_cache_schema_version": SEMANTIC_CACHE_SCHEMA_VERSION,
+        "architecture_contract_version": ARCHITECTURE_CONTRACT_VERSION,
+        "ai_decision_schema_version": AI_DECISION_SCHEMA_VERSION,
         "ai_target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
         "ai_prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+        "candidate_contract_hash": sha256(candidate_contract_blob.encode("utf-8")).hexdigest(),
         "symbol": str(payload.get("symbol") or ""),
+        "entry_bar_id": str(
+            _get_any(
+                snapshot_metadata,
+                ["candle_time", "entry_candle_time"],
+                _get_any(merged, ["entry_bar_id", "last_confirm_bar_time", "source_t_disp"], ""),
+            )
+            or ""
+        ),
         "direction": str(direction or "").lower(),
         "setup_family": str(_get_any(merged, ["setup_family"], "") or "").lower(),
         "setup_class": str(_get_any(merged, ["setup_class"], "") or "").lower(),
@@ -1774,6 +3162,17 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         "entry_est": _bucket_float(_get_any(merged, ["entry_est", "entry"], None)),
         "sl": _bucket_float(_get_any(merged, ["sl", "stop_loss", "stop"], None)),
         "tp2": _bucket_float(_get_any(merged, ["tp2", "tp", "final_tp"], None)),
+        "structure_state": str(
+            _get_any(merged, ["structure_state", "structure_type"], _get_any(po3, ["po3_state", "structure_type"], ""))
+            or ""
+        ).lower(),
+        "fvg_mitigation_state": str(
+            _get_any(merged, ["fvg_mitigation_state", "mitigation_state", "fvg_execution_class"], "") or ""
+        ).lower(),
+        "candidate_hash": str(merged.get("candidate_hash") or ""),
+        "execution_fingerprint": str(
+            merged.get("request_execution_fingerprint") or merged.get("assessed_execution_fingerprint") or ""
+        ),
         "target_source": str(_get_any(merged, ["target_source"], payload.get("target_source")) or "").lower(),
         "target_model": str(_get_any(merged, ["target_model", "tp_model"], payload.get("target_model")) or "").lower(),
         "chosen_target_model": str(_get_any(merged, ["chosen_target_model", "ai_chosen_target_model"], payload.get("chosen_target_model")) or "").lower(),
@@ -1804,22 +3203,40 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         "inp_min_live_rr2": _bucket_float(runtime_inputs.get("min_live_rr2"), 0.01),
         "inp_fallback_rr2": _bucket_float(runtime_inputs.get("fallback_rr2"), 0.01),
         "inp_fallback_rr_buffer_r": _bucket_float(runtime_inputs.get("fallback_rr_buffer_r"), 0.01),
+        "inp_tester_ai_cache": _boolish(runtime_inputs.get("tester_ai_cache"), False),
+        "inp_tester_ai_mode": str(runtime_inputs.get("tester_ai_mode") or ""),
+        "inp_tester_allow_live_wait_debug_trading": _boolish(runtime_inputs.get("tester_allow_live_wait_debug_trading"), False),
         "inp_max_target_atr_mult": _bucket_float(runtime_inputs.get("max_target_atr_mult"), 0.01),
         "inp_max_target_adr_frac": _bucket_float(runtime_inputs.get("max_target_adr_frac"), 0.01),
         "inp_standard_trade_liquidity_rr_floor": _bucket_float(runtime_inputs.get("standard_trade_liquidity_rr_floor"), 0.01),
-        "ai_score_full_po3": _bucket_float(runtime_inputs.get("ai_score_full_po3"), 0.01),
-        "ai_score_micro_po3": _bucket_float(runtime_inputs.get("ai_score_micro_po3"), 0.01),
-        "ai_score_continuation": _bucket_float(runtime_inputs.get("ai_score_continuation"), 0.01),
-        "ai_score_range": _bucket_float(runtime_inputs.get("ai_score_range"), 0.01),
-        "ai_score_failed_breakout": _bucket_float(runtime_inputs.get("ai_score_failed_breakout"), 0.01),
+        "llm_quality_score_full_po3": _bucket_float(runtime_inputs.get("llm_quality_score_full_po3"), 0.01),
+        "llm_quality_score_micro_po3": _bucket_float(runtime_inputs.get("llm_quality_score_micro_po3"), 0.01),
+        "llm_quality_score_continuation": _bucket_float(runtime_inputs.get("llm_quality_score_continuation"), 0.01),
+        "llm_quality_score_range": _bucket_float(runtime_inputs.get("llm_quality_score_range"), 0.01),
+        "llm_quality_score_failed_breakout": _bucket_float(runtime_inputs.get("llm_quality_score_failed_breakout"), 0.01),
         "session_name": str(session_name or "").lower(),
         "killzone_code": str(_get_any(merged, ["killzone_code"], "K" if _boolish(in_killzone, False) else "NK") or "").upper(),
         "runtime_input_hash": str(payload.get("runtime_input_hash") or _runtime_inputs(payload).get("runtime_input_hash") or ""),
         "execution_cost_r_bucket": _bucket_float(execution_cost_r, 0.01),
         "spread_r_bucket": _bucket_float(spread_r, 0.01),
+        "bucket_prior_hash": _bucket_prior_hash_for_item(merged, payload),
+        "policy_version": str(
+            payload.get("policy_hash")
+            or payload.get("policy_version")
+            or runtime_inputs.get("active_policy_hash")
+            or runtime_inputs.get("active_policy_id")
+            or ""
+        ),
+        "model_version": AI_CONFIG.model,
+        "hierarchical_prior_schema_version": HIERARCHICAL_PRIOR_SCHEMA_VERSION,
+        "hierarchical_prior_artifact_hash": str(prior_artifact.get("artifact_hash") or ""),
+        "repeatability_schema_version": REPEATABILITY_SCHEMA_VERSION,
+        "repeatability_authority_hash": str(repeatability_group.get("artifact_hash") or ""),
+        "runtime_governance_versions": runtime_governance_versions(),
     }
-    full_blob = json.dumps(fields, sort_keys=True, separators=(",", ":"))
-    base_fields = dict(fields)
+    signature_fields = {k: v for k, v in fields.items() if k not in AI_DECISION_CACHE_SIGNATURE_IGNORED_FIELDS}
+    full_blob = json.dumps(signature_fields, sort_keys=True, separators=(",", ":"))
+    base_fields = dict(signature_fields)
     for key in (
         "tp2",
         "target_source",
@@ -1852,6 +3269,9 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         "inp_min_live_rr2",
         "inp_fallback_rr2",
         "inp_fallback_rr_buffer_r",
+        "inp_tester_ai_cache",
+        "inp_tester_ai_mode",
+        "inp_tester_allow_live_wait_debug_trading",
         "inp_max_target_atr_mult",
         "inp_max_target_adr_frac",
         "inp_standard_trade_liquidity_rr_floor",
@@ -1864,6 +3284,111 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
 
 
 def _cached_decision_schema_miss_reason(dec_raw: Dict[str, Any]) -> str:
+    if str(dec_raw.get("decision_schema_version") or "") != AI_DECISION_SCHEMA_VERSION:
+        return "cache_miss_due_to_schema_version"
+    tier = str(dec_raw.get("decision_quality_tier") or "")
+    if tier not in {
+        DECISION_QUALITY_FULL_STRUCTURED,
+        DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+    }:
+        return "cache_miss_due_to_schema_version"
+    alias = dec_raw.get("response_quality")
+    if alias is not None and str(alias) != tier:
+        return "cache_miss_due_to_schema_version"
+    if dec_raw.get("mandatory_fields_complete") is not True:
+        return "cache_miss_due_to_schema_version"
+    assessments = dec_raw.get("candidate_assessments")
+    if not isinstance(assessments, list) or not assessments:
+        return "cache_miss_due_to_schema_version"
+    if not str(dec_raw.get("selected_candidate_hash") or ""):
+        return "cache_miss_due_to_schema_version"
+    if not str(dec_raw.get("assessed_execution_fingerprint") or ""):
+        return "cache_miss_due_to_schema_version"
+    if not str(dec_raw.get("request_execution_fingerprint") or ""):
+        return "cache_miss_due_to_schema_version"
+    for required in (
+        "decision_state",
+        "raw_allow",
+        "model_raw_allow",
+        "python_final_allow",
+        "mql_final_allow",
+        "rule_score",
+        "llm_quality_score",
+        "blended_legacy_score",
+        "legacy_agreement_confidence",
+        "llm_self_reported_confidence",
+        "suggested_risk_multiplier",
+        "selected_candidate_id",
+    ):
+        if required not in dec_raw or dec_raw.get(required) is None:
+            if required != "mql_final_allow":
+                return "cache_miss_due_to_schema_version"
+    if "mql_final_allow" not in dec_raw or dec_raw.get("mql_final_allow") is not None:
+        return "cache_miss_due_to_schema_version"
+    if dec_raw.get("missing_mandatory_fields") or dec_raw.get("invalid_mandatory_fields"):
+        return "cache_miss_due_to_schema_version"
+
+    # A cache row has exactly the same authority as a fresh response, so its
+    # per-candidate contract must still be complete.  Reconstruct only the
+    # immutable request identities needed by the shared validator; no legacy
+    # top-level defaults are allowed to repair an incomplete assessment.
+    cache_candidates: list[Dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    selected_assessment: Dict[str, Any] | None = None
+    selected_hash = str(dec_raw.get("selected_candidate_hash") or "")
+    for assessment in assessments:
+        if not isinstance(assessment, dict):
+            return "cache_miss_due_to_schema_version"
+        candidate_hash = str(assessment.get("candidate_hash") or "")
+        if not candidate_hash or candidate_hash in seen_hashes:
+            return "cache_miss_due_to_schema_version"
+        seen_hashes.add(candidate_hash)
+        candidate_validation = validate_candidate_assessment(assessment)
+        if not candidate_validation.valid:
+            return "cache_miss_due_to_schema_version"
+        cache_candidates.append(
+            {
+                "candidate_index": assessment.get("candidate_index"),
+                "candidate_id": assessment.get("candidate_id"),
+                "candidate_hash": candidate_hash,
+                "request_execution_fingerprint": assessment.get("request_execution_fingerprint"),
+                "setup_taxonomy_version": assessment.get("setup_taxonomy_version"),
+                "setup_taxonomy_enum": assessment.get("setup_taxonomy_enum"),
+                "taxonomy_mapping_source": assessment.get("taxonomy_mapping_source"),
+            }
+        )
+        if candidate_hash == selected_hash:
+            selected_assessment = assessment
+
+    validation_envelope = dict(dec_raw)
+    validation_envelope["decision_quality_tier"] = DECISION_QUALITY_FULL_STRUCTURED
+    validation_envelope["response_quality"] = DECISION_QUALITY_FULL_STRUCTURED
+    envelope_validation = validate_decision_envelope(validation_envelope, cache_candidates)
+    if not envelope_validation.valid or selected_assessment is None:
+        return "cache_miss_due_to_schema_version"
+    if str(selected_assessment.get("candidate_id") or "") != str(dec_raw.get("selected_candidate_id") or ""):
+        return "cache_miss_due_to_schema_version"
+    if str(selected_assessment.get("decision_state") or "").upper() != str(dec_raw.get("decision_state") or "").upper():
+        return "cache_miss_due_to_schema_version"
+    if str(selected_assessment.get("assessed_execution_fingerprint") or "") != str(
+        dec_raw.get("assessed_execution_fingerprint") or ""
+    ):
+        return "cache_miss_due_to_schema_version"
+    if str(selected_assessment.get("request_execution_fingerprint") or "") != str(
+        dec_raw.get("request_execution_fingerprint") or ""
+    ):
+        return "cache_miss_due_to_schema_version"
+    if str(selected_assessment.get("selected_target_identity") or "") != str(
+        dec_raw.get("selected_target_identity") or ""
+    ):
+        return "cache_miss_due_to_schema_version"
+    try:
+        selected_risk = float(selected_assessment["suggested_risk_multiplier"])
+        cached_risk = float(dec_raw["suggested_risk_multiplier"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return "cache_miss_due_to_schema_version"
+    if not math.isfinite(selected_risk) or not math.isfinite(cached_risk) or abs(selected_risk - cached_risk) > 1.0e-12:
+        return "cache_miss_due_to_schema_version"
     schema = str(dec_raw.get("target_arbitration_schema_version") or "")
     prompt_contract = str(dec_raw.get("prompt_contract_version") or "")
     if schema != AI_TARGET_ARBITRATION_SCHEMA_VERSION or prompt_contract != AI_PROMPT_CONTRACT_VERSION:
@@ -1899,7 +3424,12 @@ class AIDecisionCache:
         self.ttl_sec = ttl_sec
         self._lock = Lock()
 
-    def lookup(self, signature: str, base_signature: str) -> tuple[Decision | None, str]:
+    def lookup(
+        self,
+        signature: str,
+        base_signature: str,
+        current_fields: Mapping[str, Any] | None = None,
+    ) -> tuple[Decision | None, str]:
         now = int(time.time())
         with self._lock:
             if not self.path.exists():
@@ -1909,17 +3439,28 @@ class AIDecisionCache:
             except Exception:
                 return None, "miss_read_error"
             base_seen = False
+            base_semantic_reason = ""
             for line in reversed(lines):
                 if not line.strip():
                     continue
                 try:
-                    item = json.loads(line)
+                    item = strict_json_loads(line)
                 except Exception:
                     continue
                 ts = int(item.get("timestamp") or 0)
-                if ts and now - ts > self.ttl_sec:
-                    continue
                 if item.get("signature") == signature:
+                    cached_semantic = item.get("semantic_state")
+                    if not isinstance(cached_semantic, Mapping):
+                        cached_semantic = item.get("fields") if isinstance(item.get("fields"), Mapping) else {}
+                    if current_fields is not None:
+                        reasons = semantic_cache_invalidation_reasons(
+                            semantic_cache_state(cached_semantic),
+                            semantic_cache_state(current_fields),
+                        )
+                        if reasons:
+                            return None, reasons[0]
+                    if ts and now - ts > self.ttl_sec:
+                        return None, "expired_ttl"
                     dec_raw = item.get("decision") if isinstance(item.get("decision"), dict) else {}
                     schema_miss = _cached_decision_schema_miss_reason(dec_raw)
                     if schema_miss:
@@ -1931,9 +3472,39 @@ class AIDecisionCache:
                         return None, schema_miss
                     dec = Decision(
                         allow=bool(dec_raw.get("allow")),
-                        score=float(dec_raw.get("score") or 0.0),
-                        chosen_index=int(dec_raw.get("chosen_index") or 0),
-                        confidence=float(dec_raw.get("confidence") or 0.0),
+                        score=float(dec_raw.get("llm_quality_score")),
+                        raw_allow=bool(dec_raw.get("raw_allow", dec_raw.get("allow", True))),
+                        model_raw_allow=bool(dec_raw.get("model_raw_allow", dec_raw.get("raw_allow", False))),
+                        python_final_allow=bool(dec_raw.get("python_final_allow", dec_raw.get("allow", False))),
+                        mql_final_allow=None,
+                        chosen_index=int(dec_raw.get("chosen_index", 0)),
+                        confidence=float(dec_raw.get("llm_self_reported_confidence")),
+                        decision_state=str(dec_raw.get("decision_state") or DECISION_REJECT),
+                        decision_quality_tier=DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+                        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+                        mandatory_fields_complete=True,
+                        missing_mandatory_fields=[],
+                        invalid_mandatory_fields=[],
+                        selected_candidate_id=str(dec_raw.get("selected_candidate_id") or ""),
+                        selected_candidate_hash=str(dec_raw.get("selected_candidate_hash") or ""),
+                        request_execution_fingerprint=str(dec_raw.get("request_execution_fingerprint") or ""),
+                        assessed_execution_fingerprint=str(dec_raw.get("assessed_execution_fingerprint") or ""),
+                        selected_target_identity=str(dec_raw.get("selected_target_identity") or ""),
+                        selected_target_price=float(dec_raw.get("selected_target_price") or 0.0),
+                        assessed_entry=float(dec_raw.get("assessed_entry") or 0.0),
+                        assessed_sl=float(dec_raw.get("assessed_sl") or 0.0),
+                        assessed_tp1=float(dec_raw.get("assessed_tp1") or 0.0),
+                        assessed_tp2=float(dec_raw.get("assessed_tp2") or 0.0),
+                        candidate_assessments=list(dec_raw.get("candidate_assessments") or []),
+                        rule_score=float(dec_raw.get("rule_score")),
+                        llm_quality_score=float(dec_raw.get("llm_quality_score")),
+                        blended_legacy_score=float(dec_raw.get("blended_legacy_score")),
+                        legacy_agreement_confidence=float(dec_raw.get("legacy_agreement_confidence")),
+                        llm_self_reported_confidence=float(dec_raw.get("llm_self_reported_confidence")),
+                        calibrated_win_probability=None,
+                        expected_net_r=None,
+                        oos_predicted_probability=None,
+                        calibration_available=False,
                         reasons={
                             "decision_source": "ai_cache_hit",
                             "cached_source": dec_raw.get("decision_source", ""),
@@ -1941,19 +3512,32 @@ class AIDecisionCache:
                             "cached_at": ts,
                             "cached_reasons": dec_raw.get("reasons", ""),
                         },
-                        decision_source="ai_cache_hit",
+                        decision_source="ai_cache_hit_full_structured",
                         rejection_codes=list(dec_raw.get("rejection_codes") or []),
                         narrative_state=str(dec_raw.get("narrative_state") or "cached"),
                         invalidation_risks=list(dec_raw.get("invalidation_risks") or []),
                         missing_confirmations=list(dec_raw.get("missing_confirmations") or []),
-                        suggested_risk_multiplier=float(dec_raw.get("suggested_risk_multiplier") or 1.0),
+                        suggested_risk_multiplier=float(dec_raw["suggested_risk_multiplier"]),
                         model_version=str(dec_raw.get("model_version") or AI_GATE_MODEL_VERSION),
                         decision_id=str(dec_raw.get("decision_id") or ""),
-                        ai_score_threshold=float(dec_raw.get("ai_score_threshold") or 0.0),
-                        ai_threshold_source=str(dec_raw.get("ai_threshold_source") or ""),
-                        global_ai_score_as_hard_floor=bool(dec_raw.get("global_ai_score_as_hard_floor")),
-                        ai_threshold_passed=bool(dec_raw.get("ai_threshold_passed", True)),
-                        ai_reject_reason=str(dec_raw.get("ai_reject_reason") or ""),
+                        llm_quality_score_threshold=float(dec_raw.get("llm_quality_score_threshold") or 0.0),
+                        llm_quality_threshold_source=str(dec_raw.get("llm_quality_threshold_source") or ""),
+                        global_llm_quality_as_hard_floor=bool(dec_raw.get("global_llm_quality_as_hard_floor")),
+                        llm_quality_threshold_passed=bool(dec_raw.get("llm_quality_threshold_passed", True)),
+                        llm_quality_reject_reason=str(dec_raw.get("llm_quality_reject_reason") or ""),
+                        structure_quality_score=float(dec_raw.get("structure_quality_score") or 0.0),
+                        entry_timing_score=float(dec_raw.get("entry_timing_score") or 0.0),
+                        follow_through_probability=float(dec_raw.get("follow_through_probability", 0.0)),
+                        invalidation_risk=float(dec_raw.get("invalidation_risk", 1.0)),
+                        chop_risk=float(dec_raw.get("chop_risk", 1.0)),
+                        cost_risk=float(dec_raw.get("cost_risk", 1.0)),
+                        symbol_bucket_risk=float(dec_raw.get("symbol_bucket_risk", 1.0)),
+                        session_bucket_risk=float(dec_raw.get("session_bucket_risk", 1.0)),
+                        post_entry_failure_risk=float(dec_raw.get("post_entry_failure_risk", 1.0)),
+                        final_trade_expectancy_score=float(dec_raw.get("final_trade_expectancy_score", 0.0)),
+                        veto_enabled=bool(dec_raw.get("veto_enabled", False)),
+                        veto_reason=str(dec_raw.get("veto_reason") or ""),
+                        bucket_prior_override_justification=str(dec_raw.get("bucket_prior_override_justification") or ""),
                         target_arbitration=dec_raw.get("target_arbitration") if isinstance(dec_raw.get("target_arbitration"), dict) else {},
                         chosen_target_model=str(dec_raw.get("chosen_target_model") or ""),
                         chosen_tp1=float(dec_raw.get("chosen_tp1") or 0.0),
@@ -1981,6 +3565,18 @@ class AIDecisionCache:
                     return dec, "hit"
                 if item.get("base_signature") == base_signature:
                     base_seen = True
+                    if current_fields is not None and not base_semantic_reason:
+                        cached_semantic = item.get("semantic_state")
+                        if not isinstance(cached_semantic, Mapping):
+                            cached_semantic = item.get("fields") if isinstance(item.get("fields"), Mapping) else {}
+                        reasons = semantic_cache_invalidation_reasons(
+                            semantic_cache_state(cached_semantic),
+                            semantic_cache_state(current_fields),
+                        )
+                        if reasons:
+                            base_semantic_reason = reasons[0]
+            if base_semantic_reason:
+                return None, base_semantic_reason
             return None, "invalidated_material_field_changed" if base_seen else "miss"
 
     def store(self, signature: str, base_signature: str, fields: Dict[str, Any], decision: Decision) -> None:
@@ -2000,9 +3596,41 @@ class AIDecisionCache:
                     "signature": signature,
                     "base_signature": base_signature,
                     "fields": fields,
+                    "semantic_state": semantic_cache_row(semantic_cache_state(fields)),
                     "decision": {
+                        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+                        "decision_quality_tier": DECISION_QUALITY_FULL_STRUCTURED,
+                        "response_quality": DECISION_QUALITY_FULL_STRUCTURED,
+                        "decision_state": str(decision.decision_state),
+                        "mandatory_fields_complete": bool(decision.mandatory_fields_complete),
+                        "missing_mandatory_fields": list(decision.missing_mandatory_fields or []),
+                        "invalid_mandatory_fields": list(decision.invalid_mandatory_fields or []),
+                        "selected_candidate_id": str(decision.selected_candidate_id),
+                        "selected_candidate_hash": str(decision.selected_candidate_hash),
+                        "request_execution_fingerprint": str(decision.request_execution_fingerprint),
+                        "assessed_execution_fingerprint": str(decision.assessed_execution_fingerprint),
+                        "selected_target_identity": str(decision.selected_target_identity),
+                        "selected_target_price": float(decision.selected_target_price),
+                        "assessed_entry": float(decision.assessed_entry),
+                        "assessed_sl": float(decision.assessed_sl),
+                        "assessed_tp1": float(decision.assessed_tp1),
+                        "assessed_tp2": float(decision.assessed_tp2),
+                        "candidate_assessments": list(decision.candidate_assessments or []),
+                        "rule_score": float(decision.rule_score),
+                        "llm_quality_score": float(decision.llm_quality_score),
+                        "blended_legacy_score": float(decision.blended_legacy_score),
+                        "legacy_agreement_confidence": float(decision.legacy_agreement_confidence),
+                        "llm_self_reported_confidence": float(decision.llm_self_reported_confidence),
+                        "calibrated_win_probability": None,
+                        "expected_net_r": None,
+                        "oos_predicted_probability": None,
+                        "calibration_available": False,
                         "allow": bool(decision.allow),
+                        "model_raw_allow": bool(decision.model_raw_allow),
+                        "python_final_allow": bool(decision.python_final_allow),
+                        "mql_final_allow": None,
                         "score": float(decision.score),
+                        "raw_allow": bool(decision.raw_allow),
                         "chosen_index": int(decision.chosen_index),
                         "confidence": float(decision.confidence),
                         "reasons": _decision_reason_text(decision.reasons),
@@ -2011,14 +3639,27 @@ class AIDecisionCache:
                         "narrative_state": str(decision.narrative_state or ""),
                         "invalidation_risks": list(decision.invalidation_risks or []),
                         "missing_confirmations": list(decision.missing_confirmations or []),
-                        "suggested_risk_multiplier": float(decision.suggested_risk_multiplier),
+                        "suggested_risk_multiplier": float(decision.suggested_risk_multiplier if decision.suggested_risk_multiplier is not None else 0.0),
                         "model_version": str(decision.model_version or AI_GATE_MODEL_VERSION),
                         "decision_id": str(decision.decision_id or ""),
-                        "ai_score_threshold": float(decision.ai_score_threshold),
-                        "ai_threshold_source": str(decision.ai_threshold_source or ""),
-                        "global_ai_score_as_hard_floor": bool(decision.global_ai_score_as_hard_floor),
-                        "ai_threshold_passed": bool(decision.ai_threshold_passed),
-                        "ai_reject_reason": str(decision.ai_reject_reason or ""),
+                        "llm_quality_score_threshold": float(decision.llm_quality_score_threshold),
+                        "llm_quality_threshold_source": str(decision.llm_quality_threshold_source or ""),
+                        "global_llm_quality_as_hard_floor": bool(decision.global_llm_quality_as_hard_floor),
+                        "llm_quality_threshold_passed": bool(decision.llm_quality_threshold_passed),
+                        "llm_quality_reject_reason": str(decision.llm_quality_reject_reason or ""),
+                        "structure_quality_score": float(decision.structure_quality_score),
+                        "entry_timing_score": float(decision.entry_timing_score),
+                        "follow_through_probability": float(decision.follow_through_probability),
+                        "invalidation_risk": float(decision.invalidation_risk),
+                        "chop_risk": float(decision.chop_risk),
+                        "cost_risk": float(decision.cost_risk),
+                        "symbol_bucket_risk": float(decision.symbol_bucket_risk),
+                        "session_bucket_risk": float(decision.session_bucket_risk),
+                        "post_entry_failure_risk": float(decision.post_entry_failure_risk),
+                        "final_trade_expectancy_score": float(decision.final_trade_expectancy_score),
+                        "veto_enabled": bool(decision.veto_enabled),
+                        "veto_reason": str(decision.veto_reason or ""),
+                        "bucket_prior_override_justification": str(decision.bucket_prior_override_justification or ""),
                         "target_arbitration": decision.target_arbitration or {},
                         "chosen_target_model": str(decision.chosen_target_model or ""),
                         "chosen_tp1": float(decision.chosen_tp1 or 0.0),
@@ -2125,19 +3766,24 @@ def _payload_hard_block_reason(payload: Dict[str, Any]) -> str:
     return ""
 
 def _candidate_family_group(item: Dict[str, Any]) -> str:
-    text = " ".join(
-        _norm_text(item.get(key))
-        for key in ("setup_family", "setup_class", "entry_branch", "entry_model")
-    )
-    if "continuation" in text:
+    taxonomy = classify_setup_taxonomy(item).taxonomy
+    if taxonomy in {
+        SetupTaxonomy.MICRO_CONTINUATION_FVG,
+        SetupTaxonomy.MICRO_NESTED_CONTINUATION,
+        SetupTaxonomy.FULL_PO3_CONTINUATION,
+    }:
         return "continuation"
-    if "range" in text:
+    if taxonomy in {SetupTaxonomy.MICRO_RANGE_REENTRY, SetupTaxonomy.MICRO_SESSION_REENTRY}:
         return "range"
-    if "failed_breakout" in text or "failed breakout" in text:
+    if taxonomy == SetupTaxonomy.FAILED_BREAKOUT_RECLAIM:
         return "failed_breakout"
-    if "edge" in text:
+    if taxonomy in {SetupTaxonomy.MICRO_FVG_EDGE_REVERSAL, SetupTaxonomy.MICRO_BREAKER_RETEST}:
         return "edge"
-    if "reversal" in text or "full_po3" in text:
+    if taxonomy in {
+        SetupTaxonomy.MICRO_FVG_MID_REVERSAL,
+        SetupTaxonomy.MICRO_OTE_REVERSAL,
+        SetupTaxonomy.FULL_PO3_REVERSAL,
+    }:
         return "reversal"
     return "unknown"
 
@@ -2174,10 +3820,31 @@ def _candidate_hard_block_reason(item: Dict[str, Any], payload: Dict[str, Any]) 
     family_group = _candidate_family_group(merged)
     branch = _norm_text(merged.get("entry_branch") or merged.get("entry_model"))
     family = _norm_text(merged.get("setup_family"))
+    setup_class = _norm_text(merged.get("setup_class"))
     stale, touched = _candidate_fvg_state(merged)
 
+    if not _boolish(runtime_inputs.get("enable_mpc_trading"), True):
+        setup_code = _setup_code_for_item(merged, payload)
+        comment = str(_get_any(merged, ["broker_comment"], payload.get("broker_comment")) or "").strip().upper()
+        if setup_code == "MPC" or comment.startswith("MPC-") or _boolish(merged.get("is_mpc"), False):
+            log(
+                "[mpc_block]"
+                f" symbol={payload.get('symbol') or merged.get('symbol') or ''}"
+                f" setup_code=MPC setup_class={merged.get('setup_class') or ''}"
+                f" session={_get_any(merged, ['session_code'], '')}"
+                f" killzone={_get_any(merged, ['killzone_code'], '')}"
+                " action=blocked_before_ai"
+            )
+            return "mpc_trading_disabled"
+
     if _boolish(runtime_inputs.get("suppress_micro_bisi_sibi_edge"), False):
-        if "micro_bisi" in family or branch == "fvg_edge":
+        micro_bisi_sibi_family = (
+            family in {"micro_bisi_sibi", "micro_bisi_sibi_edge"}
+            or "micro_bisi_sibi" in family
+            or setup_class in {"micro_bisi_sibi", "micro_bisi_sibi_edge"}
+            or "micro_bisi_sibi" in setup_class
+        )
+        if micro_bisi_sibi_family:
             return "suppressed_micro_bisi_sibi_edge"
     if _boolish(runtime_inputs.get("suppress_stale_fvg_branches"), False) and stale:
         return "suppressed_stale_fvg_branch"
@@ -2262,7 +3929,7 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
                 allow=False,
                 score=0.0,
                 chosen_index=best_index,
-                confidence=1.0,
+                confidence=0.0,
                 reasons={
                     "decision_source": "hard_pre_gate",
                     "rejection_codes": ["runtime_inputs_missing_live_reject"],
@@ -2287,7 +3954,7 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
             allow=False,
             score=0.0,
             chosen_index=best_index,
-            confidence=1.0,
+            confidence=0.0,
             reasons={
                 "decision_source": "hard_pre_gate",
                 "rejection_codes": [payload_reason],
@@ -2317,14 +3984,14 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
                 allow=True,
                 score=0.0,
                 chosen_index=best_index,
-                confidence=1.0,
+                confidence=0.0,
                 reasons={"decision_source": "hard_pre_gate_pass"},
                 decision_source="hard_pre_gate_pass",
                 rejection_codes=[],
                 narrative_state="hard_pre_gate_pass",
                 invalidation_risks=[],
                 missing_confirmations=[],
-                suggested_risk_multiplier=1.0,
+                suggested_risk_multiplier=0.0,
                 model_version=AI_GATE_MODEL_VERSION,
             )
         reasons.append(reason)
@@ -2338,7 +4005,7 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
         allow=False,
         score=0.0,
         chosen_index=best_index,
-        confidence=1.0,
+        confidence=0.0,
         reasons={
             "decision_source": "hard_pre_gate",
             "rejection_codes": [code],
@@ -2382,12 +4049,8 @@ PO3_ACTIONABLE_AUDIT_STATES = {
 }
 
 def _candidate_score(cand: Dict[str, Any]) -> float:
+    """Deterministic raw-feature ordering only; legacy setup_score is excluded."""
     score = 0.0
-    try:
-        setup_score = max(0.0, float(cand.get("setup_score", 0.0)))
-        score += min(10.0, setup_score / 12.5) * 1.0
-    except Exception:
-        pass
     try:
         fvg_score = float(cand.get("fvg_score", 0.0))
         if 0.0 <= fvg_score <= 1.0:
@@ -2434,29 +4097,22 @@ def _setup_family_from_payload(payload: Dict[str, Any], plan: Dict[str, Any] | N
         cands = payload.get("candidates") or []
     best_candidate, _, _ = _best_candidate(cands)
     po3 = _as_dict(payload.get("po3"))
-    family_sources = [
-        _get_any(best_candidate, ["setup_family", "setup_class", "final_setup_class", "structure_type", "entry_branch", "entry_model"]),
-        _get_any(plan, ["setup_family", "setup_class", "entry_branch", "entry_model", "target_model"]),
-        _get_any(po3, ["final_setup_class", "structure_type", "htf_structure_type", "ltf_structure_type", "po3_scope"]),
-        _get_any(payload, ["setup_family", "setup_class", "entry_branch", "entry_model", "target_model", "po3_scope"]),
-    ]
-    hint = " ".join(str(value or "").strip().lower() for value in family_sources if value not in (None, ""))
-
-    if "failed_breakout" in hint or "failed-breakout" in hint:
-        return "micro_failed_breakout_reclaim"
-    if "continuation" in hint or "impulse" in hint:
-        return "micro_continuation_fvg"
-    if "range_reentry" in hint or "session_reentry" in hint or "range_mid" in hint:
-        return "micro_range_reentry"
-    if "bisi" in hint or "sibi" in hint:
-        return "micro_bisi_sibi_edge"
-    if "fvg_edge" in hint or "breaker_retest" in hint:
-        po3_scope = str(_get_any(po3, ["po3_scope"], _get_any(payload, ["po3_scope"], "")) or "").lower()
-        if "micro" in po3_scope or "intraday" in po3_scope:
-            return "micro_bisi_sibi_edge"
-
-    family = str(_get_any(best_candidate, ["setup_family"], _get_any(plan, ["setup_family"], _get_any(payload, ["setup_family"], ""))) or "").strip().lower()
-    return family
+    merged = {**po3, **plan, **best_candidate}
+    resolution = classify_setup_taxonomy(merged)
+    mapping = {
+        SetupTaxonomy.MICRO_FVG_MID_REVERSAL: "micro_po3_reversal",
+        SetupTaxonomy.MICRO_FVG_EDGE_REVERSAL: "micro_bisi_sibi_edge",
+        SetupTaxonomy.MICRO_BREAKER_RETEST: "micro_breaker_retest",
+        SetupTaxonomy.MICRO_OTE_REVERSAL: "micro_po3_reversal",
+        SetupTaxonomy.MICRO_CONTINUATION_FVG: "micro_continuation_fvg",
+        SetupTaxonomy.MICRO_NESTED_CONTINUATION: "micro_nested_continuation",
+        SetupTaxonomy.MICRO_RANGE_REENTRY: "micro_range_reentry",
+        SetupTaxonomy.MICRO_SESSION_REENTRY: "micro_session_reentry",
+        SetupTaxonomy.FAILED_BREAKOUT_RECLAIM: "micro_failed_breakout_reclaim",
+        SetupTaxonomy.FULL_PO3_REVERSAL: "full_po3_reversal",
+        SetupTaxonomy.FULL_PO3_CONTINUATION: "full_po3_continuation",
+    }
+    return mapping.get(resolution.taxonomy, "unknown_unclassified")
 
 
 def _family_requires_sweep_story(setup_family: str, payload: Dict[str, Any] | None = None) -> bool:
@@ -2469,39 +4125,12 @@ def _family_requires_sweep_story(setup_family: str, payload: Dict[str, Any] | No
         "session_reentry",
     }:
         return False
-    if payload is not None:
-        po3 = _as_dict(payload.get("po3"))
-        plan = _as_dict(payload.get("plan"))
-        cands = payload.get("candidates") or []
-        best_candidate, _, _ = _best_candidate(cands)
-        has_sweep = bool(po3.get("has_sweep"))
-        t_sweep = _get_any(po3, ["t_sweep", "sweep_time"], _get_any(payload, ["t_sweep", "source_t_sweep"]))
-        flow_hint = " ".join(
-            str(value or "").strip().lower()
-            for value in (
-                _get_any(best_candidate, ["entry_branch", "entry_model", "setup_class", "structure_type"]),
-                _get_any(plan, ["entry_branch", "entry_model", "setup_class", "target_model"]),
-                _get_any(po3, ["po3_scope", "final_setup_class", "structure_type", "htf_structure_type", "ltf_structure_type"]),
-                _get_any(payload, ["po3_scope", "entry_branch", "entry_model", "setup_class", "target_model"]),
-            )
-            if value not in (None, "")
-        )
-        if not has_sweep and not t_sweep and (
-            "micro" in flow_hint
-            or "intraday" in flow_hint
-            or "continuation" in flow_hint
-            or "failed_breakout" in flow_hint
-            or "range_reentry" in flow_hint
-            or "session_reentry" in flow_hint
-        ):
-            return False
     return family in {"", "full_po3_reversal", "full_po3_continuation", "micro_po3_reversal", "micro_bisi_sibi_edge"}
 
 def _rule_score(payload: Dict[str, Any]) -> Tuple[float, str]:
     """
-    Rule-based sanity score (0..10) used to calibrate the LLM output.
-    This version is reweighted so "normal good" setups land ~4.5-7.0,
-    and 8+ requires truly exceptional confluence.
+    Deterministic technical-quality score (0..10). It is not probability,
+    calibration, or empirical expected R and is never blended into authority.
     """
     po3 = _as_dict(payload.get("po3"))
     plan = _as_dict(payload.get("plan"))
@@ -2798,16 +4427,6 @@ def _rule_score(payload: Dict[str, Any]) -> Tuple[float, str]:
     except Exception:
         pass
 
-    try:
-        net_expected_r = float(_get_any(best_candidate, ["net_expected_r", "expected_value_r"], _get_any(plan, ["net_expected_r", "expected_value_r"], 0.0)))
-        if net_expected_r < 0.05:
-            score -= 1.4
-            notes.append("net_expected_r_too_low")
-        elif net_expected_r >= 0.35:
-            score += 0.25
-    except Exception:
-        pass
-
     # Regime alignment: volatility, signed slope, and trend strength should agree with trade direction.
     try:
         atr_pct = float(_get_any(regime, ["atr_pct"], _get_any(payload, ["atr_pct"], 0.0)))
@@ -3028,39 +4647,12 @@ def _rule_score(payload: Dict[str, Any]) -> Tuple[float, str]:
         except Exception:
             pass
 
-    try:
-        setup_score = float(_get_any(best_candidate, ["setup_score"], _get_any(plan, ["setup_score"], _get_any(payload, ["setup_score"], 0.0))))
-        if setup_score > 0:
-            score += min(0.35, setup_score / 220.0)
-    except Exception:
-        pass
-
     if bool(watchlist.get("armed")):
         score += 0.1
-
-    if score > 7.2:
-        score = 7.2 + (score - 7.2) * 0.55
 
     score = max(0.0, min(10.0, score))
     return score, ";".join(notes)
 
-
-def _fallback_confidence(rule_score: float, rule_notes: str, error_text: str) -> float:
-    notes = {note for note in str(rule_notes or "").split(";") if note}
-    confidence = 0.30 + min(0.24, max(0.0, rule_score - 3.0) * 0.05)
-    if "rr_extreme" in notes or "rr_unrealistic" in notes:
-        confidence -= 0.08
-    if "too_far_from_vwap" in notes:
-        confidence -= 0.07
-    if "liquidity_target_far" in notes or "liquidity_target_stretched" in notes:
-        confidence -= 0.04
-    if "weak_trend" in notes or "trend_against_long" in notes or "trend_against_short" in notes:
-        confidence -= 0.06
-    if "no_sweep" in notes or "no_displacement" in notes or "no_bos" in notes:
-        confidence -= 0.10
-    if error_text:
-        confidence -= 0.04
-    return max(0.25, min(0.74, round(confidence, 2)))
 
 def _runtime_bool(value: Any, default: bool) -> bool:
     if value is None:
@@ -3083,15 +4675,6 @@ def _runtime_mode(payload: Dict[str, Any]) -> tuple[str, bool, bool, bool, float
     return mode, fail_closed, allow_rule_live, allow_rule_fallback, max(0.0, min(1.0, fallback_mult))
 
 
-def _runtime_min_confidence(payload: Dict[str, Any]) -> float:
-    runtime = _as_dict(payload.get("runtime"))
-    raw = runtime.get("min_ai_confidence", AI_CONFIG.min_confidence)
-    try:
-        return max(0.0, min(1.0, float(raw)))
-    except Exception:
-        return AI_CONFIG.min_confidence
-
-
 def _threshold_identity(payload: Dict[str, Any], chosen_index: int | None = None) -> tuple[str, str, str]:
     plan = _as_dict(payload.get("plan"))
     cand: Dict[str, Any] = {}
@@ -3105,35 +4688,35 @@ def _threshold_identity(payload: Dict[str, Any], chosen_index: int | None = None
     return family, setup_class, branch
 
 
-def effective_ai_score_threshold(payload: Dict[str, Any], chosen_index: int | None = None) -> tuple[float, str]:
+def effective_llm_quality_score_threshold(payload: Dict[str, Any], chosen_index: int | None = None) -> tuple[float, str]:
     runtime = _runtime_inputs(payload)
     family, setup_class, branch = _threshold_identity(payload, chosen_index)
 
-    fallback = _floatish(runtime.get("min_ai_score_trend"), 7.0)
+    fallback = _floatish(runtime.get("min_llm_quality_score_trend"), 7.0)
     threshold = fallback
-    source = "min_ai_score_trend"
+    source = "min_llm_quality_score_trend"
 
     if family in {"full_po3", "full_po3_reversal", "full_po3_continuation"} or "full_po3" in setup_class:
-        threshold = _floatish(runtime.get("ai_score_full_po3"), fallback)
-        source = "ai_score_full_po3"
+        threshold = _floatish(runtime.get("llm_quality_score_full_po3"), fallback)
+        source = "llm_quality_score_full_po3"
     elif (
         family in {"micro_po3", "micro_po3_reversal", "micro_bisi_sibi_edge"}
         or "micro_po3" in setup_class
         or "micro_bisi_sibi" in setup_class
     ):
-        threshold = _floatish(runtime.get("ai_score_micro_po3"), fallback)
-        source = "ai_score_micro_po3"
+        threshold = _floatish(runtime.get("llm_quality_score_micro_po3"), fallback)
+        source = "llm_quality_score_micro_po3"
     elif family in {"micro_continuation_fvg", "continuation"} or branch == "continuation_reentry" or "continuation" in setup_class:
-        threshold = _floatish(runtime.get("ai_score_continuation"), fallback)
-        source = "ai_score_continuation"
+        threshold = _floatish(runtime.get("llm_quality_score_continuation"), fallback)
+        source = "llm_quality_score_continuation"
     elif family in {"micro_range_reentry", "range"} or branch == "range_reentry" or "range_reentry" in setup_class:
-        threshold = _floatish(runtime.get("ai_score_range"), fallback)
-        source = "ai_score_range"
+        threshold = _floatish(runtime.get("llm_quality_score_range"), fallback)
+        source = "llm_quality_score_range"
     elif family in {"micro_failed_breakout_reclaim", "failed_breakout"} or "failed_breakout" in setup_class or "reclaim" in setup_class:
-        threshold = _floatish(runtime.get("ai_score_failed_breakout"), fallback)
-        source = "ai_score_failed_breakout"
+        threshold = _floatish(runtime.get("llm_quality_score_failed_breakout"), fallback)
+        source = "llm_quality_score_failed_breakout"
 
-    if _boolish(runtime.get("global_ai_score_as_hard_floor"), False):
+    if _boolish(runtime.get("global_llm_quality_as_hard_floor"), False):
         threshold = max(fallback, threshold)
         source = source + "+global_floor"
 
@@ -3141,40 +4724,47 @@ def effective_ai_score_threshold(payload: Dict[str, Any], chosen_index: int | No
 
 
 def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision, chosen_index: int | None = None) -> Decision:
-    threshold, source = effective_ai_score_threshold(payload, chosen_index)
+    threshold, source = effective_llm_quality_score_threshold(payload, chosen_index)
     family, setup_class, branch = _threshold_identity(payload, chosen_index)
-    passed = float(decision.score) >= threshold
-    decision.ai_score_threshold = threshold
-    decision.ai_threshold_source = source
-    decision.global_ai_score_as_hard_floor = _boolish(_runtime_inputs(payload).get("global_ai_score_as_hard_floor"), False)
-    decision.ai_threshold_passed = passed
+    repeatability = _repeatability_authority_for(
+        str(decision.model_version or AI_CONFIG.model),
+        str(decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+    )
+    # Existing family thresholds retain their configured values, but now apply
+    # to the independently assessed LLM quality score, never the blended alias.
+    passed = float(decision.llm_quality_score) >= threshold
+    decision.llm_quality_score_threshold = threshold
+    decision.llm_quality_threshold_source = source
+    decision.global_llm_quality_as_hard_floor = _boolish(_runtime_inputs(payload).get("global_llm_quality_as_hard_floor"), False)
+    decision.llm_quality_threshold_passed = passed
     if not passed:
         decision.allow = False
         decision.decision_source = "ai_family_threshold_gate"
-        decision.ai_reject_reason = "ai_score_below_family_threshold"
+        decision.llm_quality_reject_reason = "llm_quality_score_below_family_threshold"
         if decision.rejection_codes is None:
             decision.rejection_codes = []
-        if "ai_score_below_family_threshold" not in decision.rejection_codes:
-            decision.rejection_codes.append("ai_score_below_family_threshold")
+        if "llm_quality_score_below_family_threshold" not in decision.rejection_codes:
+            decision.rejection_codes.append("llm_quality_score_below_family_threshold")
         if isinstance(decision.reasons, dict):
-            decision.reasons["ai_score_threshold"] = threshold
-            decision.reasons["ai_threshold_source"] = source
-            decision.reasons["ai_threshold_passed"] = False
-            decision.reasons["ai_reject_reason"] = "ai_score_below_family_threshold"
+            decision.reasons["llm_quality_score_threshold"] = threshold
+            decision.reasons["llm_quality_threshold_source"] = source
+            decision.reasons["llm_quality_threshold_passed"] = False
+            decision.reasons["llm_quality_reject_reason"] = "llm_quality_score_below_family_threshold"
         else:
             decision.reasons = {
                 "previous_reasons": str(decision.reasons or ""),
-                "ai_score_threshold": threshold,
-                "ai_threshold_source": source,
-                "ai_threshold_passed": False,
-                "ai_reject_reason": "ai_score_below_family_threshold",
+                "llm_quality_score_threshold": threshold,
+                "llm_quality_threshold_source": source,
+                "llm_quality_threshold_passed": False,
+                "llm_quality_reject_reason": "llm_quality_score_below_family_threshold",
             }
-    elif not decision.ai_reject_reason:
-        decision.ai_reject_reason = ""
+    elif not decision.llm_quality_reject_reason:
+        decision.llm_quality_reject_reason = ""
     log(
         f"[ai_gate] family_threshold family={family or 'unknown'} class={setup_class or 'unknown'} "
-        f"branch={branch or 'unknown'} score={float(decision.score):.2f} threshold={threshold:.2f} "
-        f"source={source} pass={str(passed).lower()}"
+        f"branch={branch or 'unknown'} llm_quality_score={float(decision.llm_quality_score):.2f} threshold={threshold:.2f} "
+        f"source={source} pass={str(passed).lower()} "
+        f"repeatability_status={repeatability.get('status')} configured_floor_always_enforced=true"
     )
     return decision
 
@@ -3280,15 +4870,95 @@ def _fatal_snapshot_integrity_codes(codes: list[str]) -> list[str]:
     }
     return [code for code in codes if code in hard_fatal]
 
+
+_UNKNOWN_TAXONOMY_LOCK = Lock()
+
+
+def _strict_taxonomy_failures(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """Bind canonical taxonomy before AI; unknown candidates fail closed."""
+
+    failures: list[Dict[str, Any]] = []
+    po3 = _as_dict(payload.get("po3"))
+    plan = _as_dict(payload.get("plan"))
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            failures.append({"candidate_index": index, "reason": "candidate_not_object"})
+            continue
+        resolution = classify_setup_taxonomy({**po3, **plan, **candidate})
+        candidate["setup_taxonomy_version"] = SETUP_TAXONOMY_VERSION
+        candidate["setup_taxonomy_enum"] = resolution.taxonomy.value
+        candidate["taxonomy_mapping_source"] = resolution.mapping_source
+        if resolution.taxonomy == SetupTaxonomy.UNKNOWN_UNCLASSIFIED:
+            failures.append(
+                {
+                    "request_id": str(payload.get("id") or ""),
+                    "symbol": str(payload.get("symbol") or candidate.get("symbol") or ""),
+                    "candidate_index": int(candidate.get("candidate_index", index)),
+                    "entry_branch": candidate.get("entry_branch"),
+                    "setup_family": candidate.get("setup_family"),
+                    "setup_class": candidate.get("setup_class"),
+                    "po3_scope": candidate.get("po3_scope") or po3.get("po3_scope"),
+                    "structure_state": candidate.get("structure_state") or candidate.get("structure_type"),
+                    "fvg_state": candidate.get("fvg_state") or candidate.get("fvg_execution_class"),
+                    "mapping_failure_reason": resolution.failure_reason,
+                }
+            )
+    if failures:
+        output = resolve_project_path("data/unknown_setup_taxonomy.jsonl")
+        with _UNKNOWN_TAXONOMY_LOCK:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with output.open("a", encoding="utf-8", newline="\n") as handle:
+                for failure in failures:
+                    handle.write(json.dumps(failure, sort_keys=True, separators=(",", ":")) + "\n")
+    return failures
+
 def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     """
     Rule-based scoring blended with LLM advisory reranking/veto metadata.
     MT5 remains the final execution authority.
     """
+    taxonomy_failures = _strict_taxonomy_failures(payload)
+    if taxonomy_failures:
+        log(
+            "[setup_reject] reject_stage=taxonomy reject_reason=unknown_unclassified"
+            f" count={len(taxonomy_failures)}"
+        )
+        return Decision(
+            allow=False,
+            raw_allow=False,
+            score=0.0,
+            confidence=0.0,
+            decision_state=DECISION_REJECT,
+            decision_quality_tier=DECISION_QUALITY_RULE_ONLY_NON_TRADING,
+            mandatory_fields_complete=False,
+            reasons={"taxonomy_failures": taxonomy_failures},
+            decision_source="taxonomy_hard_gate",
+            rejection_codes=["unknown_unclassified"],
+            narrative_state="taxonomy_rejected_before_ai",
+            invalidation_risks=["unproven_setup_taxonomy"],
+            suggested_risk_multiplier=0.0,
+        )
     rule_score, rule_notes = _rule_score(payload)
     cands = payload.get("candidates") or []
     best_candidate, best_index, best_composite = _best_candidate(cands)
-    min_confidence = _runtime_min_confidence(payload)
+    mandatory_prior_reject = _mandatory_live_prior_rejection(payload, best_index)
+    if mandatory_prior_reject is not None:
+        _write_ai_cost_report(
+            payload,
+            request_id=str(payload.get("id") or ""),
+            decision_source=mandatory_prior_reject.decision_source,
+            model="",
+            reasoning_effort=AI_CONFIG.reasoning_effort,
+            service_tier="",
+            prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
+            cache_status="mandatory_prior_hard_gate",
+            batch_used=False,
+            flex_used=False,
+            openai_called=False,
+            skip_reason="mandatory_live_priors_unavailable",
+        )
+        return mandatory_prior_reject
     if AI_CONFIG.use_batch_api and _is_live_payload(payload):
         log("[ai_gate] batch_api_disabled_for_live")
     hard_pre_decision = _hard_pretrade_decision(payload, best_index)
@@ -3315,7 +4985,7 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             allow=False,
             score=0.0,
             chosen_index=best_index,
-            confidence=1.0,
+            confidence=0.0,
             reasons={
                 "decision_source": "snapshot_integrity",
                 "rejection_codes": fatal_integrity_codes,
@@ -3352,11 +5022,20 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     cache_fields: Dict[str, Any] = {}
     if AI_CONFIG.decision_cache_enable:
         cache_signature, cache_base_signature, cache_fields = _decision_cache_signature(payload, best_index)
-        cached_decision, cache_status = AI_DECISION_CACHE.lookup(cache_signature, cache_base_signature)
+        cached_decision, cache_status = AI_DECISION_CACHE.lookup(
+            cache_signature,
+            cache_base_signature,
+            cache_fields,
+        )
         if cached_decision is not None:
             _inc_counter("ai_cache_hit")
             log(f"[ai_gate] ai_cache_hit request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
+            cached_decision = _validate_ai_target_choice_against_feasibility(payload, cached_decision, cached_decision.chosen_index)
+            cached_decision = _synchronize_selected_assessment_contract(payload, cached_decision)
+            cached_decision = _apply_repeatability_authority(cached_decision)
+            cached_decision = _apply_ai_veto_gate(payload, cached_decision)
             cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
+            cached_decision = _synchronize_candidate_authority_fields(cached_decision)
             _write_ai_cost_report(
                 payload,
                 request_id=str(payload.get("id") or ""),
@@ -3376,7 +5055,7 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         if cache_status == "cache_miss_due_to_schema_version":
             _inc_counter("ai_cache_miss_due_to_schema_version")
             log(f"[ai_gate] ai_cache_miss_due_to_schema_version request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
-        elif cache_status.startswith("invalidated"):
+        elif cache_status.startswith("invalidated") or cache_status.startswith("cache_stale_"):
             log(f"[ai_gate] ai_cache_invalidated_reason={cache_status} request_id={str(payload.get('id') or '')}")
         else:
             log(f"[ai_gate] ai_cache_miss request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
@@ -3384,118 +5063,32 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     try:
         dec = _score_setup_openai(payload)
     except Exception as e:
-        mode, fail_closed, allow_rule_live, allow_rule_fallback, fallback_mult = _runtime_mode(payload)
-        if not allow_rule_fallback:
-            log(
-                f"[ai_gate] AI unavailable for {str(payload.get('symbol', '') or 'unknown_symbol')}; "
-                "rule-only fallback is disabled."
-            )
-            decision = Decision(
-                allow=False,
-                score=0.0,
-                chosen_index=best_index,
-                confidence=1.0,
-                reasons={
-                    "error": str(e),
-                    "decision_source": "ai_failure_fallback_disabled",
-                    "rejection_codes": ["ai_unavailable_fallback_disabled"],
-                    "rule_score": rule_score,
-                    "rule_notes": rule_notes,
-                },
-                decision_source="ai_failure_fallback_disabled",
-                rejection_codes=["ai_unavailable_fallback_disabled"],
-                narrative_state="ai_failure_fallback_disabled",
-                invalidation_risks=["ai_decision_missing"],
-                missing_confirmations=["ai_structured_audit"],
-                suggested_risk_multiplier=0.0,
-                model_version=AI_GATE_MODEL_VERSION,
-            )
-            _write_ai_cost_report(
-                payload,
-                request_id=str(payload.get("id") or ""),
-                decision_source=decision.decision_source,
-                model="",
-                reasoning_effort=AI_CONFIG.reasoning_effort,
-                service_tier="",
-                prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
-                cache_status="openai_failure",
-                batch_used=False,
-                flex_used=False,
-                openai_called=True,
-                skip_reason="ai_failure_fallback_disabled",
-            )
-            return decision
         log(
             f"[ai_gate] AI unavailable for {str(payload.get('symbol', '') or 'unknown_symbol')}; "
-            "using rule-only fallback."
+            "rule-only output is diagnostic and non-trading."
         )
-        if mode == "real" and fail_closed and not allow_rule_live:
-            decision = Decision(
-                allow=False,
-                score=0.0,
-                chosen_index=best_index,
-                confidence=1.0,
-                reasons={
-                    "error": str(e),
-                    "decision_source": "ai_failure_live_fail_closed",
-                    "rejection_codes": ["ai_unavailable_live_fail_closed"],
-                    "rule_score": rule_score,
-                    "rule_notes": rule_notes,
-                },
-                decision_source="ai_failure_live_fail_closed",
-                rejection_codes=["ai_unavailable_live_fail_closed"],
-                narrative_state="ai_failure_fail_closed",
-                invalidation_risks=["ai_decision_missing"],
-                missing_confirmations=["ai_structured_audit"],
-                suggested_risk_multiplier=0.0,
-                model_version="rule_only_fallback",
-            )
-            _write_ai_cost_report(
-                payload,
-                request_id=str(payload.get("id") or ""),
-                decision_source=decision.decision_source,
-                model="",
-                reasoning_effort=AI_CONFIG.reasoning_effort,
-                service_tier="",
-                prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
-                cache_status="openai_failure",
-                batch_used=False,
-                flex_used=False,
-                openai_called=True,
-                skip_reason="ai_failure_live_fail_closed",
-            )
-            return decision
-        fallback_conf = _fallback_confidence(rule_score, rule_notes, str(e))
-        fallback_allow = bool(rule_score >= 6.2 and fallback_conf >= min_confidence)
-        fallback_source = "rule_only_fallback_tester" if bool(_as_dict(payload.get("runtime")).get("tester")) else ("rule_only_fallback_demo" if mode != "real" else "rule_only_fallback_live_reduced")
-        decision = Decision(
-            allow=fallback_allow,
-            score=round(rule_score, 2),
-            chosen_index=best_index,
-            confidence=round(fallback_conf, 2),
-            reasons={
-                "error": str(e),
-                "fallback": "rule_only",
-                "decision_source": fallback_source,
-                "rejection_codes": ["ai_unavailable_rule_only_fallback"],
-                "snapshot_integrity_codes": integrity_codes,
-                "rule_score": rule_score,
-                "rule_notes": rule_notes,
-                "best_candidate_score": round(best_composite, 2),
-            },
-            decision_source=fallback_source,
-            rejection_codes=[] if fallback_allow else ["rule_only_score_below_threshold"],
-            narrative_state="rule_only_fallback",
-            invalidation_risks=["ai_audit_unavailable"] + integrity_risks,
-            missing_confirmations=["ai_structured_audit"] + integrity_missing,
-            suggested_risk_multiplier=fallback_mult,
-            model_version="rule_only_fallback",
+        decision = _degraded_non_trading_decision(
+            payload,
+            f"OpenAI unavailable: {e}",
+            missing=["full_structured_ai_response"],
+            source="rule_only_non_trading",
         )
+        decision.decision_quality_tier = DECISION_QUALITY_RULE_ONLY_NON_TRADING
+        decision.decision_source = "rule_only_non_trading"
+        decision.rejection_codes = ["ai_unavailable_rule_only_non_trading", "degraded_ai_response_non_trading"]
+        decision.rule_score = float(rule_score)
+        decision.score = float(rule_score)
+        decision.reasons = {
+            "error": str(e),
+            "rule_score": rule_score,
+            "rule_notes": rule_notes,
+            "best_candidate_score": round(best_composite, 2),
+        }
         _write_ai_cost_report(
             payload,
             request_id=str(payload.get("id") or ""),
             decision_source=decision.decision_source,
-            model="rule_only_fallback",
+            model="rule_only_non_trading",
             reasoning_effort=AI_CONFIG.reasoning_effort,
             service_tier="",
             prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
@@ -3503,40 +5096,17 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             batch_used=False,
             flex_used=False,
             openai_called=True,
-            skip_reason="rule_only_fallback_after_ai_failure",
+            skip_reason="degraded_ai_response_non_trading",
         )
         return decision
 
+    repeatability_authority_before_shadow = _repeatability_authority_for(
+        str(dec.model_version or AI_CONFIG.model),
+        str(dec.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+    )
+    _run_shadow_repeat_evaluation(payload, dec)
+    dec = _apply_repeatability_authority(dec, repeatability_authority_before_shadow)
 
-    ai_score = float(dec.score)
-    blended = 0.72 * rule_score + 0.28 * ai_score
-
-    # Soft cap / compression instead of hard-forcing 7.50.
-    # Goal: 8+ remains rare, but scores don't all collapse to 7.50.
-    if blended >= 7.8 and (rule_score < 8.7 or ai_score < 8.5):
-        gap = abs(rule_score - ai_score)          # disagreement penalty
-        penalty = min(1.20, 0.20 + 0.18 * gap)    # 0.2 .. 1.2
-        blended = blended - penalty
-        blended = min(blended, 7.95)              # keep sub-8 unless both are strong
-
-    blended = max(0.0, min(10.0, blended))
-    blended = round(blended, 2)
-    agreement = max(0.0, 1.0 - abs(rule_score - ai_score) / 6.0)
-    model_strength = max(0.0, min(1.0, blended / 10.0))
-    separation = 0.0
-    if isinstance(cands, list) and len(cands) > 1:
-        ranked = sorted((_candidate_score(c) for c in cands if isinstance(c, dict)), reverse=True)
-        if len(ranked) >= 2:
-            separation = max(0.0, min(1.0, (ranked[0] - ranked[1]) / 12.0))
-    ai_confidence = 0.0
-    try:
-        ai_confidence = float(dec.confidence)
-    except Exception:
-        ai_confidence = 0.0
-    ai_confidence = max(0.0, min(1.0, ai_confidence))
-    confidence = 0.40 * agreement + 0.25 * model_strength + 0.10 * separation + 0.25 * ai_confidence
-    confidence = max(0.0, min(1.0, confidence))
-    confidence = round(confidence, 2)
     inherited_codes, inherited_risks, inherited_missing = _normalize_advisory_metadata(payload, dec)
     for risk in integrity_risks:
         if risk not in inherited_risks:
@@ -3545,81 +5115,85 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         if field not in inherited_missing:
             inherited_missing.append(field)
     hard_model_codes = _hard_model_rejection_codes(inherited_codes)
-
-    allow = bool(dec.allow and confidence >= min_confidence and not hard_model_codes)
-    if confidence < min_confidence and "ai_confidence_below_threshold" not in inherited_codes:
-        inherited_codes.append("ai_confidence_below_threshold")
-
     chosen_index = int(dec.chosen_index)
-    if chosen_index < 0:
-        chosen_index = 0
-    if isinstance(cands, list) and chosen_index >= len(cands):
-        chosen_index = best_index
-
-    if isinstance(cands, list) and 0 <= chosen_index < len(cands) and isinstance(cands[chosen_index], dict):
-        chosen_hard_reason = _candidate_hard_block_reason(cands[chosen_index], payload)
+    selected_candidate = next(
+        (
+            candidate
+            for candidate in cands
+            if isinstance(candidate, dict)
+            and int(candidate.get("candidate_index", -1)) == chosen_index
+            and str(candidate.get("candidate_id") or "") == dec.selected_candidate_id
+            and str(candidate.get("candidate_hash") or "") == dec.selected_candidate_hash
+            and str(candidate.get("request_execution_fingerprint") or "") == dec.request_execution_fingerprint
+        ),
+        None,
+    )
+    if selected_candidate is None:
+        dec.allow = False
+        inherited_codes.append("candidate_hash_mismatch")
+        inherited_risks.append("decision_integrity_failure")
+    else:
+        chosen_hard_reason = _candidate_hard_block_reason(selected_candidate, payload)
         if chosen_hard_reason:
-            allow = False
+            dec.allow = False
             if chosen_hard_reason not in inherited_codes:
                 inherited_codes.append(chosen_hard_reason)
             if "objective_pre_trade_gate_failed" not in inherited_risks:
                 inherited_risks.append("objective_pre_trade_gate_failed")
 
-    final_decision = Decision(
-        allow=allow,
-        score=blended,
-        chosen_index=chosen_index,
-        confidence=confidence,
-        reasons={
-            "ai_reasons": dec.reasons,
-            "decision_source": "llm_blended",
-            "rule_score": rule_score,
-            "rule_notes": rule_notes,
-            "agreement": round(agreement, 3),
-            "best_candidate_score": round(best_composite, 2),
-            "snapshot_integrity_codes": integrity_codes,
-            "rejection_codes": inherited_codes,
-            "narrative_state": dec.narrative_state or "audited",
-        },
-        decision_source="llm_blended",
-        rejection_codes=inherited_codes,
-        narrative_state=dec.narrative_state or "audited",
-        invalidation_risks=inherited_risks,
-        missing_confirmations=inherited_missing,
-        suggested_risk_multiplier=max(0.0, min(1.0, float(dec.suggested_risk_multiplier or 1.0))),
-        model_version=dec.model_version or AI_GATE_MODEL_VERSION,
-        target_arbitration=dec.target_arbitration or {},
-        chosen_target_model=dec.chosen_target_model,
-        chosen_tp1=dec.chosen_tp1,
-        chosen_tp2=dec.chosen_tp2,
-        chosen_rr1=dec.chosen_rr1,
-        chosen_rr2=dec.chosen_rr2,
-        rejected_target_models=list(dec.rejected_target_models or []),
-        target_blocker_kind=dec.target_blocker_kind,
-        target_blocker_severity=dec.target_blocker_severity,
-        target_blocker_class=dec.target_blocker_class,
-        target_blocker_is_trade_killer=dec.target_blocker_is_trade_killer,
-        target_decision_reason=dec.target_decision_reason,
-        target_blocker_severity_present=dec.target_blocker_severity_present,
-        target_blocker_class_present=dec.target_blocker_class_present,
-        target_blocker_is_trade_killer_present=dec.target_blocker_is_trade_killer_present,
-        target_decision_reason_present=dec.target_decision_reason_present,
-        why_not_liquidity_target=dec.why_not_liquidity_target,
-        why_not_partial_before_obstacle=dec.why_not_partial_before_obstacle,
-        why_not_capped_before_obstacle=dec.why_not_capped_before_obstacle,
-        why_not_synthetic_fallback=dec.why_not_synthetic_fallback,
-        target_arbitration_schema_version=dec.target_arbitration_schema_version or AI_TARGET_ARBITRATION_SCHEMA_VERSION,
-        prompt_contract_version=dec.prompt_contract_version or AI_PROMPT_CONTRACT_VERSION,
-        target_comparison_json=dec.target_comparison_json or "{}",
-    )
+    if dec.decision_quality_tier not in {
+        DECISION_QUALITY_FULL_STRUCTURED,
+        DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+    }:
+        dec.allow = False
+        inherited_codes.append("degraded_ai_response_non_trading")
+    if not dec.mandatory_fields_complete:
+        dec.allow = False
+        inherited_codes.append("ai_quality_schema_incomplete")
+    if dec.decision_state == DECISION_ABSTAIN:
+        dec.allow = False
+        inherited_codes.append("ai_abstain")
+    if dec.decision_state != DECISION_APPROVE:
+        dec.allow = False
+    if dec.suggested_risk_multiplier is None:
+        dec.allow = False
+        inherited_codes.append("ai_quality_schema_incomplete")
+    elif float(dec.suggested_risk_multiplier) <= 0.0:
+        dec.allow = False
+        inherited_codes.append("resolved_risk_multiplier_zero")
+    if hard_model_codes:
+        dec.allow = False
+
+    dec.rejection_codes = list(dict.fromkeys(inherited_codes))
+    dec.invalidation_risks = list(dict.fromkeys(inherited_risks))
+    dec.missing_confirmations = list(dict.fromkeys(inherited_missing))
+    dec.score = dec.llm_quality_score
+    dec.confidence = dec.llm_self_reported_confidence
+    dec.reasons = {
+        "ai_reasons": dec.reasons,
+        "decision_source": dec.decision_source,
+        "rule_score": dec.rule_score,
+        "llm_quality_score": dec.llm_quality_score,
+        "blended_legacy_score_diagnostic_only": dec.blended_legacy_score,
+        "legacy_agreement_confidence_diagnostic_only": dec.legacy_agreement_confidence,
+        "llm_self_reported_confidence_not_probability": dec.llm_self_reported_confidence,
+        "calibration_available": False,
+        "snapshot_integrity_codes": integrity_codes,
+        "rejection_codes": dec.rejection_codes,
+    }
+    final_decision = _validate_ai_target_choice_against_feasibility(payload, dec, chosen_index)
+    final_decision = _synchronize_selected_assessment_contract(payload, final_decision)
+    final_decision = _apply_ai_veto_gate(payload, final_decision)
     final_decision = _apply_family_ai_threshold_gate(payload, final_decision, chosen_index)
+    final_decision = _synchronize_candidate_authority_fields(final_decision)
     if AI_CONFIG.decision_cache_enable and cache_signature:
-        AI_DECISION_CACHE.store(cache_signature, cache_base_signature, cache_fields, final_decision)
+        if final_decision.decision_quality_tier == DECISION_QUALITY_FULL_STRUCTURED and final_decision.mandatory_fields_complete:
+            AI_DECISION_CACHE.store(cache_signature, cache_base_signature, cache_fields, final_decision)
     return final_decision
 
 
 def score_setup_live(payload: Dict[str, Any]) -> Decision:
-    return _score_setup_impl(payload)
+    return _synchronize_decision_authority_fields(_score_setup_impl(payload))
 
 
 def score_setup(payload: Dict[str, Any]) -> Decision:
@@ -3627,18 +5201,18 @@ def score_setup(payload: Dict[str, Any]) -> Decision:
 
 
 def _batch_output_dir() -> Path:
-    path = AI_CONFIG.batch_output_dir
-    if path.is_absolute():
-        return path
-    return Path.cwd() / path
+    return resolve_project_path(AI_CONFIG.batch_output_dir)
 
 
 def _batch_request_body(payload: Dict[str, Any]) -> Dict[str, Any]:
     compact = _compact_model_payload(payload)
     instructions = (
-        "You are a PO3/FVG research gate. Score this historical setup. "
-        "Return concise JSON fields allow, score, chosen_index, confidence, reasons. "
-        "Delayed batch results are for analytics only and must never trigger live execution."
+        "You are a PO3/FVG research auditor. Assess each historical candidate independently "
+        "using candidate_id, candidate_hash, rule_score, llm_quality_score, "
+        "llm_self_reported_confidence, decision_state, veto fields, and target identity. "
+        "Do not emit ambiguous score/confidence authority and do not fabricate calibrated "
+        "probability or expected R. Delayed batch results are DEGRADED_NON_TRADING research "
+        "artifacts and must never trigger live execution."
     )
     request_kwargs: Dict[str, Any] = {
         "model": AI_CONFIG.model,
@@ -3915,6 +5489,15 @@ def _release_request_claim(lock_path: Path | None) -> None:
     except Exception:
         pass
 
+def _normalize_request_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if isinstance(payload.get("0"), dict) and any(k in payload["0"] for k in ("plan", "po3", "candidates", "mkt")):
+        inner = payload["0"]
+        merged = dict(payload)
+        merged.pop("0", None)
+        merged.update(inner)
+        return merged
+    return payload
+
 def _is_stable_input_file(path: Path) -> bool:
     lowered = path.name.lower()
     if lowered.endswith((".tmp", ".partial", ".lock")):
@@ -3936,7 +5519,28 @@ def _write_error_response(req_id: str, resp_dir: Path, reason: str, payload_summ
     reason_text = _ascii_compact(f"bridge_error={reason}")
     resp: Dict[str, Any] = {
         "id": req_id,
+        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        "decision_quality_tier": DECISION_QUALITY_DEGRADED_NON_TRADING,
+        "response_quality": DECISION_QUALITY_DEGRADED_NON_TRADING,
+        "decision_state": DECISION_REJECT,
+        "mandatory_fields_complete": False,
+        "missing_mandatory_fields": ["full_structured_ai_response"],
+        "invalid_mandatory_fields": [],
+        "selected_candidate_id": "",
+        "selected_candidate_hash": "",
+        "assessed_execution_fingerprint": "",
+        "candidate_assessments": [],
         "allow": False,
+        "raw_allow": False,
+        "rule_score": 0.0,
+        "llm_quality_score": 0.0,
+        "blended_legacy_score": 0.0,
+        "legacy_agreement_confidence": 0.0,
+        "llm_self_reported_confidence": 0.0,
+        "calibrated_win_probability": None,
+        "expected_net_r": None,
+        "oos_predicted_probability": None,
+        "calibration_available": False,
         "score": 0.0,
         "chosen_index": 0,
         "confidence": 0.0,
@@ -3958,6 +5562,174 @@ def _write_error_response(req_id: str, resp_dir: Path, reason: str, payload_summ
     }
     write_debug_json(resp_dir.parent / "response_debug" / f"{req_id}.json", debug_obj)
 
+def _tester_workflow_source(payload: Dict[str, Any]) -> str:
+    runtime_inputs = _runtime_inputs(payload)
+    raw_mode = _get_any(runtime_inputs, ["tester_ai_mode", "inp_tester_ai_mode"], payload.get("tester_ai_mode"))
+    mode_name = _norm_text(_get_any(runtime_inputs, ["tester_ai_mode_name", "tester_mode_name"], payload.get("tester_ai_mode_name")))
+    try:
+        mode = int(float(raw_mode))
+    except Exception:
+        mode = -1
+    if mode == 0 or mode_name == "tester_ai_record_only":
+        return "record_only"
+    if mode == 1 or mode_name == "tester_ai_cache_only":
+        return "cache_only"
+    if mode == 2 or mode_name == "tester_ai_live_wait_debug":
+        return "live_wait_debug"
+    return "tester"
+
+def _tester_cache_identity(payload: Dict[str, Any]) -> tuple[str, str, str]:
+    signature = str(payload.get("tester_cache_signature") or "").strip()
+    key = str(payload.get("tester_cache_key") or "").strip()
+    if not signature:
+        return "", "", "missing_tester_cache_signature"
+    if not key:
+        return "", "", "missing_tester_cache_key"
+    safe_key = "".join(ch for ch in key if ch.isalnum() or ch in {"_", "-"})
+    if safe_key != key or not safe_key:
+        return "", "", "invalid_tester_cache_key"
+    return signature, safe_key, ""
+
+def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
+    if str(resp.get("decision_schema_version") or "") != AI_DECISION_SCHEMA_VERSION:
+        return "legacy_decision_schema"
+    if str(resp.get("target_arbitration_schema_version") or "") != AI_TARGET_ARBITRATION_SCHEMA_VERSION:
+        return "legacy_target_arbitration_schema"
+    if str(resp.get("prompt_contract_version") or "") != AI_PROMPT_CONTRACT_VERSION:
+        return "legacy_prompt_contract"
+    tier = str(resp.get("decision_quality_tier") or "")
+    if tier not in {
+        DECISION_QUALITY_FULL_STRUCTURED,
+        DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+    }:
+        return "degraded_decision_quality_tier"
+    if resp.get("response_quality") is not None and str(resp.get("response_quality")) != tier:
+        return "decision_quality_alias_conflict"
+    if resp.get("mandatory_fields_complete") is not True:
+        return "incomplete_mandatory_fields"
+    assessments = resp.get("candidate_assessments")
+    if not isinstance(assessments, list) or not assessments:
+        return "missing_candidate_assessments"
+    seen_hashes: set[str] = set()
+    for assessment in assessments:
+        if not isinstance(assessment, dict):
+            return "invalid_candidate_assessment"
+        validation = validate_candidate_assessment(assessment)
+        if not validation.valid:
+            return "invalid_candidate_assessment"
+        assessment_hash = str(assessment.get("candidate_hash") or "")
+        if not assessment_hash or assessment_hash in seen_hashes:
+            return "duplicate_candidate_assessment"
+        seen_hashes.add(assessment_hash)
+    if str(resp.get("selected_candidate_hash") or "") not in seen_hashes:
+        return "selected_candidate_not_assessed"
+    source = str(resp.get("decision_source") or "").lower()
+    codes = {str(code).lower() for code in resp.get("rejection_codes") or []}
+    if source == "bridge_error" or "bridge_error" in codes:
+        return "bridge_error"
+    skip_tokens = (
+        "ai_failure",
+        "transport",
+        "timeout",
+        "malformed",
+        "invalid_json",
+        "parse_error",
+        "parser_error",
+        "placeholder",
+        "unavailable",
+    )
+    for token in skip_tokens:
+        if token in source or token in codes:
+            return token
+    if "invalid_ai_target_arbitration_response" in codes:
+        return "invalid_schema_decision"
+    return ""
+
+def _mql_tester_cache_contract_current(resp: Dict[str, Any]) -> bool:
+    return (
+        str(resp.get("decision_schema_version") or "") == AI_DECISION_SCHEMA_VERSION
+        and str(resp.get("decision_quality_tier") or "") in {
+            DECISION_QUALITY_FULL_STRUCTURED,
+            DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+        }
+        and resp.get("mandatory_fields_complete") is True
+        and str(resp.get("target_arbitration_schema_version") or "") == AI_TARGET_ARBITRATION_SCHEMA_VERSION
+        and str(resp.get("prompt_contract_version") or "") == AI_PROMPT_CONTRACT_VERSION
+    )
+
+def _mql_tester_replay_cache_path(payload: Dict[str, Any], bus: Path) -> tuple[Path | None, str, str, str]:
+    signature, key, identity_error = _tester_cache_identity(payload)
+    if identity_error:
+        return None, signature, key, identity_error
+    return bus / "logs" / "tester_ai_cache" / f"{key}.json", signature, key, ""
+
+def _export_mql_tester_replay_cache(payload: Dict[str, Any], resp: Dict[str, Any], bus: Path) -> str:
+    # This is the MQL Strategy Tester replay cache. It is intentionally separate
+    # from Python's AI_DECISION_CACHE_FILE signature cache; MQL provides the key.
+    cache_path, signature, key, identity_error = _mql_tester_replay_cache_path(payload, bus)
+    if identity_error:
+        log(f"[tester_cache_export] skipped reason={identity_error}")
+        return f"skipped:{identity_error}"
+    skip_reason = _mql_tester_cache_skip_reason(resp)
+    if skip_reason:
+        log(f"[tester_cache_export] skipped reason={skip_reason} key={key} signature={signature}")
+        return f"skipped:{skip_reason}"
+    assert cache_path is not None
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_obj = dict(resp)
+    cache_obj["id"] = str(resp.get("id") or key)
+    cache_obj["cache_signature"] = signature
+    cache_obj["decision_quality_tier"] = DECISION_QUALITY_CACHE_FULL_STRUCTURED
+    cache_obj["response_quality"] = DECISION_QUALITY_CACHE_FULL_STRUCTURED
+    if cache_path.exists():
+        try:
+            existing = read_json_any_encoding(cache_path)
+            if (
+                existing.get("cache_signature") == signature
+                and not _mql_tester_cache_skip_reason(existing)
+                and _mql_tester_cache_contract_current(existing)
+            ):
+                log(f"[tester_cache_export] existing=true key={key} signature={signature}")
+                return "existing"
+        except Exception:
+            pass
+    atomic_write_json(cache_path, cache_obj, encoding=RESP_ENCODING)
+    log(f"[tester_cache_export] written=true key={key} signature={signature} source={_tester_workflow_source(payload)}")
+    return "written"
+
+def _repair_mql_tester_replay_cache_from_existing_response(req_path: Path, resp_path: Path, bus: Path) -> str:
+    try:
+        payload = _normalize_request_payload(read_json_any_encoding(req_path))
+    except Exception as exc:
+        log(f"[tester_cache_export] skipped reason=request_read_error request={req_path.name} error={exc}")
+        return "skipped:request_read_error"
+    cache_path, signature, key, identity_error = _mql_tester_replay_cache_path(payload, bus)
+    if identity_error:
+        log(f"[tester_cache_export] skipped reason={identity_error} request={req_path.name}")
+        return f"skipped:{identity_error}"
+    assert cache_path is not None
+    if cache_path.exists():
+        try:
+            existing = read_json_any_encoding(cache_path)
+            if (
+                existing.get("cache_signature") == signature
+                and not _mql_tester_cache_skip_reason(existing)
+                and _mql_tester_cache_contract_current(existing)
+            ):
+                log(f"[tester_cache_export] existing=true key={key} signature={signature} request={req_path.name}")
+                return "existing"
+        except Exception:
+            pass
+    try:
+        resp = read_json_any_encoding(resp_path)
+    except Exception as exc:
+        log(f"[tester_cache_export] skipped reason=response_read_error key={key} signature={signature} error={exc}")
+        return "skipped:response_read_error"
+    status = _export_mql_tester_replay_cache(payload, resp, bus)
+    if status == "written":
+        log(f"[tester_cache_export] repaired_from_existing_response=true key={key} signature={signature} response={resp_path.name}")
+    return status
+
 
 def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
     log(f"[ai_gate] Processing {req_path.name}")
@@ -3976,14 +5748,33 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
     if payload is None:
         raise last_err if last_err else RuntimeError("Unreadable request file")
 
-    if isinstance(payload.get("0"), dict) and any(k in payload["0"] for k in ("plan", "po3", "candidates", "mkt")):
-        inner = payload["0"]
-        merged = dict(payload)
-        merged.pop("0", None)
-        merged.update(inner)
-        payload = merged
+    payload = _normalize_request_payload(payload)
 
     req_id = payload.get("id") or req_path.stem
+    missing_transport = [
+        field
+        for field in ("session_id", "request_nonce")
+        if not str(payload.get(field) or "").strip()
+    ]
+    if missing_transport:
+        raise ValueError("file_bus_transport_contract_missing:" + ",".join(missing_transport))
+
+    prior_artifact = _load_live_bucket_priors()
+    request_contract = request_fingerprint(
+        payload,
+        model=AI_CONFIG.model,
+        reasoning_effort=AI_CONFIG.reasoning_effort,
+        decision_quality_tier="FULL_STRUCTURED_REQUIRED",
+        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+        target_schema_version=AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        prior_artifact_hash=str(prior_artifact.get("artifact_hash") or ""),
+        prior_artifact_version=str(prior_artifact.get("prior_version") or HIERARCHICAL_PRIOR_SCHEMA_VERSION),
+    )
+    payload["request_fingerprint"] = request_contract["request_fingerprint"]
+    payload["request_fingerprint_contract"] = request_contract
+    payload["hierarchical_prior_artifact_hash"] = request_contract["prior_artifact_hash"]
+    payload["hierarchical_prior_schema_version"] = HIERARCHICAL_PRIOR_SCHEMA_VERSION
 
     dec = score_setup(payload)
 
@@ -4103,7 +5894,7 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
             "tp2": tp2,
             "rr2": plan.get("rr2"),
             "liquidity_rr": plan.get("liquidity_rr"),
-            "setup_score": plan.get("setup_score"),
+            "diagnostic_legacy_setup_score": plan.get("setup_score"),
         },
         "target_candidates": _compact_target_candidates(_target_candidates(payload, plan)),
         "regime": {
@@ -4128,12 +5919,104 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
     }
 
     reason_text = _decision_reason_text(dec.reasons)
+    resolved_risk = dec.suggested_risk_multiplier
+    decision_repeatability = {}
+    if isinstance(dec.reasons, dict) and isinstance(dec.reasons.get("repeatability_authority"), dict):
+        decision_repeatability = dict(dec.reasons["repeatability_authority"])
+    if not decision_repeatability:
+        decision_repeatability = _repeatability_authority_for(
+            str(dec.model_version or AI_CONFIG.model),
+            str(dec.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+        )
+    trade_authorized_by_contract = response_can_trade(
+        dec.decision_quality_tier,
+        dec.decision_state,
+        resolved_risk,
+    ) and dec.mandatory_fields_complete
+    dec = _synchronize_decision_authority_fields(dec)
+    python_final_allow = bool(dec.python_final_allow and trade_authorized_by_contract and not missing_fields)
+    dec.python_final_allow = python_final_allow
+    dec.allow = python_final_allow
+    forward_contract = live_forward_behavior_contract()
     resp = {
         "id": req_id,
-        "allow": bool(dec.allow),
-        "score": float(dec.score),
+        "session_id": str(payload.get("session_id") or ""),
+        "request_nonce": str(payload.get("request_nonce") or ""),
+        # Preserve the exact canonical tester mode in the transport envelope;
+        # _payload_workload_mode intentionally collapses tester modes only for
+        # OpenAI service-tier/batch routing.
+        "workload_mode": canonical_workload_mode(payload),
+        "live_forward_contract_version": LIVE_FORWARD_CONTRACT_VERSION,
+        "behavior_contract_hash": forward_contract["behavior_contract_hash"],
+        "architecture_contract_version": ARCHITECTURE_CONTRACT_VERSION,
+        "semantic_cache_schema_version": SEMANTIC_CACHE_SCHEMA_VERSION,
+        "cohort_schema_version": COHORT_SCHEMA_VERSION,
+        "hierarchical_outcome_model_version": HIERARCHICAL_OUTCOME_MODEL_VERSION,
+        "response_id": str(dec.decision_id or f"{req_id}:{dec.decision_source or 'decision'}"),
+        "model_returned": str(dec.model_version or AI_CONFIG.model),
+        "reasoning_configuration": str(AI_CONFIG.reasoning_effort),
+        "bucket_prior_hash": request_contract["prior_artifact_hash"],
+        "calibration_artifact_id": "",
+        "request_fingerprint": request_contract["request_fingerprint"],
+        "request_fingerprint_contract": request_contract,
+        "hierarchical_prior_artifact_hash": request_contract["prior_artifact_hash"],
+        "hierarchical_prior_schema_version": HIERARCHICAL_PRIOR_SCHEMA_VERSION,
+        "repeatability_schema_version": REPEATABILITY_SCHEMA_VERSION,
+        "repeatability_status": str(decision_repeatability.get("status") or UNAVAILABLE),
+        "repeatability_score_threshold_authority": bool(
+            decision_repeatability.get("score_threshold_authority", True)
+        ),
+        "repeatability_trading_eligible": bool(decision_repeatability.get("trading_eligible", True)),
+        "repeatability_group_key": str(decision_repeatability.get("group_key") or ""),
+        "repeatability_authority_hash": str(decision_repeatability.get("artifact_hash") or ""),
+        "decision_schema_version": str(dec.decision_schema_version or AI_DECISION_SCHEMA_VERSION),
+        "decision_quality_tier": str(dec.decision_quality_tier or DECISION_QUALITY_DEGRADED_NON_TRADING),
+        "response_quality": str(dec.decision_quality_tier or DECISION_QUALITY_DEGRADED_NON_TRADING),
+        "mandatory_fields_complete": bool(dec.mandatory_fields_complete),
+        "missing_mandatory_fields": list(dec.missing_mandatory_fields or []),
+        "invalid_mandatory_fields": list(dec.invalid_mandatory_fields or []),
+        "decision_state": str(dec.decision_state or DECISION_REJECT),
+        "selected_candidate_id": str(dec.selected_candidate_id or ""),
+        "selected_candidate_hash": str(dec.selected_candidate_hash or ""),
+        "request_execution_fingerprint": str(dec.request_execution_fingerprint or ""),
+        "assessed_execution_fingerprint": str(dec.assessed_execution_fingerprint or ""),
+        "selected_target_identity": str(dec.selected_target_identity or ""),
+        "selected_target_price": float(dec.selected_target_price or 0.0),
+        "assessed_entry": float(dec.assessed_entry or 0.0),
+        "assessed_sl": float(dec.assessed_sl or 0.0),
+        "assessed_tp1": float(dec.assessed_tp1 or 0.0),
+        "assessed_tp2": float(dec.assessed_tp2 or 0.0),
+        "candidate_assessments": list(dec.candidate_assessments or []),
+        "allow": python_final_allow,
+        "raw_allow": bool(dec.model_raw_allow),
+        "model_raw_allow": bool(dec.model_raw_allow),
+        "python_final_allow": python_final_allow,
+        "mql_final_allow": None,
+        "decision_field_authority": decision_field_authority_manifest(),
+        "rule_score": float(dec.rule_score),
+        "llm_quality_score": float(dec.llm_quality_score),
+        "blended_legacy_score": float(dec.blended_legacy_score),
+        "legacy_agreement_confidence": float(dec.legacy_agreement_confidence),
+        "llm_self_reported_confidence": float(dec.llm_self_reported_confidence),
+        "calibrated_win_probability": None,
+        "expected_net_r": None,
+        "oos_predicted_probability": None,
+        "calibration_bucket": str(dec.calibration_bucket or ""),
+        "calibration_sample_size": int(dec.calibration_sample_size),
+        "calibration_lower_bound": None,
+        "calibration_upper_bound": None,
+        "calibration_model_version": str(dec.calibration_model_version or ""),
+        "calibration_data_window_start": str(dec.calibration_data_window_start or ""),
+        "calibration_data_window_end": str(dec.calibration_data_window_end or ""),
+        "calibration_available": False,
+        # Explicit migration aliases. Neither has independent trade authority.
+        "score": float(dec.llm_quality_score),
         "chosen_index": int(dec.chosen_index),
-        "confidence": float(dec.confidence),
+        "confidence": float(dec.llm_self_reported_confidence),
+        "migration_aliases": {
+            "score": "llm_quality_score",
+            "confidence": "llm_self_reported_confidence",
+        },
         "decision_source": str(dec.decision_source or ""),
         "reasons": reason_text,
         "decision_id": str(dec.decision_id or f"{req_id}:{dec.decision_source or 'decision'}:{int(time.time())}"),
@@ -4141,18 +6024,30 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "narrative_state": str(dec.narrative_state or "audited"),
         "invalidation_risks": list(dec.invalidation_risks or []),
         "missing_confirmations": list(dec.missing_confirmations or []),
-        "suggested_risk_multiplier": float(dec.suggested_risk_multiplier),
+        "suggested_risk_multiplier": float(resolved_risk if resolved_risk is not None else 0.0),
         "model_version": str(dec.model_version or AI_GATE_MODEL_VERSION),
         "setup_family": str(setup_family or ""),
         "setup_class": str(_get_any(plan, ["setup_class"], "")),
         "entry_branch": str(_get_any(plan, ["entry_branch", "entry_model"], "")),
-        "ai_score": float(dec.score),
-        "ai_confidence": float(dec.confidence),
-        "ai_score_threshold": float(dec.ai_score_threshold),
-        "ai_threshold_source": str(dec.ai_threshold_source or ""),
-        "global_ai_score_as_hard_floor": bool(dec.global_ai_score_as_hard_floor),
-        "ai_threshold_passed": bool(dec.ai_threshold_passed),
-        "ai_reject_reason": str(dec.ai_reject_reason or ""),
+        "llm_quality_score_threshold": float(dec.llm_quality_score_threshold),
+        "llm_quality_threshold_source": str(dec.llm_quality_threshold_source or ""),
+        "global_llm_quality_as_hard_floor": bool(dec.global_llm_quality_as_hard_floor),
+        "llm_quality_threshold_passed": bool(dec.llm_quality_threshold_passed),
+        "llm_quality_reject_reason": str(dec.llm_quality_reject_reason or ""),
+        "structure_quality_score": float(dec.structure_quality_score),
+        "entry_timing_score": float(dec.entry_timing_score),
+        "follow_through_probability": float(dec.follow_through_probability),
+        "invalidation_risk": float(dec.invalidation_risk),
+        "chop_risk": float(dec.chop_risk),
+        "cost_risk": float(dec.cost_risk),
+        "symbol_bucket_risk": float(dec.symbol_bucket_risk),
+        "session_bucket_risk": float(dec.session_bucket_risk),
+        "post_entry_failure_risk": float(dec.post_entry_failure_risk),
+        "final_trade_expectancy_score": float(dec.final_trade_expectancy_score),
+        "veto_enabled": bool(dec.veto_enabled),
+        "veto_reason": str(dec.veto_reason or ""),
+        "veto": {"enabled": bool(dec.veto_enabled), "reason": str(dec.veto_reason or "")},
+        "bucket_prior_override_justification": str(dec.bucket_prior_override_justification or ""),
         "target_arbitration": dec.target_arbitration or {},
         "chosen_target_model": str(dec.chosen_target_model or ""),
         "chosen_tp1": float(dec.chosen_tp1 or 0.0),
@@ -4178,9 +6073,27 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "target_comparison": _json_object_from_text(dec.target_comparison_json),
     }
 
+    resp["response_binding_hash"] = response_binding_hash(resp)
+
+    response_contract = response_fingerprint(resp)
+    resp["response_fingerprint"] = response_contract["response_fingerprint"]
+    resp["full_structured_response_hash"] = response_contract["full_structured_response_hash"]
+    resp["response_fingerprint_contract"] = response_contract
+    _append_fingerprint_record(
+        {
+            "recorded_at": int(time.time()),
+            "request_id": str(req_id),
+            "session_id": str(payload.get("session_id") or ""),
+            "request": request_contract,
+            "response": response_contract,
+            "runtime_governance_versions": runtime_governance_versions(),
+        }
+    )
+
     resp_path = resp_dir / f"{req_id}.json"
     resp_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(resp_path, resp, encoding=RESP_ENCODING)
+    _export_mql_tester_replay_cache(payload, resp, resp_dir.parent)
     write_debug_json(
         resp_dir.parent / "response_debug" / f"{req_id}.json",
         {
@@ -4193,7 +6106,8 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
     )
     log(
         f"[ai_gate] OK {req_path.name} -> {resp_path.name} "
-        f"allow={resp['allow']} score={resp['score']} conf={resp['confidence']} chosen={resp['chosen_index']} "
+        f"allow={resp['allow']} llm_quality_score={resp['llm_quality_score']} "
+        f"llm_self_reported_confidence={resp['llm_self_reported_confidence']} chosen={resp['chosen_index']} "
         f"source={resp['decision_source']} "
         f"cand={payload_summary['cand_count']} missing={len(missing_fields)}"
     )
@@ -4203,7 +6117,13 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
     if payload_summary["cand_count"] == 0:
         log(f"[ai_gate] {req_path.name} had no candidates")
 
-    moved, move_reason = _try_move_to_stale(req_path, stale_dir)
+    terminal_state = "completed" if python_final_allow else "rejected"
+    terminal_reason = "python_final_allow_true" if python_final_allow else (
+        str(dec.decision_state or "REJECT").lower()
+        + ":"
+        + ";".join(dec.rejection_codes or [dec.decision_source or "python_reject"])
+    )
+    moved, move_reason = _archive_request_terminal(req_path, terminal_state, terminal_reason)
     if not moved and move_reason == "permission_denied":
         log(f"[ai_gate] request cleanup deferred {req_path.name}: permission_denied")
     elif not moved and move_reason != "missing":
@@ -4224,14 +6144,7 @@ def _process_claimed_request(
         payload_summary: Dict[str, Any] = {"bridge_error": str(exc)}
         try:
             raw_payload = read_json_any_encoding(req_path)
-            if isinstance(raw_payload.get("0"), dict) and any(
-                key in raw_payload["0"] for key in ("plan", "po3", "candidates", "mkt")
-            ):
-                inner = raw_payload["0"]
-                merged = dict(raw_payload)
-                merged.pop("0", None)
-                merged.update(inner)
-                raw_payload = merged
+            raw_payload = _normalize_request_payload(raw_payload)
             req_id = raw_payload.get("id") or req_id
             payload_summary["keys"] = sorted(list(raw_payload.keys()))
         except Exception as inner:
@@ -4245,11 +6158,169 @@ def _process_claimed_request(
                 log(f"[ai_gate] Preserved existing response for {req_id} after error")
         except Exception as inner:
             log(f"[ai_gate] Failed to write error response for {req_path.name}: {inner}")
-        moved, move_reason = _try_move_to_stale(req_path, stale_dir)
+        moved, move_reason = _archive_request_terminal(req_path, "quarantined", f"processing_error:{exc}")
         if not moved and move_reason not in {"missing", "permission_denied"}:
             log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
     finally:
         _release_request_claim(lock_path)
+
+def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
+    req_dir = bus / "requests"
+    resp_dir = bus / "responses"
+    stale_dir = bus / "stale"
+    lock_dir = bus / "locks"
+    summary = {
+        "requests_seen": 0,
+        "processed_new": 0,
+        "repaired_existing_response": 0,
+        "cache_written": 0,
+        "cache_existing": 0,
+        "skipped": 0,
+        "errors": 0,
+        "moved_to_stale": 0,
+    }
+
+    for req_path in sorted(req_dir.glob("*.json")):
+        if req_path.name.endswith(".tmp") or not _is_stable_input_file(req_path):
+            continue
+        summary["requests_seen"] += 1
+        req_id = req_path.stem
+        resp_path = resp_dir / f"{req_id}.json"
+
+        try:
+            if resp_path.exists():
+                status = _repair_mql_tester_replay_cache_from_existing_response(req_path, resp_path, bus)
+                summary["repaired_existing_response"] += 1
+                if status == "written":
+                    summary["cache_written"] += 1
+                elif status == "existing":
+                    summary["cache_existing"] += 1
+                else:
+                    summary["skipped"] += 1
+                moved, move_reason = _archive_request_terminal(
+                    req_path,
+                    "completed",
+                    "existing_response_reconciled",
+                )
+                if moved:
+                    summary["moved_to_stale"] += 1
+                elif move_reason not in {"missing", "permission_denied"}:
+                    log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
+                continue
+
+            lock_path = _acquire_request_claim(lock_dir, req_path)
+            if lock_path is None:
+                summary["skipped"] += 1
+                continue
+
+            before_cache_path: Path | None = None
+            before_cache_exists = False
+            try:
+                payload_for_identity = _normalize_request_payload(read_json_any_encoding(req_path))
+                before_cache_path, _signature, _key, identity_error = _mql_tester_replay_cache_path(payload_for_identity, bus)
+                if identity_error:
+                    before_cache_path = None
+                before_cache_exists = bool(before_cache_path and before_cache_path.exists())
+            except Exception:
+                before_cache_path = None
+
+            processing_path = _move_claimed_request_to_processing(req_path)
+            _process_claimed_request(processing_path, resp_dir, stale_dir, lock_path)
+            summary["processed_new"] += 1
+            if not req_path.exists():
+                summary["moved_to_stale"] += 1
+            if before_cache_path and before_cache_path.exists():
+                if before_cache_exists:
+                    summary["cache_existing"] += 1
+                else:
+                    summary["cache_written"] += 1
+            else:
+                summary["skipped"] += 1
+        except Exception as exc:
+            summary["errors"] += 1
+            log(f"[tester_cache_export] fill_once_error request={req_path.name} error={exc}")
+
+    log(
+        "[tester_cache_export_summary] mode=fill_once "
+        + " ".join(f"{key}={value}" for key, value in summary.items())
+    )
+    return summary
+
+
+def _ledger_status_for_policy_manifest(bus: Path) -> str:
+    candidates = (
+        bus / "logs" / "analytics" / "ledger_integrity_report.json",
+        resolve_project_path("data/ledger_integrity_report.json"),
+        resolve_project_path("data/ledger_audit.json"),
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            payload = read_json_any_encoding(path)
+        except Exception:
+            continue
+        status = str(
+            payload.get("global_status")
+            or payload.get("ledger_integrity_status")
+            or payload.get("status")
+            or ""
+        ).upper()
+        clean_count = int(payload.get("clean_count") or payload.get("clean") or 0)
+        if status in {"CLEAN", "VERIFIED_CLEAN", "RECONCILED_CLEAN"} and clean_count > 0:
+            return "CLEAN"
+        return status or "QUARANTINED"
+    return "UNKNOWN"
+
+
+def _write_startup_policy_manifest(bus: Path) -> Dict[str, Any]:
+    policy_dir = bus / "logs" / "policies"
+    config_dir = bus / "config"
+    ledger_status = _ledger_status_for_policy_manifest(bus)
+    # Python starts before it has an EA request and therefore cannot prove the
+    # active runtime-input contract.  An empty expected hash would incorrectly
+    # look compatible; active policy authority remains blocked at this stage.
+    ea_runtime_required = "__EA_RUNTIME_INPUT_HASH_REQUIRED__"
+    specs = [
+        PolicySpec("active", "active_policy", policy_dir / "active_policy.json", True, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("context", "context_policy", policy_dir / "context_policy.ndjson", True, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("subtype", "subtype_policy", policy_dir / "subtype_policy.ndjson", True, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("session", "session_weekday_policy", policy_dir / "session_weekday_policy.ndjson", True, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("hierarchical_priors", "hierarchical_priors", AI_CONFIG.live_bucket_priors_file, True, "active", HIERARCHICAL_PRIOR_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
+        PolicySpec("risk_factors", "risk_factor_policy", config_dir / "risk_factor_policy.v1.json", True, "active", RISK_FACTOR_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
+        PolicySpec("invalidation", "invalidation_policy", config_dir / "invalidation_policy.v1.json", True, "active", INVALIDATION_POLICY_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
+        PolicySpec("normalized_fvg", "normalized_fvg_policy", config_dir / "normalized_fvg_policy.v2.json", True, "shadow", NORMALIZED_FVG_SCHEMA_VERSION),
+        PolicySpec("management", "management_policy", bus / "logs" / "analytics" / "management_policy.json", True, "shadow", MANAGEMENT_SCHEMA_VERSION),
+        PolicySpec("calibration", "calibration_artifact", resolve_project_path("data/calibration_artifact.json"), True, "shadow", CALIBRATION_CONTRACT_VERSION),
+        PolicySpec("repeatability", "repeatability_artifact", AI_CONFIG.shadow_repeat_artifact_file, True, "shadow", REPEATABILITY_SCHEMA_VERSION),
+    ]
+    manifest = build_startup_policy_manifest(
+        specs,
+        ledger_integrity_status=ledger_status,
+        runtime_input_hash="python_startup_no_ea_payload",
+    )
+    manifest["component_scope"] = "python_pre_request"
+    manifest["runtime_authority_available"] = False
+    manifest["runtime_authority_reason"] = "ea_runtime_payload_not_available_at_python_startup"
+    manifest.pop("manifest_hash", None)
+    manifest["manifest_hash"] = canonical_hash(manifest)
+    governance_atomic_write_json(bus / "logs" / "startup_policy_manifest.json", manifest)
+    governance_atomic_write_json(resolve_project_path("data/startup_policy_manifest_latest.json"), manifest)
+    for row in manifest["policies"]:
+        log(
+            "[startup_policy_manifest]"
+            f" policy_type={row['policy_type']} policy_id={row['policy_id']}"
+            f" status={row['status']} authority={row['authority']}"
+            f" reason={';'.join(row['rejection_reasons']) or 'none'}"
+        )
+    return manifest
+
+
+def _log_file_bus_summary() -> None:
+    if FILE_BUS_LIFECYCLE is None:
+        return
+    summary = FILE_BUS_LIFECYCLE.summary()
+    log("[file_bus_final_summary] " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
 
 # ---------- Main loop ----------
 
@@ -4265,6 +6336,11 @@ def main() -> None:
         type=int,
         default=int(os.getenv("AI_GATE_WORKERS", "4")),
         help="Maximum AI requests processed concurrently (default: 4).",
+    )
+    ap.add_argument(
+        "--fill-tester-cache-once",
+        action="store_true",
+        help="Process current RECORD_ONLY tester requests into the MQL tester replay cache, then exit.",
     )
     args = ap.parse_args()
 
@@ -4301,9 +6377,16 @@ def main() -> None:
     lock_dir = bus / "locks"
     analytics_jobs_dir = bus / "logs" / "analytics_jobs"
 
-    global LOG_FILE
+    global LOG_FILE, FILE_BUS_LIFECYCLE
     LOG_FILE = bus / "logs" / "ai_gate.log"
     set_openai_usage_bus(bus)
+
+    FILE_BUS_LIFECYCLE = FileBusLifecycle(
+        bus,
+        session_id=f"python_{os.getpid()}_{int(time.time())}",
+    )
+    FILE_BUS_LIFECYCLE.ensure()
+    recovered = FILE_BUS_LIFECYCLE.recover_processing(stale_after_sec=REQUEST_LOCK_STALE_SEC)
 
     req_dir.mkdir(parents=True, exist_ok=True)
     resp_dir.mkdir(parents=True, exist_ok=True)
@@ -4322,7 +6405,28 @@ def main() -> None:
     log(f"[ai_gate] Model chain:       {', '.join(_candidate_models())}")
     log(f"[ai_gate] Request workers:    {worker_count}")
     log(f"[ai_gate] Analytics jobs:    {analytics_jobs_dir}")
+    log(
+        f"[file_bus] lifecycle_version={FILE_BUS_LIFECYCLE_VERSION}"
+        f" session_id={FILE_BUS_LIFECYCLE.session_id} recovered={len(recovered)}"
+    )
     _log_ai_runtime_config_once()
+    _refresh_prior_startup_audit()
+    _write_startup_policy_manifest(bus)
+    repeatability_artifact = _load_repeatability_artifact()
+    log(
+        "[repeatability_startup_audit] "
+        f"path={AI_CONFIG.shadow_repeat_artifact_file} exists={str(AI_CONFIG.shadow_repeat_artifact_file.is_file()).lower()} "
+        f"schema={repeatability_artifact.get('schema_version')} groups={len(repeatability_artifact.get('groups') or {})} "
+        f"shadow_enabled={str(AI_CONFIG.shadow_repeat_enable).lower()} sample_rate={AI_CONFIG.shadow_repeat_sample_rate:.4f} "
+        f"repeat_count={AI_CONFIG.shadow_repeat_count}"
+    )
+    if args.fill_tester_cache_once:
+        try:
+            fill_tester_cache_once(bus)
+        finally:
+            request_pool.shutdown(wait=True)
+            _log_file_bus_summary()
+        return
     while True:
         try:
             for req_path in sorted(req_dir.glob("*.json")):
@@ -4332,16 +6436,27 @@ def main() -> None:
                 req_id = req_path.stem
                 resp_path = resp_dir / f"{req_id}.json"
                 if resp_path.exists():
-                    moved, move_reason = _try_move_to_stale(req_path, stale_dir)
+                    _repair_mql_tester_replay_cache_from_existing_response(req_path, resp_path, bus)
+                    moved, move_reason = _archive_request_terminal(
+                        req_path,
+                        "completed",
+                        "existing_response_reconciled",
+                    )
                     if not moved and move_reason not in {"missing", "permission_denied"}:
                         log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
                     continue
                 lock_path = _acquire_request_claim(lock_dir, req_path)
                 if lock_path is None:
                     continue
+                try:
+                    processing_path = _move_claimed_request_to_processing(req_path)
+                except Exception as exc:
+                    _release_request_claim(lock_path)
+                    log(f"[file_bus] claim_failed request={req_path.name} error={exc}")
+                    continue
                 request_pool.submit(
                     _process_claimed_request,
-                    req_path,
+                    processing_path,
                     resp_dir,
                     stale_dir,
                     lock_path,
@@ -4370,6 +6485,7 @@ def main() -> None:
             print("\n[ai_gate] Stopped.")
             break
     request_pool.shutdown(wait=True)
+    _log_file_bus_summary()
 
 if __name__ == "__main__":
     main()

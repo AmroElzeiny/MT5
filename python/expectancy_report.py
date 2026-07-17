@@ -31,31 +31,30 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from openai_usage_logger import log_openai_usage
 from po3_env import load_dotenv
+from calibration_pipeline import run_shadow_calibration, write_calibration_reports
+from experiment_registry import ExperimentRegistry
+from architecture_contracts import partition_homogeneous_cohorts
+from governance_contracts import (
+    EMPIRICAL_PRE_ENTRY_FEATURES,
+    FEATURE_LINEAGE_VERSION,
+    LedgerIntegrityStatus,
+    audit_trade_records,
+    block_bootstrap_uncertainty,
+    enforce_policy_governance,
+    feature_lineage_violations,
+    purged_chronological_folds,
+    suppression_eligibility,
+    write_feature_lineage,
+)
 
 # Analytics should use this project's .env, not a stale shell-level API key.
 load_dotenv(override=True)
 
 
-FEATURE_SPECS: List[Dict[str, str]] = [
-    {"name": "setup_score", "direction": "positive"},
-    {"name": "effective_rr2", "direction": "positive"},
-    {"name": "liquidity_rr", "direction": "positive"},
-    {"name": "sequence_quality", "direction": "positive"},
-    {"name": "htf_alignment_score", "direction": "positive"},
-    {"name": "stop_quality_score", "direction": "positive"},
-    {"name": "trend_strength", "direction": "positive"},
-    {"name": "session_vol_ratio", "direction": "positive"},
-    {"name": "fvg_score", "direction": "positive"},
-    {"name": "adverse_context_score", "direction": "negative"},
-    {"name": "execution_cost_r", "direction": "negative"},
-    {"name": "slippage_r", "direction": "negative"},
-    {"name": "commission_r", "direction": "negative"},
-    {"name": "gross_expected_r", "direction": "positive"},
-    {"name": "net_expected_r", "direction": "positive"},
-    {"name": "fill_slippage_r", "direction": "negative"},
-    {"name": "vwap_dist_atr", "direction": "negative"},
-    {"name": "news_risk", "direction": "negative"},
-]
+# This hand-built scorecard is diagnostic only.  It uses immutable pre-entry
+# features and deliberately excludes setup_score and hand-built EV/probability
+# fields so they cannot be counted twice or acquire trading authority.
+FEATURE_SPECS: List[Dict[str, str]] = [dict(item) for item in EMPIRICAL_PRE_ENTRY_FEATURES]
 
 DECISION_MAKER_EDIT_SCOPE: Dict[str, Any] = {
     "runtime_policy_files": {
@@ -125,7 +124,6 @@ DECISION_MAKER_EDIT_SCOPE: Dict[str, Any] = {
         "InpMaxTradesPerScan",
         "InpMaxTotalRiskEnable",
         "InpMaxTotalRiskMoney",
-        "InpAutoSuppressWeakFamiliesLive",
         "InpUseSnapshotAI",
         "InpRequireSnapshots",
         "Market Watch symbol list",
@@ -315,8 +313,16 @@ def _subtype_key(record: Dict[str, Any]) -> str:
     return f"{po3_subtype}|{fvg_subtype}|{setup_class}|{regime}"
 
 
-def _ai_score_bucket(record: Dict[str, Any]) -> str:
-    score = _safe_float(record.get("ai_score"), _safe_float(record.get("score"), _safe_float(record.get("ai_decision_score"))))
+def _llm_quality_score_bucket(record: Dict[str, Any]) -> str:
+    score = _safe_float(record.get("llm_quality_score"), _safe_float(record.get("ai_llm_quality_score")))
+    if score <= 0:
+        # Explicit read-only migration for pre-integrity analytics. Legacy
+        # values never become calibrated probabilities or entry authority.
+        for legacy_field in ("ai_score", "score", "ai_decision_score"):
+            if record.get(legacy_field) not in (None, ""):
+                score = _safe_float(record.get(legacy_field))
+                record.setdefault("legacy_llm_quality_alias_source", legacy_field)
+                break
     if score <= 0:
         return "unknown"
     if score < 5.0:
@@ -386,6 +392,8 @@ def _load_trade_identity_index(logs_dir: Path) -> Dict[str, str]:
             meta = _read_json_any_encoding(path)
         except Exception:
             continue
+        if not _safe_bool(meta.get("execution_identity_verified")) or _safe_bool(meta.get("execution_identity_quarantined")):
+            continue
         trade_key = str(meta.get("trade_key") or "").strip()
         identity = _record_trade_id(meta)
         if trade_key and identity:
@@ -427,6 +435,21 @@ def _invalid_trade_record_reasons(record: Dict[str, Any]) -> List[str]:
     schema_version = _safe_int(record.get("analytics_schema_version"), 0)
     if schema_version < 2 and _safe_float(record.get("virtual_balance_base")) <= 0.0:
         reasons.append("legacy_trade_result_schema")
+    if schema_version >= 3:
+        if not _safe_bool(record.get("execution_identity_verified")):
+            reasons.append("execution_identity_unverified")
+        if _safe_bool(record.get("execution_identity_quarantined")):
+            reasons.append("execution_identity_quarantined")
+        if not _valid_identity(record.get("result_order_ticket")):
+            reasons.append("missing_result_order_ticket")
+        if not _valid_identity(record.get("result_deal_ticket")):
+            reasons.append("missing_result_deal_ticket")
+        if not _valid_identity(record.get("broker_position_identifier")):
+            reasons.append("missing_broker_position_identifier")
+        if not str(record.get("candidate_hash") or "").strip():
+            reasons.append("missing_candidate_hash")
+        if not str(record.get("final_execution_fingerprint") or "").strip():
+            reasons.append("missing_execution_fingerprint")
     if not _record_trade_id(record):
         reasons.append("missing_trade_id")
     has_pnl, pnl = _realized_pnl(record)
@@ -459,12 +482,16 @@ def _record_quality_example(path: Path, record: Dict[str, Any], reasons: List[st
 
 
 def _normalize_loaded_record(record: Dict[str, Any]) -> None:
+    # Explicit analytics aliases for pre-v4 report code.  The authoritative
+    # fields remain broker_net_pnl and result_r_initial_risk.
+    record["realized_pnl"] = _safe_float(record.get("broker_net_pnl"), _safe_float(record.get("realized_pnl")))
+    record["realized_r"] = _safe_float(record.get("result_r_initial_risk"), _safe_float(record.get("realized_r")))
     record.setdefault("volatility_profile", _derive_volatility_profile(record))
     record.setdefault("policy_bucket", _policy_bucket(record))
     record.setdefault("subtype_key", _subtype_key(record))
     record.setdefault("setup_family", str(record.get("setup_family") or record.get("setup_class") or "unknown"))
     record.setdefault("entry_branch", str(record.get("entry_branch") or record.get("entry_model") or "unknown"))
-    record.setdefault("ai_score_bucket", _ai_score_bucket(record))
+    record.setdefault("llm_quality_score_bucket", _llm_quality_score_bucket(record))
     record.setdefault("execution_cost_bucket", _execution_cost_bucket(record))
     record.setdefault("duration_minutes", _duration_minutes(record))
     record.setdefault("runner_trade", _safe_bool(record.get("runner_trade")))
@@ -495,46 +522,60 @@ def _load_records_with_quality(logs_dir: Path, include_suspicious: Optional[bool
         "parse_failures": 0,
         "identity_meta_keys": 0,
         "identity_enriched_from_trade_key_meta": 0,
+        "identity_recovery_policy": "disabled_exact_position_id_required",
     }
     if not logs_dir.exists():
         return [], quality
     paths = sorted(logs_dir.glob("trade_result_*.json"))
     quality["loaded_files"] = len(paths)
-    identities_by_key = _load_trade_identity_index(logs_dir)
-    quality["identity_meta_keys"] = len(identities_by_key)
-
-    ignored_reasons: Counter[str] = Counter()
-    records: List[Dict[str, Any]] = []
+    raw_records: List[Dict[str, Any]] = []
+    source_by_index: List[Path] = []
     for path in paths:
         try:
             record = _read_json_any_encoding(path)
         except Exception:
             quality["parse_failures"] += 1
-            ignored_reasons["parse_failure"] += 1
             continue
+        raw_records.append(record)
+        source_by_index.append(path)
 
-        identity_source = _enrich_trade_identity(record, identities_by_key)
-        if identity_source:
-            record["trade_identity_source"] = identity_source
-            quality["identity_enriched_from_trade_key_meta"] += 1
-
-        reasons = _invalid_trade_record_reasons(record)
-        record["data_integrity_status"] = "suspicious" if reasons else str(record.get("data_integrity_status") or "clean")
-        record["data_integrity_reasons"] = reasons
-        if reasons:
-            for reason in reasons:
-                ignored_reasons[reason] += 1
+    audited, ledger_report = audit_trade_records(raw_records)
+    quality["central_ledger_audit"] = ledger_report
+    quality["ledger_integrity_status"] = ledger_report.get("global_status", LedgerIntegrityStatus.QUARANTINED.value)
+    quality["ignored_reasons"] = dict(ledger_report.get("reason_counts") or {})
+    records: List[Dict[str, Any]] = []
+    for index, record in enumerate(audited):
+        status = str(record.get("ledger_integrity_status") or LedgerIntegrityStatus.QUARANTINED.value)
+        reasons = list(record.get("ledger_integrity_reasons") or [])
+        if status != LedgerIntegrityStatus.CLEAN.value:
             if len(quality["ignored_examples"]) < 12:
-                quality["ignored_examples"].append(_record_quality_example(path, record, reasons))
+                quality["ignored_examples"].append(
+                    _record_quality_example(source_by_index[index], record, reasons)
+                )
             if not include_suspicious:
                 continue
-
         _normalize_loaded_record(record)
         records.append(record)
     records.sort(key=lambda r: _safe_int(r.get("closed_at")))
+    cohorts = partition_homogeneous_cohorts(records)
+    cohort_counts = {cohort_id: len(rows) for cohort_id, rows in cohorts.items()}
+    complete_cohort_ids = [cohort_id for cohort_id in cohorts if cohort_id != "INCOMPLETE"]
+    cohort_block_reasons: List[str] = []
+    if "INCOMPLETE" in cohorts:
+        cohort_block_reasons.append("cohort_metadata_incomplete")
+    if len(complete_cohort_ids) > 1:
+        cohort_block_reasons.append("mixed_version_cohort_analysis_blocked")
+    quality["cohort_counts"] = cohort_counts
+    quality["cohort_ids"] = complete_cohort_ids
+    quality["cohort_integrity_status"] = "BLOCKED" if cohort_block_reasons else ("COMPATIBLE" if records else "NO_DATA")
+    quality["cohort_block_reasons"] = cohort_block_reasons
+    if cohort_block_reasons:
+        quality["ignored_reasons"]["cohort_integrity_block"] = len(records)
+        quality["ignored_records"] = len(audited)
+        quality["used_records"] = 0
+        return [], quality
     quality["used_records"] = len(records)
-    quality["ignored_records"] = quality["loaded_files"] - len(records)
-    quality["ignored_reasons"] = dict(sorted(ignored_reasons.items()))
+    quality["ignored_records"] = len(audited) - len(records)
     return records, quality
 
 
@@ -1002,9 +1043,8 @@ def _summarize(records: Iterable[Dict[str, Any]], bootstrap_iterations: int = 0)
             "win_rate": 0.0,
             "avg_r": 0.0,
             "avg_effective_rr2": 0.0,
-            "avg_expected_value_r": 0.0,
-            "avg_net_expected_r": 0.0,
-            "avg_gross_expected_r": 0.0,
+            "avg_heuristic_expected_r_diagnostic": None,
+            "avg_expected_value_r_legacy_alias": None,
             "avg_execution_cost_r": 0.0,
             "avg_slippage_r": 0.0,
             "avg_commission_r": 0.0,
@@ -1020,14 +1060,15 @@ def _summarize(records: Iterable[Dict[str, Any]], bootstrap_iterations: int = 0)
             "r_ci_low": 0.0,
             "r_ci_high": 0.0,
             "bootstrap_positive_rate": 0.0,
+            "uncertainty_available": False,
+            "uncertainty_method": "day_block_bootstrap",
+            "equal_trade_weighted_expectancy_r": 0.0,
+            "risk_weighted_expectancy_r": 0.0,
         }
 
-    pnls = [_safe_float(r.get("realized_pnl")) for r in rows]
-    rs = [_safe_float(r.get("realized_r")) for r in rows]
+    pnls = [_safe_float(r.get("broker_net_pnl"), _safe_float(r.get("realized_pnl"))) for r in rows]
+    rs = [_safe_float(r.get("result_r_initial_risk"), _safe_float(r.get("realized_r"))) for r in rows]
     eff_rr = [_safe_float(r.get("effective_rr2")) for r in rows]
-    exp_r = [_safe_float(r.get("expected_value_r")) for r in rows]
-    net_exp_r = [_safe_float(r.get("net_expected_r"), _safe_float(r.get("expected_value_r"))) for r in rows]
-    gross_exp_r = [_safe_float(r.get("gross_expected_r")) for r in rows]
     execution_costs = [_safe_float(r.get("execution_cost_r")) for r in rows]
     slippage_rs = [_safe_float(r.get("slippage_r")) for r in rows]
     commission_rs = [_safe_float(r.get("commission_r")) for r in rows]
@@ -1041,7 +1082,23 @@ def _summarize(records: Iterable[Dict[str, Any]], bootstrap_iterations: int = 0)
     gross_loss = abs(sum(p for p in pnls if p < 0.0))
     wins = sum(1 for value in rs if value > 0.0)
     losses = sum(1 for value in rs if value < 0.0)
-    r_boot = _bootstrap_mean(rs, bootstrap_iterations, 23 + count)
+    uncertainty = block_bootstrap_uncertainty(
+        rows,
+        iterations=bootstrap_iterations,
+        block_type="day",
+        seed=23 + count,
+    )
+    uncertainty_available = bool(uncertainty.get("available"))
+    total_risk = sum(max(0.0, _safe_float(row.get("initial_risk_money"))) for row in rows)
+    risk_weighted_expectancy = (
+        sum(
+            _safe_float(row.get("result_r_initial_risk"), _safe_float(row.get("realized_r")))
+            * max(0.0, _safe_float(row.get("initial_risk_money")))
+            for row in rows
+        ) / total_risk
+        if total_risk > 0.0
+        else 0.0
+    )
 
     return {
         "count": count,
@@ -1050,9 +1107,8 @@ def _summarize(records: Iterable[Dict[str, Any]], bootstrap_iterations: int = 0)
         "win_rate": wins / count if count else 0.0,
         "avg_r": _mean(rs),
         "avg_effective_rr2": _mean(eff_rr),
-        "avg_expected_value_r": _mean(exp_r),
-        "avg_net_expected_r": _mean(net_exp_r),
-        "avg_gross_expected_r": _mean(gross_exp_r),
+        "avg_heuristic_expected_r_diagnostic": None,
+        "avg_expected_value_r_legacy_alias": None,
         "avg_execution_cost_r": _mean(execution_costs),
         "avg_slippage_r": _mean(slippage_rs),
         "avg_commission_r": _mean(commission_rs),
@@ -1065,9 +1121,14 @@ def _summarize(records: Iterable[Dict[str, Any]], bootstrap_iterations: int = 0)
         "avg_mae_r": _mean(mae_rs),
         "avg_duration_minutes": _mean(durations),
         "avg_stop_quality": _mean(stop_q),
-        "r_ci_low": r_boot["ci_low"],
-        "r_ci_high": r_boot["ci_high"],
-        "bootstrap_positive_rate": r_boot["positive_rate"],
+        "r_ci_low": uncertainty.get("mean_r_ci_low") if uncertainty_available else None,
+        "r_ci_high": uncertainty.get("mean_r_ci_high") if uncertainty_available else None,
+        "bootstrap_positive_rate": _safe_float(uncertainty.get("positive_draw_rate")) if uncertainty_available else 0.0,
+        "uncertainty_available": uncertainty_available,
+        "uncertainty_method": "day_block_bootstrap",
+        "effective_block_count": _safe_int(uncertainty.get("effective_block_count")),
+        "equal_trade_weighted_expectancy_r": _mean(rs),
+        "risk_weighted_expectancy_r": risk_weighted_expectancy,
     }
 
 
@@ -1085,6 +1146,21 @@ def _group_summary(records: List[Dict[str, Any]], field: str, min_count: int, bo
         rows.append(item)
     rows.sort(key=lambda row: (-row["avg_r"], -row["count"], row["bucket"]))
     return rows
+
+
+def _strict_suppression_evidence(rows: List[Dict[str, Any]], min_sample: int) -> Dict[str, Any]:
+    ledger_status = (
+        LedgerIntegrityStatus.CLEAN.value
+        if rows and all(row.get("ledger_integrity_status") == LedgerIntegrityStatus.CLEAN.value for row in rows)
+        else LedgerIntegrityStatus.SUSPICIOUS.value
+    )
+    return suppression_eligibility(
+        rows,
+        ledger_status=ledger_status,
+        min_clean_sample=max(1, min_sample),
+        bootstrap_iterations=1000,
+        block_type="day",
+    )
 
 
 def _pearson(x_values: List[float], y_values: List[float]) -> float:
@@ -1184,13 +1260,14 @@ def _scorecard_predict(record: Dict[str, Any], model: Dict[str, Any]) -> Dict[st
         if feature.get("direction") == "negative":
             centered *= -1.0
         score += centered * _safe_float(feature.get("weight"))
-    probability = _sigmoid(score)
+    heuristic_win_rate = _sigmoid(score)
     effective_rr = max(0.0, _safe_float(record.get("effective_rr2"), _safe_float(record.get("rr2"))))
-    expected_r = probability * effective_rr - (1.0 - probability)
+    heuristic_expected_r = heuristic_win_rate * effective_rr - (1.0 - heuristic_win_rate)
     return {
         "score": score,
-        "probability": probability,
-        "expected_r": expected_r,
+        "heuristic_win_rate_diagnostic": heuristic_win_rate,
+        "heuristic_expected_r_diagnostic": heuristic_expected_r,
+        "decision_authoritative": False,
     }
 
 
@@ -1200,18 +1277,19 @@ def _evaluate_scorecard(records: List[Dict[str, Any]], model: Dict[str, Any], al
     for record in records:
         pred = _scorecard_predict(record, model)
         row = dict(record)
-        row["model_score"] = pred["score"]
-        row["model_probability"] = pred["probability"]
-        row["model_expected_r"] = pred["expected_r"]
+        row["heuristic_score_diagnostic"] = pred["score"]
+        row["heuristic_win_rate_diagnostic"] = pred["heuristic_win_rate_diagnostic"]
+        row["heuristic_expected_r_diagnostic"] = pred["heuristic_expected_r_diagnostic"]
         decorated.append(row)
-        if pred["expected_r"] >= allow_threshold:
+        if pred["heuristic_expected_r_diagnostic"] >= allow_threshold:
             selected.append(row)
     stats = _summarize(selected)
     stats.update(
         {
             "selected_count": len(selected),
             "coverage": len(selected) / len(records) if records else 0.0,
-            "avg_model_expected_r": _mean(row["model_expected_r"] for row in decorated),
+            "avg_heuristic_expected_r_diagnostic": _mean(row["heuristic_expected_r_diagnostic"] for row in decorated),
+            "heuristic_decision_authoritative": False,
         }
     )
     return stats
@@ -1293,8 +1371,8 @@ def _aggregate_walk_forward(rows: List[Dict[str, Any]]) -> Dict[str, float]:
         }
     train_r = [_safe_float(row["train_stats"].get("avg_r")) for row in rows]
     test_r = [_safe_float(row["test_stats"].get("avg_r")) for row in rows]
-    train_ev = [_safe_float(row["train_stats"].get("avg_model_expected_r")) for row in rows]
-    test_ev = [_safe_float(row["test_stats"].get("avg_model_expected_r")) for row in rows]
+    train_ev = [_safe_float(row["train_stats"].get("avg_heuristic_expected_r_diagnostic")) for row in rows]
+    test_ev = [_safe_float(row["test_stats"].get("avg_heuristic_expected_r_diagnostic")) for row in rows]
     gaps = [tr - te for tr, te in zip(train_r, test_r)]
     return {
         "folds": len(rows),
@@ -1340,15 +1418,21 @@ def _build_context_policies(
         positive_fold_rate = _safe_float(wf_summary.get("positive_fold_rate"))
         gap = _safe_float(wf_summary.get("avg_gap"))
 
+        suppression = _strict_suppression_evidence(rows, min_bucket_samples)
         action = "allow"
-        if avg_test_r <= -0.30 and positive_fold_rate < 0.45:
+        if suppression["suppression_eligible"]:
             action = "suppress"
         elif avg_test_r < 0.0 or gap > 0.40:
             action = "downrank"
 
         strength = _policy_strength(len(rows), min_bucket_samples, min_bucket_samples * 3)
         raw_score_bias = _clamp((avg_test_r - overall_stats["avg_r"]) * 6.0, -4.0, 4.0)
-        raw_ev_bias = _clamp(_safe_float(wf_summary.get("avg_test_ev"), fitted["avg_expected_value_r"]) - overall_stats["avg_r"], -1.5, 1.5)
+        raw_ev_bias = _clamp(
+            _safe_float(wf_summary.get("avg_test_ev"), fitted.get("avg_heuristic_expected_r_diagnostic"))
+            - overall_stats["avg_r"],
+            -1.5,
+            1.5,
+        )
         raw_risk_multiplier = _clamp(0.75 + avg_test_r * 0.30 + (positive_fold_rate - 0.5) * 0.25, 0.35, 1.0)
         score_bias = _blend_from_neutral(0.0, raw_score_bias, strength)
         expected_value_bias = _blend_from_neutral(0.0, raw_ev_bias, strength)
@@ -1367,6 +1451,12 @@ def _build_context_policies(
                 "fit_stats": fitted,
                 "walk_forward": walk_forward,
                 "walk_forward_summary": wf_summary,
+                "suppression_eligible": suppression["suppression_eligible"],
+                "suppression_block_reasons": suppression["suppression_block_reasons"],
+                "suppression_confidence_interval": suppression["suppression_confidence_interval"],
+                "suppression_fold_results": suppression["suppression_fold_results"],
+                "version_confound_detected": suppression["version_confound_detected"],
+                "controlled_effect_status": suppression["controlled_effect_status"],
             }
         )
         diagnostics.append(
@@ -1410,7 +1500,18 @@ def _build_subtype_backtest(records: List[Dict[str, Any]], min_subtype_samples: 
         shrunk_win_rate = (wins + prior_strength * base_win_rate) / (sample_count + prior_strength)
         avg_r = stats["avg_r"]
         action = "allow"
-        if sample_count >= min_subtype_samples and shrunk_win_rate < 0.42 and avg_r < -0.10 and stats["r_ci_high"] < 0.05:
+        ledger_status = (
+            LedgerIntegrityStatus.CLEAN.value
+            if all(row.get("ledger_integrity_status") == LedgerIntegrityStatus.CLEAN.value for row in rows)
+            else LedgerIntegrityStatus.SUSPICIOUS.value
+        )
+        suppression = suppression_eligibility(
+            rows,
+            ledger_status=ledger_status,
+            min_clean_sample=min_subtype_samples,
+            bootstrap_iterations=max(200, bootstrap_iterations),
+        )
+        if suppression["suppression_eligible"]:
             action = "suppress"
         elif shrunk_win_rate < 0.48 or avg_r < 0.0:
             action = "downrank"
@@ -1436,6 +1537,12 @@ def _build_subtype_backtest(records: List[Dict[str, Any]], min_subtype_samples: 
                 "evidence_score": round(evidence_score, 4),
                 "sample_count": sample_count,
                 "stats": stats,
+                "suppression_eligible": suppression["suppression_eligible"],
+                "suppression_block_reasons": suppression["suppression_block_reasons"],
+                "suppression_confidence_interval": suppression["suppression_confidence_interval"],
+                "suppression_fold_results": suppression["suppression_fold_results"],
+                "version_confound_detected": suppression["version_confound_detected"],
+                "controlled_effect_status": suppression["controlled_effect_status"],
             }
         )
     output.sort(key=lambda row: (row["action"], row["avg_r"], -row["sample_count"]))
@@ -1487,7 +1594,7 @@ def _snapshot_feature_report(records: List[Dict[str, Any]], min_count: int) -> L
                 "setup_class": setup_class,
                 "count": len(rows),
                 "avg_r": _mean(_safe_float(row.get("realized_r")) for row in rows),
-                "avg_expected_value_r": _mean(_safe_float(row.get("expected_value_r")) for row in rows),
+                "avg_heuristic_expected_r_diagnostic": None,
                 "avg_stop_quality": _mean(_safe_float(row.get("realized_stop_quality"), _safe_float(row.get("stop_quality_score"))) for row in rows),
                 "win_rate": _mean(1.0 if _safe_float(row.get("realized_r")) > 0.0 else 0.0 for row in rows),
             }
@@ -1684,14 +1791,15 @@ def _symbol_expectancy_policy(records: List[Dict[str, Any]]) -> List[Dict[str, A
     output: List[Dict[str, Any]] = []
     for symbol, rows in sorted(buckets.items()):
         stats = _summarize(rows, bootstrap_iterations=0)
+        suppression = _strict_suppression_evidence(rows, thresholds["symbol_suppress_trades"])
         family_rows = _family_rows(rows, min_count=1)
         supported = [r for r in family_rows if r["count"] >= 10]
         profitable = [r for r in supported if r["avg_r"] > 0.0 and r["profit_factor"] >= 1.05]
         action = "allow"
         reason = f"exploration_sample_lt_{thresholds['symbol_weak_trades']}"
-        if stats["count"] >= thresholds["symbol_suppress_trades"] and stats["profit_factor"] < 0.95:
+        if suppression["suppression_eligible"]:
             action = "suppress"
-            reason = f"symbol_pf_lt_0_95_after_{thresholds['symbol_suppress_trades']}"
+            reason = "strict_all_and_suppression_evidence_passed"
         elif stats["count"] >= thresholds["symbol_weak_trades"] and profitable:
             action = "family_only"
             reason = "profitable_family_supported"
@@ -1706,6 +1814,8 @@ def _symbol_expectancy_policy(records: List[Dict[str, Any]]) -> List[Dict[str, A
                 "best_setup_families": sorted(profitable, key=lambda r: (-r["avg_r"], -r["count"]))[:3],
                 "worst_setup_families": sorted(supported or family_rows, key=lambda r: (r["avg_r"], -r["count"]))[:3],
                 "stats": stats,
+                "suppression_eligible": suppression["suppression_eligible"],
+                "suppression_block_reasons": suppression["suppression_block_reasons"],
             }
         )
     return output
@@ -1719,9 +1829,11 @@ def _family_expectancy_policy(records: List[Dict[str, Any]]) -> List[Dict[str, A
         action = "allow"
         reason = f"exploration_sample_lt_{thresholds['family_weak_trades']}"
         risk_multiplier = 0.50 if count < thresholds["family_weak_trades"] else 1.0
-        if count >= thresholds["family_suppress_trades"] and (row["avg_r"] < 0.0 or row["profit_factor"] < 1.0):
+        family_records = [record for record in records if _group_key(record, "setup_family") == row["setup_family"]]
+        suppression = _strict_suppression_evidence(family_records, thresholds["family_suppress_trades"])
+        if suppression["suppression_eligible"]:
             action = "suppress"
-            reason = f"negative_expectancy_after_{thresholds['family_suppress_trades']}"
+            reason = "strict_all_and_suppression_evidence_passed"
             risk_multiplier = 0.0
         elif count >= thresholds["family_weak_trades"] and row["avg_r"] <= 0.0:
             action = "reduce_risk"
@@ -1739,6 +1851,8 @@ def _family_expectancy_policy(records: List[Dict[str, Any]]) -> List[Dict[str, A
                 "family_policy_action": action,
                 "family_policy_reason": reason,
                 "risk_multiplier": risk_multiplier,
+                "suppression_eligible": suppression["suppression_eligible"],
+                "suppression_block_reasons": suppression["suppression_block_reasons"],
             }
         )
         output.append(row)
@@ -1803,12 +1917,12 @@ FAMILY_INPUT_HINTS: Dict[str, Dict[str, str]] = {
     "micro_po3_reversal": {
         "floor": "InpSetupFloorMicroPO3",
         "rr": "InpMinRRMicroPO3",
-        "ai_score": "InpAiScoreMicroPO3",
+        "llm_quality_score_input": "InpAiScoreMicroPO3",
     },
     "full_po3": {
         "floor": "InpSetupFloorFullPO3",
         "rr": "InpMinRRFullPO3",
-        "ai_score": "InpAiScoreFullPO3",
+        "llm_quality_score_input": "InpAiScoreFullPO3",
     },
     "micro_bisi_sibi_edge": {
         "enable": "InpEnableFvgEdge / InpEnableBreakerRetest",
@@ -1818,7 +1932,7 @@ FAMILY_INPUT_HINTS: Dict[str, Dict[str, str]] = {
     "failed_breakout": {
         "floor": "InpSetupFloorFailedBreakout",
         "rr": "InpMinRRFailedBreakout",
-        "ai_score": "InpAiScoreFailedBreakout",
+        "llm_quality_score_input": "InpAiScoreFailedBreakout",
     },
 }
 
@@ -1972,9 +2086,9 @@ def _input_recommendations(
             continue
         family = str(row.get("setup_family") or "")
         hint = _family_hint(family)
-        inputs = [value for value in (hint.get("enable"), hint.get("floor"), hint.get("rr"), hint.get("ai_score")) if value]
+        inputs = [value for value in (hint.get("enable"), hint.get("floor"), hint.get("rr"), hint.get("llm_quality_score_input")) if value]
         if not inputs:
-            inputs = ["InpAutoSuppressWeakFamiliesLive", "family-specific setup floors"]
+            inputs = ["active_policy.json family policy", "family-specific setup floors"]
         if action == "suppress":
             suggested = "Disable the branch/family where an input exists, or raise its setup floor by 5-8 points and set risk multiplier to 0 in policy."
             severity = "high"
@@ -2055,7 +2169,7 @@ def _input_recommendations(
             category="subtype_policy",
             severity="high" if action == "suppress" else "medium",
             action=action,
-            inputs=["active_policy.json subtype_policy", "InpAutoSuppressWeakFamiliesLive"],
+            inputs=["active_policy.json subtype_policy", "InpPolicyShadowMode"],
             suggested_change="Let subtype policy penalize this pattern. Convert to a hard input disable only after the same branch/family is also weak.",
             reason="Subtype proof is weak after shrinkage and bootstrap checks.",
             evidence={
@@ -2263,14 +2377,11 @@ def _derive_active_policy(
     if not runner_winners:
         runner_winners = winners
 
-    soft_setup_floor = _runner_quantile(winners, "setup_score", 0.25, 35.0)
-    hard_setup_floor = max(18.0, soft_setup_floor - 6.0)
     runner_sequence_floor = _runner_quantile(runner_winners, "sequence_quality", 0.30, 6.6)
     runner_liquidity_rr_floor = _runner_quantile(runner_winners, "liquidity_rr", 0.30, 2.1)
     runner_cost_r_ceiling = _runner_quantile(runner_winners, "execution_cost_r", 0.75, 0.22)
     runner_alignment_floor = _runner_quantile(runner_winners, "htf_alignment_score", 0.30, 6.1)
     runner_adverse_ceiling = _runner_quantile(runner_winners, "adverse_context_score", 0.75, 3.2)
-    runner_ev_floor = max(0.0, _runner_quantile(runner_winners, "expected_value_r", 0.25, 0.0))
 
     global_wf = context_bundle.get("global_walk_forward_summary", {})
     max_relevant_bucket = max(
@@ -2315,14 +2426,15 @@ def _derive_active_policy(
     evidence_score = _clamp(
         len(records) / max(float(min_total_trades), 1.0)
         + overall["bootstrap_positive_rate"]
-        + max(0.0, overall["r_ci_low"]),
+        + max(0.0, _safe_float(overall.get("r_ci_low"))),
         0.0,
         4.0,
     )
     evidence_passed = (
         len(records) >= min_total_trades
         and max_relevant_bucket >= min_bucket_trades
-        and overall["r_ci_low"] > 0.0
+        and bool(overall.get("uncertainty_available"))
+        and _safe_float(overall.get("r_ci_low")) > 0.0
         and overall["profit_factor"] > min_pf_after_costs
         and overall["max_drawdown_r"] <= max_drawdown_r
     )
@@ -2340,8 +2452,9 @@ def _derive_active_policy(
         "evidence_passed": evidence_passed,
         "walk_forward_passed": walk_forward_passed,
         "change_rate_passed": True,
-        "soft_setup_floor": round(soft_setup_floor, 4),
-        "hard_setup_floor": round(hard_setup_floor, 4),
+        "legacy_setup_score_authority": False,
+        "calibrated_probability_authority": False,
+        "expected_net_r_authority": False,
         "setup_floor_penalty_mult": 0.75,
         "ote_softness_frac": 0.08,
         "default_risk_multiplier": round(_clamp(0.9 + overall["avg_r"] * 0.10, 0.75, 1.0), 4),
@@ -2350,7 +2463,7 @@ def _derive_active_policy(
         "runner_cost_r_ceiling": round(runner_cost_r_ceiling, 4),
         "runner_alignment_floor": round(runner_alignment_floor, 4),
         "runner_adverse_ceiling": round(runner_adverse_ceiling, 4),
-        "runner_ev_floor": round(runner_ev_floor, 4),
+        "runner_ev_floor_available": False,
     }
     current = _apply_gradual_active_policy(previous_active, current)
     change_check = _change_rate_check(previous_active, current)
@@ -2365,7 +2478,8 @@ def _derive_active_policy(
             "min_total_trades": min_total_trades,
             "min_bucket_trades": min_bucket_trades,
             "max_relevant_bucket": max_relevant_bucket,
-            "r_ci_low": overall["r_ci_low"],
+            "r_ci_low": overall.get("r_ci_low"),
+            "uncertainty_available": bool(overall.get("uncertainty_available")),
             "profit_factor_after_costs": overall["profit_factor"],
             "max_drawdown_r": overall["max_drawdown_r"],
             "min_profit_factor_after_costs": min_pf_after_costs,
@@ -3252,7 +3366,10 @@ def _render_markdown(suite: Dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"Trades analyzed: {overall['count']}")
     lines.append(f"Avg R: {overall['avg_r']:.3f}")
-    lines.append(f"R 90% CI: [{overall['r_ci_low']:.3f}, {overall['r_ci_high']:.3f}]")
+    if overall.get("uncertainty_available"):
+        lines.append(f"R 90% day-block CI: [{_safe_float(overall.get('r_ci_low')):.3f}, {_safe_float(overall.get('r_ci_high')):.3f}]")
+    else:
+        lines.append("R uncertainty: unavailable (insufficient independent day blocks)")
     history = suite.get("system_trade_history") or {}
     ledger = history.get("summary") or {}
     if ledger:
@@ -3436,7 +3553,7 @@ def build_report(
         "regime_bucket",
         "volatility_profile",
         "setup_class",
-        "ai_score_bucket",
+        "llm_quality_score_bucket",
         "execution_cost_bucket",
         "ai_decision_source",
         "weekday_name",
@@ -3476,6 +3593,9 @@ def run_analytics_suite(
     policy_min_positive_fold_rate: Optional[float] = None,
     policy_max_drawdown_r: Optional[float] = None,
     include_suspicious: Optional[bool] = None,
+    experiment_id: str = "",
+    experiment_hypothesis: str = "",
+    experiment_registry_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     include_sources = include_sources or set()
     exclude_sources = exclude_sources or set()
@@ -3484,6 +3604,8 @@ def run_analytics_suite(
     records = _filter_ai_decision_sources(records, include_sources, exclude_sources)
     data_quality["source_filter_excluded"] = records_before_source_filter - len(records)
     data_quality["analyzed_records"] = len(records)
+    ledger_report = dict(data_quality.get("central_ledger_audit") or {})
+    ledger_status = str(ledger_report.get("global_status") or LedgerIntegrityStatus.QUARANTINED.value)
     virtual_start_balance = _virtual_start_balance()
     records = _decorate_virtual_ledger(records, virtual_start_balance)
     system_history = _system_trade_history(records, virtual_start_balance)
@@ -3522,6 +3644,32 @@ def run_analytics_suite(
         max_drawdown_r=policy_max_drawdown_r,
     )
 
+    feature_manifest = write_feature_lineage(analytics_root / "feature_lineage.json")
+    lineage_violations = feature_lineage_violations(feature_manifest)
+    registry_path = experiment_registry_path or (policy_root / "experiment_registry.jsonl")
+    registry = ExperimentRegistry(registry_path)
+    experiment_authorized, experiment_authorization_reason = registry.optimization_authorized(
+        experiment_id,
+        experiment_hypothesis,
+    )
+    activation_contract_reasons: List[str] = []
+    if ledger_status != LedgerIntegrityStatus.CLEAN.value:
+        activation_contract_reasons.append("ledger_not_globally_clean")
+    if lineage_violations:
+        activation_contract_reasons.append("feature_lineage_invalid")
+    if not experiment_authorized:
+        activation_contract_reasons.append("experiment_not_authorized:" + experiment_authorization_reason)
+    activation_contract_ok = not activation_contract_reasons
+
+    engine_versions = sorted({str(row.get("engine_version") or "") for row in records if row.get("engine_version")})
+    decision_versions = sorted({str(row.get("decision_schema_version") or "") for row in records if row.get("decision_schema_version")})
+    calibration_artifact = run_shadow_calibration(
+        records,
+        ledger_status=ledger_status,
+        engine_version=engine_versions[0] if len(engine_versions) == 1 else "",
+        decision_schema_version=decision_versions[0] if len(decision_versions) == 1 else "",
+    )
+
     next_version = _safe_int((previous_active or {}).get("version"), 0) + 1
     policy_id = f"policy_{int(time.time())}_v{next_version}"
     active_policy = dict(active_bundle["active_policy"])
@@ -3532,15 +3680,55 @@ def run_analytics_suite(
         if policy_shadow_mode is not None
         else os.getenv("POLICY_SHADOW_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
     )
-    governance_passed = bool(active_bundle["governance"].get("activate_ok"))
+    evidence_governance_passed = bool(active_bundle["governance"].get("activate_ok"))
+    governance_passed = evidence_governance_passed and activation_contract_ok
     active_policy["shadow_mode"] = shadow_mode
     active_policy["activation_state"] = "shadow" if shadow_mode else ("eligible" if governance_passed else "blocked")
     active_bundle["governance"]["shadow_mode"] = shadow_mode
     active_bundle["governance"]["governance_passed"] = governance_passed
+    active_bundle["governance"]["evidence_governance_passed"] = evidence_governance_passed
+    active_bundle["governance"]["ledger_integrity_status"] = ledger_status
+    active_bundle["governance"]["feature_lineage_version"] = FEATURE_LINEAGE_VERSION
+    active_bundle["governance"]["feature_lineage_violations"] = lineage_violations
+    active_bundle["governance"]["experiment_id"] = experiment_id
+    active_bundle["governance"]["experiment_authorized"] = experiment_authorized
+    active_bundle["governance"]["experiment_authorization_reason"] = experiment_authorization_reason
+    active_bundle["governance"]["activation_contract_reasons"] = activation_contract_reasons
+    active_bundle["governance"]["calibration_trading_activation"] = False
     active_bundle["governance"]["activate_ok"] = governance_passed and not shadow_mode
 
-    context_policy = _snapshot_stub_policy_rows(context_bundle["context_policies"], policy_id)
-    subtype_policy = _snapshot_stub_policy_rows(subtype_rows, policy_id)
+    policy_authority = governance_passed and not shadow_mode
+    context_policy = _snapshot_stub_policy_rows(
+        enforce_policy_governance(
+            context_bundle["context_policies"],
+            activation_allowed=policy_authority,
+            block_reasons=activation_contract_reasons,
+        ),
+        policy_id,
+    )
+    subtype_policy = _snapshot_stub_policy_rows(
+        enforce_policy_governance(
+            subtype_rows,
+            activation_allowed=policy_authority,
+            block_reasons=activation_contract_reasons,
+        ),
+        policy_id,
+    )
+    session_weekday_policy = enforce_policy_governance(
+        session_weekday_policy,
+        activation_allowed=policy_authority,
+        block_reasons=activation_contract_reasons,
+    )
+    report["symbol_expectancy_policy"] = enforce_policy_governance(
+        report.get("symbol_expectancy_policy", []),
+        activation_allowed=policy_authority,
+        block_reasons=activation_contract_reasons,
+    )
+    report["family_expectancy_policy"] = enforce_policy_governance(
+        report.get("family_expectancy_policy", []),
+        activation_allowed=policy_authority,
+        block_reasons=activation_contract_reasons,
+    )
     input_recommendations = _input_recommendations(
         report=report,
         context_policy=context_policy,
@@ -3570,6 +3758,17 @@ def run_analytics_suite(
         "input_recommendations": input_recommendations,
         "decision_maker_edit_scope": DECISION_MAKER_EDIT_SCOPE,
         "decision_thresholds": _decision_thresholds(),
+        "ledger_integrity_report": ledger_report,
+        "feature_lineage": feature_manifest,
+        "shadow_calibration": calibration_artifact,
+        "experiment_registry": {
+            "path": str(registry_path),
+            "experiment_id": experiment_id,
+            "hypothesis": experiment_hypothesis,
+            "authorized": experiment_authorized,
+            "reason": experiment_authorization_reason,
+        },
+        "purged_chronological_folds": purged_chronological_folds(records, folds=walk_forward_folds),
         "source_paths": {
             "logs_dir": str(logs_dir),
             "analytics_root": str(analytics_root),
@@ -3595,6 +3794,12 @@ def run_analytics_suite(
     _write_json(analytics_root / "input_recommendations.json", input_recommendations)
     _write_json(analytics_root / "decision_maker_edit_scope.json", DECISION_MAKER_EDIT_SCOPE)
     _write_json(analytics_root / "expectancy_ai_audit.json", suite["ai_audit"])
+    _write_json(analytics_root / "ledger_integrity_report.json", ledger_report)
+    write_calibration_reports(
+        calibration_artifact,
+        analytics_root / "calibration_report.json",
+        analytics_root / "calibration_report.md",
+    )
     _write_dashboard_outputs(analytics_root, suite)
     _write_json(analytics_root / "analytics_suite.json", suite)
 
@@ -3617,6 +3822,10 @@ def run_analytics_suite(
         "ai_audit": suite["ai_audit"],
         "context_diagnostics": context_bundle["context_diagnostics"],
         "global_walk_forward": context_bundle["global_walk_forward"],
+        "ledger_integrity_report": ledger_report,
+        "feature_lineage_version": FEATURE_LINEAGE_VERSION,
+        "experiment_registry": suite["experiment_registry"],
+        "shadow_calibration_status": calibration_artifact.get("status"),
     }
     snapshot_path = policy_root / "snapshots" / f"{policy_id}.json"
     _write_json(snapshot_path, snapshot)
@@ -3654,6 +3863,9 @@ def main() -> None:
     parser.add_argument("--policy-min-positive-fold-rate", type=float, default=_env_float_any(("POLICY_MIN_POSITIVE_FOLD_RATE",), 0.60, minimum=0.0), help="Minimum positive walk-forward fold rate for governed activation.")
     parser.add_argument("--policy-max-drawdown-r", type=float, default=_env_float_any(("POLICY_MAX_DRAWDOWN_R",), 12.0, minimum=0.0), help="Maximum allowed drawdown in R for governed activation.")
     parser.add_argument("--auto-activate", action="store_true", help="Activate a newly generated policy snapshot when governance passes.")
+    parser.add_argument("--experiment-id", type=str, default="", help="Registered immutable experiment id required for optimization or activation.")
+    parser.add_argument("--experiment-hypothesis", type=str, default="", help="Exact pre-registered hypothesis required for optimization or activation.")
+    parser.add_argument("--experiment-registry", type=str, default="", help="Append-only experiment registry JSONL path.")
     shadow_group = parser.add_mutually_exclusive_group()
     shadow_group.add_argument("--policy-shadow-mode", dest="policy_shadow_mode", action="store_true", default=None, help="Write policy recommendations without live activation.")
     shadow_group.add_argument("--policy-live-mode", dest="policy_shadow_mode", action="store_false", help="Permit activation when governance and --auto-activate pass.")
@@ -3700,6 +3912,9 @@ def main() -> None:
         policy_min_positive_fold_rate=args.policy_min_positive_fold_rate,
         policy_max_drawdown_r=args.policy_max_drawdown_r,
         include_suspicious=args.include_suspicious,
+        experiment_id=args.experiment_id.strip(),
+        experiment_hypothesis=args.experiment_hypothesis.strip(),
+        experiment_registry_path=Path(args.experiment_registry) if args.experiment_registry else None,
     )
     suite["setup_funnel"] = funnel
 

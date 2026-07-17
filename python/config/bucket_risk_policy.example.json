@@ -1,0 +1,61 @@
+{
+  "setup_code": {
+    "MPC": {
+      "enabled": false,
+      "risk_multiplier": 0.0,
+      "reason": "negative_live_demo_bucket"
+    }
+  },
+  "setup_session_killzone": {
+    "MPC-ASIA-NK": {
+      "enabled": false,
+      "risk_multiplier": 0.0,
+      "reason": "negative_live_demo_bucket"
+    },
+    "MPC-OFF-NK": {
+      "enabled": false,
+      "risk_multiplier": 0.0,
+      "reason": "negative_live_demo_bucket"
+    },
+    "MPC-LON-K": {
+      "enabled": false,
+      "risk_multiplier": 0.0,
+      "reason": "negative_live_demo_bucket"
+    },
+    "MPC-ASIA-K": {
+      "enabled": false,
+      "risk_multiplier": 0.0,
+      "reason": "negative_live_demo_bucket"
+    }
+  },
+  "symbol": {
+    "EURCAD": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    },
+    "GBPUSD": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    },
+    "EURUSD": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    },
+    "GOLD": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    },
+    "GBPCAD": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    },
+    "SILVER": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    },
+    "WTI": {
+      "risk_multiplier": 0.25,
+      "reason": "negative_live_demo_symbol"
+    }
+  }
+}

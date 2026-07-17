@@ -1,0 +1,101 @@
+{
+  "schema_version": "20260717_risk_factor_v1",
+  "description": "Fixed original-SL-risk factor caps. This artifact is inactive unless InpRiskFactorGateEnable is true.",
+  "caps_pct": {
+    "symbol": 1.0,
+    "currency": 2.0,
+    "factor": 2.0,
+    "asset_class": 2.5,
+    "cluster": 2.0,
+    "session": 2.5,
+    "macro": 2.0
+  },
+  "per_symbol_caps_pct": {},
+  "symbol_aliases": {
+    "GOLD": {
+      "asset_class": "metals",
+      "cluster": "metals_usd",
+      "macro_direction": "usd_real_yield_inverse",
+      "primary_factor": "metals_usd",
+      "factor_loading": 1.0
+    },
+    "XAUUSD": {
+      "asset_class": "metals",
+      "cluster": "metals_usd",
+      "macro_direction": "usd_real_yield_inverse",
+      "primary_factor": "metals_usd",
+      "factor_loading": 1.0
+    },
+    "SILVER": {
+      "asset_class": "metals",
+      "cluster": "metals_usd",
+      "primary_factor": "metals_usd",
+      "factor_loading": 1.0
+    },
+    "XAGUSD": {
+      "asset_class": "metals",
+      "cluster": "metals_usd",
+      "primary_factor": "metals_usd",
+      "factor_loading": 1.0
+    },
+    "WTI": {
+      "asset_class": "energy",
+      "cluster": "energy",
+      "primary_factor": "energy",
+      "factor_loading": 1.0
+    },
+    "BRENT": {
+      "asset_class": "energy",
+      "cluster": "energy",
+      "primary_factor": "energy",
+      "factor_loading": 1.0
+    },
+    "US30": {
+      "asset_class": "indices",
+      "cluster": "us_indices",
+      "macro_direction": "risk_on_indices",
+      "primary_factor": "us_indices",
+      "factor_loading": 1.0
+    },
+    "NAS100": {
+      "asset_class": "indices",
+      "cluster": "us_indices",
+      "macro_direction": "risk_on_indices",
+      "primary_factor": "us_indices",
+      "factor_loading": 1.0
+    },
+    "SPX500": {
+      "asset_class": "indices",
+      "cluster": "us_indices",
+      "macro_direction": "risk_on_indices",
+      "primary_factor": "us_indices",
+      "factor_loading": 1.0
+    },
+    "GER40": {
+      "asset_class": "indices",
+      "cluster": "european_indices",
+      "macro_direction": "risk_on_indices",
+      "primary_factor": "european_indices",
+      "factor_loading": 1.0
+    },
+    "UK100": {
+      "asset_class": "indices",
+      "cluster": "european_indices",
+      "macro_direction": "risk_on_indices",
+      "primary_factor": "european_indices",
+      "factor_loading": 1.0
+    },
+    "BTCUSD": {
+      "asset_class": "crypto",
+      "cluster": "crypto",
+      "macro_direction": "risk_on_crypto",
+      "primary_factor": "crypto",
+      "factor_loading": 1.0
+    }
+  },
+  "covariance_interface": {
+    "enabled": false,
+    "trading_authority": false,
+    "status": "shadow_only_insufficient_clean_synchronized_returns"
+  }
+}

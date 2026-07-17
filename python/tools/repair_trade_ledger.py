@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Repair and audit PO3 trade_result_*.json ledger records.
+"""Audit and rebuild PO3 trade_result records without identity inference.
 
-The tool is intentionally non-mutating: it reads MT5/Common trade-result JSON,
-recovers safe missing identities from trade_key metadata when possible, writes a
-clean repaired history, and separates suspicious/rejected rows for analytics.
+Legacy helper functions remain readable for forensic compatibility, but the
+authoritative repair path delegates to the central fail-closed ledger gate.
+Missing broker position identities are never recovered from comments or keys.
 """
 
 from __future__ import annotations
@@ -11,9 +11,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from governance_contracts import LedgerIntegrityStatus, audit_trade_records
 
 
 EMPTY_ID_VALUES = {"", "0", "0.0", "none", "null", "nan"}
@@ -291,52 +298,50 @@ def _write_outputs(out_dir: Path, clean_records: list[Dict[str, Any]], rejected:
 
 def run_repair(logs_dir: Path, out_dir: Path) -> Dict[str, Any]:
     paths = sorted(logs_dir.glob("trade_result_*.json")) if logs_dir.exists() else []
-    identities_by_key = _load_meta_identity_index(logs_dir)
-    position_owner: Dict[str, tuple[str, str]] = {}
-    reason_counts: Counter[str] = Counter()
-    repair_counts: Counter[str] = Counter()
-    clean_records: list[Dict[str, Any]] = []
-    rejected: list[Dict[str, Any]] = []
-    examples = []
-
+    parsed: list[Dict[str, Any]] = []
+    source_names: list[str] = []
+    parse_rejected: list[Dict[str, Any]] = []
     for path in paths:
         try:
-            record = _read_json_any_encoding(path)
+            parsed.append(_read_json_any_encoding(path))
+            source_names.append(path.name)
         except Exception as exc:
-            reason_counts["parse_failure"] += 1
-            rejected.append({"file": path.name, "reasons": ["parse_failure"], "error": str(exc)})
+            parse_rejected.append({"file": path.name, "reasons": ["parse_failure"], "error": str(exc)})
+
+    audited, central_report = audit_trade_records(parsed)
+    clean_records = [
+        row for row in audited
+        if row.get("ledger_integrity_status") == LedgerIntegrityStatus.CLEAN.value
+    ]
+    rejected = list(parse_rejected)
+    for index, row in enumerate(audited):
+        if row.get("ledger_integrity_status") == LedgerIntegrityStatus.CLEAN.value:
             continue
-
-        fixed, reasons, repairs = _audit_record(record, identities_by_key, position_owner)
-        for reason in reasons:
-            reason_counts[reason] += 1
-        for repair in repairs:
-            repair_counts[repair] += 1
-        if reasons:
-            rejected.append({
-                "file": path.name,
-                "trade_key": fixed.get("trade_key", ""),
-                "broker_comment": fixed.get("broker_comment", ""),
-                "position_id": fixed.get("position_id", ""),
-                "symbol": fixed.get("symbol", ""),
-                "reasons": reasons,
-                "record": fixed,
-            })
-            if len(examples) < 20:
-                examples.append({"file": path.name, "symbol": fixed.get("symbol", ""), "reasons": reasons})
-        else:
-            clean_records.append(fixed)
-
+        rejected.append({
+            "file": source_names[index],
+            "trade_key": row.get("trade_key", ""),
+            "position_id": row.get("position_id", row.get("broker_position_identifier", "")),
+            "symbol": row.get("symbol", ""),
+            "reasons": list(row.get("ledger_integrity_reasons") or []),
+            "record": row,
+        })
+    reason_counts = Counter(central_report.get("reason_counts") or {})
+    reason_counts["parse_failure"] += len(parse_rejected)
     report = {
         "logs_dir": str(logs_dir),
         "output_dir": str(out_dir),
         "files_scanned": len(paths),
-        "meta_identities_loaded": len(identities_by_key),
+        "meta_identities_loaded": 0,
+        "identity_repair_policy": "disabled_exact_broker_position_identity_required",
         "clean_records": len(clean_records),
         "rejected_records": len(rejected),
         "reason_counts": dict(sorted(reason_counts.items())),
-        "repair_counts": dict(sorted(repair_counts.items())),
-        "examples": examples,
+        "repair_counts": {},
+        "central_ledger_report": central_report,
+        "examples": [
+            {"file": item.get("file"), "symbol": item.get("symbol", ""), "reasons": item.get("reasons", [])}
+            for item in rejected[:20]
+        ],
         "analytics_default": "exclude suspicious/rejected rows; use --include-suspicious only for forensic analysis",
     }
     _write_outputs(out_dir, clean_records, rejected, report)

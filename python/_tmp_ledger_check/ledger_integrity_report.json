@@ -1,0 +1,24 @@
+{
+  "logs_dir": "tests\\fixtures\\ledger_wrong_symbol_price_scale\\trade_results",
+  "output_dir": "_tmp_ledger_check",
+  "files_scanned": 1,
+  "meta_identities_loaded": 0,
+  "clean_records": 0,
+  "rejected_records": 1,
+  "reason_counts": {
+    "price_scale_mismatch": 1,
+    "symbol_mismatch": 1
+  },
+  "repair_counts": {},
+  "examples": [
+    {
+      "file": "trade_result_bad_xauusd.json",
+      "symbol": "XAUUSD",
+      "reasons": [
+        "price_scale_mismatch",
+        "symbol_mismatch"
+      ]
+    }
+  ],
+  "analytics_default": "exclude suspicious/rejected rows; use --include-suspicious only for forensic analysis"
+}
