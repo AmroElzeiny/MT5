@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-LEDGER_SCHEMA_VERSION = "20260717_trade_ledger_architecture_v6"
+LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_execution_path_v7"
 SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1"
-FEATURE_LINEAGE_VERSION = "20260717_pre_entry_features_v2"
+FEATURE_LINEAGE_VERSION = "20260718_tick_path_evidence_v3"
 CALIBRATION_CONTRACT_VERSION = "20260716_oos_calibration_v1"
 
 
@@ -417,7 +417,7 @@ def _audit_single_record(record: Mapping[str, Any], tolerances: LedgerTolerances
     mae = _number(row.get("mae_r"), math.nan)
     if math.isfinite(mfe) and (mfe < 0 or mfe > tolerances.max_mfe_r):
         reasons.append("mfe_out_of_bounds")
-    if math.isfinite(mae) and (mae > 0 or abs(mae) > tolerances.max_abs_mae_r):
+    if math.isfinite(mae) and (mae < 0 or mae > tolerances.max_abs_mae_r):
         reasons.append("mae_out_of_bounds")
 
     initial_risk = _number(row.get("initial_risk_money"))

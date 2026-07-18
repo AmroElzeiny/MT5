@@ -281,6 +281,205 @@ private:
       st.executed_action_ids += action_id;
    }
 
+   bool _ActionLifecyclePending(const PenaltyState &st) const {
+      return (st.action_lifecycle_state == "DETECTED" ||
+              st.action_lifecycle_state == "ELIGIBLE" ||
+              st.action_lifecycle_state == "DEFERRED_COOLDOWN" ||
+              st.action_lifecycle_state == "SUBMISSION_ATTEMPTED" ||
+              st.action_lifecycle_state == "FAILED_RETRYABLE");
+   }
+
+   int _ActionStrength(const string action) const {
+      if(action == "FULL_CLOSE") return 2;
+      if(action == "PARTIAL_CLOSE") return 1;
+      return 0;
+   }
+
+   bool _ManagementRetcodeAccepted(const uint retcode) const {
+      return (retcode == TRADE_RETCODE_DONE ||
+              retcode == TRADE_RETCODE_DONE_PARTIAL ||
+              retcode == TRADE_RETCODE_PLACED);
+   }
+
+   bool _ManagementFailureTerminal(const uint retcode) const {
+      return (retcode == TRADE_RETCODE_INVALID ||
+              retcode == TRADE_RETCODE_INVALID_ORDER ||
+              retcode == TRADE_RETCODE_ONLY_REAL);
+   }
+
+   void _SetActionLifecycle(PenaltyState &st,
+                            const string next_state,
+                            const string reason) {
+      string previous = st.action_lifecycle_state;
+      st.action_lifecycle_state = next_state;
+      if(next_state == "FAILED_TERMINAL" || next_state == "SUPERSEDED")
+         st.action_terminal_reason = reason;
+      _RiskLog("[management_action_lifecycle] action_id=" + st.action_id
+               + " position_id=" + IntegerToString(st.position_identifier)
+               + " position_ticket=" + IntegerToString((long)st.position_ticket)
+               + " requested_action=" + st.requested_action
+               + " requested_volume=" + DoubleToString(st.requested_volume, 8)
+               + " normalized_volume=" + DoubleToString(st.normalized_volume, 8)
+               + " previous_state=" + previous
+               + " next_state=" + next_state
+               + " broker_retcode=" + IntegerToString((int)st.action_last_retcode)
+               + " broker_retcode_description=" + st.action_last_retcode_description
+               + " retry_count=" + IntegerToString(st.action_retry_count)
+               + " next_eligible_retry_time=" + TimeToString(st.next_eligible_retry_time, TIME_DATE|TIME_SECONDS)
+               + " reason=" + reason);
+   }
+
+   void _QueueManagementAction(PenaltyState &st,
+                               const string action_id,
+                               const string requested_action,
+                               const double cut_fraction,
+                               const string reason) {
+      if(_ActionLifecyclePending(st) && st.action_id == action_id &&
+         st.requested_action == requested_action) return;
+      if(_ActionLifecyclePending(st))
+         _SetActionLifecycle(st, "SUPERSEDED", "stronger_or_newer_management_action:" + reason);
+      st.action_id = action_id;
+      st.requested_action = requested_action;
+      st.requested_cut_fraction = _Clamp(cut_fraction, 0.0, 1.0);
+      st.requested_volume = 0.0;
+      st.normalized_volume = 0.0;
+      st.action_position_volume_before = 0.0;
+      st.action_retry_count = 0;
+      st.next_eligible_retry_time = 0;
+      st.action_last_attempt_at = 0;
+      st.action_last_retcode = 0;
+      st.action_last_retcode_description = "";
+      st.action_terminal_reason = "";
+      st.action_executed = "none";
+      _SetActionLifecycle(st, "DETECTED", reason);
+      _SetActionLifecycle(st, "ELIGIBLE", reason);
+   }
+
+   bool _PriorActionEffectVisible(PenaltyState &st,
+                                  const double current_volume,
+                                  const double volume_tolerance) {
+      if(!_ActionLifecyclePending(st) || st.action_position_volume_before <= 0.0) return false;
+      if(st.requested_action == "PARTIAL_CLOSE" &&
+         current_volume + volume_tolerance < st.action_position_volume_before){
+         st.action_executed = "partial_exit";
+         st.last_reduction_at = _NowServerOrTester();
+         st.strikes++;
+         _RememberExecutedAction(st, st.action_id);
+         _SetActionLifecycle(st, "SUCCEEDED", "position_volume_reduction_verified_after_deferred_broker_result");
+         return true;
+      }
+      return false;
+   }
+
+   void _ProcessPendingAction(CTrade &trade,
+                              PenaltyState &st,
+                              const ulong ticket,
+                              const double current_volume,
+                              const datetime now) {
+      if(!_ActionLifecyclePending(st) || _ActionAlreadyExecuted(st, st.action_id)) return;
+      double volume_step = SymbolInfoDouble(st.symbol, SYMBOL_VOLUME_STEP);
+      double volume_tolerance = MathMax(1.0e-8, volume_step * 0.51);
+      if(_PriorActionEffectVisible(st, current_volume, volume_tolerance)) return;
+
+      datetime policy_cooldown_until = (st.last_reduction_at > 0
+                                        ? st.last_reduction_at + InpPenaltyCooldownMin * 60 : 0);
+      datetime retry_at = MathMax(policy_cooldown_until, st.next_eligible_retry_time);
+      if(retry_at > now){
+         st.next_eligible_retry_time = retry_at;
+         _SetActionLifecycle(st, "DEFERRED_COOLDOWN", "management_retry_cooldown_active");
+         return;
+      }
+      if(st.action_retry_count >= MathMax(1, InpManagementActionMaxRetries)){
+         _SetActionLifecycle(st, "FAILED_TERMINAL", "management_retry_limit_exhausted");
+         return;
+      }
+
+      st.requested_volume = (st.requested_action == "FULL_CLOSE"
+                             ? current_volume
+                             : current_volume * st.requested_cut_fraction);
+      st.action_position_volume_before = current_volume;
+      bool submit_full_close = (st.requested_action == "FULL_CLOSE");
+      if(submit_full_close){
+         st.normalized_volume = current_volume;
+      } else {
+         VolumeNormalizationResult close_norm = NormalizeClosingVolume(st.symbol,
+                                                                        st.requested_volume,
+                                                                        current_volume,
+                                                                        InpClosingVolumeAllowCloseAllBelowMinimum);
+         st.normalized_volume = close_norm.normalized_volume;
+         if(close_norm.action == "close_all"){
+            submit_full_close = true;
+            st.normalized_volume = current_volume;
+            st.action_executed = "close_all_small_remainder";
+         } else if(st.normalized_volume <= 0.0){
+            st.action_retry_count++;
+            st.action_last_attempt_at = now;
+            st.next_eligible_retry_time = now + MathMax(1, InpManagementActionRetryCooldownSec);
+            st.action_last_retcode = 0;
+            st.action_last_retcode_description = "closing_volume_normalization_unavailable:" + close_norm.reason;
+            _RiskLog("[closing_volume] stage=management position_id=" + IntegerToString(st.position_identifier)
+                     + " requested=" + DoubleToString(close_norm.requested_volume, 8)
+                     + " normalized=" + DoubleToString(close_norm.normalized_volume, 8)
+                     + " residual=" + DoubleToString(close_norm.residual_volume, 8)
+                     + " action=" + close_norm.action
+                     + " reason=" + close_norm.reason);
+            _SetActionLifecycle(st, "FAILED_RETRYABLE", "normalized_close_volume_invalid_recompute_later");
+            return;
+         }
+      }
+
+      st.action_retry_count++;
+      st.action_last_attempt_at = now;
+      st.next_eligible_retry_time = now + MathMax(1, InpManagementActionRetryCooldownSec);
+      _SetActionLifecycle(st, "SUBMISSION_ATTEMPTED", "management_close_submitted_to_broker");
+      bool submitted = (submit_full_close
+                        ? trade.PositionClose(ticket)
+                        : trade.PositionClosePartial(ticket, st.normalized_volume));
+      uint retcode = trade.ResultRetcode();
+      st.action_last_retcode = (long)retcode;
+      st.action_last_retcode_description = trade.ResultRetcodeDescription();
+
+      bool still_open = PositionSelectByTicket(ticket);
+      double remaining_volume = (still_open ? PositionGetDouble(POSITION_VOLUME) : 0.0);
+      bool effect_verified = (submit_full_close
+                              ? !still_open
+                              : (!still_open || remaining_volume + volume_tolerance < current_volume));
+      if(submitted && _ManagementRetcodeAccepted(retcode) && effect_verified){
+         st.action_executed = (submit_full_close
+                               ? (st.action_executed == "close_all_small_remainder"
+                                  ? "close_all_small_remainder" : "full_close")
+                               : "partial_exit");
+         st.last_reduction_at = now;
+         st.strikes++;
+         _RememberExecutedAction(st, st.action_id);
+         _SetActionLifecycle(st, "SUCCEEDED", "broker_result_and_position_volume_verified");
+         if(!still_open){
+            st.previous_state = st.current_state;
+            st.current_state = "EXITED";
+            st.transition_time = now;
+            st.transition_reason = "management_close_verified";
+         }
+         return;
+      }
+
+      if(retcode == TRADE_RETCODE_POSITION_CLOSED || !still_open){
+         _SetActionLifecycle(st, "SUPERSEDED", "position_no_longer_open");
+         return;
+      }
+      if(_ManagementFailureTerminal(retcode)){
+         _SetActionLifecycle(st, "FAILED_TERMINAL", "terminal_broker_rejection");
+         return;
+      }
+      if(st.action_retry_count >= MathMax(1, InpManagementActionMaxRetries)){
+         _SetActionLifecycle(st, "FAILED_TERMINAL", "management_retry_limit_exhausted");
+         return;
+      }
+      _SetActionLifecycle(st, "FAILED_RETRYABLE",
+                          submitted && _ManagementRetcodeAccepted(retcode)
+                          ? "broker_accepted_effect_not_yet_verified"
+                          : "retryable_broker_or_runtime_failure");
+   }
+
    string _TransitionActionId(const PenaltyState &st,
                               const string next_state,
                               const string reason,
@@ -403,6 +602,87 @@ private:
       m_bus.AppendText("logs\\management_experiments.jsonl", experiment + "\n");
    }
 
+   void _ObserveSelectedPositionPath(const ulong ticket,
+                                     const string observed_symbol,
+                                     const MqlTick &tick,
+                                     const string observation_source,
+                                     const bool tick_complete_source) {
+      if(ticket == 0 || !PositionSelectByTicket(ticket) || !PositionMatchesMagic(ticket)) return;
+      string symbol = PositionGetString(POSITION_SYMBOL);
+      long position_identifier = (long)PositionGetInteger(POSITION_IDENTIFIER);
+      if(position_identifier <= 0 || symbol != observed_symbol) return;
+      bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl = PositionGetDouble(POSITION_SL);
+      double risk_dist = MathAbs(entry - sl);
+      double executable_price = (is_buy ? tick.bid : tick.ask);
+      if(entry <= 0.0 || sl <= 0.0 || risk_dist <= 0.0 || executable_price <= 0.0) return;
+
+      int idx = _FindState(position_identifier, symbol);
+      PenaltyState st;
+      if(idx >= 0){
+         st = m_states[idx];
+      } else {
+         ZeroMemory(st);
+         st.symbol = symbol;
+         st.position_identifier = position_identifier;
+         st.position_ticket = ticket;
+         st.opened_at = (datetime)PositionGetInteger(POSITION_TIME);
+         st.entry = entry;
+         st.sl = sl;
+         st.risk_dist = risk_dist;
+         st.is_buy = is_buy;
+         st.mfe_price = entry;
+         st.mae_price = entry;
+         st.current_state = "HEALTHY";
+         st.transition_time = st.opened_at;
+         st.transition_reason = "position_tracking_started";
+         st.management_version = MANAGEMENT_SCHEMA_VERSION;
+         st.path_data_gap = (tick_complete_source &&
+                             (st.opened_at <= 0 || tick.time > st.opened_at + 2));
+      }
+
+      if(st.entry <= 0.0) st.entry = entry;
+      if(st.sl <= 0.0) st.sl = sl;
+      if(st.risk_dist <= 0.0) st.risk_dist = risk_dist;
+      st.position_ticket = ticket;
+      st.is_buy = is_buy;
+      st.position_closed_observed_at = 0;
+      if(st.mfe_price <= 0.0) st.mfe_price = st.entry;
+      if(st.mae_price <= 0.0) st.mae_price = st.entry;
+      if(is_buy){
+         st.mfe_price = MathMax(st.mfe_price, executable_price);
+         st.mae_price = MathMin(st.mae_price, executable_price);
+      } else {
+         st.mfe_price = MathMin(st.mfe_price, executable_price);
+         st.mae_price = MathMax(st.mae_price, executable_price);
+      }
+      double favorable_r = (is_buy ? st.mfe_price - st.entry : st.entry - st.mfe_price) / st.risk_dist;
+      double adverse_r = (is_buy ? st.entry - st.mae_price : st.mae_price - st.entry) / st.risk_dist;
+      st.mfe_r = MathMax(st.mfe_r, MathMax(0.0, favorable_r));
+      st.mae_r = MathMax(st.mae_r, MathMax(0.0, adverse_r));
+      datetime observed_time = (tick.time > 0 ? tick.time : _NowServerOrTester());
+      if(st.first_0_25r_time <= 0 && st.mfe_r >= 0.25) st.first_0_25r_time = observed_time;
+      if(st.first_0_50r_time <= 0 && st.mfe_r >= 0.50) st.first_0_50r_time = observed_time;
+      double adverse_threshold = MathMax(0.01, MathAbs(InpPenaltyMaeTriggerR));
+      if(st.first_adverse_threshold_time <= 0 && st.mae_r >= adverse_threshold)
+         st.first_adverse_threshold_time = observed_time;
+      if(st.first_0_25r_time == observed_time && st.first_adverse_threshold_time == observed_time)
+         st.path_order_ambiguous = true;
+      if(st.first_0_50r_time == observed_time && st.first_adverse_threshold_time == observed_time)
+         st.path_order_ambiguous = true;
+      st.latest_observed_tick_time = observed_time;
+      st.latest_observed_tick_msc = (long)tick.time_msc;
+      st.path_observation_source = observation_source;
+      if(tick_complete_source && !st.path_data_gap)
+         st.path_completeness_status = "TICK_COMPLETE";
+      else if(st.path_data_gap)
+         st.path_completeness_status = "DATA_GAP";
+      else if(st.path_completeness_status != "TICK_COMPLETE")
+         st.path_completeness_status = "TIMER_SAMPLED";
+      _SaveState(st);
+   }
+
 public:
    CPenaltyWatcher(CFileBus &bus){
       m_bus=&bus;
@@ -412,7 +692,18 @@ public:
    void RestoreStates(const PenaltyState &states[]){
       int n = ArraySize(states);
       ArrayResize(m_states, n);
-      for(int i=0; i<n; i++) m_states[i] = states[i];
+      for(int i=0; i<n; i++){
+         m_states[i] = states[i];
+         m_states[i].path_data_gap = true;
+         m_states[i].path_completeness_status = "DATA_GAP";
+         m_states[i].path_observation_source = "RESTORED_AFTER_OFFLINE_INTERVAL";
+         if(m_states[i].action_lifecycle_state == "SUBMISSION_ATTEMPTED"){
+            m_states[i].action_lifecycle_state = "FAILED_RETRYABLE";
+            m_states[i].next_eligible_retry_time = _NowServerOrTester()
+                                                     + MathMax(1, InpManagementActionRetryCooldownSec);
+            m_states[i].action_last_retcode_description = "restart_requires_effect_verification_before_retry";
+         }
+      }
    }
 
    void SnapshotStates(PenaltyState &out_states[]){
@@ -426,6 +717,23 @@ public:
       if(idx < 0) return false;
       out_state = m_states[idx];
       return true;
+   }
+
+   bool ForgetState(const long position_identifier, const string symbol){
+      int idx = _FindState(position_identifier, symbol);
+      if(idx < 0) return false;
+      _RemoveStateAt(idx);
+      return true;
+   }
+
+   void ObserveChartTick(const string chart_symbol){
+      MqlTick tick;
+      if(!SymbolInfoTick(chart_symbol, tick)) return;
+      for(int i=PositionsTotal()-1; i>=0; i--){
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0 || PositionGetString(POSITION_SYMBOL) != chart_symbol) continue;
+         _ObserveSelectedPositionPath(ticket, chart_symbol, tick, "ON_TICK_CHART_SYMBOL", true);
+      }
    }
 
    void Tick(CTrade &trade){
@@ -462,6 +770,11 @@ public:
          double risk_dist = MathAbs(entry - sl);
          if(risk_dist <= 0) continue;
 
+         MqlTick sampled_tick;
+         if(SymbolInfoTick(sym, sampled_tick))
+            _ObserveSelectedPositionPath(ticket, sym, sampled_tick,
+                                         "TIMER_SAMPLED_MARKET_WATCH", false);
+
          int st_idx = _FindState(position_identifier, sym);
          PenaltyState st;
          if(st_idx >= 0){
@@ -486,13 +799,19 @@ public:
             st.transition_reason = "position_tracking_started";
             st.management_version = MANAGEMENT_SCHEMA_VERSION;
             st.executed_action_ids = "";
+            st.action_lifecycle_state = "";
+            st.path_completeness_status = "UNKNOWN";
+            st.path_observation_source = "NO_QUOTE_OBSERVED";
+            st.path_data_gap = true;
          }
 
          st.symbol = sym;
          st.position_identifier = position_identifier;
          st.position_ticket = ticket;
          st.opened_at = opened;
-         st.sl = sl;
+         st.position_closed_observed_at = 0;
+         if(st.entry <= 0.0) st.entry = entry;
+         if(st.sl <= 0.0) st.sl = sl;
          st.is_buy = is_buy;
          if(st.risk_dist <= 0) st.risk_dist = risk_dist;
          if(StringLen(st.current_state) == 0) st.current_state = "HEALTHY";
@@ -509,7 +828,11 @@ public:
 
          // compute current R and MFE R using persisted state
          double curR = is_buy ? (px - st.entry)/st.risk_dist : (st.entry - px)/st.risk_dist;
-         double mfeR = is_buy ? (st.mfe_price - st.entry)/st.risk_dist : (st.entry - st.mfe_price)/st.risk_dist;
+         double observed_mfe_r = is_buy ? (st.mfe_price - st.entry)/st.risk_dist : (st.entry - st.mfe_price)/st.risk_dist;
+         double observed_mae_r = is_buy ? (st.entry - st.mae_price)/st.risk_dist : (st.mae_price - st.entry)/st.risk_dist;
+         st.mfe_r = MathMax(st.mfe_r, MathMax(0.0, observed_mfe_r));
+         st.mae_r = MathMax(st.mae_r, MathMax(0.0, observed_mae_r));
+         double mfeR = st.mfe_r;
 
           // ---- Invalidations ----
           TradePlan meta;
@@ -623,87 +946,68 @@ public:
             desired_state = st.current_state;
          }
 
-         if(desired_state != st.current_state){
+         bool state_changed = (desired_state != st.current_state);
+         datetime evidence_time = (thesis_confirmed && st.confirmed_time > 0
+                                   ? st.confirmed_time
+                                   : (state_changed || st.transition_time <= 0 ? now : st.transition_time));
+         string transition_reason = (desired_state == "HEALTHY" ? "trigger_cleared" : trigger_reason);
+         if(state_changed){
             string prior_state = st.current_state;
-            datetime evidence_time = (thesis_confirmed && st.confirmed_time > 0 ? st.confirmed_time : now);
-            string transition_reason = (desired_state == "HEALTHY" ? "trigger_cleared" : trigger_reason);
-            string action_id = _TransitionActionId(st, desired_state, transition_reason, evidence_time);
             st.previous_state = prior_state;
             st.current_state = desired_state;
             st.transition_time = now;
             st.transition_reason = transition_reason;
             st.evidence_snapshot_json = "{" + JsonKVNum("price", px, 8) + ","
                                         + JsonKVNum("cur_r", curR, 6) + ","
-                                        + JsonKVNum("mfe_r", mfeR, 6) + ","
+                                        + JsonKVNum("mfe_r", st.mfe_r, 6) + ","
+                                        + JsonKVNum("mae_r", st.mae_r, 6) + ","
                                         + JsonKVBool("raw_thesis_breach", thesis_raw) + ","
                                         + JsonKVBool("confirmed", thesis_confirmed) + ","
                                         + JsonKVStr("confirmation_mode", st.confirmation_mode) + "}";
-            st.action_id = action_id;
             st.management_version = MANAGEMENT_SCHEMA_VERSION;
-            st.action_executed = "none";
+            if(desired_state == "HEALTHY" && _ActionLifecyclePending(st))
+               _SetActionLifecycle(st, "SUPERSEDED", "management_trigger_cleared_before_execution");
+         }
 
-            if(_ActionAlreadyExecuted(st, action_id)){
-               st.action_executed = "duplicate_action_skipped";
-               _RiskLog("[management_action] position_id=" + IntegerToString(position_identifier)
-                        + " action_id=" + action_id + " status=skipped reason=idempotent_duplicate");
-            } else if(desired_state == "THESIS_INVALID" &&
-                      InpThesisInvalidationPolicy == THESIS_INVALIDATION_ORIGINAL_SL_TP_ONLY){
-               st.action_executed = "shadow_original_sl_tp_only";
-               _RememberExecutedAction(st, action_id);
-            } else if((desired_state == "WARNING" || desired_state == "THESIS_INVALID") &&
-                      !_InCooldown(st)){
-               st.strikes++;
-               st.last_reduction_at = now;
+         bool management_action_required = ((desired_state == "WARNING" || desired_state == "THESIS_INVALID") &&
+                                            (trigger_cut || thesis_confirmed ||
+                                             (desired_state == "THESIS_INVALID" && _ActionLifecyclePending(st))));
+         if(management_action_required){
+            string action_id = (_ActionLifecyclePending(st) && !state_changed
+                                ? st.action_id
+                                : _TransitionActionId(st, desired_state, transition_reason, evidence_time));
+            if(InpThesisInvalidationPolicy == THESIS_INVALIDATION_ORIGINAL_SL_TP_ONLY &&
+               desired_state == "THESIS_INVALID"){
+               if(!_ActionAlreadyExecuted(st, action_id)){
+                  _QueueManagementAction(st, action_id, "NO_BROKER_ACTION", 0.0,
+                                         "original_sl_tp_only_policy");
+                  st.action_executed = "shadow_original_sl_tp_only";
+                  _RememberExecutedAction(st, action_id);
+                  _SetActionLifecycle(st, "SUCCEEDED", "policy_requires_no_broker_intervention");
+               }
+            } else {
                bool force_full_close = (desired_state == "THESIS_INVALID" &&
                                         InpThesisInvalidationPolicy == THESIS_INVALIDATION_FULL_EXIT);
-               if(st.strikes >= close_strikes) force_full_close = true;
-               bool action_ok = false;
-               if(force_full_close){
-                  st.action_executed = "full_close";
-                  action_ok = trade.PositionClose(ticket);
-               } else {
-                  double eff_cut_pct = _ScaledCutPct(MathMax(0.01, cut_pct), st.strikes);
-                  VolumeNormalizationResult close_norm = NormalizeClosingVolume(sym,
-                                                                                 vol * eff_cut_pct,
-                                                                                 vol,
-                                                                                 InpClosingVolumeAllowCloseAllBelowMinimum);
-                  if(close_norm.action == "close_all"){
-                     st.action_executed = "close_all_small_remainder";
-                     action_ok = trade.PositionClose(ticket);
-                  } else if(close_norm.normalized_volume > 0.0){
-                     st.action_executed = "partial_exit";
-                     action_ok = trade.PositionClosePartial(ticket, close_norm.normalized_volume);
-                  } else {
-                     st.action_executed = "closing_volume_skipped";
-                     action_ok = false;
-                     _RiskLog("[closing_volume] stage=management position_id=" + IntegerToString(position_identifier)
-                              + " requested=" + DoubleToString(close_norm.requested_volume, 8)
-                              + " normalized=" + DoubleToString(close_norm.normalized_volume, 8)
-                              + " residual=" + DoubleToString(close_norm.residual_volume, 8)
-                              + " action=" + close_norm.action
-                              + " reason=" + close_norm.reason);
-                  }
-               }
-               _RememberExecutedAction(st, action_id);
-               _RiskLog("[management_action] position_id=" + IntegerToString(position_identifier)
-                        + " action_id=" + action_id
-                        + " action=" + st.action_executed
-                        + " status=" + (action_ok ? "executed" : "failed_no_retry_same_transition"));
-               if(action_ok && (st.action_executed == "full_close" || st.action_executed == "close_all_small_remainder")){
-                  st.previous_state = desired_state;
-                  st.current_state = "EXITED";
-                  st.transition_time = now;
-                  st.transition_reason = "management_close_submitted";
-               }
-            } else if(desired_state == "WARNING" || desired_state == "THESIS_INVALID"){
-               st.action_executed = "cooldown_skip_no_retry_same_transition";
-               _RememberExecutedAction(st, action_id);
-            } else {
-               st.action_executed = "none";
-               _RememberExecutedAction(st, action_id);
+               if(st.strikes + 1 >= close_strikes) force_full_close = true;
+               string requested_action = (force_full_close ? "FULL_CLOSE" : "PARTIAL_CLOSE");
+               double cut_fraction = (force_full_close
+                                      ? 1.0
+                                      : _ScaledCutPct(MathMax(0.01, cut_pct), st.strikes + 1));
+               bool need_new_action = (StringLen(st.action_id) == 0 ||
+                                       (st.action_id != action_id && !_ActionAlreadyExecuted(st, action_id)) ||
+                                       (_ActionLifecyclePending(st) &&
+                                        _ActionStrength(requested_action) > _ActionStrength(st.requested_action)) ||
+                                       (state_changed && st.action_id != action_id));
+               if(need_new_action)
+                  _QueueManagementAction(st, action_id, requested_action, cut_fraction, transition_reason);
+               if(_ActionLifecyclePending(st))
+                  _ProcessPendingAction(trade, st, ticket, vol, now);
             }
-            _LogTransition(st);
+         } else if(_ActionLifecyclePending(st) && desired_state == st.current_state){
+            _SetActionLifecycle(st, "SUPERSEDED", "management_action_no_longer_applicable");
          }
+
+         if(state_changed) _LogTransition(st);
 
          _SaveState(st);
       }
@@ -711,7 +1015,36 @@ public:
       for(int i=ArraySize(m_states)-1; i>=0; i--){
          if(!_PositionIdentifierStillOpen(m_states[i].position_identifier,
                                           live_position_identifiers)){
-            _RemoveStateAt(i);
+            if(_ActionLifecyclePending(m_states[i]) &&
+               m_states[i].requested_action == "FULL_CLOSE" &&
+               _ManagementRetcodeAccepted((uint)m_states[i].action_last_retcode)){
+               m_states[i].action_executed = "full_close";
+               m_states[i].last_reduction_at = now;
+               m_states[i].strikes++;
+               _RememberExecutedAction(m_states[i], m_states[i].action_id);
+               _SetActionLifecycle(m_states[i], "SUCCEEDED",
+                                   "position_absence_verified_after_deferred_full_close_result");
+               m_states[i].previous_state = m_states[i].current_state;
+               m_states[i].current_state = "EXITED";
+               m_states[i].transition_time = now;
+               m_states[i].transition_reason = "management_close_verified_after_deferred_result";
+            } else if(_ActionLifecyclePending(m_states[i])){
+               _SetActionLifecycle(m_states[i], "SUPERSEDED",
+                                   "position_closed_by_other_authority_before_retry");
+            }
+            if(m_states[i].position_closed_observed_at <= 0){
+               m_states[i].position_closed_observed_at = now;
+               _RiskLog("[management_state_retained] position_id="
+                        + IntegerToString(m_states[i].position_identifier)
+                        + " symbol=" + m_states[i].symbol
+                        + " reason=awaiting_completed_trade_ledger");
+            } else if(now - m_states[i].position_closed_observed_at > 86400){
+               _RiskLog("[management_state_expired] position_id="
+                        + IntegerToString(m_states[i].position_identifier)
+                        + " symbol=" + m_states[i].symbol
+                        + " reason=completed_trade_ledger_not_consumed_within_24h");
+               _RemoveStateAt(i);
+            }
          }
       }
    }

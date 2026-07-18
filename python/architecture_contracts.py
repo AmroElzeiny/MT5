@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-ARCHITECTURE_CONTRACT_VERSION = "20260717_architecture_cache_shadow_v2"
+ARCHITECTURE_CONTRACT_VERSION = "20260718_version_z_reliability_v3"
 LIVE_FORWARD_CONTRACT_VERSION = "20260717_live_forward_v1"
 SEMANTIC_CACHE_SCHEMA_VERSION = "20260717_semantic_cache_v1"
 POLICY_MANIFEST_SCHEMA_VERSION = "20260717_policy_manifest_v1"
@@ -685,8 +685,9 @@ def decision_field_authority_manifest() -> dict[str, Any]:
         "exact_risk_size": {"owner": "deterministic_portfolio", "authority": "active"},
         "calibrated_probability": {"owner": "statistical", "authority": "unavailable"},
         "expected_net_r": {"owner": "statistical", "authority": "unavailable"},
-        "llm_quality_score": {"owner": "llm", "authority": "diagnostic_and_veto_only"},
-        "llm_risk_assessments": {"owner": "llm", "authority": "veto_only_uncalibrated"},
+        "llm_quality_score": {"owner": "llm", "authority": "diagnostic_only_uncalibrated"},
+        "llm_risk_assessments": {"owner": "llm", "authority": "diagnostic_only_uncalibrated"},
+        "llm_qualitative_veto": {"owner": "llm", "authority": "evidence_backed_enumerated_veto"},
         "llm_narrative": {"owner": "llm", "authority": "diagnostic"},
         "python_final_allow": {"owner": "python_policy", "authority": "intermediate"},
         "mql_final_allow": {"owner": "mql_execution", "authority": "final"},

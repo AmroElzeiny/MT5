@@ -117,7 +117,7 @@ def clean_trade(position_id: int = 9001, *, risk: float = 100.0, pnl: float = 10
         "internal_net_pnl": pnl,
         "result_r_initial_risk": pnl / risk,
         "mfe_r": max(0.1, pnl / risk + 0.2),
-        "mae_r": -0.25,
+        "mae_r": 0.25,
         "engine_version": "engine-v4",
         "runtime_input_hash": "runtime-v4",
         "prompt_contract_version": "prompt-v4",

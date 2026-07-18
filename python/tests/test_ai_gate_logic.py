@@ -49,11 +49,11 @@ class AIGateLogicTests(unittest.TestCase):
         self.assertEqual(compact["candidates"][0]["opposing_clearance_score"], 8.0)
         self.assertNotIn("opposing_obstruction_score", compact["fvg"])
 
-    def test_only_structural_codes_are_hard_vetoes(self) -> None:
+    def test_model_rejection_codes_have_no_implicit_trade_authority(self) -> None:
         hard = _hard_model_rejection_codes(
             ["DISTANT_FROM_FVG", "FVG_STRUCTURE_INVALIDATED", "OBSTACLE_NEARBY_RT"]
         )
-        self.assertEqual(hard, ["FVG_STRUCTURE_INVALIDATED"])
+        self.assertEqual(hard, [])
 
 
 if __name__ == "__main__":

@@ -91,6 +91,9 @@ private:
       j += JsonKVStr("hierarchical_prior_schema_version", p.hierarchical_prior_schema_version) + ",";
       j += JsonKVStr("repeatability_schema_version", p.ai.repeatability_schema_version) + ",";
       j += JsonKVStr("repeatability_status", p.repeatability_status) + ",";
+      j += JsonKVBool("repeatability_required_live", p.repeatability_required_live) + ",";
+      j += JsonKVStr("repeatability_artifact_state", p.repeatability_artifact_state) + ",";
+      j += JsonKVStr("repeatability_rejection_code", p.repeatability_rejection_code) + ",";
       j += JsonKVBool("repeatability_score_threshold_authority", p.repeatability_score_threshold_authority) + ",";
       j += JsonKVBool("repeatability_trading_eligible", p.repeatability_trading_eligible) + ",";
       j += JsonKVStr("repeatability_group_key", p.repeatability_group_key) + ",";
@@ -368,7 +371,10 @@ private:
       j += JsonKVNum("ai_session_bucket_risk", p.ai.session_bucket_risk, 6) + ",";
       j += JsonKVNum("ai_post_entry_failure_risk", p.ai.post_entry_failure_risk, 6) + ",";
       j += JsonKVNum("ai_final_trade_expectancy_score", p.ai.final_trade_expectancy_score, 6) + ",";
+      j += JsonKVStr("ai_llm_numeric_diagnostics_authority", p.ai.llm_numeric_diagnostics_authority) + ",";
       j += JsonKVBool("ai_veto_enabled", p.ai.veto_enabled) + ",";
+      j += JsonKVStr("ai_veto_code", p.ai.veto_code) + ",";
+      j += "\"ai_veto_evidence_fields\":" + (StringLen(p.ai.veto_evidence_fields_json) > 0 ? p.ai.veto_evidence_fields_json : "[]") + ",";
       j += JsonKVStr("ai_veto_reason", p.ai.veto_reason) + ",";
       j += JsonKVBool("ai_veto_fields_present", p.ai.veto_fields_present) + ",";
       j += JsonKVStr("ai_bucket_prior_override_justification", p.ai.bucket_prior_override_justification) + ",";
@@ -429,6 +435,14 @@ private:
       j += JsonKVNum("result_deal_ticket", (double)p.result_deal_ticket, 0) + ",";
       j += JsonKVNum("broker_position_ticket", (double)p.broker_position_ticket, 0) + ",";
       j += JsonKVNum("broker_position_identifier", (double)p.broker_position_identifier, 0) + ",";
+      j += JsonKVStr("intended_order_type", p.intended_order_type) + ",";
+      j += JsonKVStr("execution_authority_state", p.execution_authority_state) + ",";
+      j += JsonKVBool("broker_submission_attempted", p.broker_submission_attempted) + ",";
+      j += JsonKVBool("broker_request_accepted", p.broker_request_accepted) + ",";
+      j += JsonKVNum("broker_retcode", (double)p.broker_retcode, 0) + ",";
+      j += JsonKVStr("broker_retcode_description", p.broker_retcode_description) + ",";
+      j += JsonKVBool("broker_partial_fill", p.broker_partial_fill) + ",";
+      j += JsonKVBool("final_execution_success", p.final_execution_success) + ",";
       j += JsonKVBool("execution_identity_verified", p.execution_identity_verified) + ",";
       j += JsonKVBool("execution_identity_quarantined", p.execution_identity_quarantined) + ",";
       j += JsonKVStr("execution_identity_reason", p.execution_identity_reason) + ",";
@@ -468,6 +482,17 @@ private:
       j += "\"management_evidence_snapshot\":" + (StringLen(p.management_evidence_snapshot_json) > 0 ? p.management_evidence_snapshot_json : "{}") + ",";
       j += JsonKVStr("management_action_executed", p.management_action_executed) + ",";
       j += JsonKVStr("management_action_id", p.management_action_id) + ",";
+      j += JsonKVStr("management_action_lifecycle_state", p.management_action_lifecycle_state) + ",";
+      j += JsonKVStr("management_requested_action", p.management_requested_action) + ",";
+      j += JsonKVNum("management_requested_volume", p.management_requested_volume, 8) + ",";
+      j += JsonKVNum("management_normalized_volume", p.management_normalized_volume, 8) + ",";
+      j += JsonKVNum("management_position_volume_before", p.management_position_volume_before, 8) + ",";
+      j += JsonKVNum("management_requested_cut_fraction", p.management_requested_cut_fraction, 8) + ",";
+      j += JsonKVInt("management_action_retry_count", p.management_action_retry_count) + ",";
+      j += JsonKVInt("management_next_retry_at", (int)p.management_next_retry_at) + ",";
+      j += JsonKVNum("management_last_retcode", (double)p.management_last_retcode, 0) + ",";
+      j += JsonKVStr("management_last_retcode_description", p.management_last_retcode_description) + ",";
+      j += JsonKVStr("management_action_terminal_reason", p.management_action_terminal_reason) + ",";
       j += JsonKVStr("management_policy", p.management_policy) + ",";
       j += JsonKVInt("management_decision_at", (int)p.management_decision_at) + ",";
       j += JsonKVBool("management_features_time_safe", p.management_features_time_safe) + ",";
@@ -551,6 +576,15 @@ private:
       j += JsonKVNum("mae_r", p.mae_r, 6) + ",";
       j += JsonKVInt("minutes_to_0_25r_mfe", p.minutes_to_0_25r_mfe) + ",";
       j += JsonKVInt("minutes_to_0_50r_mfe", p.minutes_to_0_50r_mfe) + ",";
+      j += JsonKVInt("first_0_25r_time", (int)p.first_0_25r_time) + ",";
+      j += JsonKVInt("first_0_50r_time", (int)p.first_0_50r_time) + ",";
+      j += JsonKVInt("first_adverse_threshold_time", (int)p.first_adverse_threshold_time) + ",";
+      j += JsonKVInt("latest_observed_tick_time", (int)p.latest_observed_tick_time) + ",";
+      j += JsonKVNum("latest_observed_tick_msc", (double)p.latest_observed_tick_msc, 0) + ",";
+      j += JsonKVStr("path_completeness_status", p.path_completeness_status) + ",";
+      j += JsonKVStr("path_observation_source", p.path_observation_source) + ",";
+      j += JsonKVBool("path_data_gap", p.path_data_gap) + ",";
+      j += JsonKVBool("path_order_ambiguous", p.path_order_ambiguous) + ",";
       j += JsonKVBool("stuck_no_mfe_triggered", p.stuck_no_mfe_triggered) + ",";
       j += JsonKVBool("dr_and_structural_invalid_triggered", p.dr_and_structural_invalid_triggered) + ",";
       j += JsonKVInt("penalty_reductions_count", p.penalty_reductions_count) + ",";
@@ -739,6 +773,18 @@ private:
       j += JsonKVBool("is_buy", st.is_buy) + ",";
       j += JsonKVNum("mfe_price", st.mfe_price, 8) + ",";
       j += JsonKVNum("mae_price", st.mae_price, 8) + ",";
+      j += JsonKVNum("mfe_r", st.mfe_r, 6) + ",";
+      j += JsonKVNum("mae_r", st.mae_r, 6) + ",";
+      j += JsonKVInt("first_0_25r_time", (int)st.first_0_25r_time) + ",";
+      j += JsonKVInt("first_0_50r_time", (int)st.first_0_50r_time) + ",";
+      j += JsonKVInt("first_adverse_threshold_time", (int)st.first_adverse_threshold_time) + ",";
+      j += JsonKVInt("latest_observed_tick_time", (int)st.latest_observed_tick_time) + ",";
+      j += JsonKVNum("latest_observed_tick_msc", (double)st.latest_observed_tick_msc, 0) + ",";
+      j += JsonKVStr("path_completeness_status", st.path_completeness_status) + ",";
+      j += JsonKVStr("path_observation_source", st.path_observation_source) + ",";
+      j += JsonKVBool("path_data_gap", st.path_data_gap) + ",";
+      j += JsonKVBool("path_order_ambiguous", st.path_order_ambiguous) + ",";
+      j += JsonKVInt("position_closed_observed_at", (int)st.position_closed_observed_at) + ",";
       j += JsonKVInt("strikes", st.strikes) + ",";
       j += JsonKVInt("last_reduction_at", (int)st.last_reduction_at) + ",";
       j += JsonKVStr("current_state", st.current_state) + ",";
@@ -748,6 +794,18 @@ private:
       j += "\"evidence_snapshot\":" + (StringLen(st.evidence_snapshot_json) > 0 ? st.evidence_snapshot_json : "{}") + ",";
       j += JsonKVStr("action_executed", st.action_executed) + ",";
       j += JsonKVStr("action_id", st.action_id) + ",";
+      j += JsonKVStr("action_lifecycle_state", st.action_lifecycle_state) + ",";
+      j += JsonKVStr("requested_action", st.requested_action) + ",";
+      j += JsonKVNum("requested_volume", st.requested_volume, 8) + ",";
+      j += JsonKVNum("normalized_volume", st.normalized_volume, 8) + ",";
+      j += JsonKVNum("action_position_volume_before", st.action_position_volume_before, 8) + ",";
+      j += JsonKVNum("requested_cut_fraction", st.requested_cut_fraction, 8) + ",";
+      j += JsonKVInt("action_retry_count", st.action_retry_count) + ",";
+      j += JsonKVInt("next_eligible_retry_time", (int)st.next_eligible_retry_time) + ",";
+      j += JsonKVInt("action_last_attempt_at", (int)st.action_last_attempt_at) + ",";
+      j += JsonKVNum("action_last_retcode", (double)st.action_last_retcode, 0) + ",";
+      j += JsonKVStr("action_last_retcode_description", st.action_last_retcode_description) + ",";
+      j += JsonKVStr("action_terminal_reason", st.action_terminal_reason) + ",";
       j += JsonKVStr("management_version", st.management_version) + ",";
       j += JsonKVStr("executed_action_ids", st.executed_action_ids) + ",";
       j += JsonKVStr("confirmation_mode", st.confirmation_mode) + ",";
@@ -822,6 +880,9 @@ private:
       p.hierarchical_prior_artifact_hash = JsonGetString(json, "hierarchical_prior_artifact_hash", "");
       p.hierarchical_prior_schema_version = JsonGetString(json, "hierarchical_prior_schema_version", "");
       p.repeatability_status = JsonGetString(json, "repeatability_status", "UNAVAILABLE");
+      p.repeatability_required_live = JsonGetBool(json, "repeatability_required_live", false);
+      p.repeatability_artifact_state = JsonGetString(json, "repeatability_artifact_state", "legacy_or_missing");
+      p.repeatability_rejection_code = JsonGetString(json, "repeatability_rejection_code", "");
       p.repeatability_score_threshold_authority = JsonGetBool(json, "repeatability_score_threshold_authority", false);
       p.repeatability_trading_eligible = JsonGetBool(json, "repeatability_trading_eligible", false);
       p.repeatability_group_key = JsonGetString(json, "repeatability_group_key", "");
@@ -1107,7 +1168,10 @@ private:
       p.ai.session_bucket_risk = JsonGetNumber(json, "ai_session_bucket_risk", -1.0);
       p.ai.post_entry_failure_risk = JsonGetNumber(json, "ai_post_entry_failure_risk", -1.0);
       p.ai.final_trade_expectancy_score = JsonGetNumber(json, "ai_final_trade_expectancy_score", -1.0);
+      p.ai.llm_numeric_diagnostics_authority = JsonGetString(json, "ai_llm_numeric_diagnostics_authority", "");
       p.ai.veto_enabled = JsonGetBool(json, "ai_veto_enabled", false);
+      p.ai.veto_code = JsonGetString(json, "ai_veto_code", "");
+      p.ai.veto_evidence_fields_json = JsonGetArray(json, "ai_veto_evidence_fields", "[]");
       p.ai.veto_reason = JsonGetString(json, "ai_veto_reason", "");
       p.ai.veto_fields_present = JsonGetBool(json, "ai_veto_fields_present", false);
       p.ai.bucket_prior_override_justification = JsonGetString(json, "ai_bucket_prior_override_justification", "");
@@ -1136,6 +1200,9 @@ private:
       p.ai.hierarchical_prior_schema_version = p.hierarchical_prior_schema_version;
       p.ai.repeatability_schema_version = JsonGetString(json, "repeatability_schema_version", "");
       p.ai.repeatability_status = p.repeatability_status;
+      p.ai.repeatability_required_live = p.repeatability_required_live;
+      p.ai.repeatability_artifact_state = p.repeatability_artifact_state;
+      p.ai.repeatability_rejection_code = p.repeatability_rejection_code;
       p.ai.repeatability_score_threshold_authority = p.repeatability_score_threshold_authority;
       p.ai.repeatability_trading_eligible = p.repeatability_trading_eligible;
       p.ai.repeatability_group_key = p.repeatability_group_key;
@@ -1160,6 +1227,8 @@ private:
                  strict_quality && p.ai.mandatory_fields_complete &&
                  p.ai.decision_state == "APPROVE" && p.ai.allow && p.ai.raw_allow &&
                  !p.ai.veto_enabled && p.ai.veto_fields_present &&
+                 p.ai.llm_numeric_diagnostics_authority == "uncalibrated_diagnostic_only_no_direct_trade_authority" &&
+                 StringLen(p.ai.veto_code) == 0 && p.ai.veto_evidence_fields_json == "[]" &&
                  p.ai.suggested_risk_multiplier > 0.0 && p.ai.suggested_risk_multiplier <= 1.0 &&
                  calibration_unavailable && veto_values_valid &&
                  StringLen(p.ai.selected_candidate_id) > 0 &&
@@ -1171,7 +1240,8 @@ private:
                  p.ai.prompt_contract_version == AI_PROMPT_CONTRACT_VERSION &&
                  p.ai.hierarchical_prior_schema_version == HIERARCHICAL_PRIOR_SCHEMA_VERSION &&
                  p.ai.repeatability_schema_version == REPEATABILITY_SCHEMA_VERSION &&
-                 p.ai.repeatability_trading_eligible &&
+                 (!p.ai.repeatability_required_live ||
+                  (p.ai.repeatability_status == "REPEATABLE" && p.ai.repeatability_trading_eligible)) &&
                  StringLen(p.ai.request_fingerprint) > 0 && StringLen(p.ai.response_fingerprint) > 0 &&
                  p.candidate_id == p.ai.selected_candidate_id &&
                  p.candidate_hash == p.ai.selected_candidate_hash &&
@@ -1221,6 +1291,14 @@ private:
       p.result_deal_ticket = (ulong)JsonGetNumber(json, "result_deal_ticket", 0);
       p.broker_position_ticket = (ulong)JsonGetNumber(json, "broker_position_ticket", 0);
       p.broker_position_identifier = (long)JsonGetNumber(json, "broker_position_identifier", 0);
+      p.intended_order_type = JsonGetString(json, "intended_order_type", "");
+      p.execution_authority_state = JsonGetString(json, "execution_authority_state", "UNAVAILABLE");
+      p.broker_submission_attempted = JsonGetBool(json, "broker_submission_attempted", false);
+      p.broker_request_accepted = JsonGetBool(json, "broker_request_accepted", false);
+      p.broker_retcode = (long)JsonGetNumber(json, "broker_retcode", 0);
+      p.broker_retcode_description = JsonGetString(json, "broker_retcode_description", "");
+      p.broker_partial_fill = JsonGetBool(json, "broker_partial_fill", false);
+      p.final_execution_success = JsonGetBool(json, "final_execution_success", false);
       p.execution_identity_verified = JsonGetBool(json, "execution_identity_verified", false);
       p.execution_identity_quarantined = JsonGetBool(json, "execution_identity_quarantined", false);
       p.execution_identity_reason = JsonGetString(json, "execution_identity_reason", "");
@@ -1261,6 +1339,17 @@ private:
       p.management_evidence_snapshot_json = JsonGetObject(json, "management_evidence_snapshot", "{}");
       p.management_action_executed = JsonGetString(json, "management_action_executed", "");
       p.management_action_id = JsonGetString(json, "management_action_id", "");
+      p.management_action_lifecycle_state = JsonGetString(json, "management_action_lifecycle_state", "");
+      p.management_requested_action = JsonGetString(json, "management_requested_action", "");
+      p.management_requested_volume = JsonGetNumber(json, "management_requested_volume", 0);
+      p.management_normalized_volume = JsonGetNumber(json, "management_normalized_volume", 0);
+      p.management_position_volume_before = JsonGetNumber(json, "management_position_volume_before", 0);
+      p.management_requested_cut_fraction = JsonGetNumber(json, "management_requested_cut_fraction", 0);
+      p.management_action_retry_count = (int)JsonGetNumber(json, "management_action_retry_count", 0);
+      p.management_next_retry_at = (datetime)JsonGetNumber(json, "management_next_retry_at", 0);
+      p.management_last_retcode = (long)JsonGetNumber(json, "management_last_retcode", 0);
+      p.management_last_retcode_description = JsonGetString(json, "management_last_retcode_description", "");
+      p.management_action_terminal_reason = JsonGetString(json, "management_action_terminal_reason", "");
       p.management_policy = JsonGetString(json, "management_policy", "");
       p.management_decision_at = (datetime)JsonGetNumber(json, "management_decision_at", 0);
       p.management_features_time_safe = JsonGetBool(json, "management_features_time_safe", false);
@@ -1344,6 +1433,15 @@ private:
       p.mae_r = JsonGetNumber(json, "mae_r", 0);
       p.minutes_to_0_25r_mfe = (int)JsonGetNumber(json, "minutes_to_0_25r_mfe", 0);
       p.minutes_to_0_50r_mfe = (int)JsonGetNumber(json, "minutes_to_0_50r_mfe", 0);
+      p.first_0_25r_time = (datetime)JsonGetNumber(json, "first_0_25r_time", 0);
+      p.first_0_50r_time = (datetime)JsonGetNumber(json, "first_0_50r_time", 0);
+      p.first_adverse_threshold_time = (datetime)JsonGetNumber(json, "first_adverse_threshold_time", 0);
+      p.latest_observed_tick_time = (datetime)JsonGetNumber(json, "latest_observed_tick_time", 0);
+      p.latest_observed_tick_msc = (long)JsonGetNumber(json, "latest_observed_tick_msc", 0);
+      p.path_completeness_status = JsonGetString(json, "path_completeness_status", "UNKNOWN");
+      p.path_observation_source = JsonGetString(json, "path_observation_source", "UNKNOWN");
+      p.path_data_gap = JsonGetBool(json, "path_data_gap", true);
+      p.path_order_ambiguous = JsonGetBool(json, "path_order_ambiguous", false);
       p.stuck_no_mfe_triggered = JsonGetBool(json, "stuck_no_mfe_triggered", false);
       p.dr_and_structural_invalid_triggered = JsonGetBool(json, "dr_and_structural_invalid_triggered", false);
       p.penalty_reductions_count = (int)JsonGetNumber(json, "penalty_reductions_count", 0);
@@ -1538,6 +1636,18 @@ private:
       st.is_buy = JsonGetBool(json, "is_buy", true);
       st.mfe_price = JsonGetNumber(json, "mfe_price", st.entry);
       st.mae_price = JsonGetNumber(json, "mae_price", st.entry);
+      st.mfe_r = JsonGetNumber(json, "mfe_r", 0);
+      st.mae_r = JsonGetNumber(json, "mae_r", 0);
+      st.first_0_25r_time = (datetime)JsonGetNumber(json, "first_0_25r_time", 0);
+      st.first_0_50r_time = (datetime)JsonGetNumber(json, "first_0_50r_time", 0);
+      st.first_adverse_threshold_time = (datetime)JsonGetNumber(json, "first_adverse_threshold_time", 0);
+      st.latest_observed_tick_time = (datetime)JsonGetNumber(json, "latest_observed_tick_time", 0);
+      st.latest_observed_tick_msc = (long)JsonGetNumber(json, "latest_observed_tick_msc", 0);
+      st.path_completeness_status = JsonGetString(json, "path_completeness_status", "UNKNOWN");
+      st.path_observation_source = JsonGetString(json, "path_observation_source", "UNKNOWN");
+      st.path_data_gap = JsonGetBool(json, "path_data_gap", true);
+      st.path_order_ambiguous = JsonGetBool(json, "path_order_ambiguous", false);
+      st.position_closed_observed_at = (datetime)JsonGetNumber(json, "position_closed_observed_at", 0);
       st.strikes = (int)JsonGetNumber(json, "strikes", 0);
       st.last_reduction_at = (datetime)(int)JsonGetNumber(json, "last_reduction_at", 0);
       st.current_state = JsonGetString(json, "current_state", "");
@@ -1547,6 +1657,18 @@ private:
       st.evidence_snapshot_json = JsonGetObject(json, "evidence_snapshot", "{}");
       st.action_executed = JsonGetString(json, "action_executed", "");
       st.action_id = JsonGetString(json, "action_id", "");
+      st.action_lifecycle_state = JsonGetString(json, "action_lifecycle_state", "");
+      st.requested_action = JsonGetString(json, "requested_action", "");
+      st.requested_volume = JsonGetNumber(json, "requested_volume", 0);
+      st.normalized_volume = JsonGetNumber(json, "normalized_volume", 0);
+      st.action_position_volume_before = JsonGetNumber(json, "action_position_volume_before", 0);
+      st.requested_cut_fraction = JsonGetNumber(json, "requested_cut_fraction", 0);
+      st.action_retry_count = (int)JsonGetNumber(json, "action_retry_count", 0);
+      st.next_eligible_retry_time = (datetime)JsonGetNumber(json, "next_eligible_retry_time", 0);
+      st.action_last_attempt_at = (datetime)JsonGetNumber(json, "action_last_attempt_at", 0);
+      st.action_last_retcode = (long)JsonGetNumber(json, "action_last_retcode", 0);
+      st.action_last_retcode_description = JsonGetString(json, "action_last_retcode_description", "");
+      st.action_terminal_reason = JsonGetString(json, "action_terminal_reason", "");
       st.management_version = JsonGetString(json, "management_version", "");
       st.executed_action_ids = JsonGetString(json, "executed_action_ids", "");
       st.confirmation_mode = JsonGetString(json, "confirmation_mode", "");

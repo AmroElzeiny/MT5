@@ -2752,6 +2752,70 @@ private:
       return IntegerToString((int)m_trade.ResultRetcode()) + " " + m_trade.ResultRetcodeDescription();
    }
 
+   bool _BrokerRetcodeAccepted(const uint retcode) const {
+      return (retcode == TRADE_RETCODE_DONE ||
+              retcode == TRADE_RETCODE_PLACED ||
+              retcode == TRADE_RETCODE_DONE_PARTIAL);
+   }
+
+   void _SetExecutionAuthority(TradePlan &meta,
+                               const string state,
+                               const bool mql_allow,
+                               const string reason) {
+      meta.execution_authority_state = state;
+      meta.mql_final_allow = mql_allow;
+      meta.ai.mql_final_allow = mql_allow;
+      meta.mql_decision_reasons = reason;
+      _Journal("[execution_authority] req_id=" + meta.req_id
+               + " candidate_id=" + meta.candidate_id
+               + " candidate_hash=" + meta.candidate_hash
+               + " intended_order_type=" + meta.intended_order_type
+               + " state=" + state
+               + " broker_submission_attempted=" + (meta.broker_submission_attempted ? "true" : "false")
+               + " broker_request_accepted=" + (meta.broker_request_accepted ? "true" : "false")
+               + " broker_retcode=" + IntegerToString((int)meta.broker_retcode)
+               + " broker_retcode_description=" + meta.broker_retcode_description
+               + " order_ticket=" + IntegerToString((long)meta.result_order_ticket)
+               + " deal_ticket=" + IntegerToString((long)meta.result_deal_ticket)
+               + " attribution_verified=" + (meta.execution_identity_verified ? "true" : "false")
+               + " quarantine=" + (meta.execution_identity_quarantined ? "true" : "false")
+               + " final_execution_success=" + (meta.final_execution_success ? "true" : "false")
+               + " mql_final_allow=" + (mql_allow ? "true" : "false")
+               + " reason=" + reason);
+      bool terminal = (state == "BROKER_REQUEST_REJECTED" ||
+                       state == "BROKER_ACCEPTED_IDENTITY_QUARANTINED" ||
+                       state == "EXECUTION_IDENTITY_VERIFIED" ||
+                       state == "POSITION_PARTIALLY_FILLED_IDENTITY_VERIFIED" ||
+                       state == "POSITION_FILLED_IDENTITY_VERIFIED");
+      string event = "{";
+      event += JsonKVInt("timestamp", (int)_NowServerOrLocal()) + ",";
+      event += JsonKVStr("request_id", meta.req_id) + ",";
+      event += JsonKVStr("trade_key", meta.trade_key) + ",";
+      event += JsonKVStr("candidate_id", meta.candidate_id) + ",";
+      event += JsonKVStr("candidate_hash", meta.candidate_hash) + ",";
+      event += JsonKVStr("execution_fingerprint", meta.final_execution_fingerprint) + ",";
+      event += JsonKVStr("intended_order_type", meta.intended_order_type) + ",";
+      event += JsonKVStr("execution_authority_state", state) + ",";
+      event += JsonKVBool("terminal", terminal) + ",";
+      event += JsonKVBool("broker_submission_attempted", meta.broker_submission_attempted) + ",";
+      event += JsonKVBool("broker_request_accepted", meta.broker_request_accepted) + ",";
+      event += JsonKVNum("broker_retcode", (double)meta.broker_retcode, 0) + ",";
+      event += JsonKVStr("broker_retcode_description", meta.broker_retcode_description) + ",";
+      event += JsonKVNum("result_order_ticket", (double)meta.result_order_ticket, 0) + ",";
+      event += JsonKVNum("result_deal_ticket", (double)meta.result_deal_ticket, 0) + ",";
+      event += JsonKVNum("broker_position_identifier", (double)meta.broker_position_identifier, 0) + ",";
+      event += JsonKVBool("broker_partial_fill", meta.broker_partial_fill) + ",";
+      event += JsonKVBool("execution_identity_verified", meta.execution_identity_verified) + ",";
+      event += JsonKVBool("execution_identity_quarantined", meta.execution_identity_quarantined) + ",";
+      event += JsonKVBool("final_execution_success", meta.final_execution_success) + ",";
+      event += JsonKVBool("model_raw_allow", meta.model_raw_allow) + ",";
+      event += JsonKVBool("python_final_allow", meta.python_final_allow) + ",";
+      event += JsonKVBool("mql_final_allow", mql_allow) + ",";
+      event += JsonKVStr("reason", reason);
+      event += "}";
+      m_bus.AppendText("logs\\execution_authority_events.jsonl", event + "\n");
+   }
+
    bool _RangesOverlap(const double low_a, const double high_a, const double low_b, const double high_b) const {
       return (low_a <= high_b && high_a >= low_b);
    }
@@ -4281,8 +4345,9 @@ private:
       j += "\"exact_risk_size\":{\"owner\":\"deterministic_portfolio\",\"authority\":\"active\"},";
       j += "\"calibrated_probability\":{\"owner\":\"statistical\",\"authority\":\"unavailable\"},";
       j += "\"expected_net_r\":{\"owner\":\"statistical\",\"authority\":\"unavailable\"},";
-      j += "\"llm_quality_score\":{\"owner\":\"llm\",\"authority\":\"diagnostic_and_veto_only\"},";
-      j += "\"llm_risk_assessments\":{\"owner\":\"llm\",\"authority\":\"veto_only_uncalibrated\"},";
+      j += "\"llm_quality_score\":{\"owner\":\"llm\",\"authority\":\"diagnostic_only_uncalibrated\"},";
+      j += "\"llm_risk_assessments\":{\"owner\":\"llm\",\"authority\":\"diagnostic_only_uncalibrated\"},";
+      j += "\"llm_qualitative_veto\":{\"owner\":\"llm\",\"authority\":\"evidence_backed_enumerated_veto\"},";
       j += "\"llm_narrative\":{\"owner\":\"llm\",\"authority\":\"diagnostic\"},";
       j += "\"python_final_allow\":{\"owner\":\"python_policy\",\"authority\":\"intermediate\"},";
       j += "\"mql_final_allow\":{\"owner\":\"mql_execution\",\"authority\":\"final\"},";
@@ -4328,6 +4393,9 @@ private:
       j += JsonKVStr("hierarchical_prior_schema_version", dec.hierarchical_prior_schema_version) + ",";
       j += JsonKVStr("repeatability_schema_version", dec.repeatability_schema_version) + ",";
       j += JsonKVStr("repeatability_status", dec.repeatability_status) + ",";
+      j += JsonKVBool("repeatability_required_live", dec.repeatability_required_live) + ",";
+      j += JsonKVStr("repeatability_artifact_state", dec.repeatability_artifact_state) + ",";
+      j += JsonKVStr("repeatability_rejection_code", dec.repeatability_rejection_code) + ",";
       j += JsonKVBool("repeatability_score_threshold_authority", dec.repeatability_score_threshold_authority) + ",";
       j += JsonKVBool("repeatability_trading_eligible", dec.repeatability_trading_eligible) + ",";
       j += JsonKVStr("repeatability_group_key", dec.repeatability_group_key) + ",";
@@ -4391,9 +4459,15 @@ private:
       j += JsonKVNum("session_bucket_risk", dec.session_bucket_risk, 6) + ",";
       j += JsonKVNum("post_entry_failure_risk", dec.post_entry_failure_risk, 6) + ",";
       j += JsonKVNum("final_trade_expectancy_score", dec.final_trade_expectancy_score, 6) + ",";
+      j += JsonKVStr("llm_numeric_diagnostics_authority", dec.llm_numeric_diagnostics_authority) + ",";
       j += JsonKVBool("veto_enabled", dec.veto_enabled) + ",";
+      j += JsonKVStr("veto_code", dec.veto_code) + ",";
+      j += "\"veto_evidence_fields\":" + (StringLen(dec.veto_evidence_fields_json) > 0 ? dec.veto_evidence_fields_json : "[]") + ",";
       j += JsonKVStr("veto_reason", dec.veto_reason) + ",";
-      j += "\"veto\":{" + JsonKVBool("enabled", dec.veto_enabled) + "," + JsonKVStr("reason", dec.veto_reason) + "},";
+      j += "\"veto\":{" + JsonKVBool("enabled", dec.veto_enabled) + ","
+           + JsonKVStr("code", dec.veto_code) + ","
+           + "\"evidence_fields\":" + (StringLen(dec.veto_evidence_fields_json) > 0 ? dec.veto_evidence_fields_json : "[]") + ","
+           + JsonKVStr("reason", dec.veto_reason) + "},";
       j += JsonKVStr("bucket_prior_override_justification", dec.bucket_prior_override_justification) + ",";
       j += "\"target_arbitration\":{";
       j += JsonKVStr("target_arbitration_schema_version", dec.target_arbitration_schema_version) + ",";
@@ -5375,6 +5449,55 @@ private:
                + " time_safe=true model_authority=shadow_only");
    }
 
+   void _ApplyPenaltyStateToMeta(TradePlan &meta, const PenaltyState &state) {
+      meta.management_version = state.management_version;
+      meta.management_previous_state = state.previous_state;
+      meta.management_state = state.current_state;
+      meta.management_transition_time = state.transition_time;
+      meta.management_transition_reason = state.transition_reason;
+      meta.management_evidence_snapshot_json = state.evidence_snapshot_json;
+      meta.management_action_executed = state.action_executed;
+      meta.management_action_id = state.action_id;
+      meta.management_action_lifecycle_state = state.action_lifecycle_state;
+      meta.management_requested_action = state.requested_action;
+      meta.management_requested_volume = state.requested_volume;
+      meta.management_normalized_volume = state.normalized_volume;
+      meta.management_position_volume_before = state.action_position_volume_before;
+      meta.management_requested_cut_fraction = state.requested_cut_fraction;
+      meta.management_action_retry_count = state.action_retry_count;
+      meta.management_next_retry_at = state.next_eligible_retry_time;
+      meta.management_last_retcode = state.action_last_retcode;
+      meta.management_last_retcode_description = state.action_last_retcode_description;
+      meta.management_action_terminal_reason = state.action_terminal_reason;
+      meta.invalidation_confirmation_mode = state.confirmation_mode;
+      meta.invalidation_reference_timeframe = state.confirmation_timeframe;
+      meta.invalidation_trigger_level = state.confirmation_trigger_level;
+      meta.invalidation_spread = state.confirmation_spread;
+      meta.invalidation_buffer = state.confirmation_buffer;
+      meta.invalidation_first_breach_time = state.first_breach_time;
+      meta.invalidation_confirmed_time = state.confirmed_time;
+      meta.invalidation_confirming_bar = state.confirming_bar;
+      meta.mfe_price = state.mfe_price;
+      meta.mae_price = state.mae_price;
+      meta.mfe_r = MathMax(meta.mfe_r, state.mfe_r);
+      meta.mae_r = MathMax(meta.mae_r, state.mae_r);
+      meta.first_0_25r_time = state.first_0_25r_time;
+      meta.first_0_50r_time = state.first_0_50r_time;
+      meta.first_adverse_threshold_time = state.first_adverse_threshold_time;
+      meta.latest_observed_tick_time = state.latest_observed_tick_time;
+      meta.latest_observed_tick_msc = state.latest_observed_tick_msc;
+      meta.path_completeness_status = state.path_completeness_status;
+      meta.path_observation_source = state.path_observation_source;
+      meta.path_data_gap = state.path_data_gap;
+      meta.path_order_ambiguous = state.path_order_ambiguous;
+      datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+      if(meta.first_0_25r_time > 0 && opened_at > 0)
+         meta.minutes_to_0_25r_mfe = (int)MathMax(0, (meta.first_0_25r_time - opened_at) / 60);
+      if(meta.first_0_50r_time > 0 && opened_at > 0)
+         meta.minutes_to_0_50r_mfe = (int)MathMax(0, (meta.first_0_50r_time - opened_at) / 60);
+      meta.penalty_reductions_count = MathMax(meta.penalty_reductions_count, state.strikes);
+   }
+
    void _UpdateAnalyticsSnapshot(TradePlan &meta, const ulong ticket, const double live_px, const double live_vol) {
       if(!InpAnalyticsEnable) return;
       if(meta.planned_entry <= 0) meta.planned_entry = meta.entry_est;
@@ -5406,14 +5529,24 @@ private:
          meta.mae_price = MathMax(meta.mae_price, live_px);
       }
       if(risk_dist > 0){
-         meta.mfe_r = (meta.is_buy ? (meta.mfe_price - meta.filled_entry) : (meta.filled_entry - meta.mfe_price)) / risk_dist;
-         meta.mae_r = (meta.is_buy ? (meta.mae_price - meta.filled_entry) : (meta.filled_entry - meta.mae_price)) / risk_dist;
+         double sampled_mfe_r = (meta.is_buy ? (meta.mfe_price - meta.filled_entry) : (meta.filled_entry - meta.mfe_price)) / risk_dist;
+         double sampled_mae_r = (meta.is_buy ? (meta.filled_entry - meta.mae_price) : (meta.mae_price - meta.filled_entry)) / risk_dist;
+         meta.mfe_r = MathMax(meta.mfe_r, MathMax(0.0, sampled_mfe_r));
+         meta.mae_r = MathMax(meta.mae_r, MathMax(0.0, sampled_mae_r));
          datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
          int minutes_open = (opened_at > 0 && now >= opened_at ? (int)((now - opened_at) / 60) : 0);
-         if(meta.minutes_to_0_25r_mfe <= 0 && meta.mfe_r >= 0.25)
+         if(meta.first_0_25r_time <= 0 && meta.mfe_r >= 0.25) meta.first_0_25r_time = now;
+         if(meta.first_0_50r_time <= 0 && meta.mfe_r >= 0.50) meta.first_0_50r_time = now;
+         if(meta.first_adverse_threshold_time <= 0 && meta.mae_r >= MathMax(0.01, MathAbs(InpPenaltyMaeTriggerR)))
+            meta.first_adverse_threshold_time = now;
+         if(meta.minutes_to_0_25r_mfe <= 0 && meta.first_0_25r_time > 0)
             meta.minutes_to_0_25r_mfe = minutes_open;
-         if(meta.minutes_to_0_50r_mfe <= 0 && meta.mfe_r >= 0.50)
+         if(meta.minutes_to_0_50r_mfe <= 0 && meta.first_0_50r_time > 0)
             meta.minutes_to_0_50r_mfe = minutes_open;
+         if(StringLen(meta.path_completeness_status) == 0 || meta.path_completeness_status == "UNKNOWN"){
+            meta.path_completeness_status = "TIMER_SAMPLED";
+            meta.path_observation_source = "TRADE_ENGINE_TIMER_SNAPSHOT";
+         }
          int stuck_minutes = (meta.penalty_stuck_minutes > 0 ? meta.penalty_stuck_minutes : InpPenaltyStuckMinutes);
          double stuck_min_mfe = (meta.penalty_stuck_min_mfe_r > 0.0 ? meta.penalty_stuck_min_mfe_r : InpPenaltyStuckMinMfeR);
          if(stuck_minutes > 0 && minutes_open >= stuck_minutes && meta.mfe_r < stuck_min_mfe)
@@ -5447,7 +5580,7 @@ private:
          }
          double realized_quality = meta.stop_quality_score;
          if(meta.fill_slippage_r > 0.0) realized_quality -= MathMin(1.5, meta.fill_slippage_r * 3.0);
-         if(meta.mae_r <= -1.0 && meta.mfe_r >= 0.5) realized_quality -= 1.0;
+         if(meta.mae_r >= 1.0 && meta.mfe_r >= 0.5) realized_quality -= 1.0;
          meta.realized_stop_quality = _ClampRange(realized_quality, 0.0, 10.0);
       }
    }
@@ -8107,16 +8240,17 @@ private:
             reason = "ai_quality_schema_incomplete";
             return false;
          }
-         if(!p.ai.repeatability_trading_eligible){
-            reason = "model_prompt_decision_non_repeatable";
+         if(p.ai.repeatability_required_live &&
+            (p.ai.repeatability_status != "REPEATABLE" || !p.ai.repeatability_trading_eligible)){
+            reason = (StringLen(p.ai.repeatability_rejection_code) > 0
+                      ? p.ai.repeatability_rejection_code
+                      : "repeatability_unavailable");
             return false;
          }
          string quality_threshold_source = "";
          double quality_threshold = EffectiveLlmQualityScoreThreshold(p, quality_threshold_source);
-         if(p.ai.repeatability_score_threshold_authority && p.ai.llm_quality_score < quality_threshold){
-            reason = "llm_quality_score_below_family_threshold";
-            return false;
-         }
+         // Uncalibrated LLM quality thresholds remain observable for cohort
+         // analysis but have no direct positive or negative trade authority.
          if(p.ai.suggested_risk_multiplier <= 0.0){
             reason = "resolved_risk_multiplier_zero";
             return false;
@@ -8177,18 +8311,13 @@ private:
    string _AiVetoReason(const AiDecision &dec) const {
       if(!dec.ok) return "";
       if(InpAiVetoEnable && dec.veto_fields_present){
-         if(dec.veto_enabled)
-            return "ai_veto:" + (StringLen(dec.veto_reason) > 0 ? dec.veto_reason : "model_veto");
-         if(dec.follow_through_probability < InpAiMinFollowThroughProb)
-            return "ai_veto:follow_through_probability";
-         if(dec.invalidation_risk > InpAiMaxInvalidationRisk)
-            return "ai_veto:invalidation_risk";
-         if(dec.chop_risk > InpAiMaxChopRisk)
-            return "ai_veto:chop_risk";
-         if(dec.post_entry_failure_risk > InpAiMaxPostEntryFailureRisk)
-            return "ai_veto:post_entry_failure_risk";
-         if(dec.final_trade_expectancy_score < InpAiMinFinalExpectancyScore)
-            return "ai_veto:final_trade_expectancy_score";
+         if(dec.veto_enabled){
+            string evidence = dec.veto_evidence_fields_json;
+            StringReplace(evidence, " ", "");
+            if(StringLen(dec.veto_code) == 0 || evidence == "[]" || StringLen(dec.veto_reason) == 0)
+               return "ai_quality_schema_incomplete";
+            return dec.veto_code + ":" + dec.veto_reason;
+         }
       }
       return "";
    }
@@ -9319,7 +9448,8 @@ private:
                                        const ulong order_ticket,
                                        const ulong deal_ticket,
                                        const double requested_volume,
-                                       string &reason) {
+                                       string &reason,
+                                       const double accepted_deal_volume=0.0) {
       reason = "";
       meta.result_order_ticket = order_ticket;
       meta.result_deal_ticket = deal_ticket;
@@ -9362,7 +9492,9 @@ private:
       double volume_step = SymbolInfoDouble(meta.symbol, SYMBOL_VOLUME_STEP);
       double volume_tolerance = MathMax(InpLedgerVolumeReconciliationTolerance, volume_step * 0.51);
       double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
-      if(requested_volume <= 0.0 || MathAbs(deal_volume - requested_volume) > volume_tolerance){
+      double expected_deal_volume = (accepted_deal_volume > 0.0 ? accepted_deal_volume : requested_volume);
+      if(requested_volume <= 0.0 || expected_deal_volume <= 0.0 ||
+         MathAbs(deal_volume - expected_deal_volume) > volume_tolerance){
          reason = "deal_volume_mismatch";
          return false;
       }
@@ -9412,7 +9544,18 @@ private:
          return false;
       }
       double position_volume = PositionGetDouble(POSITION_VOLUME);
-      if(position_volume <= 0.0 || MathAbs(position_volume - requested_volume) > volume_tolerance){
+      double aggregate_entry_volume = 0.0;
+      for(int deal_index=0; deal_index<HistoryDealsTotal(); deal_index++){
+         ulong related_deal = HistoryDealGetTicket(deal_index);
+         if(related_deal == 0) continue;
+         if((ulong)HistoryDealGetInteger(related_deal, DEAL_ORDER) != order_ticket) continue;
+         if((long)HistoryDealGetInteger(related_deal, DEAL_POSITION_ID) != position_identifier) continue;
+         ENUM_DEAL_ENTRY related_entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(related_deal, DEAL_ENTRY);
+         if(related_entry != DEAL_ENTRY_IN && related_entry != DEAL_ENTRY_INOUT) continue;
+         aggregate_entry_volume += HistoryDealGetDouble(related_deal, DEAL_VOLUME);
+      }
+      if(aggregate_entry_volume <= 0.0) aggregate_entry_volume = expected_deal_volume;
+      if(position_volume <= 0.0 || MathAbs(position_volume - aggregate_entry_volume) > volume_tolerance){
          reason = "position_volume_mismatch";
          return false;
       }
@@ -9721,6 +9864,14 @@ private:
       row += JsonKVStr("position_identifier", IntegerToString(meta.broker_position_identifier)) + ",";
       row += JsonKVStr("order_ticket", IntegerToString((long)meta.result_order_ticket)) + ",";
       row += JsonKVStr("deal_ticket", IntegerToString((long)meta.result_deal_ticket)) + ",";
+      row += JsonKVStr("intended_order_type", meta.intended_order_type) + ",";
+      row += JsonKVStr("execution_authority_state", meta.execution_authority_state) + ",";
+      row += JsonKVBool("broker_submission_attempted", meta.broker_submission_attempted) + ",";
+      row += JsonKVBool("broker_request_accepted", meta.broker_request_accepted) + ",";
+      row += JsonKVNum("broker_retcode", (double)meta.broker_retcode, 0) + ",";
+      row += JsonKVStr("broker_retcode_description", meta.broker_retcode_description) + ",";
+      row += JsonKVBool("broker_partial_fill", meta.broker_partial_fill) + ",";
+      row += JsonKVBool("final_execution_success", meta.final_execution_success) + ",";
       row += JsonKVBool("execution_identity_verified", meta.execution_identity_verified) + ",";
       row += JsonKVStr("attribution_status", meta.attribution_status) + ",";
       row += JsonKVStr("ledger_schema_version", meta.ledger_schema_version) + ",";
@@ -9790,7 +9941,10 @@ private:
       row += JsonKVNum("chop_risk", meta.ai.chop_risk, 6) + ",";
       row += JsonKVNum("post_entry_failure_risk", meta.ai.post_entry_failure_risk, 6) + ",";
       row += JsonKVNum("final_trade_expectancy_score", meta.ai.final_trade_expectancy_score, 6) + ",";
+      row += JsonKVStr("llm_numeric_diagnostics_authority", meta.ai.llm_numeric_diagnostics_authority) + ",";
       row += JsonKVBool("ai_veto_enabled", meta.ai.veto_enabled) + ",";
+      row += JsonKVStr("ai_veto_code", meta.ai.veto_code) + ",";
+      row += "\"ai_veto_evidence_fields\":" + (StringLen(meta.ai.veto_evidence_fields_json) > 0 ? meta.ai.veto_evidence_fields_json : "[]") + ",";
       row += JsonKVStr("ai_veto_reason", meta.ai.veto_reason) + ",";
       row += JsonKVStr("bucket_prior_override_justification", meta.ai.bucket_prior_override_justification) + ",";
       row += JsonKVNum("entry_price", meta.filled_entry, 8) + ",";
@@ -9833,11 +9987,26 @@ private:
       row += JsonKVStr("repeatability_status", meta.repeatability_status) + ",";
       row += JsonKVStr("repeatability_group_key", meta.repeatability_group_key) + ",";
       row += JsonKVStr("repeatability_authority_hash", meta.repeatability_authority_hash) + ",";
+      row += JsonKVBool("repeatability_required_live", meta.ai.repeatability_required_live) + ",";
+      row += JsonKVStr("repeatability_artifact_state", meta.ai.repeatability_artifact_state) + ",";
+      row += JsonKVStr("repeatability_rejection_code", meta.ai.repeatability_rejection_code) + ",";
       row += JsonKVStr("risk_factor_schema_version", meta.risk_factor_schema_version) + ",";
       row += "\"risk_factor_contributions\":" + (StringLen(meta.risk_factor_contributions_json) > 0 ? meta.risk_factor_contributions_json : "{}") + ",";
       row += JsonKVNum("original_initial_risk_money", meta.original_initial_risk_money, 4) + ",";
       row += JsonKVStr("management_version", meta.management_version) + ",";
       row += JsonKVStr("management_state", meta.management_state) + ",";
+      row += JsonKVStr("management_action_id", meta.management_action_id) + ",";
+      row += JsonKVStr("management_action_lifecycle_state", meta.management_action_lifecycle_state) + ",";
+      row += JsonKVStr("management_requested_action", meta.management_requested_action) + ",";
+      row += JsonKVNum("management_requested_volume", meta.management_requested_volume, 8) + ",";
+      row += JsonKVNum("management_normalized_volume", meta.management_normalized_volume, 8) + ",";
+      row += JsonKVNum("management_position_volume_before", meta.management_position_volume_before, 8) + ",";
+      row += JsonKVNum("management_requested_cut_fraction", meta.management_requested_cut_fraction, 8) + ",";
+      row += JsonKVInt("management_action_retry_count", meta.management_action_retry_count) + ",";
+      row += JsonKVInt("management_next_retry_at", (int)meta.management_next_retry_at) + ",";
+      row += JsonKVNum("management_last_retcode", (double)meta.management_last_retcode, 0) + ",";
+      row += JsonKVStr("management_last_retcode_description", meta.management_last_retcode_description) + ",";
+      row += JsonKVStr("management_action_terminal_reason", meta.management_action_terminal_reason) + ",";
       row += JsonKVStr("management_policy", meta.management_policy) + ",";
       row += JsonKVInt("management_decision_at", (int)meta.management_decision_at) + ",";
       row += JsonKVBool("management_features_time_safe", meta.management_features_time_safe) + ",";
@@ -9880,6 +10049,15 @@ private:
       row += JsonKVBool("management_policy_selection_eligible", meta.management_policy_selection_eligible) + ",";
       row += JsonKVNum("mfe_r", meta.mfe_r, 6) + ",";
       row += JsonKVNum("mae_r", meta.mae_r, 6) + ",";
+      row += JsonKVInt("first_0_25r_time", (int)meta.first_0_25r_time) + ",";
+      row += JsonKVInt("first_0_50r_time", (int)meta.first_0_50r_time) + ",";
+      row += JsonKVInt("first_adverse_threshold_time", (int)meta.first_adverse_threshold_time) + ",";
+      row += JsonKVInt("latest_observed_tick_time", (int)meta.latest_observed_tick_time) + ",";
+      row += JsonKVNum("latest_observed_tick_msc", (double)meta.latest_observed_tick_msc, 0) + ",";
+      row += JsonKVStr("path_completeness_status", meta.path_completeness_status) + ",";
+      row += JsonKVStr("path_observation_source", meta.path_observation_source) + ",";
+      row += JsonKVBool("path_data_gap", meta.path_data_gap) + ",";
+      row += JsonKVBool("path_order_ambiguous", meta.path_order_ambiguous) + ",";
       row += JsonKVInt("minutes_to_0_25r_mfe", meta.minutes_to_0_25r_mfe) + ",";
       row += JsonKVInt("minutes_to_0_50r_mfe", meta.minutes_to_0_50r_mfe) + ",";
       row += JsonKVBool("stuck_no_mfe_triggered", meta.stuck_no_mfe_triggered) + ",";
@@ -9945,8 +10123,10 @@ private:
       double internal_gross_price_pnl = 0.0;
       double exit_prices[];
       double exit_volumes[];
+      datetime exit_times[];
       ArrayResize(exit_prices, 0);
       ArrayResize(exit_volumes, 0);
+      ArrayResize(exit_times, 0);
       bool deal_magic_mismatch = false;
       bool deal_symbol_mismatch = false;
       bool inout_ambiguous = false;
@@ -10023,8 +10203,10 @@ private:
             int exit_idx = ArraySize(exit_prices);
             ArrayResize(exit_prices, exit_idx + 1);
             ArrayResize(exit_volumes, exit_idx + 1);
+            ArrayResize(exit_times, exit_idx + 1);
             exit_prices[exit_idx] = price;
             exit_volumes[exit_idx] = vol;
+            exit_times[exit_idx] = deal_time;
             if(partial_count > 0) partials_json += ",";
             partials_json += "{";
             partials_json += JsonKVStr("deal_ticket", IntegerToString((long)deal_ticket)) + ",";
@@ -10088,11 +10270,64 @@ private:
       }
       _PopulateDerivedPlanFields(meta);
 
+      PenaltyState retained_penalty_state;
+      bool retained_penalty_state_found = m_penalty.GetState(position_id,
+                                                              meta.symbol,
+                                                              retained_penalty_state);
+      if(retained_penalty_state_found)
+         _ApplyPenaltyStateToMeta(meta, retained_penalty_state);
+
       double risk_dist = _RiskDistanceForMeta(meta);
       if(risk_dist > 0 && meta.planned_entry > 0){
          meta.fill_slippage = meta.filled_entry - meta.planned_entry;
          double adverse = (meta.is_buy ? (meta.filled_entry - meta.planned_entry) : (meta.planned_entry - meta.filled_entry));
          meta.fill_slippage_r = adverse / risk_dist;
+      }
+      if(risk_dist > 0.0 && meta.filled_entry > 0.0){
+         if(meta.mfe_price <= 0.0) meta.mfe_price = meta.filled_entry;
+         if(meta.mae_price <= 0.0) meta.mae_price = meta.filled_entry;
+         for(int exit_i=0; exit_i<ArraySize(exit_prices); exit_i++){
+            double observed_exit = exit_prices[exit_i];
+            datetime observed_at = exit_times[exit_i];
+            if(meta.is_buy){
+               meta.mfe_price = MathMax(meta.mfe_price, observed_exit);
+               meta.mae_price = MathMin(meta.mae_price, observed_exit);
+            } else {
+               meta.mfe_price = MathMin(meta.mfe_price, observed_exit);
+               meta.mae_price = MathMax(meta.mae_price, observed_exit);
+            }
+            double exit_mfe_r = (meta.is_buy
+                                 ? (meta.mfe_price - meta.filled_entry)
+                                 : (meta.filled_entry - meta.mfe_price)) / risk_dist;
+            double exit_mae_r = (meta.is_buy
+                                 ? (meta.filled_entry - meta.mae_price)
+                                 : (meta.mae_price - meta.filled_entry)) / risk_dist;
+            meta.mfe_r = MathMax(meta.mfe_r, MathMax(0.0, exit_mfe_r));
+            meta.mae_r = MathMax(meta.mae_r, MathMax(0.0, exit_mae_r));
+            if(meta.first_0_25r_time <= 0 && meta.mfe_r >= 0.25)
+               meta.first_0_25r_time = observed_at;
+            if(meta.first_0_50r_time <= 0 && meta.mfe_r >= 0.50)
+               meta.first_0_50r_time = observed_at;
+            if(meta.first_adverse_threshold_time <= 0 &&
+               meta.mae_r >= MathMax(0.01, MathAbs(InpPenaltyMaeTriggerR)))
+               meta.first_adverse_threshold_time = observed_at;
+            if(meta.first_0_25r_time == observed_at &&
+               meta.first_adverse_threshold_time == observed_at)
+               meta.path_order_ambiguous = true;
+            if(meta.first_0_50r_time == observed_at &&
+               meta.first_adverse_threshold_time == observed_at)
+               meta.path_order_ambiguous = true;
+            meta.latest_observed_tick_time = MathMax(meta.latest_observed_tick_time, observed_at);
+         }
+         if(StringLen(meta.path_completeness_status) == 0){
+            meta.path_completeness_status = "UNKNOWN";
+            meta.path_observation_source = "DEAL_HISTORY_ONLY";
+            meta.path_data_gap = true;
+         }
+         if(meta.first_0_25r_time > 0 && meta.filled_at > 0)
+            meta.minutes_to_0_25r_mfe = (int)MathMax(0, (meta.first_0_25r_time - meta.filled_at) / 60);
+         if(meta.first_0_50r_time > 0 && meta.filled_at > 0)
+            meta.minutes_to_0_50r_mfe = (int)MathMax(0, (meta.first_0_50r_time - meta.filled_at) / 60);
       }
 
       double exit_price = (out_vol > 0 ? out_value / out_vol : 0.0);
@@ -10241,8 +10476,8 @@ private:
          critical_integrity_failure = true;
       }
       if(!MathIsValidNumber(meta.mfe_r) || !MathIsValidNumber(meta.mae_r) ||
-         meta.mfe_r < -InpLedgerRReconciliationTolerance || meta.mae_r > InpLedgerRReconciliationTolerance ||
-         meta.mfe_r > InpLedgerMaxMfeR || MathAbs(meta.mae_r) > InpLedgerMaxAbsMaeR)
+         meta.mfe_r < -InpLedgerRReconciliationTolerance || meta.mae_r < -InpLedgerRReconciliationTolerance ||
+         meta.mfe_r > InpLedgerMaxMfeR || meta.mae_r > InpLedgerMaxAbsMaeR)
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "mfe_mae_invariant_failed");
       if(meta.account_equity_at_entry <= 0.0)
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "equity_at_entry_missing");
@@ -10250,10 +10485,19 @@ private:
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "zero_realized_pnl");
       if(StringLen(meta.management_version) == 0)
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "management_version_missing");
+      if(meta.path_completeness_status != "TICK_COMPLETE" || meta.path_data_gap)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "path_evidence_not_tick_complete");
+      if(meta.path_order_ambiguous)
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "path_event_order_ambiguous");
       if(meta.counterfactual_ambiguous && !meta.counterfactual_pending)
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "counterfactual_path_ambiguous_or_unavailable");
       if(!meta.model_raw_allow || !meta.python_final_allow || !meta.mql_final_allow){
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "three_stage_decision_authority_incomplete");
+         critical_integrity_failure = true;
+      }
+      if(!meta.broker_submission_attempted || !meta.broker_request_accepted ||
+         !meta.final_execution_success){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "broker_execution_lifecycle_incomplete");
          critical_integrity_failure = true;
       }
       if(!meta.cohort_complete)
@@ -10269,7 +10513,9 @@ private:
       bool clean_eligible = (data_integrity_status == "CLEAN" && meta.execution_identity_verified &&
                              meta.candidate_hash_match && meta.execution_fingerprint_match &&
                              meta.setup_taxonomy != UNKNOWN_UNCLASSIFIED && meta.cohort_complete &&
-                             meta.model_raw_allow && meta.python_final_allow && meta.mql_final_allow);
+                             meta.model_raw_allow && meta.python_final_allow && meta.mql_final_allow &&
+                             meta.broker_submission_attempted && meta.broker_request_accepted &&
+                             meta.final_execution_success);
       meta.learning_eligible = clean_eligible;
       meta.optimization_eligible = clean_eligible;
       meta.suppression_eligible = clean_eligible;
@@ -10286,6 +10532,9 @@ private:
       j += JsonKVStr("decision_quality_tier", meta.ai.decision_quality_tier) + ",";
       j += JsonKVStr("response_quality", meta.ai.response_quality_alias) + ",";
       j += JsonKVStr("decision_state", meta.ai.decision_state) + ",";
+      j += JsonKVBool("model_raw_allow", meta.model_raw_allow) + ",";
+      j += JsonKVBool("python_final_allow", meta.python_final_allow) + ",";
+      j += JsonKVBool("mql_final_allow", meta.mql_final_allow) + ",";
       j += JsonKVStr("candidate_id", meta.candidate_id) + ",";
       j += JsonKVStr("candidate_hash", meta.candidate_hash) + ",";
       j += JsonKVStr("ai_selected_candidate_hash", meta.ai_selected_candidate_hash) + ",";
@@ -10298,6 +10547,14 @@ private:
       j += JsonKVNum("result_deal_ticket", (double)meta.result_deal_ticket, 0) + ",";
       j += JsonKVNum("broker_position_ticket", (double)meta.broker_position_ticket, 0) + ",";
       j += JsonKVNum("broker_position_identifier", (double)meta.broker_position_identifier, 0) + ",";
+      j += JsonKVStr("intended_order_type", meta.intended_order_type) + ",";
+      j += JsonKVStr("execution_authority_state", meta.execution_authority_state) + ",";
+      j += JsonKVBool("broker_submission_attempted", meta.broker_submission_attempted) + ",";
+      j += JsonKVBool("broker_request_accepted", meta.broker_request_accepted) + ",";
+      j += JsonKVNum("broker_retcode", (double)meta.broker_retcode, 0) + ",";
+      j += JsonKVStr("broker_retcode_description", meta.broker_retcode_description) + ",";
+      j += JsonKVBool("broker_partial_fill", meta.broker_partial_fill) + ",";
+      j += JsonKVBool("final_execution_success", meta.final_execution_success) + ",";
       j += JsonKVBool("execution_identity_verified", meta.execution_identity_verified) + ",";
       j += JsonKVBool("execution_identity_quarantined", meta.execution_identity_quarantined) + ",";
       j += JsonKVStr("account_position_mode", meta.account_position_mode) + ",";
@@ -10364,6 +10621,15 @@ private:
       j += JsonKVNum("mae_price", meta.mae_price, 8) + ",";
       j += JsonKVNum("mfe_r", meta.mfe_r, 6) + ",";
       j += JsonKVNum("mae_r", meta.mae_r, 6) + ",";
+      j += JsonKVInt("first_0_25r_time", (int)meta.first_0_25r_time) + ",";
+      j += JsonKVInt("first_0_50r_time", (int)meta.first_0_50r_time) + ",";
+      j += JsonKVInt("first_adverse_threshold_time", (int)meta.first_adverse_threshold_time) + ",";
+      j += JsonKVInt("latest_observed_tick_time", (int)meta.latest_observed_tick_time) + ",";
+      j += JsonKVNum("latest_observed_tick_msc", (double)meta.latest_observed_tick_msc, 0) + ",";
+      j += JsonKVStr("path_completeness_status", meta.path_completeness_status) + ",";
+      j += JsonKVStr("path_observation_source", meta.path_observation_source) + ",";
+      j += JsonKVBool("path_data_gap", meta.path_data_gap) + ",";
+      j += JsonKVBool("path_order_ambiguous", meta.path_order_ambiguous) + ",";
       j += JsonKVInt("time_to_tp1_sec", (meta.tp1_hit_at > 0 && meta.filled_at > 0 ? (int)(meta.tp1_hit_at - meta.filled_at) : -1)) + ",";
       j += JsonKVInt("time_to_tp2_sec", (meta.tp2_hit_at > 0 && meta.filled_at > 0 ? (int)(meta.tp2_hit_at - meta.filled_at) : -1)) + ",";
       j += JsonKVInt("time_to_sl_sec", (meta.sl_hit_at > 0 && meta.filled_at > 0 ? (int)(meta.sl_hit_at - meta.filled_at) : -1)) + ",";
@@ -10441,6 +10707,17 @@ private:
       j += JsonKVStr("management_transition_reason", meta.management_transition_reason) + ",";
       j += JsonKVStr("management_action_executed", meta.management_action_executed) + ",";
       j += JsonKVStr("management_action_id", meta.management_action_id) + ",";
+      j += JsonKVStr("management_action_lifecycle_state", meta.management_action_lifecycle_state) + ",";
+      j += JsonKVStr("management_requested_action", meta.management_requested_action) + ",";
+      j += JsonKVNum("management_requested_volume", meta.management_requested_volume, 8) + ",";
+      j += JsonKVNum("management_normalized_volume", meta.management_normalized_volume, 8) + ",";
+      j += JsonKVNum("management_position_volume_before", meta.management_position_volume_before, 8) + ",";
+      j += JsonKVNum("management_requested_cut_fraction", meta.management_requested_cut_fraction, 8) + ",";
+      j += JsonKVInt("management_action_retry_count", meta.management_action_retry_count) + ",";
+      j += JsonKVInt("management_next_retry_at", (int)meta.management_next_retry_at) + ",";
+      j += JsonKVNum("management_last_retcode", (double)meta.management_last_retcode, 0) + ",";
+      j += JsonKVStr("management_last_retcode_description", meta.management_last_retcode_description) + ",";
+      j += JsonKVStr("management_action_terminal_reason", meta.management_action_terminal_reason) + ",";
       j += JsonKVStr("management_policy", meta.management_policy) + ",";
       j += JsonKVStr("invalidation_confirmation_mode", meta.invalidation_confirmation_mode) + ",";
       j += JsonKVNum("actual_managed_result", meta.actual_managed_result, 4) + ",";
@@ -10507,6 +10784,17 @@ private:
       j += JsonKVBool("calibration_available", meta.ai.calibration_available) + ",";
       j += "\"calibrated_win_probability\":null,";
       j += "\"expected_net_r\":null,";
+      j += JsonKVStr("llm_numeric_diagnostics_authority", meta.ai.llm_numeric_diagnostics_authority) + ",";
+      j += JsonKVBool("ai_veto_enabled", meta.ai.veto_enabled) + ",";
+      j += JsonKVStr("ai_veto_code", meta.ai.veto_code) + ",";
+      j += "\"ai_veto_evidence_fields\":" + (StringLen(meta.ai.veto_evidence_fields_json) > 0 ? meta.ai.veto_evidence_fields_json : "[]") + ",";
+      j += JsonKVStr("ai_veto_reason", meta.ai.veto_reason) + ",";
+      j += JsonKVBool("repeatability_required_live", meta.ai.repeatability_required_live) + ",";
+      j += JsonKVStr("repeatability_status", meta.ai.repeatability_status) + ",";
+      j += JsonKVStr("repeatability_group_key", meta.ai.repeatability_group_key) + ",";
+      j += JsonKVStr("repeatability_authority_hash", meta.ai.repeatability_authority_hash) + ",";
+      j += JsonKVStr("repeatability_artifact_state", meta.ai.repeatability_artifact_state) + ",";
+      j += JsonKVStr("repeatability_rejection_code", meta.ai.repeatability_rejection_code) + ",";
       j += JsonKVNum("llm_quality_score_threshold", meta.ai.llm_quality_score_threshold, 4) + ",";
       j += JsonKVStr("llm_quality_threshold_source", meta.ai.llm_quality_threshold_source) + ",";
       j += JsonKVBool("llm_quality_threshold_passed", meta.ai.llm_quality_threshold_passed) + ",";
@@ -10599,6 +10887,8 @@ private:
       _AppendCompletedAiTradeLedger(meta, partials_json, all_deals_json, result_pct_virtual, final_reason);
       _WriteTradeMeta(meta);
       _QueueAnalyticsRefreshJob(meta);
+      if(retained_penalty_state_found)
+         m_penalty.ForgetState(position_id, meta.symbol);
       return true;
    }
 
@@ -10648,8 +10938,11 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       if(p.ai.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
          p.ai.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION)
          return _RejectPlacement(p, "ai_quality_schema_incomplete");
-      if(!p.ai.repeatability_trading_eligible)
-         return _RejectPlacement(p, "model_prompt_decision_non_repeatable");
+      if(p.ai.repeatability_required_live &&
+         (p.ai.repeatability_status != "REPEATABLE" || !p.ai.repeatability_trading_eligible))
+         return _RejectPlacement(p, StringLen(p.ai.repeatability_rejection_code) > 0
+                                 ? p.ai.repeatability_rejection_code
+                                 : "repeatability_unavailable");
       if(p.candidate_hash != p.ai_selected_candidate_hash || p.candidate_hash != p.ai.selected_candidate_hash)
          return _RejectPlacement(p, "candidate_hash_mismatch");
       if(p.request_execution_fingerprint != p.ai.request_execution_fingerprint ||
@@ -10799,42 +11092,94 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
          live.planned_at = market_entry_time;
          live.initial_volume = vol;
          _CaptureEntryRiskContext(live, vol, entry_px, live.sl);
-         live.narrative_state = "execution_submitted";
+         live.narrative_state = "pre_submission_eligible";
          live.model_raw_allow = live.ai.model_raw_allow;
          live.python_final_allow = live.ai.python_final_allow;
-         live.mql_final_allow = true;
-         live.ai.mql_final_allow = true;
-         live.mql_decision_reasons = "all_final_market_execution_gates_passed";
+         live.intended_order_type = (p.is_buy ? "MARKET_BUY" : "MARKET_SELL");
+         live.broker_submission_attempted = false;
+         live.broker_request_accepted = false;
+         live.broker_retcode = 0;
+         live.broker_retcode_description = "";
+         live.broker_partial_fill = false;
+         live.final_execution_success = false;
+         live.execution_identity_verified = false;
+         live.execution_identity_quarantined = false;
+         _SetExecutionAuthority(live, "MQL_PRE_SUBMISSION_ELIGIBLE", false,
+                                "all_final_market_execution_gates_passed_broker_not_yet_called");
          live.tp1_done = false;
          live.account_position_mode = m_account_position_mode;
          _WriteTradeMeta(live);
          _Journal("[decision_authority] model_raw_allow=" + (live.model_raw_allow ? "true" : "false")
                   + " python_final_allow=" + (live.python_final_allow ? "true" : "false")
-                  + " mql_final_allow=true python_reasons=" + live.python_decision_reasons
+                  + " mql_final_allow=false authority_state=MQL_PRE_SUBMISSION_ELIGIBLE python_reasons=" + live.python_decision_reasons
                   + " mql_reasons=" + live.mql_decision_reasons);
-         _WriteShadowDecisionUpdate(live, live.ai, "mql_market_approved",
-                                    live.mql_decision_reasons, true);
+         _WriteShadowDecisionUpdate(live, live.ai, "mql_pre_submission_eligible",
+                                    live.mql_decision_reasons, false);
 
          bool ok = false;
          m_funnel_market_entries_attempted++;
+         live.broker_submission_attempted = true;
+         live.narrative_state = "broker_submission_attempted";
+         _SetExecutionAuthority(live, "BROKER_SUBMISSION_ATTEMPTED", false,
+                                "market_order_method_invoked");
          if(p.is_buy) ok = m_trade.Buy(vol, p.symbol, 0.0, live.sl, live.tp2, trade_comment);
          else         ok = m_trade.Sell(vol, p.symbol, 0.0, live.sl, live.tp2, trade_comment);
 
-         if(!ok) return _RejectPlacement(p, "market order rejected: " + _TradeRetcodeText());
+         uint market_retcode = m_trade.ResultRetcode();
+         live.broker_retcode = (long)market_retcode;
+         live.broker_retcode_description = m_trade.ResultRetcodeDescription();
+         live.result_order_ticket = m_trade.ResultOrder();
+         live.result_deal_ticket = m_trade.ResultDeal();
+         live.broker_partial_fill = (market_retcode == TRADE_RETCODE_DONE_PARTIAL);
+         live.broker_request_accepted = (ok && _BrokerRetcodeAccepted(market_retcode));
+         if(!live.broker_request_accepted){
+            live.narrative_state = "broker_request_rejected";
+            _SetExecutionAuthority(live, "BROKER_REQUEST_REJECTED", false,
+                                   "market_order_rejected:" + _TradeRetcodeText());
+            _WriteTradeMeta(live, live.result_order_ticket);
+            return _RejectPlacement(live, "market order rejected: " + _TradeRetcodeText());
+         }
+         live.narrative_state = "broker_request_accepted";
+         _SetExecutionAuthority(live, "BROKER_REQUEST_ACCEPTED", true,
+                                "market_order_accepted_by_broker");
+         _WriteTradeMeta(live, live.result_order_ticket);
+         _WriteShadowDecisionUpdate(live, live.ai, "mql_market_broker_accepted",
+                                    live.mql_decision_reasons, true);
+         _Journal("[decision_authority] model_raw_allow=" + (live.model_raw_allow ? "true" : "false")
+                  + " python_final_allow=" + (live.python_final_allow ? "true" : "false")
+                  + " mql_final_allow=true authority_state=BROKER_REQUEST_ACCEPTED"
+                  + " python_reasons=" + live.python_decision_reasons
+                  + " mql_reasons=" + live.mql_decision_reasons);
          m_funnel_trades_opened++;
          m_total_trades_opened++;
          m_total_orders_placed++;
          _RememberConsumedSweep(live);
 
-         live.narrative_state = "executed";
-         ulong result_order = m_trade.ResultOrder();
-         ulong result_deal = m_trade.ResultDeal();
+         ulong result_order = live.result_order_ticket;
+         ulong result_deal = live.result_deal_ticket;
+         double accepted_volume = (live.broker_partial_fill && m_trade.ResultVolume() > 0.0
+                                   ? m_trade.ResultVolume() : vol);
          string identity_reason = "";
-         bool identity_ok = _ResolveExactExecutionIdentity(live, result_order, result_deal, vol, identity_reason);
+         bool identity_ok = _ResolveExactExecutionIdentity(live, result_order, result_deal, vol,
+                                                            identity_reason, accepted_volume);
          if(!identity_ok){
             live.filled_entry = (m_trade.ResultPrice() > 0.0 ? m_trade.ResultPrice() : entry_px);
             live.filled_at = _NowServerOrLocal();
+            live.final_execution_success = false;
+            live.execution_authority_state = "BROKER_ACCEPTED_IDENTITY_QUARANTINED";
+            live.narrative_state = "broker_accepted_identity_quarantined";
             _QuarantineExecutionIdentity(live, identity_reason, result_order, result_deal);
+            _SetExecutionAuthority(live, "BROKER_ACCEPTED_IDENTITY_QUARANTINED", true,
+                                   "broker_accepted_but_exact_identity_failed:" + identity_reason);
+         } else {
+            live.final_execution_success = true;
+            live.narrative_state = (live.broker_partial_fill ? "executed_partial_fill" : "executed");
+            _SetExecutionAuthority(live,
+                                   live.broker_partial_fill ? "POSITION_PARTIALLY_FILLED_IDENTITY_VERIFIED"
+                                                            : "EXECUTION_IDENTITY_VERIFIED",
+                                   true,
+                                   live.broker_partial_fill ? "partial_fill_exact_identity_verified"
+                                                            : "market_fill_exact_identity_verified");
          }
          ulong pos_ticket = (identity_ok ? live.broker_position_ticket : 0);
          if(identity_ok)
@@ -10944,20 +11289,47 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       bool ok = false;
       pending.model_raw_allow = pending.ai.model_raw_allow;
       pending.python_final_allow = pending.ai.python_final_allow;
-      pending.mql_final_allow = true;
-      pending.ai.mql_final_allow = true;
-      pending.mql_decision_reasons = "all_final_pending_execution_gates_passed";
+      pending.intended_order_type = (p.is_buy ? "BUY_LIMIT" : "SELL_LIMIT");
+      pending.broker_submission_attempted = false;
+      pending.broker_request_accepted = false;
+      pending.broker_retcode = 0;
+      pending.broker_retcode_description = "";
+      pending.broker_partial_fill = false;
+      pending.final_execution_success = false;
+      pending.execution_identity_verified = false;
+      pending.execution_identity_quarantined = false;
+      pending.narrative_state = "pre_submission_eligible";
+      _SetExecutionAuthority(pending, "MQL_PRE_SUBMISSION_ELIGIBLE", false,
+                             "all_final_pending_execution_gates_passed_broker_not_yet_called");
       _Journal("[decision_authority] model_raw_allow=" + (pending.model_raw_allow ? "true" : "false")
                + " python_final_allow=" + (pending.python_final_allow ? "true" : "false")
-               + " mql_final_allow=true python_reasons=" + pending.python_decision_reasons
+               + " mql_final_allow=false authority_state=MQL_PRE_SUBMISSION_ELIGIBLE python_reasons=" + pending.python_decision_reasons
                + " mql_reasons=" + pending.mql_decision_reasons);
-      _WriteShadowDecisionUpdate(pending, pending.ai, "mql_pending_approved",
-                                 pending.mql_decision_reasons, true);
+      _WriteTradeMeta(pending);
+      _WriteShadowDecisionUpdate(pending, pending.ai, "mql_pre_submission_eligible",
+                                 pending.mql_decision_reasons, false);
       m_funnel_pending_entries_attempted++;
+      pending.broker_submission_attempted = true;
+      pending.narrative_state = "broker_submission_attempted";
+      _SetExecutionAuthority(pending, "BROKER_SUBMISSION_ATTEMPTED", false,
+                             "pending_order_method_invoked");
       if(p.is_buy) ok = m_trade.BuyLimit(vol, pending_entry, p.symbol, pending.sl, pending.tp2, ORDER_TIME_SPECIFIED, expiry, trade_comment);
       else         ok = m_trade.SellLimit(vol, pending_entry, p.symbol, pending.sl, pending.tp2, ORDER_TIME_SPECIFIED, expiry, trade_comment);
 
-      if(!ok) return _RejectPlacement(p, "pending order rejected: " + _TradeRetcodeText());
+      uint pending_retcode = m_trade.ResultRetcode();
+      pending.broker_retcode = (long)pending_retcode;
+      pending.broker_retcode_description = m_trade.ResultRetcodeDescription();
+      pending.result_order_ticket = m_trade.ResultOrder();
+      pending.result_deal_ticket = m_trade.ResultDeal();
+      pending.broker_partial_fill = (pending_retcode == TRADE_RETCODE_DONE_PARTIAL);
+      pending.broker_request_accepted = (ok && _BrokerRetcodeAccepted(pending_retcode));
+      if(!pending.broker_request_accepted){
+         pending.narrative_state = "broker_request_rejected";
+         _SetExecutionAuthority(pending, "BROKER_REQUEST_REJECTED", false,
+                                "pending_order_rejected:" + _TradeRetcodeText());
+         _WriteTradeMeta(pending, pending.result_order_ticket);
+         return _RejectPlacement(pending, "pending order rejected: " + _TradeRetcodeText());
+      }
       m_funnel_pending_orders_placed++;
       m_total_orders_placed++;
 
@@ -10972,18 +11344,30 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       pending.tp1_done = false;
       pending.bars_waited = 0;
       pending.last_confirm_bar_time = _LastClosedBarTime(pending.symbol, pending.confirm_tf);
-      ulong order_ticket = m_trade.ResultOrder();
+      ulong order_ticket = pending.result_order_ticket;
       pending.result_order_ticket = order_ticket;
-      pending.result_deal_ticket = 0;
       pending.account_position_mode = m_account_position_mode;
       pending.execution_identity_verified = false;
       pending.execution_identity_quarantined = false;
       pending.execution_identity_reason = "pending_order_awaiting_fill";
+      pending.final_execution_success = false;
+      _SetExecutionAuthority(pending, "ORDER_ACCEPTED_PENDING", true,
+                             "pending_order_accepted_awaiting_fill");
       if(order_ticket == 0){
          pending.narrative_state = "pending_order_identity_unavailable";
+         pending.execution_authority_state = "ORDER_ACCEPTED_IDENTITY_QUARANTINED";
          _QuarantineExecutionIdentity(pending, "missing_result_order_ticket_after_pending_submit", 0, 0);
+         _SetExecutionAuthority(pending, "ORDER_ACCEPTED_IDENTITY_QUARANTINED", true,
+                                "pending_order_accepted_missing_order_identity");
       }
       _WriteTradeMeta(pending, order_ticket);
+      _WriteShadowDecisionUpdate(pending, pending.ai, "mql_pending_order_accepted",
+                                 pending.mql_decision_reasons, true);
+      _Journal("[decision_authority] model_raw_allow=" + (pending.model_raw_allow ? "true" : "false")
+               + " python_final_allow=" + (pending.python_final_allow ? "true" : "false")
+               + " mql_final_allow=true authority_state=" + pending.execution_authority_state
+               + " python_reasons=" + pending.python_decision_reasons
+               + " mql_reasons=" + pending.mql_decision_reasons);
       _Journal(p.symbol + " pending limit placed key=" + trade_key
                + " comment=" + trade_comment
                + " entry_session=" + pending.session_code
@@ -11641,23 +12025,54 @@ public:
          meta.position_id = position_identifier;
          meta.broker_position_identifier = position_identifier;
          meta.broker_position_ticket = _FindPositionTicketByIdentifier(position_identifier);
+         meta.broker_submission_attempted = true;
+         meta.broker_request_accepted = true;
+         meta.mql_final_allow = true;
+         meta.ai.mql_final_allow = true;
+         meta.final_execution_success = false;
+         meta.execution_authority_state = "BROKER_ACCEPTED_IDENTITY_QUARANTINED";
          _QuarantineExecutionIdentity(meta, "missing_execution_metadata_for_entry_deal", order_ticket, trans.deal);
+         _SetExecutionAuthority(meta, "BROKER_ACCEPTED_IDENTITY_QUARANTINED", true,
+                                "entry_deal_arrived_without_exact_execution_metadata");
          return;
       }
 
       bool pending_fill = (meta.narrative_state == "pending_order" ||
                            meta.narrative_state == "pending_order_recovered");
+      double deal_volume = HistoryDealGetDouble(trans.deal, DEAL_VOLUME);
+      double volume_step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+      double volume_tolerance = MathMax(InpLedgerVolumeReconciliationTolerance, volume_step * 0.51);
+      meta.broker_submission_attempted = true;
+      meta.broker_request_accepted = true;
+      meta.mql_final_allow = true;
+      meta.ai.mql_final_allow = true;
+      meta.result_order_ticket = order_ticket;
+      meta.result_deal_ticket = trans.deal;
+      meta.broker_partial_fill = (meta.initial_volume > 0.0 &&
+                                  deal_volume + volume_tolerance < meta.initial_volume);
       string identity_reason = "";
-      if(!_ResolveExactExecutionIdentity(meta, order_ticket, trans.deal, meta.initial_volume, identity_reason)){
+      if(!_ResolveExactExecutionIdentity(meta, order_ticket, trans.deal, meta.initial_volume,
+                                         identity_reason, deal_volume)){
          meta.position_id = position_identifier;
          meta.broker_position_identifier = position_identifier;
          meta.broker_position_ticket = _FindPositionTicketByIdentifier(position_identifier);
+         meta.final_execution_success = false;
+         meta.execution_authority_state = "BROKER_ACCEPTED_IDENTITY_QUARANTINED";
          _QuarantineExecutionIdentity(meta, identity_reason, order_ticket, trans.deal);
+         _SetExecutionAuthority(meta, "BROKER_ACCEPTED_IDENTITY_QUARANTINED", true,
+                                "entry_fill_exact_identity_failed:" + identity_reason);
          return;
       }
-      meta.narrative_state = "executed";
+      meta.final_execution_success = true;
+      meta.narrative_state = (meta.broker_partial_fill ? "executed_partial_fill" : "executed");
+      _SetExecutionAuthority(meta,
+                             meta.broker_partial_fill ? "POSITION_PARTIALLY_FILLED_IDENTITY_VERIFIED"
+                                                      : "POSITION_FILLED_IDENTITY_VERIFIED",
+                             true,
+                             meta.broker_partial_fill ? "entry_partial_fill_exact_identity_verified"
+                                                      : "entry_fill_exact_identity_verified");
       _CaptureEntryRiskContext(meta,
-                               HistoryDealGetDouble(trans.deal, DEAL_VOLUME),
+                               deal_volume,
                                HistoryDealGetDouble(trans.deal, DEAL_PRICE),
                                (meta.planned_sl > 0.0 ? meta.planned_sl : meta.sl));
       _UpdateAnalyticsSnapshot(meta,
@@ -11665,6 +12080,10 @@ public:
                                SymbolInfoDouble(symbol, meta.is_buy ? SYMBOL_BID : SYMBOL_ASK),
                                PositionSelectByTicket(meta.broker_position_ticket) ? PositionGetDouble(POSITION_VOLUME) : meta.initial_volume);
       _WriteTradeMeta(meta, meta.broker_position_ticket);
+      _WriteShadowDecisionUpdate(meta, meta.ai,
+                                 meta.broker_partial_fill ? "mql_position_partially_filled"
+                                                          : "mql_position_filled",
+                                 meta.mql_decision_reasons, true);
       if(pending_fill){
          m_funnel_orders_filled++;
          m_funnel_trades_opened++;
@@ -12697,8 +13116,8 @@ public:
 
          string ai_threshold_source = "InpMinAiScoreTrend";
          double required_llm_quality_score = (have_selected ? EffectiveLlmQualityScoreThreshold(selected, ai_threshold_source) : InpMinAiScoreTrend);
-         // Repeatability can veto or abstain, but it can never disable a
-         // configured family floor and make the decision path more permissive.
+         // The configured value remains a diagnostic cohort feature. It is an
+         // uncalibrated LLM number and has no direct trade authority.
          bool llm_quality_floor_ok = (dec.llm_quality_score >= required_llm_quality_score);
          bool state_approve = (dec.decision_state == "APPROVE");
          bool full_ai_approval = (dec.python_final_allow && dec.model_raw_allow && state_approve);
@@ -12707,12 +13126,15 @@ public:
          if(!strict_schema_ok)
             reject_reason = (strict_response_quality ? "ai_quality_schema_incomplete" : "degraded_ai_response_non_trading");
          else if(!have_selected) reject_reason = "candidate_hash_mismatch";
-         else if(!dec.repeatability_trading_eligible) reject_reason = "model_prompt_decision_non_repeatable";
+         else if(dec.repeatability_required_live &&
+                 (dec.repeatability_status != "REPEATABLE" || !dec.repeatability_trading_eligible))
+            reject_reason = (StringLen(dec.repeatability_rejection_code) > 0
+                             ? dec.repeatability_rejection_code
+                             : "repeatability_unavailable");
          else if(dec.decision_state == "ABSTAIN") reject_reason = "ai_abstain";
          else if(!state_approve || !dec.model_raw_allow || !dec.python_final_allow) reject_reason = "ai_raw_allow_false";
          else if(!risk_multiplier_ok) reject_reason = "resolved_risk_multiplier_zero";
          else if(hard_veto) reject_reason = "ai_veto";
-         else if(!llm_quality_floor_ok) reject_reason = "llm_quality_score_below_family_threshold";
          else if(!deterministic_pass) reject_reason = deterministic_reason;
 
          dec.llm_quality_score_threshold = required_llm_quality_score;
@@ -12739,10 +13161,15 @@ public:
                   + " expected_net_r=unavailable"
                   + " llm_self_reported_confidence=" + DoubleToString(dec.llm_self_reported_confidence, 4)
                   + " legacy_agreement_confidence=" + DoubleToString(dec.legacy_agreement_confidence, 4)
-                  + " legacy_fields_trade_authority=false");
+                  + " legacy_fields_trade_authority=false"
+                  + " llm_numeric_authority=diagnostic_only_no_direct_trade_authority"
+                  + " family_threshold_pass_diagnostic=" + (llm_quality_floor_ok ? "true" : "false"));
          _Journal("[repeatability_authority] req_id=" + req_ids[r]
                   + " schema=" + dec.repeatability_schema_version
                   + " status=" + dec.repeatability_status
+                  + " required_live=" + (dec.repeatability_required_live ? "true" : "false")
+                  + " artifact_state=" + dec.repeatability_artifact_state
+                  + " rejection_code=" + dec.repeatability_rejection_code
                   + " score_threshold_authority=" + (dec.repeatability_score_threshold_authority ? "true" : "false")
                   + " trading_eligible=" + (dec.repeatability_trading_eligible ? "true" : "false")
                   + " group_key=" + dec.repeatability_group_key);
@@ -12802,6 +13229,12 @@ public:
             selected.hierarchical_prior_artifact_hash = dec.hierarchical_prior_artifact_hash;
             selected.hierarchical_prior_schema_version = dec.hierarchical_prior_schema_version;
             selected.repeatability_status = dec.repeatability_status;
+            selected.repeatability_required_live = dec.repeatability_required_live;
+            selected.repeatability_artifact_state = dec.repeatability_artifact_state;
+            selected.repeatability_rejection_code = dec.repeatability_rejection_code;
+            selected.ai.repeatability_required_live = dec.repeatability_required_live;
+            selected.ai.repeatability_artifact_state = dec.repeatability_artifact_state;
+            selected.ai.repeatability_rejection_code = dec.repeatability_rejection_code;
             selected.repeatability_score_threshold_authority = dec.repeatability_score_threshold_authority;
             selected.repeatability_trading_eligible = dec.repeatability_trading_eligible;
             selected.repeatability_group_key = dec.repeatability_group_key;
@@ -13242,6 +13675,10 @@ public:
       }
    }
 
+   void ObserveChartTick(const string chart_symbol) {
+      m_penalty.ObserveChartTick(chart_symbol);
+   }
+
    void MaintainPositions() {
       // TP1 partial + BE; penalty watcher tick.
       if(m_last_positions_tick == TimeLocal()) return;
@@ -13391,30 +13828,13 @@ public:
                                          PositionGetString(POSITION_COMMENT),
                                          state_meta,
                                          state_meta_reason)) continue;
-         state_meta.management_version = penalty_state.management_version;
-         state_meta.management_previous_state = penalty_state.previous_state;
-         state_meta.management_state = penalty_state.current_state;
-         state_meta.management_transition_time = penalty_state.transition_time;
-         state_meta.management_transition_reason = penalty_state.transition_reason;
-         state_meta.management_evidence_snapshot_json = penalty_state.evidence_snapshot_json;
-         state_meta.management_action_executed = penalty_state.action_executed;
-         state_meta.management_action_id = penalty_state.action_id;
-         state_meta.invalidation_confirmation_mode = penalty_state.confirmation_mode;
-         state_meta.invalidation_reference_timeframe = penalty_state.confirmation_timeframe;
-         state_meta.invalidation_trigger_level = penalty_state.confirmation_trigger_level;
-         state_meta.invalidation_spread = penalty_state.confirmation_spread;
-         state_meta.invalidation_buffer = penalty_state.confirmation_buffer;
-         state_meta.invalidation_first_breach_time = penalty_state.first_breach_time;
-         state_meta.invalidation_confirmed_time = penalty_state.confirmed_time;
-         state_meta.invalidation_confirming_bar = penalty_state.confirming_bar;
-         state_meta.mfe_price = penalty_state.mfe_price;
-         state_meta.mae_price = penalty_state.mae_price;
-         state_meta.penalty_reductions_count = MathMax(state_meta.penalty_reductions_count, penalty_state.strikes);
-         if(StringLen(penalty_state.action_executed) > 0){
+         _ApplyPenaltyStateToMeta(state_meta, penalty_state);
+         if(StringLen(penalty_state.requested_action) > 0 &&
+            penalty_state.requested_action != "NO_BROKER_ACTION"){
             double state_px = SymbolInfoDouble(state_symbol,
                                                PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? SYMBOL_BID : SYMBOL_ASK);
             _CaptureManagementDecisionSnapshot(state_meta,
-                                               penalty_state.action_executed,
+                                               penalty_state.requested_action,
                                                state_px,
                                                (state_meta.planned_sl > 0.0 ? state_meta.planned_sl : state_meta.sl),
                                                (state_meta.planned_tp2 > 0.0 ? state_meta.planned_tp2 : state_meta.tp2));

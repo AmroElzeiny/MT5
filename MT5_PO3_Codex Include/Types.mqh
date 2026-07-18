@@ -312,8 +312,11 @@ struct AiDecision {
    double post_entry_failure_risk;
    double final_trade_expectancy_score;
    bool   veto_enabled;
+   string veto_code;
+   string veto_evidence_fields_json;
    string veto_reason;
    bool   veto_fields_present;
+   string llm_numeric_diagnostics_authority;
    string bucket_prior_override_justification;
    string chosen_target_model;
    bool   target_arbitration_required;
@@ -353,6 +356,9 @@ struct AiDecision {
    string hierarchical_prior_schema_version;
    string repeatability_schema_version;
    string repeatability_status;
+   bool   repeatability_required_live;
+   string repeatability_artifact_state;
+   string repeatability_rejection_code;
    bool   repeatability_score_threshold_authority;
    bool   repeatability_trading_eligible;
    string repeatability_group_key;
@@ -488,6 +494,9 @@ struct TradePlan {
    string hierarchical_prior_artifact_hash;
    string hierarchical_prior_schema_version;
    string repeatability_status;
+   bool   repeatability_required_live;
+   string repeatability_artifact_state;
+   string repeatability_rejection_code;
    bool   repeatability_score_threshold_authority;
    bool   repeatability_trading_eligible;
    string repeatability_group_key;
@@ -764,6 +773,14 @@ struct TradePlan {
    ulong  result_deal_ticket;
    ulong  broker_position_ticket;
    long   broker_position_identifier;
+   string intended_order_type;
+   string execution_authority_state;
+   bool   broker_submission_attempted;
+   bool   broker_request_accepted;
+   long   broker_retcode;
+   string broker_retcode_description;
+   bool   broker_partial_fill;
+   bool   final_execution_success;
    bool   execution_identity_verified;
    bool   execution_identity_quarantined;
    string execution_identity_reason;
@@ -803,6 +820,17 @@ struct TradePlan {
    string management_evidence_snapshot_json;
    string management_action_executed;
    string management_action_id;
+   string management_action_lifecycle_state;
+   string management_requested_action;
+   double management_requested_volume;
+   double management_normalized_volume;
+   double management_position_volume_before;
+   double management_requested_cut_fraction;
+   int    management_action_retry_count;
+   datetime management_next_retry_at;
+   long   management_last_retcode;
+   string management_last_retcode_description;
+   string management_action_terminal_reason;
    string management_policy;
    datetime management_decision_at;
    bool   management_features_time_safe;
@@ -886,6 +914,15 @@ struct TradePlan {
    double mae_r;
    int    minutes_to_0_25r_mfe;
    int    minutes_to_0_50r_mfe;
+   datetime first_0_25r_time;
+   datetime first_0_50r_time;
+   datetime first_adverse_threshold_time;
+   datetime latest_observed_tick_time;
+   long   latest_observed_tick_msc;
+   string path_completeness_status;
+   string path_observation_source;
+   bool   path_data_gap;
+   bool   path_order_ambiguous;
    bool   stuck_no_mfe_triggered;
    bool   dr_and_structural_invalid_triggered;
    int    penalty_reductions_count;
@@ -931,6 +968,18 @@ struct PenaltyState {
 
    double mfe_price;  // best favorable price seen
    double mae_price;  // worst adverse price seen
+   double mfe_r;
+   double mae_r;
+   datetime first_0_25r_time;
+   datetime first_0_50r_time;
+   datetime first_adverse_threshold_time;
+   datetime latest_observed_tick_time;
+   long   latest_observed_tick_msc;
+   string path_completeness_status;
+   string path_observation_source;
+   bool   path_data_gap;
+   bool   path_order_ambiguous;
+   datetime position_closed_observed_at;
 
    int    strikes;
    datetime last_reduction_at;
@@ -941,6 +990,18 @@ struct PenaltyState {
    string evidence_snapshot_json;
    string action_executed;
    string action_id;
+   string action_lifecycle_state;
+   string requested_action;
+   double requested_volume;
+   double normalized_volume;
+   double action_position_volume_before;
+   double requested_cut_fraction;
+   int    action_retry_count;
+   datetime next_eligible_retry_time;
+   datetime action_last_attempt_at;
+   long   action_last_retcode;
+   string action_last_retcode_description;
+   string action_terminal_reason;
    string management_version;
    string executed_action_ids;
    string confirmation_mode;

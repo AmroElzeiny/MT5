@@ -22,7 +22,9 @@ import json
 import math
 import os
 import shutil
+import statistics
 import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -63,6 +65,7 @@ from decision_integrity import (
     DECISION_QUALITY_DEGRADED_NON_TRADING,
     DECISION_QUALITY_FULL_STRUCTURED,
     DECISION_QUALITY_RULE_ONLY_NON_TRADING,
+    LLM_VETO_CODES,
     RESPONSE_CACHE_FULL_STRUCTURED,
     RESPONSE_DEGRADED_NON_TRADING,
     RESPONSE_FULL_STRUCTURED,
@@ -238,6 +241,7 @@ class AIGateRuntimeConfig:
     require_live_bucket_priors: bool
     live_bucket_priors_max_age_days: int
     request_response_fingerprint_file: Path
+    require_repeatability_live: bool
     shadow_repeat_enable: bool
     shadow_repeat_sample_rate: float
     shadow_repeat_count: int
@@ -327,6 +331,9 @@ class AIGateRuntimeConfig:
             request_response_fingerprint_file=resolve_project_path(
                 _env_lookup(env, ("AI_REQUEST_RESPONSE_FINGERPRINT_FILE",), "logs/ai_request_response_fingerprints.jsonl")
             ),
+            require_repeatability_live=_env_bool(
+                env, "AI_REQUIRE_REPEATABILITY_LIVE", True, warnings, safe_default=True
+            ),
             shadow_repeat_enable=_env_bool(env, "AI_SHADOW_REPEAT_ENABLE", False, warnings, safe_default=False),
             shadow_repeat_sample_rate=_env_float(env, "AI_SHADOW_REPEAT_SAMPLE_RATE", 0.02, warnings, min_value=0.0, max_value=1.0),
             shadow_repeat_count=_env_int(env, "AI_SHADOW_REPEAT_COUNT", 3, warnings, min_value=2, max_value=20),
@@ -379,6 +386,7 @@ class AIGateRuntimeConfig:
             "require_live_bucket_priors": self.require_live_bucket_priors,
             "live_bucket_priors_max_age_days": self.live_bucket_priors_max_age_days,
             "request_response_fingerprint_file": str(self.request_response_fingerprint_file),
+            "require_repeatability_live": self.require_repeatability_live,
             "shadow_repeat_enable": self.shadow_repeat_enable,
             "shadow_repeat_sample_rate": self.shadow_repeat_sample_rate,
             "shadow_repeat_count": self.shadow_repeat_count,
@@ -485,33 +493,129 @@ def _repeatability_group_key(model: str, quality_tier: str) -> str:
     return canonical_hash(_repeatability_group_fields(model, quality_tier))
 
 
-def _load_repeatability_artifact() -> Dict[str, Any]:
-    path = AI_CONFIG.shadow_repeat_artifact_file
-    if not path.is_file():
-        return {
-            "schema_version": REPEATABILITY_SCHEMA_VERSION,
-            "groups": {},
-            "generated_at": "",
-        }
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and data.get("schema_version") == REPEATABILITY_SCHEMA_VERSION:
-            return data
-    except Exception as exc:
-        log(f"[repeatability] artifact_load_failed path={path} error={exc}")
+def _empty_repeatability_artifact(load_status: str, detail: str = "") -> Dict[str, Any]:
     return {
         "schema_version": REPEATABILITY_SCHEMA_VERSION,
         "groups": {},
         "generated_at": "",
+        "_load_status": load_status,
+        "_load_detail": detail,
     }
+
+
+def _load_repeatability_artifact() -> Dict[str, Any]:
+    path = AI_CONFIG.shadow_repeat_artifact_file
+    if not path.is_file():
+        return _empty_repeatability_artifact("missing_artifact")
+    try:
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return _empty_repeatability_artifact("empty_artifact")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return _empty_repeatability_artifact("invalid_artifact_type")
+        if data.get("schema_version") != REPEATABILITY_SCHEMA_VERSION:
+            return _empty_repeatability_artifact(
+                "incompatible_schema", str(data.get("schema_version") or "missing")
+            )
+        if not isinstance(data.get("groups"), dict):
+            return _empty_repeatability_artifact("invalid_groups")
+        data["_load_status"] = "ok"
+        data["_load_detail"] = ""
+        return data
+    except Exception as exc:
+        log(f"[repeatability] artifact_load_failed path={path} error={exc}")
+        return _empty_repeatability_artifact("unreadable_or_invalid_json", str(exc))
+
+
+@contextmanager
+def _repeatability_update_lock(timeout_sec: float = 10.0):
+    """Cross-process lock for the repeatability artifact.
+
+    The bridge can be restarted while an older process is still draining the
+    file bus, so the in-process Lock alone is insufficient.
+    """
+
+    lock_path = AI_CONFIG.shadow_repeat_artifact_file.with_suffix(
+        AI_CONFIG.shadow_repeat_artifact_file.suffix + ".lock"
+    )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + max(0.1, timeout_sec)
+    fd: int | None = None
+    while fd is None:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, f"pid={os.getpid()} created={time.time():.6f}\n".encode("ascii"))
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+                if age > 120.0:
+                    lock_path.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"repeatability_artifact_lock_timeout:{lock_path}")
+            time.sleep(0.025)
+    try:
+        yield
+    finally:
+        try:
+            if fd is not None:
+                os.close(fd)
+        finally:
+            lock_path.unlink(missing_ok=True)
 
 
 def _repeatability_authority_for(model: str, quality_tier: str) -> Dict[str, Any]:
     artifact = _load_repeatability_artifact()
+    expected_fields = _repeatability_group_fields(model, quality_tier)
+    group_key = canonical_hash(expected_fields)
+    load_status = str(artifact.get("_load_status") or "ok")
+    if load_status != "ok":
+        return {
+            "status": UNAVAILABLE,
+            "score_threshold_authority": False,
+            "trading_eligible": False,
+            "reason": "repeatability_unavailable",
+            "artifact_state": load_status,
+            "artifact_detail": str(artifact.get("_load_detail") or ""),
+            "group_key": group_key,
+            "artifact_hash": "",
+        }
     groups = artifact.get("groups") if isinstance(artifact.get("groups"), dict) else {}
-    group = groups.get(_repeatability_group_key(model, quality_tier))
-    authority = repeatability_authority(group if isinstance(group, dict) else None)
-    authority["group_key"] = _repeatability_group_key(model, quality_tier)
+    group = groups.get(group_key)
+    if not isinstance(group, dict):
+        return {
+            "status": UNAVAILABLE,
+            "score_threshold_authority": False,
+            "trading_eligible": False,
+            "reason": "repeatability_unavailable",
+            "artifact_state": "missing_group",
+            "artifact_detail": "",
+            "group_key": group_key,
+            "artifact_hash": str(artifact.get("artifact_hash") or ""),
+        }
+    mismatches = [
+        name for name, expected in expected_fields.items()
+        if str(group.get(name) or "") != str(expected)
+    ]
+    if mismatches:
+        return {
+            "status": UNAVAILABLE,
+            "score_threshold_authority": False,
+            "trading_eligible": False,
+            "reason": "repeatability_group_mismatch",
+            "artifact_state": "group_identity_mismatch",
+            "artifact_detail": ",".join(mismatches),
+            "group_key": group_key,
+            "artifact_hash": str(group.get("artifact_hash") or ""),
+        }
+    authority = repeatability_authority(group)
+    authority["group_key"] = group_key
+    authority["artifact_state"] = "ok"
+    authority["artifact_detail"] = ""
+    authority["artifact_hash"] = str(group.get("artifact_hash") or "")
     return authority
 
 
@@ -525,6 +629,8 @@ def _decision_repeatability_view(decision: "Decision") -> Dict[str, Any]:
         "selected_candidate_hash": decision.selected_candidate_hash,
         "chosen_index": decision.chosen_index,
         "veto_enabled": decision.veto_enabled,
+        "veto_code": decision.veto_code,
+        "veto_evidence_fields": list(decision.veto_evidence_fields or []),
         "veto_reason": decision.veto_reason,
         "llm_quality_score": decision.llm_quality_score,
         "suggested_risk_multiplier": decision.suggested_risk_multiplier,
@@ -572,11 +678,30 @@ def _update_repeatability_artifact(
         ]
     )
     group_key = _repeatability_group_key(model, quality_tier)
-    with _REPEATABILITY_LOCK:
+    observation["observation_id"] = canonical_hash(
+        {
+            "request_id": observation["request_id"],
+            "candidate_contract_hash": observation["candidate_contract_hash"],
+            "group_key": group_key,
+        }
+    )
+    with _REPEATABILITY_LOCK, _repeatability_update_lock():
         artifact = _load_repeatability_artifact()
+        if str(artifact.get("_load_status") or "ok") != "ok":
+            artifact = _empty_repeatability_artifact("ok")
         groups = artifact.setdefault("groups", {})
         group = groups.get(group_key) if isinstance(groups.get(group_key), dict) else {}
         observations = group.get("observations") if isinstance(group.get("observations"), list) else []
+        if any(
+            isinstance(item, dict)
+            and str(item.get("observation_id") or "") == observation["observation_id"]
+            for item in observations
+        ):
+            log(
+                f"[repeatability] duplicate_observation_skipped request_id={observation['request_id']} "
+                f"group={group_key[:12]}"
+            )
+            return
         observations.append(observation)
         observations = observations[-1000:]
         metric_names = (
@@ -614,10 +739,11 @@ def _update_repeatability_artifact(
             "thresholds": asdict(thresholds),
             "metrics": aggregate_metrics,
             "observations": observations,
-            # Repeatability may remove authority, but it may never disable a
-            # configured family floor and thereby make trading easier.
+            # Repeatability can remove live authority, but it never grants
+            # numeric LLM-score authority. Family score comparisons remain
+            # diagnostic under the Version Z qualitative-veto contract.
             "score_threshold_authority": status == REPEATABLE,
-            "trading_eligible": status not in {SCORE_NON_REPEATABLE, DECISION_NON_REPEATABLE},
+            "trading_eligible": status == REPEATABLE,
             "updated_at": int(time.time()),
         }
         group["artifact_hash"] = canonical_hash({key: value for key, value in group.items() if key != "observations"})
@@ -656,39 +782,65 @@ def _run_shadow_repeat_evaluation(payload: Dict[str, Any], primary: "Decision") 
             "trading_authority": False,
             "cache_eligible": False,
         }
+        shadow_payload["workload_mode"] = "research"
         try:
             repeated.append(_score_setup_openai(shadow_payload))
         except Exception as exc:
             log(f"[repeatability] shadow_repeat_failed request_id={payload.get('id')} index={repeat_index + 1} error={exc}")
     if repeated:
-        _update_repeatability_artifact(payload, primary, repeated)
+        try:
+            _update_repeatability_artifact(payload, primary, repeated)
+        except Exception as exc:
+            log(
+                f"[repeatability] artifact_update_failed request_id={payload.get('id')} "
+                f"error={exc} trading_authority=false"
+            )
 
 
 def _apply_repeatability_authority(
-    decision: "Decision", authority: Dict[str, Any] | None = None
+    decision: "Decision",
+    authority: Dict[str, Any] | None = None,
+    *,
+    payload: Dict[str, Any] | None = None,
 ) -> "Decision":
     authority = authority or _repeatability_authority_for(
         str(decision.model_version or AI_CONFIG.model),
         str(decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
     )
-    if authority["status"] in {SCORE_NON_REPEATABLE, DECISION_NON_REPEATABLE}:
+    strict_live = bool(AI_CONFIG.require_repeatability_live and _is_live_payload(payload))
+    authority = dict(authority)
+    authority["required_live"] = strict_live
+    if strict_live and authority.get("status") != REPEATABLE:
         decision.allow = False
         decision.raw_allow = False
+        decision.model_raw_allow = False
+        decision.python_final_allow = False
         decision.decision_state = DECISION_ABSTAIN
         decision.decision_source = "repeatability_authority_gate"
         if decision.rejection_codes is None:
             decision.rejection_codes = []
-        repeatability_code = (
-            "model_prompt_score_non_repeatable"
-            if authority["status"] == SCORE_NON_REPEATABLE
-            else "model_prompt_decision_non_repeatable"
-        )
+        repeatability_code = str(authority.get("reason") or "repeatability_unavailable")
+        if authority.get("status") == INSUFFICIENT_SAMPLE:
+            repeatability_code = "repeatability_insufficient_sample"
+        elif authority.get("status") == SCORE_NON_REPEATABLE:
+            repeatability_code = "model_prompt_score_non_repeatable"
+        elif authority.get("status") == DECISION_NON_REPEATABLE:
+            repeatability_code = "model_prompt_decision_non_repeatable"
+        elif authority.get("artifact_state") == "group_identity_mismatch":
+            repeatability_code = "repeatability_group_mismatch"
         for code in ("ai_abstain", repeatability_code):
             if code not in decision.rejection_codes:
                 decision.rejection_codes.append(code)
         decision.suggested_risk_multiplier = 0.0
-    if isinstance(decision.reasons, dict):
-        decision.reasons["repeatability_authority"] = authority
+        log(
+            f"[repeatability_authority] request_id={str((payload or {}).get('id') or '')} "
+            f"workload_mode={_payload_workload_mode(payload)} required_live=true "
+            f"status={authority.get('status')} artifact_state={authority.get('artifact_state')} "
+            f"action=fail_closed rejection_code={repeatability_code}"
+        )
+    if not isinstance(decision.reasons, dict):
+        decision.reasons = {"ai_reasons": str(decision.reasons or "")}
+    decision.reasons["repeatability_authority"] = authority
     return decision
 
 
@@ -1727,6 +1879,8 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
 
     class VetoDecision(BaseModel):
         enabled: bool
+        code: str = Field(max_length=64)
+        evidence_fields: list[str] = Field(max_length=12)
         reason: str = Field(max_length=160)
 
     class CandidateAssessment(BaseModel):
@@ -1874,7 +2028,7 @@ Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is
 
 Score semantics are strict. rule_score is the supplied deterministic score. llm_quality_score is your 0..10 technical-quality assessment. blended_legacy_score and legacy_agreement_confidence are diagnostic compatibility fields only and have no trade authority. llm_self_reported_confidence is your uncertainty report, not a probability. There is no validated out-of-sample calibration yet: calibration_available=false; calibrated_win_probability, expected_net_r, oos_predicted_probability, calibration bounds must be null; calibration strings empty and sample size zero. Never fabricate probability or expected R.
 
-Fill every veto/risk/expectancy field. These uncalibrated assessments may reject but may not positively authorize a trade. Your authority is limited to anomaly, contradiction, missing-data, and narrative vetoes. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. Set veto.enabled=true with a specific reason for weak follow-through, high invalidation/chop/cost/post-entry-failure risk, unresolved target instability, or incomplete evidence. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
+Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_fields must list the exact payload field paths that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, evidence_fields, and reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
 
 Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Fill target_arbitration_schema_version and prompt_contract_version with the exact current constants. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
@@ -2164,6 +2318,8 @@ Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_ti
                     post_entry_failure_risk=float(selected["post_entry_failure_risk"]),
                     final_trade_expectancy_score=float(selected["final_trade_expectancy_score"]),
                     veto_enabled=bool(veto.get("enabled")),
+                    veto_code=str(veto.get("code") or ""),
+                    veto_evidence_fields=list(veto.get("evidence_fields") or []),
                     veto_reason=str(veto.get("reason") or ""),
                     bucket_prior_override_justification=str(selected.get("bucket_prior_override_justification") or ""),
                     **target_kwargs,
@@ -2295,7 +2451,10 @@ class Decision:
     post_entry_failure_risk: float = 1.0
     final_trade_expectancy_score: float = 0.0
     veto_enabled: bool = False
+    veto_code: str = ""
+    veto_evidence_fields: list[str] | None = None
     veto_reason: str = ""
+    llm_numeric_diagnostics_authority: str = "uncalibrated_diagnostic_only_no_direct_trade_authority"
     bucket_prior_override_justification: str = ""
     target_arbitration: Dict[str, Any] | None = None
     chosen_target_model: str = ""
@@ -2700,8 +2859,9 @@ def _synchronize_candidate_authority_fields(decision: Decision) -> Decision:
         assessment["authority_sources"] = {
             "entry_sl_tp": "deterministic",
             "broker_feasibility": "deterministic",
-            "llm_quality_score": "llm_diagnostic",
-            "veto": "llm",
+            "llm_quality_score": "llm_uncalibrated_diagnostic_only",
+            "llm_numeric_risk_fields": "llm_uncalibrated_diagnostic_only",
+            "veto": "llm_enumerated_evidence_backed_only",
             "calibrated_probability": "statistical_unavailable",
             "expected_net_r": "statistical_unavailable",
             "risk_size": "deterministic_portfolio",
@@ -2715,45 +2875,75 @@ def _runtime_threshold_float(payload: Dict[str, Any], key: str, default: float) 
 
 def _apply_ai_veto_gate(payload: Dict[str, Any], decision: Decision) -> Decision:
     runtime_inputs = _runtime_inputs(payload)
+    threshold_crossings: list[str] = []
+    if decision.follow_through_probability < _runtime_threshold_float(payload, "ai_min_follow_through_prob", 0.58):
+        threshold_crossings.append("follow_through_probability")
+    if decision.invalidation_risk > _runtime_threshold_float(payload, "ai_max_invalidation_risk", 0.62):
+        threshold_crossings.append("invalidation_risk")
+    if decision.chop_risk > _runtime_threshold_float(payload, "ai_max_chop_risk", 0.65):
+        threshold_crossings.append("chop_risk")
+    if decision.post_entry_failure_risk > _runtime_threshold_float(payload, "ai_max_post_entry_failure_risk", 0.62):
+        threshold_crossings.append("post_entry_failure_risk")
+    if decision.final_trade_expectancy_score < _runtime_threshold_float(payload, "ai_min_final_expectancy_score", 6.80):
+        threshold_crossings.append("final_trade_expectancy_score")
+    log(
+        "[llm_numeric_diagnostics]"
+        f" req_id={payload.get('id') or ''} authority=diagnostic_only_no_direct_trade_authority"
+        f" threshold_crossings={','.join(threshold_crossings) or 'none'}"
+        f" follow_through={decision.follow_through_probability:.4f}"
+        f" invalidation_risk={decision.invalidation_risk:.4f}"
+        f" chop_risk={decision.chop_risk:.4f}"
+        f" cost_risk={decision.cost_risk:.4f}"
+        f" post_entry_failure_risk={decision.post_entry_failure_risk:.4f}"
+        f" expectancy_score={decision.final_trade_expectancy_score:.4f}"
+    )
     if not _boolish(runtime_inputs.get("ai_veto_enable"), True):
         return decision
-    reason = ""
-    if decision.veto_enabled:
-        reason = f"model_veto:{decision.veto_reason or 'veto_enabled'}"
-    elif decision.follow_through_probability < _runtime_threshold_float(payload, "ai_min_follow_through_prob", 0.58):
-        reason = "follow_through_probability"
-    elif decision.invalidation_risk > _runtime_threshold_float(payload, "ai_max_invalidation_risk", 0.62):
-        reason = "invalidation_risk"
-    elif decision.chop_risk > _runtime_threshold_float(payload, "ai_max_chop_risk", 0.65):
-        reason = "chop_risk"
-    elif decision.post_entry_failure_risk > _runtime_threshold_float(payload, "ai_max_post_entry_failure_risk", 0.62):
-        reason = "post_entry_failure_risk"
-    elif decision.final_trade_expectancy_score < _runtime_threshold_float(payload, "ai_min_final_expectancy_score", 6.80):
-        reason = "final_trade_expectancy_score"
-    if not reason:
+    if not decision.veto_enabled:
+        return decision
+    evidence = [str(field).strip() for field in (decision.veto_evidence_fields or []) if str(field).strip()]
+    if decision.veto_code not in LLM_VETO_CODES or not evidence or not decision.veto_reason.strip():
+        decision.allow = False
+        decision.raw_allow = False
+        decision.model_raw_allow = False
+        decision.python_final_allow = False
+        decision.decision_state = DECISION_REJECT
+        decision.suggested_risk_multiplier = 0.0
+        decision.llm_quality_reject_reason = "ai_quality_schema_incomplete"
+        if decision.rejection_codes is None:
+            decision.rejection_codes = []
+        if "ai_quality_schema_incomplete" not in decision.rejection_codes:
+            decision.rejection_codes.append("ai_quality_schema_incomplete")
         return decision
     decision.allow = False
+    decision.python_final_allow = False
     decision.llm_quality_reject_reason = "ai_veto"
     if decision.rejection_codes is None:
         decision.rejection_codes = []
     if "ai_veto" not in decision.rejection_codes:
         decision.rejection_codes.append("ai_veto")
+    if decision.veto_code not in decision.rejection_codes:
+        decision.rejection_codes.append(decision.veto_code)
     if isinstance(decision.reasons, dict):
-        decision.reasons["ai_veto"] = reason
-        decision.reasons["follow_through_probability"] = round(decision.follow_through_probability, 4)
-        decision.reasons["invalidation_risk"] = round(decision.invalidation_risk, 4)
-        decision.reasons["chop_risk"] = round(decision.chop_risk, 4)
-        decision.reasons["post_entry_failure_risk"] = round(decision.post_entry_failure_risk, 4)
+        decision.reasons["ai_veto"] = {
+            "code": decision.veto_code,
+            "evidence_fields": evidence,
+            "reason": decision.veto_reason,
+        }
     else:
-        decision.reasons = {"ai_reasons": decision.reasons, "ai_veto": reason}
+        decision.reasons = {
+            "ai_reasons": decision.reasons,
+            "ai_veto": {
+                "code": decision.veto_code,
+                "evidence_fields": evidence,
+                "reason": decision.veto_reason,
+            },
+        }
     log(
         "[ai_veto]"
         f" req_id={payload.get('id') or ''}"
-        f" reason={reason}"
-        f" follow_through={decision.follow_through_probability:.4f}"
-        f" invalidation_risk={decision.invalidation_risk:.4f}"
-        f" chop_risk={decision.chop_risk:.4f}"
-        f" post_entry_failure_risk={decision.post_entry_failure_risk:.4f}"
+        f" code={decision.veto_code} evidence_fields={json.dumps(evidence, separators=(',', ':'))}"
+        f" reason={decision.veto_reason} authority=qualitative_evidence_backed_veto"
     )
     return decision
 
@@ -2843,6 +3033,12 @@ def _ai_quality_kwargs_from_model(model_obj: Any) -> Dict[str, Any]:
         "post_entry_failure_risk": _floatish(data.get("post_entry_failure_risk"), 0.50),
         "final_trade_expectancy_score": _floatish(data.get("final_trade_expectancy_score"), 7.0),
         "veto_enabled": _boolish(data.get("veto_enabled"), _boolish(veto.get("enabled"), False)),
+        "veto_code": str(data.get("veto_code") or veto.get("code") or ""),
+        "veto_evidence_fields": list(
+            data.get("veto_evidence_fields")
+            if isinstance(data.get("veto_evidence_fields"), list)
+            else (veto.get("evidence_fields") if isinstance(veto.get("evidence_fields"), list) else [])
+        ),
         "veto_reason": str(data.get("veto_reason") or veto.get("reason") or ""),
         "bucket_prior_override_justification": str(data.get("bucket_prior_override_justification") or ""),
     }
@@ -3319,6 +3515,9 @@ def _cached_decision_schema_miss_reason(dec_raw: Dict[str, Any]) -> str:
         "llm_self_reported_confidence",
         "suggested_risk_multiplier",
         "selected_candidate_id",
+        "veto_code",
+        "veto_evidence_fields",
+        "llm_numeric_diagnostics_authority",
     ):
         if required not in dec_raw or dec_raw.get(required) is None:
             if required != "mql_final_allow":
@@ -3536,7 +3735,12 @@ class AIDecisionCache:
                         post_entry_failure_risk=float(dec_raw.get("post_entry_failure_risk", 1.0)),
                         final_trade_expectancy_score=float(dec_raw.get("final_trade_expectancy_score", 0.0)),
                         veto_enabled=bool(dec_raw.get("veto_enabled", False)),
+                        veto_code=str(dec_raw.get("veto_code") or ""),
+                        veto_evidence_fields=list(dec_raw.get("veto_evidence_fields") or []),
                         veto_reason=str(dec_raw.get("veto_reason") or ""),
+                        llm_numeric_diagnostics_authority=str(
+                            dec_raw.get("llm_numeric_diagnostics_authority") or ""
+                        ),
                         bucket_prior_override_justification=str(dec_raw.get("bucket_prior_override_justification") or ""),
                         target_arbitration=dec_raw.get("target_arbitration") if isinstance(dec_raw.get("target_arbitration"), dict) else {},
                         chosen_target_model=str(dec_raw.get("chosen_target_model") or ""),
@@ -3658,7 +3862,12 @@ class AIDecisionCache:
                         "post_entry_failure_risk": float(decision.post_entry_failure_risk),
                         "final_trade_expectancy_score": float(decision.final_trade_expectancy_score),
                         "veto_enabled": bool(decision.veto_enabled),
+                        "veto_code": str(decision.veto_code or ""),
+                        "veto_evidence_fields": list(decision.veto_evidence_fields or []),
                         "veto_reason": str(decision.veto_reason or ""),
+                        "llm_numeric_diagnostics_authority": str(
+                            decision.llm_numeric_diagnostics_authority
+                        ),
                         "bucket_prior_override_justification": str(decision.bucket_prior_override_justification or ""),
                         "target_arbitration": decision.target_arbitration or {},
                         "chosen_target_model": str(decision.chosen_target_model or ""),
@@ -4730,41 +4939,31 @@ def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision,
         str(decision.model_version or AI_CONFIG.model),
         str(decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
     )
-    # Existing family thresholds retain their configured values, but now apply
-    # to the independently assessed LLM quality score, never the blended alias.
+    # Preserve configured values for longitudinal diagnostics. They are not
+    # calibrated and therefore cannot independently approve or reject.
     passed = float(decision.llm_quality_score) >= threshold
     decision.llm_quality_score_threshold = threshold
     decision.llm_quality_threshold_source = source
     decision.global_llm_quality_as_hard_floor = _boolish(_runtime_inputs(payload).get("global_llm_quality_as_hard_floor"), False)
     decision.llm_quality_threshold_passed = passed
-    if not passed:
-        decision.allow = False
-        decision.decision_source = "ai_family_threshold_gate"
-        decision.llm_quality_reject_reason = "llm_quality_score_below_family_threshold"
-        if decision.rejection_codes is None:
-            decision.rejection_codes = []
-        if "llm_quality_score_below_family_threshold" not in decision.rejection_codes:
-            decision.rejection_codes.append("llm_quality_score_below_family_threshold")
-        if isinstance(decision.reasons, dict):
-            decision.reasons["llm_quality_score_threshold"] = threshold
-            decision.reasons["llm_quality_threshold_source"] = source
-            decision.reasons["llm_quality_threshold_passed"] = False
-            decision.reasons["llm_quality_reject_reason"] = "llm_quality_score_below_family_threshold"
-        else:
-            decision.reasons = {
-                "previous_reasons": str(decision.reasons or ""),
-                "llm_quality_score_threshold": threshold,
-                "llm_quality_threshold_source": source,
-                "llm_quality_threshold_passed": False,
-                "llm_quality_reject_reason": "llm_quality_score_below_family_threshold",
-            }
+    if isinstance(decision.reasons, dict):
+        decision.reasons["llm_quality_score_threshold_diagnostic"] = threshold
+        decision.reasons["llm_quality_threshold_source"] = source
+        decision.reasons["llm_quality_threshold_passed_diagnostic"] = passed
+        decision.reasons["llm_quality_threshold_authority"] = "diagnostic_only"
     elif not decision.llm_quality_reject_reason:
-        decision.llm_quality_reject_reason = ""
+        decision.reasons = {
+            "previous_reasons": str(decision.reasons or ""),
+            "llm_quality_score_threshold_diagnostic": threshold,
+            "llm_quality_threshold_source": source,
+            "llm_quality_threshold_passed_diagnostic": passed,
+            "llm_quality_threshold_authority": "diagnostic_only",
+        }
     log(
         f"[ai_gate] family_threshold family={family or 'unknown'} class={setup_class or 'unknown'} "
         f"branch={branch or 'unknown'} llm_quality_score={float(decision.llm_quality_score):.2f} threshold={threshold:.2f} "
         f"source={source} pass={str(passed).lower()} "
-        f"repeatability_status={repeatability.get('status')} configured_floor_always_enforced=true"
+        f"repeatability_status={repeatability.get('status')} authority=diagnostic_only"
     )
     return decision
 
@@ -4792,16 +4991,11 @@ def _normalize_advisory_metadata(payload: Dict[str, Any], dec: Decision) -> tupl
 
 
 def _hard_model_rejection_codes(codes: list[str]) -> list[str]:
-    hard_fragments = (
-        "wrong_symbol",
-        "structure_invalid",
-        "fvg_invalid",
-        "target_already_reached",
-        "plan_prices_invalid",
-        "news_risk_high",
-        "spread_cost_too_high",
-    )
-    return [code for code in codes if any(fragment in code.lower() for fragment in hard_fragments)]
+    # Model-emitted free-form rejection codes are diagnostics. Objective hard
+    # failures are recomputed from the structured candidate in
+    # _candidate_hard_block_reason; qualitative LLM rejection authority flows
+    # only through the enumerated evidence-backed veto contract.
+    return []
 
 def _snapshot_integrity_rejections(payload: Dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
     meta = _as_dict(payload.get("snapshot_metadata"))
@@ -5032,7 +5226,7 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             log(f"[ai_gate] ai_cache_hit request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
             cached_decision = _validate_ai_target_choice_against_feasibility(payload, cached_decision, cached_decision.chosen_index)
             cached_decision = _synchronize_selected_assessment_contract(payload, cached_decision)
-            cached_decision = _apply_repeatability_authority(cached_decision)
+            cached_decision = _apply_repeatability_authority(cached_decision, payload=payload)
             cached_decision = _apply_ai_veto_gate(payload, cached_decision)
             cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
             cached_decision = _synchronize_candidate_authority_fields(cached_decision)
@@ -5105,7 +5299,7 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         str(dec.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
     )
     _run_shadow_repeat_evaluation(payload, dec)
-    dec = _apply_repeatability_authority(dec, repeatability_authority_before_shadow)
+    dec = _apply_repeatability_authority(dec, repeatability_authority_before_shadow, payload=payload)
 
     inherited_codes, inherited_risks, inherited_missing = _normalize_advisory_metadata(payload, dec)
     for risk in integrity_risks:
@@ -5169,6 +5363,11 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     dec.missing_confirmations = list(dict.fromkeys(inherited_missing))
     dec.score = dec.llm_quality_score
     dec.confidence = dec.llm_self_reported_confidence
+    repeatability_reason = (
+        dict(dec.reasons.get("repeatability_authority") or {})
+        if isinstance(dec.reasons, dict)
+        else {}
+    )
     dec.reasons = {
         "ai_reasons": dec.reasons,
         "decision_source": dec.decision_source,
@@ -5180,15 +5379,28 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         "calibration_available": False,
         "snapshot_integrity_codes": integrity_codes,
         "rejection_codes": dec.rejection_codes,
+        "repeatability_authority": repeatability_reason,
     }
     final_decision = _validate_ai_target_choice_against_feasibility(payload, dec, chosen_index)
     final_decision = _synchronize_selected_assessment_contract(payload, final_decision)
     final_decision = _apply_ai_veto_gate(payload, final_decision)
     final_decision = _apply_family_ai_threshold_gate(payload, final_decision, chosen_index)
     final_decision = _synchronize_candidate_authority_fields(final_decision)
-    if AI_CONFIG.decision_cache_enable and cache_signature:
+    repeatability_blocked_live = bool(
+        AI_CONFIG.require_repeatability_live
+        and _is_live_payload(payload)
+        and isinstance(final_decision.reasons, dict)
+        and isinstance(final_decision.reasons.get("repeatability_authority"), dict)
+        and final_decision.reasons["repeatability_authority"].get("status") != REPEATABLE
+    )
+    if AI_CONFIG.decision_cache_enable and cache_signature and not repeatability_blocked_live:
         if final_decision.decision_quality_tier == DECISION_QUALITY_FULL_STRUCTURED and final_decision.mandatory_fields_complete:
             AI_DECISION_CACHE.store(cache_signature, cache_base_signature, cache_fields, final_decision)
+    elif repeatability_blocked_live:
+        log(
+            f"[ai_cache] store_skipped request_id={str(payload.get('id') or '')} "
+            "reason=repeatability_non_authoritative_live_decision"
+        )
     return final_decision
 
 
@@ -5963,10 +6175,17 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "hierarchical_prior_schema_version": HIERARCHICAL_PRIOR_SCHEMA_VERSION,
         "repeatability_schema_version": REPEATABILITY_SCHEMA_VERSION,
         "repeatability_status": str(decision_repeatability.get("status") or UNAVAILABLE),
-        "repeatability_score_threshold_authority": bool(
-            decision_repeatability.get("score_threshold_authority", True)
+        "repeatability_required_live": bool(
+            AI_CONFIG.require_repeatability_live and _is_live_payload(payload)
         ),
-        "repeatability_trading_eligible": bool(decision_repeatability.get("trading_eligible", True)),
+        "repeatability_artifact_state": str(
+            decision_repeatability.get("artifact_state") or "unknown"
+        ),
+        "repeatability_rejection_code": str(decision_repeatability.get("reason") or ""),
+        "repeatability_score_threshold_authority": bool(
+            decision_repeatability.get("score_threshold_authority", False)
+        ),
+        "repeatability_trading_eligible": bool(decision_repeatability.get("trading_eligible", False)),
         "repeatability_group_key": str(decision_repeatability.get("group_key") or ""),
         "repeatability_authority_hash": str(decision_repeatability.get("artifact_hash") or ""),
         "decision_schema_version": str(dec.decision_schema_version or AI_DECISION_SCHEMA_VERSION),
@@ -6044,9 +6263,17 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "session_bucket_risk": float(dec.session_bucket_risk),
         "post_entry_failure_risk": float(dec.post_entry_failure_risk),
         "final_trade_expectancy_score": float(dec.final_trade_expectancy_score),
+        "llm_numeric_diagnostics_authority": "uncalibrated_diagnostic_only_no_direct_trade_authority",
         "veto_enabled": bool(dec.veto_enabled),
+        "veto_code": str(dec.veto_code or ""),
+        "veto_evidence_fields": list(dec.veto_evidence_fields or []),
         "veto_reason": str(dec.veto_reason or ""),
-        "veto": {"enabled": bool(dec.veto_enabled), "reason": str(dec.veto_reason or "")},
+        "veto": {
+            "enabled": bool(dec.veto_enabled),
+            "code": str(dec.veto_code or ""),
+            "evidence_fields": list(dec.veto_evidence_fields or []),
+            "reason": str(dec.veto_reason or ""),
+        },
         "bucket_prior_override_justification": str(dec.bucket_prior_override_justification or ""),
         "target_arbitration": dec.target_arbitration or {},
         "chosen_target_model": str(dec.chosen_target_model or ""),

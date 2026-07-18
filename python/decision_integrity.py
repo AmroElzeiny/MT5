@@ -8,9 +8,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping, Sequence
 
 
-AI_DECISION_SCHEMA_VERSION = "20260717_ai_decision_authority_v5"
+AI_DECISION_SCHEMA_VERSION = "20260718_ai_decision_authority_v6"
 AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260717_target_fingerprint_authority_v6"
-AI_PROMPT_CONTRACT_VERSION = "20260717_layered_authority_v7"
+AI_PROMPT_CONTRACT_VERSION = "20260718_qualitative_veto_repeatability_v8"
 
 DECISION_APPROVE = "APPROVE"
 DECISION_REJECT = "REJECT"
@@ -35,7 +35,18 @@ RESPONSE_RULE_ONLY_NON_TRADING = DECISION_QUALITY_RULE_ONLY_NON_TRADING
 TRADING_RESPONSE_QUALITIES = TRADING_DECISION_QUALITY_TIERS
 
 # These values are LLM assessments, not empirically calibrated probabilities.
-# They may veto a trade, but they cannot positively authorize one.
+# They are research diagnostics only and have no direct positive or negative
+# trade authority. Only an enumerated, evidence-backed qualitative veto may
+# remove authority.
+LLM_VETO_CODES = {
+    "ai_veto_missing_mandatory_evidence",
+    "ai_veto_structural_contradiction",
+    "ai_veto_sequence_contradiction",
+    "ai_veto_target_arbitration_incoherent",
+    "ai_veto_execution_plan_mismatch",
+    "ai_veto_prior_override_unsupported",
+    "ai_veto_data_integrity_failure",
+}
 MANDATORY_ASSESSMENT_FIELDS = (
     "candidate_index",
     "candidate_id",
@@ -194,13 +205,34 @@ def validate_candidate_assessment(
             invalid.append(name)
 
     veto = assessment.get("veto")
-    if not isinstance(veto, Mapping) or not isinstance(veto.get("enabled"), bool) or "reason" not in veto:
+    if (
+        not isinstance(veto, Mapping)
+        or not isinstance(veto.get("enabled"), bool)
+        or "code" not in veto
+        or "evidence_fields" not in veto
+        or "reason" not in veto
+    ):
         invalid.append("veto")
         veto_enabled = True
     else:
         veto_enabled = bool(veto.get("enabled"))
-        if veto_enabled and not str(veto.get("reason") or "").strip():
-            invalid.append("veto.reason")
+        veto_code = str(veto.get("code") or "").strip()
+        veto_evidence = veto.get("evidence_fields")
+        veto_reason = str(veto.get("reason") or "").strip()
+        if not isinstance(veto_evidence, list) or any(
+            not isinstance(field, str) or not field.strip() for field in (veto_evidence or [])
+        ):
+            invalid.append("veto.evidence_fields")
+            veto_evidence = []
+        if veto_enabled:
+            if veto_code not in LLM_VETO_CODES:
+                invalid.append("veto.code")
+            if not veto_evidence:
+                invalid.append("veto.evidence_fields")
+            if not veto_reason:
+                invalid.append("veto.reason")
+        elif veto_code or veto_evidence or veto_reason:
+            invalid.append("veto.disabled_payload")
 
     risk_multiplier = assessment.get("suggested_risk_multiplier")
     raw_allow = assessment.get("raw_allow") is True
@@ -213,6 +245,8 @@ def validate_candidate_assessment(
         invalid.append("approve_state_contract")
     if state in {DECISION_REJECT, DECISION_ABSTAIN} and raw_allow:
         invalid.append("non_approve_raw_allow")
+    if state == DECISION_REJECT and not veto_enabled:
+        invalid.append("reject_requires_evidence_backed_veto")
     if state == DECISION_ABSTAIN and _finite_number(risk_multiplier) and float(risk_multiplier) != 0.0:
         invalid.append("abstain_risk_multiplier")
 

@@ -322,7 +322,12 @@ def _full_structured_decision(
         "session_bucket_risk": 0.26,
         "post_entry_failure_risk": 0.29,
         "final_trade_expectancy_score": 7.5,
-        "veto": {"enabled": False, "reason": ""},
+        "veto": {
+            "enabled": False,
+            "code": "",
+            "evidence_fields": [],
+            "reason": "",
+        },
         "bucket_prior_override_justification": "not required for verifier fixture",
         "reasons": "complete verifier assessment",
         "rejection_codes": [] if allow else ["verification_reject"],
@@ -345,6 +350,9 @@ def _full_structured_decision(
         allow=allow,
         score=float(llm_quality_score),
         raw_allow=allow,
+        model_raw_allow=allow,
+        python_final_allow=allow,
+        mql_final_allow=None,
         chosen_index=chosen_index,
         confidence=float(assessment["llm_self_reported_confidence"]),
         decision_state=state,
@@ -393,6 +401,8 @@ def _full_structured_decision(
         post_entry_failure_risk=float(assessment["post_entry_failure_risk"]),
         final_trade_expectancy_score=float(assessment["final_trade_expectancy_score"]),
         veto_enabled=False,
+        veto_code="",
+        veto_evidence_fields=[],
         veto_reason="",
         bucket_prior_override_justification=str(assessment["bucket_prior_override_justification"]),
         target_arbitration=target_arbitration,
@@ -1445,9 +1455,15 @@ def test_ai_veto_gate() -> None:
     bad_follow_through.chop_risk = 0.30
     bad_follow_through.post_entry_failure_risk = 0.30
     bad_follow_through.final_trade_expectancy_score = 8.0
-    rejected = ai_gate._apply_ai_veto_gate(payload, bad_follow_through)
-    _assert(not rejected.allow, "low follow-through probability should veto a high-score trade")
-    _assert("ai_veto" in (rejected.rejection_codes or []), "AI veto rejection code missing")
+    diagnostic_only = ai_gate._apply_ai_veto_gate(payload, bad_follow_through)
+    _assert(
+        diagnostic_only.allow,
+        "uncalibrated low follow-through estimate must remain diagnostic-only",
+    )
+    _assert(
+        "ai_veto" not in (diagnostic_only.rejection_codes or []),
+        "numeric LLM diagnostics must not manufacture an AI veto",
+    )
 
     passing = _full_structured_decision(payload, llm_quality_score=8.8)
     passing.follow_through_probability = 0.72
@@ -1460,14 +1476,21 @@ def test_ai_veto_gate() -> None:
 
     explicit_veto = _full_structured_decision(payload, llm_quality_score=9.1)
     explicit_veto.veto_enabled = True
-    explicit_veto.veto_reason = "recent_bucket_no_follow_through"
+    explicit_veto.veto_code = "ai_veto_structural_contradiction"
+    explicit_veto.veto_evidence_fields = ["candidate.structure_state", "candidate.bos_direction"]
+    explicit_veto.veto_reason = "BOS direction contradicts the supplied structure state."
     explicit_veto.follow_through_probability = 0.80
     explicit_veto.invalidation_risk = 0.20
     explicit_veto.chop_risk = 0.20
     explicit_veto.post_entry_failure_risk = 0.20
     explicit_veto.final_trade_expectancy_score = 8.0
     vetoed = ai_gate._apply_ai_veto_gate(payload, explicit_veto)
-    _assert(not vetoed.allow and "ai_veto" in (vetoed.rejection_codes or []), "explicit model veto should reject")
+    _assert(
+        not vetoed.allow
+        and "ai_veto" in (vetoed.rejection_codes or [])
+        and "ai_veto_structural_contradiction" in (vetoed.rejection_codes or []),
+        "enumerated evidence-backed qualitative veto should reject",
+    )
 
 
 def test_live_bucket_priors_affect_prompt_and_signature() -> None:
@@ -1644,7 +1667,7 @@ def _expect_threshold_case(
     name: str,
     family: str,
     score: float,
-    should_allow: bool,
+    should_pass_threshold: bool,
     source: str,
     *,
     runtime_overrides: Dict[str, Any] | None = None,
@@ -1656,10 +1679,21 @@ def _expect_threshold_case(
         candidate={"setup_family": family, "setup_class": setup_class or family, "entry_branch": branch},
     )
     decision = _threshold_decision(payload, score)
-    _assert(decision.allow is should_allow, f"{name}: allow mismatch")
+    _assert(decision.allow, f"{name}: diagnostic family score must not reject")
     _assert(decision.llm_quality_threshold_source == source, f"{name}: source {decision.llm_quality_threshold_source} != {source}")
-    if not should_allow:
-        _assert("llm_quality_score_below_family_threshold" in (decision.rejection_codes or []), f"{name}: missing rejection code")
+    _assert(
+        decision.llm_quality_threshold_passed is should_pass_threshold,
+        f"{name}: diagnostic threshold comparison mismatch",
+    )
+    _assert(
+        "llm_quality_score_below_family_threshold" not in (decision.rejection_codes or []),
+        f"{name}: diagnostic threshold must not create a trading rejection",
+    )
+    _assert(
+        isinstance(decision.reasons, dict)
+        and decision.reasons.get("llm_quality_threshold_authority") == "diagnostic_only",
+        f"{name}: diagnostic authority marker missing",
+    )
 
 
 def test_family_ai_thresholds() -> None:

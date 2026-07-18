@@ -4,26 +4,26 @@
 #ifndef __PO3_AIGATE_CONFIG_MQH__
 #define __PO3_AIGATE_CONFIG_MQH__
 
-const string ENGINE_VERSION = "5.5-architecture-cache-shadow-20260717-v4";
-const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-provider-architecture-20260717-v3";
-const string AI_DECISION_SCHEMA_VERSION = "20260717_ai_decision_authority_v5";
+const string ENGINE_VERSION = "5.5-version-z-reliability-20260718-v5";
+const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-provider-version-z-20260718-v4";
+const string AI_DECISION_SCHEMA_VERSION = "20260718_ai_decision_authority_v6";
 const string AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260717_target_fingerprint_authority_v6";
-const string AI_PROMPT_CONTRACT_VERSION = "20260717_layered_authority_v7";
-const string TRADE_LEDGER_SCHEMA_VERSION = "20260717_trade_ledger_architecture_v6";
+const string AI_PROMPT_CONTRACT_VERSION = "20260718_qualitative_veto_repeatability_v8";
+const string TRADE_LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_execution_path_v7";
 const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
-const string FEATURE_LINEAGE_VERSION = "20260717_pre_entry_features_v2";
+const string FEATURE_LINEAGE_VERSION = "20260718_tick_path_evidence_v3";
 const string RISK_MODEL_VERSION = "20260717_original_initial_risk_v3";
-const string REPEATABILITY_SCHEMA_VERSION = "20260717_repeatability_v1";
+const string REPEATABILITY_SCHEMA_VERSION = "20260718_repeatability_v2";
 const string HIERARCHICAL_PRIOR_SCHEMA_VERSION = "20260717_hierarchical_prior_v1";
 const string RISK_FACTOR_SCHEMA_VERSION = "20260717_risk_factor_v1";
 const string COMMISSION_MODEL_SCHEMA_VERSION = "20260717_broker_cost_v1";
-const string MANAGEMENT_SCHEMA_VERSION = "20260717_management_state_v3";
+const string MANAGEMENT_SCHEMA_VERSION = "20260718_management_action_lifecycle_v4";
 const string MANAGEMENT_EXPERIMENT_SCHEMA_VERSION = "20260717_management_experiment_v1";
 const string MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_counterfactual_v2";
 const string INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1";
 const string SHADOW_CANDIDATE_SCHEMA_VERSION = "20260717_shadow_candidate_v3";
 const string NORMALIZED_FVG_SCHEMA_VERSION = "20260717_normalized_fvg_v2";
-const string ARCHITECTURE_CONTRACT_VERSION = "20260717_architecture_cache_shadow_v2";
+const string ARCHITECTURE_CONTRACT_VERSION = "20260718_version_z_reliability_v3";
 const string LIVE_FORWARD_CONTRACT_VERSION = "20260717_live_forward_v1";
 const string SEMANTIC_CACHE_SCHEMA_VERSION = "20260717_semantic_cache_v1";
 const string POLICY_MANIFEST_SCHEMA_VERSION = "20260717_policy_manifest_v1";
@@ -439,6 +439,8 @@ input int InpTargetTradesPerDayMax = 16;
 
 // --- Penalty (strikes/cooldowns) ---
 input int    InpPenaltyCooldownMin   = 20;
+input int    InpManagementActionRetryCooldownSec = 30;
+input int    InpManagementActionMaxRetries = 20;
 input int    InpPenaltyCloseStrikes  = 6;
 input int    InpPenaltyCutStrikes    = 3;
 input int    InpMinMinutesBeforePenaltyCuts = 20;

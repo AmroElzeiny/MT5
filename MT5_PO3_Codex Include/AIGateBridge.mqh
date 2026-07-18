@@ -34,6 +34,16 @@ private:
       return "structural_sweep";
    }
 
+   bool _AllowedQualitativeVetoCode(const string code) const {
+      return (code == "ai_veto_missing_mandatory_evidence" ||
+              code == "ai_veto_structural_contradiction" ||
+              code == "ai_veto_sequence_contradiction" ||
+              code == "ai_veto_target_arbitration_incoherent" ||
+              code == "ai_veto_execution_plan_mismatch" ||
+              code == "ai_veto_prior_override_unsupported" ||
+              code == "ai_veto_data_integrity_failure");
+   }
+
    string _TargetCandidatesJson(const TradePlan &p) const {
       double risk_dist = MathAbs(p.entry_est - p.sl);
       double liquidity_tp = (p.liquidity_target_preserved > 0.0 ? p.liquidity_target_preserved : p.po3.liquidity_target);
@@ -252,6 +262,7 @@ private:
       s += (InpRiskFactorGateEnable ? "1" : "0") + "|" + InpRiskFactorPolicyFile + "|";
       s += IntegerToString((int)InpThesisInvalidationPolicy) + "|" + IntegerToString((int)InpInvalidationConfirmationMode) + "|";
       s += IntegerToString(InpInvalidationPersistenceSeconds) + "|" + DoubleToString(InpInvalidationSpreadBufferMult, 4) + "|";
+      s += IntegerToString(InpManagementActionRetryCooldownSec) + "|" + IntegerToString(InpManagementActionMaxRetries) + "|";
       s += (InpInvalidationAssetClassPolicyEnable ? "1" : "0") + "|" + InpInvalidationAssetClassPolicyFile + "|";
       s += _CommonFileContentHash(InpInvalidationAssetClassPolicyFile) + "|";
       s += IntegerToString(InpCounterfactualHorizonMinutes) + "|" + IntegerToString(InpShadowCandidateHorizonMinutes) + "|";
@@ -412,6 +423,8 @@ private:
       j += JsonKVInt("thesis_invalidation_policy", (int)InpThesisInvalidationPolicy) + ",";
       j += JsonKVInt("invalidation_persistence_seconds", InpInvalidationPersistenceSeconds) + ",";
       j += JsonKVNum("invalidation_spread_buffer_mult", InpInvalidationSpreadBufferMult, 4) + ",";
+      j += JsonKVInt("management_action_retry_cooldown_sec", InpManagementActionRetryCooldownSec) + ",";
+      j += JsonKVInt("management_action_max_retries", InpManagementActionMaxRetries) + ",";
       j += JsonKVBool("invalidation_asset_class_policy_enable", InpInvalidationAssetClassPolicyEnable) + ",";
       j += JsonKVStr("invalidation_asset_class_policy_file", InpInvalidationAssetClassPolicyFile) + ",";
       j += JsonKVStr("invalidation_asset_class_policy_hash", _CommonFileContentHash(InpInvalidationAssetClassPolicyFile)) + ",";
@@ -547,6 +560,8 @@ private:
       bool python_final_allow_value = false;
       bool veto_enabled_value = true;
       double risk_multiplier_value = -1.0;
+      string veto_code_value = "";
+      string veto_evidence_value = "";
       string veto_reason_value = "";
       string text_value = "";
       _SchemaRequireNumber(assessment, "candidate_index", number, 0.0, 100000.0, missing, invalid);
@@ -605,8 +620,20 @@ private:
       string veto = "";
       if(_SchemaRequireObject(assessment, "veto", veto, missing, invalid)){
          _SchemaRequireBool(veto, "enabled", veto_enabled_value, missing, invalid);
+         _SchemaRequireString(veto, "code", veto_code_value, missing, invalid, true);
+         _SchemaRequireArray(veto, "evidence_fields", veto_evidence_value, missing, invalid);
          _SchemaRequireString(veto, "reason", veto_reason_value, missing, invalid, true);
-         if(veto_enabled_value && StringLen(veto_reason_value) == 0) _AppendSchemaField(invalid, "veto.reason");
+         string compact_evidence = veto_evidence_value;
+         StringReplace(compact_evidence, " ", "");
+         StringReplace(compact_evidence, "\r", "");
+         StringReplace(compact_evidence, "\n", "");
+         if(veto_enabled_value){
+            if(!_AllowedQualitativeVetoCode(veto_code_value)) _AppendSchemaField(invalid, "veto.code");
+            if(compact_evidence == "[]") _AppendSchemaField(invalid, "veto.evidence_fields");
+            if(StringLen(veto_reason_value) == 0) _AppendSchemaField(invalid, "veto.reason");
+         } else if(StringLen(veto_code_value) > 0 || compact_evidence != "[]" || StringLen(veto_reason_value) > 0){
+            _AppendSchemaField(invalid, "veto.disabled_payload");
+         }
       }
       bool calibration_available = true;
       _SchemaRequireBool(assessment, "calibration_available", calibration_available, missing, invalid);
@@ -633,6 +660,8 @@ private:
          _AppendSchemaField(invalid, "approve_state_contract");
       if((state == "REJECT" || state == "ABSTAIN") && raw_allow_value)
          _AppendSchemaField(invalid, "non_approve_raw_allow");
+      if(state == "REJECT" && !veto_enabled_value)
+         _AppendSchemaField(invalid, "reject_requires_evidence_backed_veto");
       if(state == "ABSTAIN" && MathAbs(risk_multiplier_value) > 0.00000001)
          _AppendSchemaField(invalid, "abstain_risk_multiplier");
       return (StringLen(missing) == 0 && StringLen(invalid) == 0);
@@ -1426,6 +1455,9 @@ public:
       _SchemaRequireString(txt, "hierarchical_prior_schema_version", out.hierarchical_prior_schema_version, missing, invalid);
       _SchemaRequireString(txt, "repeatability_schema_version", out.repeatability_schema_version, missing, invalid);
       _SchemaRequireString(txt, "repeatability_status", out.repeatability_status, missing, invalid);
+      _SchemaRequireBool(txt, "repeatability_required_live", out.repeatability_required_live, missing, invalid);
+      _SchemaRequireString(txt, "repeatability_artifact_state", out.repeatability_artifact_state, missing, invalid);
+      _SchemaRequireString(txt, "repeatability_rejection_code", out.repeatability_rejection_code, missing, invalid, true);
       _SchemaRequireBool(txt, "repeatability_score_threshold_authority", out.repeatability_score_threshold_authority, missing, invalid);
       _SchemaRequireBool(txt, "repeatability_trading_eligible", out.repeatability_trading_eligible, missing, invalid);
       _SchemaRequireString(txt, "repeatability_group_key", out.repeatability_group_key, missing, invalid, true);
@@ -1434,14 +1466,18 @@ public:
          _AppendSchemaField(invalid, "hierarchical_prior_schema_version");
       if(out.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION)
          _AppendSchemaField(invalid, "repeatability_schema_version");
-      if(out.repeatability_status == "DECISION_NON_REPEATABLE" && out.repeatability_trading_eligible)
+      if(out.repeatability_status != "REPEATABLE" && out.repeatability_trading_eligible)
          _AppendSchemaField(invalid, "repeatability_trading_eligibility_inconsistent");
+      if(out.repeatability_required_live && out.repeatability_status == "REPEATABLE" && !out.repeatability_trading_eligible)
+         _AppendSchemaField(invalid, "repeatability_repeatable_not_eligible");
       _SchemaRequireBool(txt, "mandatory_fields_complete", out.mandatory_fields_complete, missing, invalid);
       if(!out.mandatory_fields_complete) _AppendSchemaField(invalid, "mandatory_fields_complete");
       _SchemaRequireObject(txt, "decision_field_authority", out.decision_field_authority_json, missing, invalid);
       string calibrated_authority = JsonGetObject(out.decision_field_authority_json, "calibrated_probability", "");
       string expected_r_authority = JsonGetObject(out.decision_field_authority_json, "expected_net_r", "");
       string llm_quality_authority = JsonGetObject(out.decision_field_authority_json, "llm_quality_score", "");
+      string llm_risk_authority = JsonGetObject(out.decision_field_authority_json, "llm_risk_assessments", "");
+      string llm_veto_authority = JsonGetObject(out.decision_field_authority_json, "llm_qualitative_veto", "");
       string mql_authority = JsonGetObject(out.decision_field_authority_json, "mql_final_allow", "");
       if(JsonGetString(calibrated_authority, "owner", "") != "statistical" ||
          JsonGetString(calibrated_authority, "authority", "") != "unavailable")
@@ -1450,8 +1486,14 @@ public:
          JsonGetString(expected_r_authority, "authority", "") != "unavailable")
          _AppendSchemaField(invalid, "expected_net_r_authority");
       if(JsonGetString(llm_quality_authority, "owner", "") != "llm" ||
-         JsonGetString(llm_quality_authority, "authority", "") != "diagnostic_and_veto_only")
+         JsonGetString(llm_quality_authority, "authority", "") != "diagnostic_only_uncalibrated")
          _AppendSchemaField(invalid, "llm_quality_score_authority");
+      if(JsonGetString(llm_risk_authority, "owner", "") != "llm" ||
+         JsonGetString(llm_risk_authority, "authority", "") != "diagnostic_only_uncalibrated")
+         _AppendSchemaField(invalid, "llm_risk_assessments_authority");
+      if(JsonGetString(llm_veto_authority, "owner", "") != "llm" ||
+         JsonGetString(llm_veto_authority, "authority", "") != "evidence_backed_enumerated_veto")
+         _AppendSchemaField(invalid, "llm_qualitative_veto_authority");
       if(JsonGetString(mql_authority, "owner", "") != "mql_execution" ||
          JsonGetString(mql_authority, "authority", "") != "final")
          _AppendSchemaField(invalid, "mql_final_allow_authority");
@@ -1468,7 +1510,7 @@ public:
       StringToUpper(out.decision_state);
       if(out.decision_state != "APPROVE" && out.decision_state != "REJECT" && out.decision_state != "ABSTAIN")
          _AppendSchemaField(invalid, "decision_state");
-      if(!out.repeatability_trading_eligible && out.decision_state == "APPROVE")
+      if(out.repeatability_required_live && !out.repeatability_trading_eligible && out.decision_state == "APPROVE")
          _AppendSchemaField(invalid, "repeatability_nontrading_approve");
       _SchemaRequireString(txt, "selected_candidate_id", out.selected_candidate_id, missing, invalid);
       _SchemaRequireString(txt, "selected_candidate_hash", out.selected_candidate_hash, missing, invalid);
@@ -1541,14 +1583,34 @@ public:
       _SchemaRequireNumber(txt, "session_bucket_risk", out.session_bucket_risk, 0.0, 1.0, missing, invalid);
       _SchemaRequireNumber(txt, "post_entry_failure_risk", out.post_entry_failure_risk, 0.0, 1.0, missing, invalid);
       _SchemaRequireNumber(txt, "final_trade_expectancy_score", out.final_trade_expectancy_score, 0.0, 10.0, missing, invalid);
+      _SchemaRequireString(txt, "llm_numeric_diagnostics_authority", out.llm_numeric_diagnostics_authority, missing, invalid);
+      if(out.llm_numeric_diagnostics_authority != "uncalibrated_diagnostic_only_no_direct_trade_authority")
+         _AppendSchemaField(invalid, "llm_numeric_diagnostics_authority");
       _SchemaRequireBool(txt, "veto_enabled", out.veto_enabled, missing, invalid);
+      _SchemaRequireString(txt, "veto_code", out.veto_code, missing, invalid, true);
+      _SchemaRequireArray(txt, "veto_evidence_fields", out.veto_evidence_fields_json, missing, invalid);
       _SchemaRequireString(txt, "veto_reason", out.veto_reason, missing, invalid, true);
       string veto_obj = "";
       if(_SchemaRequireObject(txt, "veto", veto_obj, missing, invalid)){
-         bool nested_veto = false; string nested_reason = "";
+         bool nested_veto = false; string nested_code = "", nested_evidence = "", nested_reason = "";
          _SchemaRequireBool(veto_obj, "enabled", nested_veto, missing, invalid);
+         _SchemaRequireString(veto_obj, "code", nested_code, missing, invalid, true);
+         _SchemaRequireArray(veto_obj, "evidence_fields", nested_evidence, missing, invalid);
          _SchemaRequireString(veto_obj, "reason", nested_reason, missing, invalid, true);
-         if(nested_veto != out.veto_enabled || nested_reason != out.veto_reason) _AppendSchemaField(invalid, "veto_mismatch");
+         if(nested_veto != out.veto_enabled || nested_code != out.veto_code ||
+            nested_evidence != out.veto_evidence_fields_json || nested_reason != out.veto_reason)
+            _AppendSchemaField(invalid, "veto_mismatch");
+      }
+      string compact_veto_evidence = out.veto_evidence_fields_json;
+      StringReplace(compact_veto_evidence, " ", "");
+      StringReplace(compact_veto_evidence, "\r", "");
+      StringReplace(compact_veto_evidence, "\n", "");
+      if(out.veto_enabled){
+         if(!_AllowedQualitativeVetoCode(out.veto_code)) _AppendSchemaField(invalid, "veto_code");
+         if(compact_veto_evidence == "[]") _AppendSchemaField(invalid, "veto_evidence_fields");
+         if(StringLen(out.veto_reason) == 0) _AppendSchemaField(invalid, "veto_reason");
+      } else if(StringLen(out.veto_code) > 0 || compact_veto_evidence != "[]" || StringLen(out.veto_reason) > 0){
+         _AppendSchemaField(invalid, "veto_disabled_payload");
       }
       out.veto_fields_present = true;
       _SchemaRequireString(txt, "bucket_prior_override_justification", out.bucket_prior_override_justification, missing, invalid, true);
@@ -1702,11 +1764,14 @@ public:
          if(MathAbs(item_number - out.assessed_tp2) > 0.00000001) _AppendSchemaField(invalid, "assessed_tp2_assessment_mismatch");
          JsonGetStringStrict(selected_assessment, "model_version", item_text);
          if(item_text != out.model_version) _AppendSchemaField(invalid, "model_version_assessment_mismatch");
-         string item_veto = "", item_veto_reason = ""; bool item_veto_enabled = false;
+         string item_veto = "", item_veto_code = "", item_veto_evidence = "", item_veto_reason = ""; bool item_veto_enabled = false;
          if(JsonGetObjectStrict(selected_assessment, "veto", item_veto)){
             JsonGetBoolStrict(item_veto, "enabled", item_veto_enabled);
+            JsonGetStringStrict(item_veto, "code", item_veto_code);
+            item_veto_evidence = JsonGetArray(item_veto, "evidence_fields", "[]");
             JsonGetStringStrict(item_veto, "reason", item_veto_reason);
-            if(item_veto_enabled != out.veto_enabled || item_veto_reason != out.veto_reason)
+            if(item_veto_enabled != out.veto_enabled || item_veto_code != out.veto_code ||
+               item_veto_evidence != out.veto_evidence_fields_json || item_veto_reason != out.veto_reason)
                _AppendSchemaField(invalid, "veto_assessment_mismatch");
          }
          string item_arbitration = "", item_chosen_model = "", item_blocker_kind = "", item_blocker_class = "", item_target_reason = "";

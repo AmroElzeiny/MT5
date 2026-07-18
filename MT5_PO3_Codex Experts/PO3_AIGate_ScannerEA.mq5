@@ -321,5 +321,9 @@ void OnTimer() {
    if(g_scanner.Done()) _EndScan();
 }
 
-// The EA is timer-driven; OnTick can remain empty.
-void OnTick() {}
+// Keep tick work intentionally narrow: only executable-side path evidence for
+// managed positions on this chart symbol. Scanning, AI, history and management
+// execution remain timer-driven.
+void OnTick() {
+   g_engine.ObserveChartTick(_Symbol);
+}

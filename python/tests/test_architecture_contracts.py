@@ -484,7 +484,7 @@ class ArchitectureContractsTests(unittest.TestCase):
             "target_before_stop": True,
             "result_r": 1.2,
             "mfe_r": 1.4,
-            "mae_r": -0.2,
+            "mae_r": 0.2,
             "time_to_event_sec": 600,
             "time_to_0_25r_sec": 120,
             "time_to_0_50r_sec": 240,

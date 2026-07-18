@@ -21,12 +21,12 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 MODULE_ROOT = Path(__file__).resolve().parent
 
-RUNTIME_GOVERNANCE_VERSION = "20260717_repeatability_priors_risk_v1"
-REPEATABILITY_SCHEMA_VERSION = "20260717_repeatability_v1"
+RUNTIME_GOVERNANCE_VERSION = "20260718_repeatability_priors_risk_v2"
+REPEATABILITY_SCHEMA_VERSION = "20260718_repeatability_v2"
 HIERARCHICAL_PRIOR_SCHEMA_VERSION = "20260717_hierarchical_prior_v1"
 RISK_FACTOR_SCHEMA_VERSION = "20260717_risk_factor_v1"
 COMMISSION_MODEL_SCHEMA_VERSION = "20260717_broker_cost_v1"
-MANAGEMENT_SCHEMA_VERSION = "20260717_management_state_v3"
+MANAGEMENT_SCHEMA_VERSION = "20260718_management_action_lifecycle_v4"
 MANAGEMENT_EXPERIMENT_SCHEMA_VERSION = "20260717_management_experiment_v1"
 MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_counterfactual_v2"
 INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1"
@@ -278,7 +278,7 @@ def evaluate_repeatability(
         "metrics": metrics,
         "status": status,
         "score_threshold_authority": status == REPEATABLE,
-        "trading_eligible": status not in {SCORE_NON_REPEATABLE, DECISION_NON_REPEATABLE},
+        "trading_eligible": status == REPEATABLE,
         "generated_at": _utc_now(),
     }
     artifact["artifact_hash"] = canonical_hash(artifact)
@@ -287,11 +287,17 @@ def evaluate_repeatability(
 
 def repeatability_authority(artifact: Mapping[str, Any] | None) -> dict[str, Any]:
     status = _text((artifact or {}).get("status"), UNAVAILABLE)
+    reason_by_status = {
+        UNAVAILABLE: "repeatability_unavailable",
+        INSUFFICIENT_SAMPLE: "repeatability_insufficient_sample",
+        SCORE_NON_REPEATABLE: "model_prompt_score_non_repeatable",
+        DECISION_NON_REPEATABLE: "model_prompt_decision_non_repeatable",
+    }
     return {
         "status": status,
         "score_threshold_authority": status == REPEATABLE,
-        "trading_eligible": status not in {SCORE_NON_REPEATABLE, DECISION_NON_REPEATABLE},
-        "reason": "repeatability_decision_or_veto_failed" if status == DECISION_NON_REPEATABLE else "",
+        "trading_eligible": status == REPEATABLE,
+        "reason": reason_by_status.get(status, ""),
     }
 
 

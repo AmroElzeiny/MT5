@@ -29,8 +29,13 @@ from tools.verify_broker_fill_capture import CAPTURE_ORIGIN, verify_capture
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MQL_INCLUDE = Path(
-    r"C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\0148BD5691B65B0F2157627A4231F3DE\MQL5\Include\MT5_PO3_Codex"
+_STAGED_MQL_INCLUDE = ROOT.parent / "mql_include"
+MQL_INCLUDE = (
+    _STAGED_MQL_INCLUDE
+    if _STAGED_MQL_INCLUDE.is_dir()
+    else Path(
+        r"C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\0148BD5691B65B0F2157627A4231F3DE\MQL5\Include\MT5_PO3_Codex"
+    )
 )
 
 
@@ -99,6 +104,7 @@ def target_arbitration() -> dict:
 
 def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> dict:
     approve = state == "APPROVE"
+    reject = state == "REJECT"
     item = {
         "candidate_index": cand["candidate_index"],
         "candidate_id": cand["candidate_id"],
@@ -135,7 +141,12 @@ def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> d
         "session_bucket_risk": 0.2,
         "post_entry_failure_risk": 0.2,
         "final_trade_expectancy_score": 7.5,
-        "veto": {"enabled": False, "reason": ""},
+        "veto": {
+            "enabled": reject,
+            "code": "ai_veto_structural_contradiction" if reject else "",
+            "evidence_fields": ["structure_type", "ltf_bos"] if reject else [],
+            "reason": "structure evidence contradicts the proposed direction" if reject else "",
+        },
         "bucket_prior_override_justification": "",
         "reasons": "complete evidence",
         "rejection_codes": [],
@@ -427,6 +438,9 @@ class DecisionIntegrityTests(unittest.TestCase):
             "legacy_agreement_confidence": item["legacy_agreement_confidence"],
             "llm_self_reported_confidence": item["llm_self_reported_confidence"],
             "suggested_risk_multiplier": item["suggested_risk_multiplier"],
+            "veto_code": item["veto"]["code"],
+            "veto_evidence_fields": item["veto"]["evidence_fields"],
+            "llm_numeric_diagnostics_authority": "uncalibrated_diagnostic_only_no_direct_trade_authority",
             "selected_target_identity": item["selected_target_identity"],
             "selected_target_price": item["selected_target_price"],
             "target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
@@ -466,7 +480,11 @@ class DecisionIntegrityTests(unittest.TestCase):
         decision.blended_legacy_score = 10.0
         decision.legacy_agreement_confidence = 1.0
         decision.llm_self_reported_confidence = 1.0
-        self.assertFalse(ai_gate._apply_family_ai_threshold_gate(payload, decision, 0).allow)
+        gated = ai_gate._apply_family_ai_threshold_gate(payload, decision, 0)
+        self.assertTrue(gated.allow)
+        self.assertFalse(gated.llm_quality_threshold_passed)
+        self.assertEqual(gated.llm_quality_reject_reason, "")
+        self.assertEqual(gated.reasons["llm_quality_threshold_authority"], "diagnostic_only")
 
     def test_unavailable_calibration_cannot_be_fabricated(self) -> None:
         cand = candidate()
