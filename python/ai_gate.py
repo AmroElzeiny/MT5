@@ -17,11 +17,11 @@ the final execution authority; Python only reranks, explains, or suggests a veto
 from __future__ import annotations
 import argparse
 import base64
-import inspect
 import json
 import math
 import os
 import shutil
+import socket
 import statistics
 import time
 from contextlib import contextmanager
@@ -32,6 +32,18 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Tuple
 
+from ai_provider import (
+    AIProvider,
+    LocalOpenAICompatibleProvider,
+    PROVIDER_CONTRACT_VERSION,
+    PROVIDER_MODE_LOCAL,
+    PROVIDER_MODE_REMOTE,
+    ProviderCallError,
+    RemoteAPIProvider,
+    UnavailableProvider,
+    endpoint_class,
+)
+
 from architecture_contracts import (
     ARCHITECTURE_CONTRACT_VERSION,
     COHORT_SCHEMA_VERSION,
@@ -41,6 +53,7 @@ from architecture_contracts import (
     LIVE_FORWARD_CONTRACT_VERSION,
     POLICY_MANIFEST_SCHEMA_VERSION,
     SEMANTIC_CACHE_SCHEMA_VERSION,
+    FileBusClaimDeferredError,
     FileBusLifecycle,
     PolicySpec,
     build_startup_policy_manifest,
@@ -56,7 +69,9 @@ from architecture_contracts import (
 )
 from decision_integrity import (
     AI_DECISION_SCHEMA_VERSION,
+    AI_IDENTITY_CANONICALIZATION_VERSION,
     AI_PROMPT_CONTRACT_VERSION,
+    AI_REQUEST_IDENTITY_VERSION,
     AI_TARGET_ARBITRATION_SCHEMA_VERSION,
     DECISION_ABSTAIN,
     DECISION_APPROVE,
@@ -70,20 +85,35 @@ from decision_integrity import (
     RESPONSE_DEGRADED_NON_TRADING,
     RESPONSE_FULL_STRUCTURED,
     RESPONSE_RULE_ONLY_NON_TRADING,
+    FrozenAIRequest,
     assessed_execution_fingerprint as deterministic_assessed_execution_fingerprint,
+    build_ai_request_identity,
     candidate_hash as deterministic_candidate_hash,
+    freeze_ai_request,
     response_can_trade,
     validate_candidate_assessment,
     validate_decision_envelope,
+    validate_request_identity_echo,
 )
+from decision_evidence import EVIDENCE_ENVELOPE_VERSION, build_decision_evidence_envelope
+from decision_pipeline import (
+    CONSENSUS_RESOLVER_VERSION,
+    ROLE_CONTRACT_VERSION,
+    evidence_path_exists,
+    run_qualitative_consensus,
+)
+from family_context import FAMILY_PROFILE_VERSION
 from governance_contracts import (
     CALIBRATION_CONTRACT_VERSION,
     SETUP_TAXONOMY_VERSION,
     SetupTaxonomy,
     classify_setup_taxonomy,
 )
-from openai_usage_logger import log_openai_usage, set_openai_usage_bus
-from po3_env import load_dotenv
+from openai_usage_logger import (
+    log_ai_usage,
+    set_ai_usage_bus,
+)
+from po3_env import load_dotenv, peek_dotenv_value
 from runtime_governance import (
     DECISION_NON_REPEATABLE,
     HIERARCHICAL_PRIOR_SCHEMA_VERSION,
@@ -108,16 +138,52 @@ from runtime_governance import (
     response_fingerprint,
     runtime_governance_versions,
 )
+from request_lifecycle import (
+    REQUEST_LIFECYCLE_VERSION,
+    RequestHeartbeat,
+    RequestIdempotencyLedger,
+)
+from trade_memory import RETRIEVAL_POLICY_VERSION, TRADE_MEMORY_SCHEMA_VERSION, TradeMemoryStore
+from structured_models import (
+    AIGateEnvelope,
+    CandidateAssessment,
+    ModelAIGateOutput,
+    all_authoritative_structured_models,
+    strict_structured_schema,
+)
 
-# The bot should follow this project's .env even when PowerShell has an older
-# OPENAI_API_KEY cached in the parent environment.
-load_dotenv(override=True)
+# Read only the provider selector before importing the rest of the private env.
+# In local/invalid mode the remote secret keys are never parsed from .env and
+# any stale parent-process values are removed before provider construction.
+_DOTENV_PROVIDER_SWITCH = peek_dotenv_value(None, "AI_USE_REMOTE_API")
+_BOOTSTRAP_PROVIDER_SWITCH = (
+    _DOTENV_PROVIDER_SWITCH
+    if _DOTENV_PROVIDER_SWITCH is not None
+    else os.environ.get("AI_USE_REMOTE_API")
+)
+_BOOTSTRAP_REMOTE = str(_BOOTSTRAP_PROVIDER_SWITCH or "").strip().lower() == "true"
+_BOOTSTRAP_EXCLUDED_KEYS = (
+    ("LOCAL_AI_API_KEY", "LOCAL_AI_MODEL_PATH")
+    if _BOOTSTRAP_REMOTE
+    else ("OPENAI_API_KEY", "OPENAI_BASE_URL")
+)
+load_dotenv(
+    override=True,
+    exclude_keys=_BOOTSTRAP_EXCLUDED_KEYS,
+)
+if _BOOTSTRAP_REMOTE:
+    os.environ.pop("LOCAL_AI_API_KEY", None)
+    os.environ.pop("LOCAL_AI_MODEL_PATH", None)
+else:
+    os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("OPENAI_BASE_URL", None)
 
 try:
-    from expectancy_report import run_analytics_suite
+    from expectancy_report import run_analytics_suite, set_expectancy_ai_provider
     ANALYTICS_IMPORT_ERROR = ""
 except Exception as exc:  # pragma: no cover - defensive import fallback
     run_analytics_suite = None
+    set_expectancy_ai_provider = None
     ANALYTICS_IMPORT_ERROR = str(exc)
 
 DEFAULT_BUS_ROOT = "PO3_AI_BUS"
@@ -206,7 +272,11 @@ def _env_float(
 
 @dataclass(frozen=True)
 class AIGateRuntimeConfig:
+    use_remote_api: bool | None
+    provider_config_valid: bool
+    provider_config_errors: tuple[str, ...]
     model: str
+    expectancy_model: str
     fallback_models: list[str]
     reasoning_effort: str
     max_output_tokens: int
@@ -252,18 +322,65 @@ class AIGateRuntimeConfig:
     shadow_repeat_min_veto_agreement: float
     shadow_repeat_min_target_choice_agreement: float
     shadow_repeat_artifact_file: Path
+    local_base_url: str
+    local_api_key: str
+    local_model: str
+    local_analyst_model: str
+    local_critic_model: str
+    local_adjudicator_model: str
+    local_fallback_models: list[str]
+    local_model_path: str
+    local_healthcheck_path: str
+    local_timeout_sec: float
+    local_max_retries: int
+    local_max_output_tokens: int
+    local_temperature: float
+    local_top_p: float
+    local_seed: int
+    local_enable_thinking: bool
+    local_require_json_schema: bool
+    local_parallelism: int
+    local_context_budget_tokens: int
+    local_retrieval_top_k: int
+    local_allow_non_loopback_ack: bool
+    shadow_compare_providers: bool
+    trade_memory_file: Path
+    provider_circuit_failure_threshold: int
+    provider_circuit_cooldown_sec: float
     validation_warnings: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "AIGateRuntimeConfig":
-        env = env or os.environ
+        env = os.environ if env is None else env
         warnings: list[str] = []
-        model = _env_lookup(env, ("AI_GATE_MODEL", "OPENAI_MODEL"), "gpt-5.5-mini") or "gpt-5.5-mini"
-        fallback_raw = _env_lookup(env, ("AI_GATE_FALLBACK_MODELS", "OPENAI_FALLBACK_MODELS"), "gpt-5.4-mini,gpt-5.4-nano")
+        provider_errors: list[str] = []
+        switch_raw = env.get("AI_USE_REMOTE_API")
+        switch_text = str(switch_raw or "").strip().lower()
+        if switch_text == "true":
+            use_remote_api: bool | None = True
+        elif switch_text == "false":
+            use_remote_api = False
+        else:
+            use_remote_api = None
+            provider_errors.append("AI_USE_REMOTE_API=missing_or_invalid")
+
+        # Preserve the existing Version Z remote defaults. The new provider
+        # switch changes transport selection, never the configured model.
+        remote_model = _env_lookup(env, ("AI_GATE_MODEL", "OPENAI_MODEL"), "gpt-5.5-mini") or "gpt-5.5-mini"
+        remote_fallback_raw = _env_lookup(
+            env,
+            ("AI_GATE_FALLBACK_MODELS", "OPENAI_FALLBACK_MODELS"),
+            "gpt-5.4-mini,gpt-5.4-nano",
+        )
+        local_model = _env_lookup(env, ("LOCAL_AI_MODEL",), "qwen3.5-9b") or "qwen3.5-9b"
+        selected_model = remote_model if use_remote_api is not False else (
+            _env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model
+        )
+        fallback_raw = remote_fallback_raw if use_remote_api is not False else _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "")
         fallback_models: list[str] = []
         for item in fallback_raw.split(","):
             name = item.strip()
-            if name and name != model and name not in fallback_models:
+            if name and name != selected_model and name not in fallback_models:
                 fallback_models.append(name)
 
         effort = _env_lookup(env, ("AI_GATE_REASONING_EFFORT", "AI_REASONING_EFFORT"), "low").lower()
@@ -293,8 +410,61 @@ class AIGateRuntimeConfig:
             warnings.append("AI_LEGACY_MIN_SELF_REPORTED_CONFIDENCE_DIAGNOSTIC=invalid")
             legacy_confidence_diagnostic = 0.45
 
+        shadow_compare_providers = _env_bool(
+            env,
+            "AI_SHADOW_COMPARE_PROVIDERS",
+            False,
+            warnings,
+            safe_default=False,
+        )
+        # Non-selected credentials are intentionally ignored. Remote mode may
+        # read local shadow settings only when the explicit non-authoritative
+        # research comparison switch is enabled; local mode never reads the
+        # remote API secret under any circumstance.
+        read_local_settings = use_remote_api is False or shadow_compare_providers
+        local_base_url = (
+            _env_lookup(env, ("LOCAL_AI_BASE_URL",), "http://127.0.0.1:1234/v1")
+            if read_local_settings
+            else "http://127.0.0.1:1234/v1"
+        )
+        local_endpoint_class = endpoint_class(local_base_url)
+        local_allow_non_loopback_ack = _env_bool(
+            env,
+            "LOCAL_AI_ALLOW_NON_LOOPBACK_ACK",
+            False,
+            warnings,
+            safe_default=False,
+        )
+        if use_remote_api is True:
+            if not str(env.get("OPENAI_API_KEY") or "").strip():
+                provider_errors.append("OPENAI_API_KEY=missing_remote")
+            if not remote_model:
+                provider_errors.append("AI_GATE_MODEL=missing_remote")
+        elif use_remote_api is False:
+            if local_endpoint_class == "invalid":
+                provider_errors.append("LOCAL_AI_BASE_URL=invalid")
+            elif local_endpoint_class != "loopback" and not local_allow_non_loopback_ack:
+                provider_errors.append("LOCAL_AI_BASE_URL=non_loopback_without_ack")
+            if not local_model:
+                provider_errors.append("LOCAL_AI_MODEL=missing")
+
+        local_fallback_models: list[str] = []
+        for item in _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "").split(","):
+            name = item.strip()
+            if name and name not in local_fallback_models:
+                local_fallback_models.append(name)
+        local_parallelism = _env_int(env, "LOCAL_AI_PARALLELISM", 1, warnings, min_value=1, max_value=1)
+
         return cls(
-            model=model,
+            use_remote_api=use_remote_api,
+            provider_config_valid=not provider_errors,
+            provider_config_errors=tuple(provider_errors),
+            model=selected_model,
+            expectancy_model=(
+                _env_lookup(env, ("EXPECTANCY_AI_MODEL",), "gpt-5.5") or "gpt-5.5"
+                if use_remote_api is not False
+                else (_env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model)
+            ),
             fallback_models=fallback_models,
             reasoning_effort=effort,
             max_output_tokens=_env_int(env, "AI_MAX_OUTPUT_TOKENS", 25000, warnings, min_value=1024, max_value=128000),
@@ -346,12 +516,50 @@ class AIGateRuntimeConfig:
             shadow_repeat_artifact_file=resolve_project_path(
                 _env_lookup(env, ("AI_SHADOW_REPEAT_ARTIFACT_FILE",), "data/ai_repeatability_artifact.json")
             ),
+            local_base_url=local_base_url,
+            local_api_key=(
+                _env_lookup(env, ("LOCAL_AI_API_KEY",), "local") or "local"
+                if read_local_settings
+                else "local"
+            ),
+            local_model=local_model,
+            local_analyst_model=_env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model,
+            local_critic_model=_env_lookup(env, ("LOCAL_AI_CRITIC_MODEL",), local_model) or local_model,
+            local_adjudicator_model=_env_lookup(env, ("LOCAL_AI_ADJUDICATOR_MODEL",), local_model) or local_model,
+            local_fallback_models=local_fallback_models,
+            local_model_path=_env_lookup(env, ("LOCAL_AI_MODEL_PATH",), ""),
+            local_healthcheck_path=_env_lookup(env, ("LOCAL_AI_HEALTHCHECK_PATH",), "/models") or "/models",
+            local_timeout_sec=_env_float(env, "LOCAL_AI_TIMEOUT_SEC", 180.0, warnings, min_value=10.0, max_value=1800.0),
+            local_max_retries=_env_int(env, "LOCAL_AI_MAX_RETRIES", 1, warnings, min_value=0, max_value=1),
+            local_max_output_tokens=_env_int(env, "LOCAL_AI_MAX_OUTPUT_TOKENS", 4096, warnings, min_value=512, max_value=32768),
+            local_temperature=_env_float(env, "LOCAL_AI_TEMPERATURE", 0.15, warnings, min_value=0.0, max_value=2.0),
+            local_top_p=_env_float(env, "LOCAL_AI_TOP_P", 0.85, warnings, min_value=0.0, max_value=1.0),
+            local_seed=_env_int(env, "LOCAL_AI_SEED", 42, warnings, min_value=0, max_value=2147483647),
+            local_enable_thinking=_env_bool(env, "LOCAL_AI_ENABLE_THINKING", True, warnings, safe_default=False),
+            local_require_json_schema=_env_bool(env, "LOCAL_AI_REQUIRE_JSON_SCHEMA", True, warnings, safe_default=True),
+            local_parallelism=local_parallelism,
+            local_context_budget_tokens=_env_int(env, "LOCAL_AI_CONTEXT_BUDGET_TOKENS", 7000, warnings, min_value=2048, max_value=131072),
+            local_retrieval_top_k=_env_int(env, "LOCAL_AI_RETRIEVAL_TOP_K", 7, warnings, min_value=5, max_value=10),
+            local_allow_non_loopback_ack=local_allow_non_loopback_ack,
+            shadow_compare_providers=shadow_compare_providers,
+            trade_memory_file=resolve_project_path(_env_lookup(env, ("AI_TRADE_MEMORY_FILE",), "data/ai_trade_memory.sqlite3")),
+            provider_circuit_failure_threshold=_env_int(env, "AI_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", 3, warnings, min_value=1, max_value=100),
+            provider_circuit_cooldown_sec=_env_float(env, "AI_PROVIDER_CIRCUIT_COOLDOWN_SEC", 60.0, warnings, min_value=5.0, max_value=3600.0),
             validation_warnings=tuple(warnings),
         )
 
     def safe_log_dict(self) -> Dict[str, Any]:
         return {
+            "use_remote_api": self.use_remote_api,
+            "provider_config_valid": self.provider_config_valid,
+            "provider_config_errors": list(self.provider_config_errors),
+            "provider_mode": (
+                PROVIDER_MODE_REMOTE if self.use_remote_api is True
+                else PROVIDER_MODE_LOCAL if self.use_remote_api is False
+                else "UNAVAILABLE"
+            ),
             "model": self.model,
+            "expectancy_model": self.expectancy_model,
             "fallback_models": self.fallback_models,
             "reasoning_effort": self.reasoning_effort,
             "max_output_tokens": self.max_output_tokens,
@@ -397,15 +605,40 @@ class AIGateRuntimeConfig:
             "shadow_repeat_min_veto_agreement": self.shadow_repeat_min_veto_agreement,
             "shadow_repeat_min_target_choice_agreement": self.shadow_repeat_min_target_choice_agreement,
             "shadow_repeat_artifact_file": str(self.shadow_repeat_artifact_file),
+            "local_base_url_class": endpoint_class(self.local_base_url),
+            "local_model": self.local_model if self.use_remote_api is False else "",
+            "local_analyst_model": self.local_analyst_model if self.use_remote_api is False else "",
+            "local_critic_model": self.local_critic_model if self.use_remote_api is False else "",
+            "local_adjudicator_model": self.local_adjudicator_model if self.use_remote_api is False else "",
+            "local_fallback_models": self.local_fallback_models if self.use_remote_api is False else [],
+            "local_model_path_configured": bool(self.local_model_path) if self.use_remote_api is False else False,
+            "local_healthcheck_path": self.local_healthcheck_path if self.use_remote_api is False else "",
+            "local_timeout_sec": self.local_timeout_sec if self.use_remote_api is False else 0.0,
+            "local_max_retries": self.local_max_retries if self.use_remote_api is False else 0,
+            "local_max_output_tokens": self.local_max_output_tokens if self.use_remote_api is False else 0,
+            "local_temperature": self.local_temperature if self.use_remote_api is False else 0.0,
+            "local_top_p": self.local_top_p if self.use_remote_api is False else 0.0,
+            "local_seed": self.local_seed if self.use_remote_api is False else 0,
+            "local_enable_thinking": self.local_enable_thinking if self.use_remote_api is False else False,
+            "local_require_json_schema": self.local_require_json_schema if self.use_remote_api is False else False,
+            "local_parallelism": self.local_parallelism if self.use_remote_api is False else 0,
+            "local_context_budget_tokens": self.local_context_budget_tokens if self.use_remote_api is False else 0,
+            "local_retrieval_top_k": self.local_retrieval_top_k,
+            "local_non_loopback_ack": self.local_allow_non_loopback_ack,
+            "shadow_compare_providers": self.shadow_compare_providers,
+            "trade_memory_file": str(self.trade_memory_file),
+            "provider_circuit_failure_threshold": self.provider_circuit_failure_threshold,
+            "provider_circuit_cooldown_sec": self.provider_circuit_cooldown_sec,
             "validation_warnings": list(self.validation_warnings),
         }
 
 
-# ---------- OpenAI (real AI) ----------
-# Set OPENAI_API_KEY in the environment before running this bridge.
+# ---------- Provider-neutral AI transport ----------
 AI_CONFIG = AIGateRuntimeConfig.from_env()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip()
+# Explicit migration globals remain for old diagnostics/tests. In local mode
+# the remote secret variables are not read and remain empty.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip() if AI_CONFIG.use_remote_api is True else ""
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() if AI_CONFIG.use_remote_api is True else ""
 OPENAI_MODEL = AI_CONFIG.model
 OPENAI_FALLBACK_MODELS = AI_CONFIG.fallback_models
 AI_REASONING_EFFORT = AI_CONFIG.reasoning_effort
@@ -415,18 +648,44 @@ AI_MIN_OUTPUT_TOKENS = 1024
 AI_DEFAULT_OUTPUT_TOKENS = 25000
 AI_MAX_OUTPUT_TOKENS = AI_CONFIG.max_output_tokens
 AI_PROMPT_CACHE_KEY = AI_CONFIG.prompt_cache_key if AI_CONFIG.prompt_cache_enable else ""
-REQUEST_LOCK_STALE_SEC = max(300, int(os.getenv("AI_REQUEST_LOCK_STALE_SEC", "1800")))
+_MAX_PROVIDER_ROLE_TIMEOUT_SEC = max(
+    float(AI_CONFIG.openai_timeout_sec),
+    float(AI_CONFIG.openai_flex_timeout_sec),
+    float(AI_CONFIG.local_timeout_sec),
+)
+EXPECTED_MAX_PROVIDER_DURATION_SEC = max(
+    300.0,
+    _MAX_PROVIDER_ROLE_TIMEOUT_SEC * 6.0 + 120.0,
+)
+REQUEST_LOCK_STALE_SEC = max(
+    int(EXPECTED_MAX_PROVIDER_DURATION_SEC),
+    int(os.getenv("AI_REQUEST_LOCK_STALE_SEC", "1800")),
+)
 REQUEST_STABLE_MS = max(20, int(os.getenv("AI_REQUEST_STABLE_MS", "120")))
+PRODUCER_LOCK_TIMEOUT_SEC = max(
+    5.0, float(os.getenv("AI_PRODUCER_LOCK_TIMEOUT_SEC", "60"))
+)
 RESP_ENCODING = os.getenv("AI_RESPONSE_ENCODING", "utf-16")
 ANALYTICS_AUTO_ACTIVATE = os.getenv("ANALYTICS_AUTO_ACTIVATE", "false").strip().lower() in {"1", "true", "yes", "on"}
-AI_GATE_MODEL_VERSION = "po3-candidate-integrity-20260714"
+AI_GATE_MODEL_VERSION = "po3-provider-neutral-consensus-20260718-v1"
 LIVE_BUCKET_PRIORS_FILE = AI_CONFIG.live_bucket_priors_file
 LOG_FILE = None  # will be set in main() once the bus path is known
-_UNSUPPORTED_OPENAI_KWARGS_LOGGED: set[str] = set()
 _AI_RUNTIME_CONFIG_LOGGED = False
 _REPEATABILITY_LOCK = Lock()
 _FINGERPRINT_LOG_LOCK = Lock()
 FILE_BUS_LIFECYCLE: FileBusLifecycle | None = None
+REQUEST_IDEMPOTENCY_LEDGER: RequestIdempotencyLedger | None = None
+_CLAIM_DEFERRED_STATE: Dict[str, Dict[str, float]] = {}
+_UNSTABLE_FILE_STATE: Dict[str, Dict[str, float]] = {}
+AI_PROVIDER: AIProvider | None = None
+SHADOW_AI_PROVIDER: AIProvider | None = None
+_PROVIDER_STARTUP_HEALTH: Dict[str, Any] = {}
+_PROVIDER_HEALTH_CHECKED_MONOTONIC = 0.0
+_TRADE_MEMORY_STORE: TradeMemoryStore | None = None
+_TRADE_MEMORY_LOCK = Lock()
+_SHADOW_PROVIDER_LOCK = Lock()
+_SHADOW_COMPARISON_LOG_LOCK = Lock()
+_STRUCTURED_SCHEMA_PREFLIGHT: Dict[str, Any] = {}
 
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -438,6 +697,171 @@ def log(msg: str) -> None:
                 f.write(msg + "\n")
         except Exception:
             pass
+
+
+def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
+    cfg = config or AI_CONFIG
+    if not cfg.provider_config_valid or cfg.use_remote_api is None:
+        return UnavailableProvider(";".join(cfg.provider_config_errors) or "provider_configuration_invalid")
+    if cfg.use_remote_api:
+        # This is the only branch allowed to read the remote secret.
+        remote_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not remote_key:
+            return UnavailableProvider("OPENAI_API_KEY=missing_remote")
+        return RemoteAPIProvider(
+            api_key=remote_key,
+            base_url=os.environ.get("OPENAI_BASE_URL", "").strip(),
+            primary_model=cfg.model,
+            fallback_models=cfg.fallback_models,
+            analytics_model=cfg.expectancy_model,
+            reasoning_effort=cfg.reasoning_effort,
+            timeout_sec=cfg.openai_timeout_sec,
+            max_output_tokens=cfg.max_output_tokens,
+            prompt_cache_enable=cfg.prompt_cache_enable,
+            prompt_cache_key=cfg.prompt_cache_key,
+            prompt_cache_retention=cfg.prompt_cache_retention,
+            service_tier=cfg.service_tier,
+            flex_unavailable_retry_enable=cfg.flex_unavailable_retry_enable,
+            flex_unavailable_max_retries=cfg.flex_unavailable_max_retries,
+            flex_unavailable_cooldown_sec=cfg.flex_unavailable_cooldown_sec,
+            circuit_failure_threshold=cfg.provider_circuit_failure_threshold,
+            circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
+            log=log,
+        )
+    return LocalOpenAICompatibleProvider(
+        base_url=cfg.local_base_url,
+        api_key=cfg.local_api_key,
+        analyst_model=cfg.local_analyst_model,
+        critic_model=cfg.local_critic_model,
+        adjudicator_model=cfg.local_adjudicator_model,
+        fallback_models=cfg.local_fallback_models,
+        healthcheck_path=cfg.local_healthcheck_path,
+        timeout_sec=cfg.local_timeout_sec,
+        max_retries=cfg.local_max_retries,
+        max_output_tokens=cfg.local_max_output_tokens,
+        temperature=cfg.local_temperature,
+        top_p=cfg.local_top_p,
+        seed=cfg.local_seed,
+        enable_thinking=cfg.local_enable_thinking,
+        require_json_schema=cfg.local_require_json_schema,
+        parallelism=cfg.local_parallelism,
+        context_budget_tokens=cfg.local_context_budget_tokens,
+        circuit_failure_threshold=cfg.provider_circuit_failure_threshold,
+        circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
+        log=log,
+    )
+
+
+def _provider() -> AIProvider:
+    global AI_PROVIDER
+    if AI_PROVIDER is None:
+        AI_PROVIDER = _build_ai_provider()
+    return AI_PROVIDER
+
+
+def _build_non_selected_shadow_provider() -> AIProvider:
+    """Build the non-selected provider for research-only comparison.
+
+    Local-authoritative mode never reads the remote API secret, even for a
+    shadow request. Remote-authoritative research may explicitly compare the
+    configured loopback-compatible local server.
+    """
+
+    selected = _provider()
+    if selected.provider_mode == PROVIDER_MODE_LOCAL:
+        return UnavailableProvider("remote_shadow_forbidden_by_local_privacy_contract")
+    local_class = endpoint_class(AI_CONFIG.local_base_url)
+    if local_class == "invalid":
+        return UnavailableProvider("shadow_local_endpoint_invalid")
+    if local_class != "loopback" and not AI_CONFIG.local_allow_non_loopback_ack:
+        return UnavailableProvider("shadow_local_non_loopback_without_ack")
+    return LocalOpenAICompatibleProvider(
+        base_url=AI_CONFIG.local_base_url,
+        api_key=AI_CONFIG.local_api_key,
+        analyst_model=AI_CONFIG.local_analyst_model,
+        critic_model=AI_CONFIG.local_critic_model,
+        adjudicator_model=AI_CONFIG.local_adjudicator_model,
+        fallback_models=AI_CONFIG.local_fallback_models,
+        healthcheck_path=AI_CONFIG.local_healthcheck_path,
+        timeout_sec=AI_CONFIG.local_timeout_sec,
+        max_retries=AI_CONFIG.local_max_retries,
+        max_output_tokens=AI_CONFIG.local_max_output_tokens,
+        temperature=AI_CONFIG.local_temperature,
+        top_p=AI_CONFIG.local_top_p,
+        seed=AI_CONFIG.local_seed,
+        enable_thinking=AI_CONFIG.local_enable_thinking,
+        require_json_schema=AI_CONFIG.local_require_json_schema,
+        parallelism=1,
+        context_budget_tokens=AI_CONFIG.local_context_budget_tokens,
+        circuit_failure_threshold=AI_CONFIG.provider_circuit_failure_threshold,
+        circuit_cooldown_sec=AI_CONFIG.provider_circuit_cooldown_sec,
+        log=log,
+    )
+
+
+def _shadow_provider() -> AIProvider:
+    global SHADOW_AI_PROVIDER
+    with _SHADOW_PROVIDER_LOCK:
+        if SHADOW_AI_PROVIDER is None:
+            SHADOW_AI_PROVIDER = _build_non_selected_shadow_provider()
+        return SHADOW_AI_PROVIDER
+
+
+def _refresh_provider_health(*, force: bool = False) -> Dict[str, Any]:
+    global _PROVIDER_STARTUP_HEALTH, _PROVIDER_HEALTH_CHECKED_MONOTONIC
+    now = time.monotonic()
+    if not force and _PROVIDER_STARTUP_HEALTH and now - _PROVIDER_HEALTH_CHECKED_MONOTONIC < 60.0:
+        return dict(_PROVIDER_STARTUP_HEALTH)
+    provider = _provider()
+    probe = provider.provider_mode == PROVIDER_MODE_LOCAL
+    health = provider.healthcheck(probe_structured=probe)
+    _PROVIDER_STARTUP_HEALTH = asdict(health)
+    _PROVIDER_HEALTH_CHECKED_MONOTONIC = now
+    log(
+        "[ai_provider_health]"
+        f" healthy={str(health.healthy).lower()} provider_mode={health.provider_mode}"
+        f" provider_id={health.provider_id} endpoint_class={health.endpoint_class}"
+        f" model_id={health.model_id} model_available={str(health.model_available).lower()}"
+        f" structured_output_available={str(health.structured_output_available).lower()}"
+        f" reason={health.reason or 'none'}"
+    )
+    return dict(_PROVIDER_STARTUP_HEALTH)
+
+
+def _run_structured_schema_preflight() -> Dict[str, Any]:
+    global _STRUCTURED_SCHEMA_PREFLIGHT
+    provider = _provider()
+    rows: list[dict[str, Any]] = []
+    for model in all_authoritative_structured_models():
+        result = strict_structured_schema(model)
+        row = {
+            "schema": result.schema_name,
+            "valid": result.valid,
+            "schema_fingerprint": result.schema_fingerprint,
+            "errors": list(result.errors),
+        }
+        rows.append(row)
+        log(
+            "[structured_schema_preflight]"
+            f" provider={provider.provider_id} schema={result.schema_name}"
+            f" valid={str(result.valid).lower()}"
+            f" schema_fingerprint={result.schema_fingerprint[:16]}"
+            f" errors={json.dumps(list(result.errors), separators=(',', ':'))}"
+        )
+    _STRUCTURED_SCHEMA_PREFLIGHT = {
+        "provider_id": provider.provider_id,
+        "valid": all(row["valid"] for row in rows),
+        "schemas": rows,
+    }
+    return dict(_STRUCTURED_SCHEMA_PREFLIGHT)
+
+
+def _trade_memory_store() -> TradeMemoryStore:
+    global _TRADE_MEMORY_STORE
+    with _TRADE_MEMORY_LOCK:
+        if _TRADE_MEMORY_STORE is None or _TRADE_MEMORY_STORE.path != AI_CONFIG.trade_memory_file:
+            _TRADE_MEMORY_STORE = TradeMemoryStore(AI_CONFIG.trade_memory_file)
+        return _TRADE_MEMORY_STORE
 
 
 def _archive_request_terminal(path: Path, state: str, reason: str) -> tuple[bool, str]:
@@ -478,13 +902,30 @@ def _repeatability_thresholds() -> RepeatabilityThresholds:
     )
 
 
-def _repeatability_group_fields(model: str, quality_tier: str) -> Dict[str, str]:
+def _repeatability_group_fields(
+    model: str,
+    quality_tier: str,
+    *,
+    provider_mode: str = "",
+    provider_id: str = "",
+    model_fingerprint: str = "",
+    generation_settings_hash: str = "",
+) -> Dict[str, str]:
+    identity = _provider().identity("analyst")
     return {
         "model": str(model or AI_CONFIG.model),
+        "provider_mode": str(provider_mode or identity.get("provider_mode") or "UNAVAILABLE"),
+        "provider_id": str(provider_id or identity.get("provider_id") or "unavailable"),
+        "model_fingerprint": str(model_fingerprint or identity.get("model_fingerprint") or "unavailable"),
         "reasoning_effort": AI_CONFIG.reasoning_effort,
         "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
         "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
         "target_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        "family_profile_version": FAMILY_PROFILE_VERSION,
+        "retrieval_policy_version": RETRIEVAL_POLICY_VERSION,
+        "generation_settings_hash": str(
+            generation_settings_hash or identity.get("generation_settings_hash") or "unavailable"
+        ),
         "decision_quality_tier": str(quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
     }
 
@@ -528,6 +969,34 @@ def _load_repeatability_artifact() -> Dict[str, Any]:
         return _empty_repeatability_artifact("unreadable_or_invalid_json", str(exc))
 
 
+def _ensure_repeatability_artifact_container() -> bool:
+    """Create a zero-observation container only when shadow collection is enabled.
+
+    The container never grants authority: an absent exact group still resolves
+    to UNAVAILABLE.  It only makes the configured collector ready for atomic,
+    schema-versioned observations instead of reporting a missing output path.
+    """
+
+    path = AI_CONFIG.shadow_repeat_artifact_file
+    if not AI_CONFIG.shadow_repeat_enable or path.is_file():
+        return False
+    with _REPEATABILITY_LOCK, _repeatability_update_lock():
+        if path.is_file():
+            return False
+        artifact: Dict[str, Any] = {
+            "schema_version": REPEATABILITY_SCHEMA_VERSION,
+            "groups": {},
+            "generated_at": int(time.time()),
+        }
+        artifact["artifact_hash"] = canonical_hash(artifact)
+        governance_atomic_write_json(path, artifact)
+    log(
+        "[repeatability] artifact_container_initialized=true"
+        f" path={path} groups=0 trading_authority=false"
+    )
+    return True
+
+
 @contextmanager
 def _repeatability_update_lock(timeout_sec: float = 10.0):
     """Cross-process lock for the repeatability artifact.
@@ -567,9 +1036,24 @@ def _repeatability_update_lock(timeout_sec: float = 10.0):
             lock_path.unlink(missing_ok=True)
 
 
-def _repeatability_authority_for(model: str, quality_tier: str) -> Dict[str, Any]:
+def _repeatability_authority_for(
+    model: str,
+    quality_tier: str,
+    *,
+    provider_mode: str = "",
+    provider_id: str = "",
+    model_fingerprint: str = "",
+    generation_settings_hash: str = "",
+) -> Dict[str, Any]:
     artifact = _load_repeatability_artifact()
-    expected_fields = _repeatability_group_fields(model, quality_tier)
+    expected_fields = _repeatability_group_fields(
+        model,
+        quality_tier,
+        provider_mode=provider_mode,
+        provider_id=provider_id,
+        model_fingerprint=model_fingerprint,
+        generation_settings_hash=generation_settings_hash,
+    )
     group_key = canonical_hash(expected_fields)
     load_status = str(artifact.get("_load_status") or "ok")
     if load_status != "ok":
@@ -637,6 +1121,10 @@ def _decision_repeatability_view(decision: "Decision") -> Dict[str, Any]:
         "chosen_target_model": decision.chosen_target_model,
         "target_arbitration": decision.target_arbitration or {},
         "candidate_assessments": decision.candidate_assessments or [],
+        "provider_mode": decision.provider_mode,
+        "provider_id": decision.provider_id,
+        "model_fingerprint": decision.model_fingerprint,
+        "generation_settings_hash": decision.generation_settings_hash,
     }
 
 
@@ -677,7 +1165,15 @@ def _update_repeatability_artifact(
             if isinstance(candidate, dict)
         ]
     )
-    group_key = _repeatability_group_key(model, quality_tier)
+    group_fields = _repeatability_group_fields(
+        model,
+        quality_tier,
+        provider_mode=primary.provider_mode,
+        provider_id=primary.provider_id,
+        model_fingerprint=primary.model_fingerprint,
+        generation_settings_hash=primary.generation_settings_hash,
+    )
+    group_key = canonical_hash(group_fields)
     observation["observation_id"] = canonical_hash(
         {
             "request_id": observation["request_id"],
@@ -733,7 +1229,7 @@ def _update_repeatability_artifact(
         else:
             status = REPEATABLE
         group = {
-            **_repeatability_group_fields(model, quality_tier),
+            **group_fields,
             "status": status,
             "evaluated_candidates": evaluated_candidates,
             "thresholds": asdict(thresholds),
@@ -772,21 +1268,63 @@ def _shadow_repeat_sampled(payload: Dict[str, Any]) -> bool:
 def _run_shadow_repeat_evaluation(payload: Dict[str, Any], primary: "Decision") -> None:
     if not _shadow_repeat_sampled(payload):
         return
+    if (
+        primary.decision_quality_tier != DECISION_QUALITY_FULL_STRUCTURED
+        or not primary.mandatory_fields_complete
+        or primary.decision_source
+        in {
+            "request_identity_mismatch",
+            "structured_response_invalid",
+            "provider_failure",
+        }
+    ):
+        log(
+            f"[repeatability] skipped request_id={payload.get('id')}"
+            " reason=primary_transport_or_identity_not_authoritative"
+            f" quality_tier={primary.decision_quality_tier}"
+            f" source={primary.decision_source}"
+        )
+        return
     repeated: List[Decision] = []
     for repeat_index in range(max(0, AI_CONFIG.shadow_repeat_count - 1)):
         shadow_payload = json.loads(json.dumps(payload))
+        primary_request_id = str(payload.get("id") or "")
+        shadow_payload["id"] = (
+            f"{primary_request_id}__shadow_repeat_{repeat_index + 1}"
+        )
+        if shadow_payload.get("request_nonce"):
+            shadow_payload["request_nonce"] = (
+                f"{shadow_payload['request_nonce']}__shadow_{repeat_index + 1}"
+            )
         shadow_payload["shadow_repeat"] = {
             "enabled": True,
             "repeat_index": repeat_index + 1,
-            "primary_request_id": str(payload.get("id") or ""),
+            "primary_request_id": primary_request_id,
             "trading_authority": False,
             "cache_eligible": False,
         }
         shadow_payload["workload_mode"] = "research"
         try:
-            repeated.append(_score_setup_openai(shadow_payload))
+            shadow_frozen = _freeze_request_for_provider(
+                shadow_payload,
+                _provider(),
+            )
+            shadow_payload = shadow_frozen.thaw_payload()
+            _attach_frozen_identity(shadow_payload, shadow_frozen)
+            repeated.append(
+                _score_setup_ai(
+                    shadow_payload,
+                    non_authoritative_shadow=True,
+                    frozen_request=shadow_frozen,
+                )
+            )
         except Exception as exc:
-            log(f"[repeatability] shadow_repeat_failed request_id={payload.get('id')} index={repeat_index + 1} error={exc}")
+            log(
+                f"[repeatability] shadow_repeat_failed"
+                f" primary_request_id={primary_request_id}"
+                f" shadow_request_id={shadow_payload.get('id')}"
+                f" index={repeat_index + 1} error={exc}"
+            )
     if repeated:
         try:
             _update_repeatability_artifact(payload, primary, repeated)
@@ -806,6 +1344,10 @@ def _apply_repeatability_authority(
     authority = authority or _repeatability_authority_for(
         str(decision.model_version or AI_CONFIG.model),
         str(decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+        provider_mode=decision.provider_mode,
+        provider_id=decision.provider_id,
+        model_fingerprint=decision.model_fingerprint,
+        generation_settings_hash=decision.generation_settings_hash,
     )
     strict_live = bool(AI_CONFIG.require_repeatability_live and _is_live_payload(payload))
     authority = dict(authority)
@@ -899,6 +1441,28 @@ def _openai_timeout_for_payload(payload: Dict[str, Any] | None) -> float:
     return float(AI_CONFIG.openai_timeout_sec)
 
 
+def _provider_request_metadata(
+    payload: Dict[str, Any] | None,
+    provider: AIProvider | None = None,
+) -> Dict[str, Any]:
+    selected_provider = provider or _provider()
+    service_tier, _flex_used, _disabled_reason = _effective_service_tier(payload)
+    timeout_sec = (
+        _openai_timeout_for_payload(payload)
+        if selected_provider.provider_mode == PROVIDER_MODE_REMOTE
+        else AI_CONFIG.local_timeout_sec
+    )
+    return {
+        "service_tier": service_tier if selected_provider.provider_mode == PROVIDER_MODE_REMOTE else "auto",
+        "timeout_sec": float(timeout_sec),
+        "workload_mode": _payload_workload_mode(payload or {}),
+        "request_id": str((payload or {}).get("id") or ""),
+        "request_identity_hash": str((payload or {}).get("request_identity_hash") or ""),
+        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+    }
+
+
 def _apply_prompt_cache_kwargs(kwargs: Dict[str, Any]) -> None:
     if not AI_CONFIG.prompt_cache_enable:
         return
@@ -932,7 +1496,9 @@ def read_json_any_encoding(path: Path) -> Dict[str, Any]:
         raise ValueError("file_bus_json_root_must_be_object")
     return value
 
-def _openai_client(timeout_sec: float | None = None):
+def _remote_batch_client(timeout_sec: float | None = None):
+    """Build the remote SDK client for the remote-only research Batch API."""
+
     if not OPENAI_API_KEY:
         raise RuntimeError(
             "Missing OpenAI API key. Set OPENAI_API_KEY as an environment variable."
@@ -947,114 +1513,6 @@ def _openai_client(timeout_sec: float | None = None):
     if timeout_sec is not None and timeout_sec > 0:
         kwargs["timeout"] = float(timeout_sec)
     return OpenAI(**kwargs)
-
-def _candidate_models() -> list[str]:
-    models: list[str] = []
-    for model in [OPENAI_MODEL, *OPENAI_FALLBACK_MODELS]:
-        if model and model not in models:
-            models.append(model)
-    return models
-
-
-def _filter_supported_kwargs(func: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        supported = inspect.signature(func).parameters
-    except Exception:
-        return dict(kwargs)
-    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in supported.values()):
-        return dict(kwargs)
-    unsupported = [key for key in kwargs if key not in supported]
-    for key in unsupported:
-        if key in {"prompt_cache_key", "prompt_cache_retention", "service_tier"} and key not in _UNSUPPORTED_OPENAI_KWARGS_LOGGED:
-            _UNSUPPORTED_OPENAI_KWARGS_LOGGED.add(key)
-            log(f"[ai_gate] openai_kwarg_unsupported key={key}; continuing without it")
-    return {key: value for key, value in kwargs.items() if key in supported}
-
-
-def _openai_error_status_code(exc: Exception) -> int | None:
-    for attr in ("status_code", "status"):
-        value = getattr(exc, attr, None)
-        if value is not None:
-            try:
-                return int(value)
-            except Exception:
-                pass
-    response = getattr(exc, "response", None)
-    value = getattr(response, "status_code", None)
-    if value is not None:
-        try:
-            return int(value)
-        except Exception:
-            pass
-    return None
-
-
-def _is_flex_unavailable_retryable(exc: Exception) -> bool:
-    status = _openai_error_status_code(exc)
-    msg = str(exc or "").lower()
-    if any(marker in msg for marker in ("invalid api key", "invalid_api_key", "authentication", "permission_denied")):
-        return False
-    if any(marker in msg for marker in ("insufficient_quota", "current quota", "billing details", "monthly spend")):
-        return False
-    if status in {400, 401, 403, 404, 422}:
-        return False
-    if status in {408, 409, 429, 500, 502, 503, 504}:
-        return True
-    retryable_markers = (
-        "flex unavailable",
-        "service tier unavailable",
-        "temporarily unavailable",
-        "overloaded",
-        "capacity",
-        "try again later",
-        "connection error",
-        "timeout",
-        "timed out",
-        "read timeout",
-        "server had an error",
-    )
-    return any(marker in msg for marker in retryable_markers)
-
-
-def _call_openai_with_flex_retries(func: Any, kwargs: Dict[str, Any]) -> Any:
-    filtered = _filter_supported_kwargs(func, kwargs)
-    uses_flex = str(filtered.get("service_tier") or "").strip().lower() == "flex"
-    max_retries = int(AI_CONFIG.flex_unavailable_max_retries)
-    cooldown = float(AI_CONFIG.flex_unavailable_cooldown_sec)
-    retries_done = 0
-    while True:
-        try:
-            return func(**filtered)
-        except Exception as exc:
-            if not uses_flex or not AI_CONFIG.flex_unavailable_retry_enable or max_retries <= 0:
-                raise
-            if not _is_flex_unavailable_retryable(exc):
-                raise
-            if retries_done >= max_retries:
-                log(
-                    "[ai_gate] flex_unavailable_retries_exhausted "
-                    f"retries={retries_done} max_retries={max_retries} "
-                    f"status={_openai_error_status_code(exc) or ''} error={exc}"
-                )
-                raise
-            retries_done += 1
-            log(
-                "[ai_gate] flex_unavailable_retry "
-                f"retry={retries_done}/{max_retries} cooldown_sec={cooldown:g} "
-                f"status={_openai_error_status_code(exc) or ''} error={exc}"
-            )
-            if cooldown > 0:
-                time.sleep(cooldown)
-
-
-def _call_responses_parse(client: Any, **kwargs: Any) -> Any:
-    parse_fn = client.responses.parse
-    return _call_openai_with_flex_retries(parse_fn, kwargs)
-
-
-def _call_responses_create(client: Any, **kwargs: Any) -> Any:
-    create_fn = client.responses.create
-    return _call_openai_with_flex_retries(create_fn, kwargs)
 
 
 def _reasoning_config_for_model(model_name: str) -> Dict[str, str] | None:
@@ -1078,20 +1536,6 @@ def _reasoning_config_for_model(model_name: str) -> Dict[str, str] | None:
     if effort in {"none", "minimal", "low", "medium", "high", "xhigh"}:
         return {"effort": effort}
     return None
-
-
-def _token_budgets_for_model(model_name: str) -> list[int]:
-    budgets: list[int] = []
-    name = str(model_name or "").strip().lower()
-    retry_caps = (
-        (AI_MAX_OUTPUT_TOKENS, max(AI_MAX_OUTPUT_TOKENS, 12288), max(AI_MAX_OUTPUT_TOKENS, 16384))
-        if name.startswith("gpt-5")
-        else (AI_MAX_OUTPUT_TOKENS, max(AI_MAX_OUTPUT_TOKENS, 4096))
-    )
-    for candidate in retry_caps:
-        if candidate and candidate not in budgets:
-            budgets.append(candidate)
-    return budgets
 
 
 def _snapshot_to_input_part(path_str: str, label: str) -> tuple[Dict[str, Any] | None, str]:
@@ -1579,220 +2023,6 @@ def _decision_reason_text(reasons: Dict[str, Any] | str) -> str:
     return _ascii_compact(text)
 
 
-def _response_output_text(resp: Any) -> str:
-    text = getattr(resp, "output_text", None)
-    if isinstance(text, str) and text.strip():
-        return text
-    output = getattr(resp, "output", None)
-    if not isinstance(output, list):
-        return ""
-    parts: list[str] = []
-    for item in output:
-        content = getattr(item, "content", None)
-        if content is None and isinstance(item, dict):
-            content = item.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            block_text = getattr(block, "text", None)
-            if block_text is None and isinstance(block, dict):
-                block_text = block.get("text")
-            if isinstance(block_text, str) and block_text:
-                parts.append(block_text)
-    return "\n".join(parts).strip()
-
-
-def _parse_decision_text(output_text: str, schema: Any) -> Any:
-    text = str(output_text or "").strip()
-    if not text:
-        raise RuntimeError("empty_structured_output")
-    candidates = [text]
-    if text.startswith("```"):
-        stripped = text
-        if stripped.startswith("```json"):
-            stripped = stripped[7:]
-        elif stripped.startswith("```"):
-            stripped = stripped[3:]
-        if stripped.endswith("```"):
-            stripped = stripped[:-3]
-        stripped = stripped.strip()
-        if stripped and stripped not in candidates:
-            candidates.append(stripped)
-    start = text.find("{")
-    end = text.rfind("}")
-    if 0 <= start < end:
-        json_slice = text[start : end + 1].strip()
-        if json_slice and json_slice not in candidates:
-            candidates.append(json_slice)
-    last_error: Exception | None = None
-    for candidate in candidates:
-        try:
-            return schema.model_validate_json(candidate)
-        except Exception as e:
-            last_error = e
-    preview = _ascii_compact(text, max_len=260)
-    raise RuntimeError(f"structured_output_parse_failed: {last_error}; output_text={preview}") from last_error
-
-
-def _parse_structured_decision(resp: Any, schema: Any) -> Any:
-    parsed = getattr(resp, "output_parsed", None)
-    if parsed is not None:
-        return parsed
-    output_text = _response_output_text(resp)
-    return _parse_decision_text(output_text, schema)
-
-
-def _responses_text_format_param(schema_model: Any) -> Dict[str, Any] | None:
-    try:
-        from openai.lib._parsing._responses import type_to_text_format_param
-
-        value = type_to_text_format_param(schema_model)
-        if isinstance(value, dict):
-            return value
-        if hasattr(value, "model_dump"):
-            return value.model_dump()
-        if hasattr(value, "dict"):
-            return value.dict()
-    except Exception:
-        return None
-    return None
-
-
-def _needs_compact_json_retry(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    recoverable_markers = (
-        "empty_structured_output",
-        "structured_output_parse_failed",
-        "validation error for aigatedecision",
-        "json_invalid",
-        "eof while parsing",
-        "unterminated string",
-        "response ended",
-        "max_output_tokens",
-        "string_too_long",
-    )
-    return any(marker in msg for marker in recoverable_markers)
-
-
-def _request_decision_text_fallback(
-    client: Any,
-    *,
-    model_name: str,
-    system_msg: str,
-    user_content: list[Dict[str, Any]],
-    budget: int,
-    schema: Any,
-    payload: Dict[str, Any] | None = None,
-    request_id: str = "",
-) -> Any:
-    fallback_system = (
-        system_msg
-        + " Return one minified JSON object matching the complete structured schema exactly. "
-        "Do not omit fields or use defaults. Keep text fields concise ASCII. No markdown."
-    )
-    reasoning = _reasoning_config_for_model(model_name)
-    request_kwargs: Dict[str, Any] = {
-        "model": model_name,
-        "instructions": fallback_system,
-        "input": [{"role": "user", "content": user_content}],
-        "text": {"verbosity": "low"},
-        "max_output_tokens": budget,
-        "reasoning": reasoning,
-        "store": False,
-        "truncation": "auto",
-    }
-    _apply_prompt_cache_kwargs(request_kwargs)
-    service_tier, flex_used = _apply_service_tier_kwargs(request_kwargs, payload)
-    resp = _call_responses_create(client, **request_kwargs)
-    log_openai_usage(
-        source="ai_gate",
-        operation="trade_gate.json_text_fallback",
-        model=model_name,
-        response=resp,
-        request_id=request_id,
-        reasoning_effort=reasoning.get("effort", "") if reasoning else "",
-        max_output_tokens=budget,
-        extra={"service_tier": service_tier, "flex_used": flex_used},
-    )
-    return _parse_decision_text(_response_output_text(resp), schema)
-
-
-def _minimal_fallback_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    po3 = _as_dict(payload.get("po3"))
-    regime = _as_dict(payload.get("regime"))
-    plan = _as_dict(payload.get("plan"))
-    return {
-        "symbol": payload.get("symbol"),
-        "is_buy": payload.get("is_buy"),
-        "candidate_count": len(payload.get("candidates") or []),
-        "po3": {
-            "has_sweep": po3.get("has_sweep"),
-            "has_displacement": po3.get("has_displacement"),
-            "has_bos": po3.get("has_bos"),
-            "session_name": po3.get("session_name"),
-            "liquidity_kind": po3.get("liquidity_kind"),
-        },
-        "regime": {
-            "trend_strength": regime.get("trend_strength"),
-            "trend_slope_pct": regime.get("trend_slope_pct"),
-            "adx_value": regime.get("adx_value"),
-            "vwap_dist_atr": regime.get("vwap_dist_atr"),
-        },
-        "plan": {
-            "entry_est": plan.get("entry_est"),
-            "sl": plan.get("sl"),
-            "tp2": plan.get("tp2"),
-            "rr2": plan.get("rr2"),
-        },
-    }
-
-
-def _request_minimal_decision_text_fallback(
-    client: Any,
-    *,
-    model_name: str,
-    payload: Dict[str, Any],
-    budget: int,
-    schema: Any,
-    request_id: str = "",
-) -> Any:
-    minimal_payload = _minimal_fallback_payload(payload)
-    minimal_system = (
-        "You are a strict PO3 trade gate. "
-        "Return only a non-trading diagnostic JSON object with allow=false and a concise error reason. "
-        "No markdown."
-    )
-    minimal_user = (
-        "Evaluate this PO3 setup summary and return only JSON: "
-        + json.dumps(minimal_payload, ensure_ascii=False, separators=(",", ":"))
-    )
-    reasoning = _reasoning_config_for_model(model_name)
-    request_kwargs: Dict[str, Any] = {
-        "model": model_name,
-        "instructions": minimal_system,
-        "input": [{"role": "user", "content": [{"type": "input_text", "text": minimal_user}]}],
-        "text": {"verbosity": "low"},
-        "max_output_tokens": budget,
-        "reasoning": reasoning,
-        "store": False,
-        "truncation": "auto",
-    }
-    _apply_prompt_cache_kwargs(request_kwargs)
-    service_tier, flex_used = _apply_service_tier_kwargs(request_kwargs, payload)
-    resp = _call_responses_create(client, **request_kwargs)
-    log_openai_usage(
-        source="ai_gate",
-        operation="trade_gate.json_minimal_fallback",
-        model=model_name,
-        response=resp,
-        request_id=request_id,
-        reasoning_effort=reasoning.get("effort", "") if reasoning else "",
-        max_output_tokens=budget,
-        extra={"service_tier": service_tier, "flex_used": flex_used},
-    )
-    return _parse_decision_text(_response_output_text(resp), schema)
-
-
 def _degraded_non_trading_decision(
     payload: Dict[str, Any],
     reason: str,
@@ -1836,118 +2066,226 @@ def _degraded_non_trading_decision(
     )
 
 
-def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
-    """Score every candidate independently in one strict structured response."""
-    try:
-        from pydantic import BaseModel, Field
-    except ImportError as e:
-        raise RuntimeError("Missing dependency 'pydantic'. Install: pip install pydantic") from e
+def _freeze_request_for_provider(
+    payload: Mapping[str, Any],
+    provider: AIProvider,
+) -> FrozenAIRequest:
+    provider_identity = provider.generation_identity(
+        "analyst",
+        _provider_request_metadata(dict(payload), provider),
+    )
+    schema_preflight = strict_structured_schema(ModelAIGateOutput)
+    if not schema_preflight.valid:
+        raise ValueError(
+            "structured_schema_preflight_failed:"
+            + "|".join(schema_preflight.errors)
+        )
+    return freeze_ai_request(
+        payload,
+        provider_identity=provider_identity,
+        schema_fingerprint=schema_preflight.schema_fingerprint,
+        family_profile_version=FAMILY_PROFILE_VERSION,
+        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
+        candidate_cap=12,
+    )
 
-    class TargetComparisonItem(BaseModel):
-        usable: bool
-        reason: str = Field(max_length=180)
-        risk: str = Field(max_length=120)
-        expected_role: str = Field(max_length=32)
 
-    class TargetComparison(BaseModel):
-        liquidity_target: TargetComparisonItem
-        partial_before_obstacle_then_liquidity: TargetComparisonItem
-        capped_before_obstacle: TargetComparisonItem
-        synthetic_rr_capped_to_max_distance: TargetComparisonItem
-        synthetic_rr_fallback: TargetComparisonItem
+def _attach_frozen_identity(
+    payload: Dict[str, Any],
+    frozen_request: FrozenAIRequest,
+) -> None:
+    identity = frozen_request.identity
+    payload["request_identity_version"] = AI_REQUEST_IDENTITY_VERSION
+    payload["identity_schema_version"] = AI_REQUEST_IDENTITY_VERSION
+    payload["canonicalization_version"] = AI_IDENTITY_CANONICALIZATION_VERSION
+    payload["request_identity_hash"] = identity["request_identity_hash"]
+    payload["request_identity"] = identity
+    payload["ordered_candidate_identities"] = list(
+        identity["ordered_candidate_identities"]
+    )
+    payload["candidate_count"] = int(identity["candidate_count"])
 
-    class TargetArbitrationDecision(BaseModel):
-        target_arbitration_schema_version: str = Field(max_length=64)
-        prompt_contract_version: str = Field(max_length=64)
-        arbitration_required: bool
-        chosen_target_model: str = Field(max_length=64)
-        chosen_tp1: float
-        chosen_tp2: float
-        chosen_rr1: float
-        chosen_rr2: float
-        rejected_target_models: list[str] = Field(max_length=6)
-        blocker_kind: str = Field(max_length=64)
-        blocker_severity: float = Field(ge=-1.0, le=10.0)
-        blocker_class: str = Field(max_length=24)
-        blocker_is_trade_killer: bool
-        why_not_liquidity_target: str = Field(max_length=160)
-        why_not_partial_before_obstacle: str = Field(max_length=160)
-        why_not_capped_before_obstacle: str = Field(max_length=160)
-        why_not_synthetic_fallback: str = Field(max_length=160)
-        target_decision_reason: str = Field(max_length=160)
-        target_comparison: TargetComparison
 
-    class VetoDecision(BaseModel):
-        enabled: bool
-        code: str = Field(max_length=64)
-        evidence_fields: list[str] = Field(max_length=12)
-        reason: str = Field(max_length=160)
+def _bind_python_owned_analyst_envelope(
+    *,
+    model_output: Mapping[str, Any],
+    candidates: list[Dict[str, Any]],
+    enriched_candidates: list[Dict[str, Any]],
+    request_id: str,
+    request_identity_hash: str,
+    ordered_candidate_identities: list[Dict[str, Any]],
+    provider_result: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Map analytical indexes to the immutable request and attach identity."""
 
-    class CandidateAssessment(BaseModel):
-        model_config = {"protected_namespaces": ()}
-        candidate_index: int = Field(ge=0)
-        candidate_id: str = Field(min_length=1, max_length=160)
-        candidate_hash: str = Field(min_length=8, max_length=128)
-        request_execution_fingerprint: str = Field(min_length=8, max_length=128)
-        setup_taxonomy_version: str = Field(min_length=1, max_length=80)
-        setup_taxonomy_enum: str = Field(min_length=1, max_length=80)
-        taxonomy_mapping_source: str = Field(min_length=1, max_length=80)
-        rule_score: float = Field(ge=0.0, le=10.0)
-        llm_quality_score: float = Field(ge=0.0, le=10.0)
-        blended_legacy_score: float = Field(ge=0.0, le=10.0)
-        legacy_agreement_confidence: float = Field(ge=0.0, le=1.0)
-        llm_self_reported_confidence: float = Field(ge=0.0, le=1.0)
-        calibrated_win_probability: float | None
-        expected_net_r: float | None
-        oos_predicted_probability: float | None
-        calibration_bucket: str = Field(max_length=80)
-        calibration_sample_size: int = Field(ge=0)
-        calibration_lower_bound: float | None
-        calibration_upper_bound: float | None
-        calibration_model_version: str = Field(max_length=80)
-        calibration_data_window_start: str = Field(max_length=40)
-        calibration_data_window_end: str = Field(max_length=40)
-        calibration_available: bool
-        raw_allow: bool
-        decision_state: str = Field(max_length=16)
-        structure_quality_score: float = Field(ge=0.0, le=10.0)
-        entry_timing_score: float = Field(ge=0.0, le=10.0)
-        follow_through_probability: float = Field(ge=0.0, le=1.0)
-        invalidation_risk: float = Field(ge=0.0, le=1.0)
-        chop_risk: float = Field(ge=0.0, le=1.0)
-        cost_risk: float = Field(ge=0.0, le=1.0)
-        symbol_bucket_risk: float = Field(ge=0.0, le=1.0)
-        session_bucket_risk: float = Field(ge=0.0, le=1.0)
-        post_entry_failure_risk: float = Field(ge=0.0, le=1.0)
-        final_trade_expectancy_score: float = Field(ge=0.0, le=10.0)
-        veto: VetoDecision
-        bucket_prior_override_justification: str = Field(max_length=180)
-        reasons: str = Field(max_length=240)
-        rejection_codes: list[str] = Field(max_length=8)
-        narrative_state: str = Field(max_length=48)
-        invalidation_risks: list[str] = Field(max_length=8)
-        missing_confirmations: list[str] = Field(max_length=8)
-        suggested_risk_multiplier: float = Field(ge=0.0, le=1.0)
-        selected_target_identity: str = Field(min_length=1, max_length=80)
-        selected_target_price: float
-        entry: float
-        sl: float
-        tp1: float
-        tp2: float
-        assessed_execution_fingerprint: str = Field(min_length=8, max_length=128)
-        model_version: str = Field(min_length=1, max_length=100)
-        target_arbitration: TargetArbitrationDecision
+    raw_assessments = model_output.get("candidate_assessments")
+    if not isinstance(raw_assessments, list):
+        raise ValueError("model_candidate_assessments_missing")
+    candidate_by_index = {
+        int(candidate.get("candidate_index", position)): candidate
+        for position, candidate in enumerate(candidates)
+    }
+    expected_indexes = list(candidate_by_index)
+    assessment_by_index: dict[int, Dict[str, Any]] = {}
+    duplicate_indexes: list[int] = []
+    unknown_indexes: list[int] = []
+    for raw_assessment in raw_assessments:
+        if not isinstance(raw_assessment, Mapping):
+            raise ValueError("model_candidate_assessment_not_object")
+        index = int(raw_assessment.get("candidate_index", -1))
+        if index in assessment_by_index:
+            duplicate_indexes.append(index)
+            continue
+        if index not in candidate_by_index:
+            unknown_indexes.append(index)
+            continue
+        assessment_by_index[index] = dict(raw_assessment)
+    missing_indexes = [
+        index for index in expected_indexes if index not in assessment_by_index
+    ]
+    mapping_diagnostics = {
+        "expected_count": len(expected_indexes),
+        "actual_count": len(raw_assessments),
+        "expected_order": expected_indexes,
+        "actual_order": [
+            int(item.get("candidate_index", -1))
+            for item in raw_assessments
+            if isinstance(item, Mapping)
+        ],
+        "missing_candidate_indexes": missing_indexes,
+        "duplicate_candidate_indexes": sorted(set(duplicate_indexes)),
+        "unknown_candidate_indexes": sorted(set(unknown_indexes)),
+    }
+    if missing_indexes or duplicate_indexes or unknown_indexes or len(raw_assessments) != len(candidates):
+        raise ValueError(
+            "model_candidate_index_mapping_invalid:"
+            + json.dumps(mapping_diagnostics, sort_keys=True, separators=(",", ":"))
+        )
 
-    class AIGateEnvelope(BaseModel):
-        decision_schema_version: str = Field(max_length=64)
-        decision_quality_tier: str = Field(max_length=48)
-        response_quality: str | None = Field(default=None, max_length=48)
-        selected_candidate_id: str = Field(min_length=1, max_length=160)
-        selected_candidate_hash: str = Field(min_length=8, max_length=128)
-        candidate_assessments: list[CandidateAssessment] = Field(min_length=1)
-        reasons: str = Field(max_length=240)
+    selected_index = int(model_output.get("selected_candidate_index", -1))
+    if selected_index not in candidate_by_index:
+        raise ValueError(f"model_selected_candidate_index_out_of_range:{selected_index}")
+    quality_tier = str(model_output.get("decision_quality_tier") or "")
+    response_quality = model_output.get("response_quality")
+    if quality_tier != DECISION_QUALITY_FULL_STRUCTURED:
+        raise ValueError("model_decision_quality_tier_invalid")
+    if response_quality is not None and str(response_quality) != quality_tier:
+        raise ValueError("model_response_quality_alias_conflict")
 
-    client = _openai_client(_openai_timeout_for_payload(payload))
+    rule_by_index = {
+        int(candidate.get("candidate_index", position)): float(
+            enriched_candidates[position]["rule_score"]
+        )
+        for position, candidate in enumerate(candidates)
+    }
+    bound_assessments: list[Dict[str, Any]] = []
+    for index in expected_indexes:
+        candidate = candidate_by_index[index]
+        analytical = dict(assessment_by_index[index])
+        rule_value = rule_by_index[index]
+        quality = float(analytical["llm_quality_score"])
+        blended = max(0.0, min(10.0, 0.72 * rule_value + 0.28 * quality))
+        agreement = max(0.0, min(1.0, 1.0 - abs(rule_value - quality) / 6.0))
+        legacy_confidence = max(
+            0.0,
+            min(
+                1.0,
+                0.65 * agreement
+                + 0.35 * float(analytical["llm_self_reported_confidence"]),
+            ),
+        )
+        arbitration = _as_dict(analytical.get("target_arbitration"))
+        chosen_model = str(arbitration.get("chosen_target_model") or "")
+        chosen_tp1 = float(arbitration.get("chosen_tp1") or 0.0)
+        chosen_tp2 = float(arbitration.get("chosen_tp2") or 0.0)
+        entry = float(candidate.get("entry_est") or candidate.get("entry") or 0.0)
+        sl = float(candidate.get("sl") or 0.0)
+        tp1 = chosen_tp1 if chosen_tp1 > 0.0 else float(candidate.get("tp1") or 0.0)
+        tp2 = chosen_tp2 if chosen_tp2 > 0.0 else float(candidate.get("tp2") or 0.0)
+        canonical = {
+            **analytical,
+            "request_id": request_id,
+            "request_identity_hash": request_identity_hash,
+            "provider_id": str(provider_result.provider_id),
+            "model_id": str(provider_result.actual_model),
+            "role_schema_version": ROLE_CONTRACT_VERSION,
+            "candidate_index": index,
+            "candidate_id": str(candidate.get("candidate_id") or ""),
+            "candidate_hash": str(candidate.get("candidate_hash") or ""),
+            "request_execution_fingerprint": str(
+                candidate.get("request_execution_fingerprint") or ""
+            ),
+            "setup_taxonomy_version": str(
+                candidate.get("setup_taxonomy_version") or ""
+            ),
+            "setup_taxonomy_enum": str(
+                candidate.get("setup_taxonomy_enum") or ""
+            ),
+            "taxonomy_mapping_source": str(
+                candidate.get("taxonomy_mapping_source") or ""
+            ),
+            "rule_score": round(rule_value, 4),
+            "blended_legacy_score": round(blended, 4),
+            "legacy_agreement_confidence": round(legacy_confidence, 4),
+            "calibrated_win_probability": None,
+            "expected_net_r": None,
+            "oos_predicted_probability": None,
+            "calibration_bucket": "",
+            "calibration_sample_size": 0,
+            "calibration_lower_bound": None,
+            "calibration_upper_bound": None,
+            "calibration_model_version": "",
+            "calibration_data_window_start": "",
+            "calibration_data_window_end": "",
+            "calibration_available": False,
+            "role_contract_version": ROLE_CONTRACT_VERSION,
+            "role": "analyst",
+            "selected_target_identity": chosen_model,
+            "selected_target_price": tp2,
+            "entry": entry,
+            "sl": sl,
+            "tp1": tp1,
+            "tp2": tp2,
+            "model_version": str(provider_result.actual_model),
+        }
+        canonical["assessed_execution_fingerprint"] = (
+            deterministic_assessed_execution_fingerprint(candidate, canonical)
+        )
+        bound_assessments.append(canonical)
+
+    selected_candidate = candidate_by_index[selected_index]
+    final_envelope = AIGateEnvelope.model_validate(
+        {
+            "request_id": request_id,
+            "request_identity_hash": request_identity_hash,
+            "provider_id": str(provider_result.provider_id),
+            "model_id": str(provider_result.actual_model),
+            "role_schema_version": ROLE_CONTRACT_VERSION,
+            "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+            "decision_quality_tier": DECISION_QUALITY_FULL_STRUCTURED,
+            "response_quality": DECISION_QUALITY_FULL_STRUCTURED,
+            "candidate_count": len(candidates),
+            "ordered_candidate_identities": ordered_candidate_identities,
+            "selected_candidate_id": str(selected_candidate.get("candidate_id") or ""),
+            "selected_candidate_hash": str(
+                selected_candidate.get("candidate_hash") or ""
+            ),
+            "candidate_assessments": bound_assessments,
+            "reasons": str(model_output.get("reasons") or ""),
+        }
+    ).model_dump()
+    return final_envelope, mapping_diagnostics
+
+
+def _score_setup_ai(
+    payload: Dict[str, Any],
+    *,
+    provider_override: AIProvider | None = None,
+    non_authoritative_shadow: bool = False,
+    frozen_request: FrozenAIRequest | None = None,
+) -> Decision:
+    """Score every candidate through the startup-selected provider and one contract."""
+    provider = provider_override or _provider()
     candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
     contract_missing: list[str] = []
     for index, candidate in enumerate(candidates):
@@ -1969,10 +2307,17 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
     if contract_missing:
         return _degraded_non_trading_decision(
             payload,
-            "candidate integrity contract missing before OpenAI",
+            "candidate integrity contract missing before selected AI provider",
             missing=contract_missing,
             source="request_contract_reject",
         )
+
+    if frozen_request is None:
+        frozen_request = _freeze_request_for_provider(payload, provider)
+        payload = frozen_request.thaw_payload()
+        _attach_frozen_identity(payload, frozen_request)
+    frozen_request.assert_unchanged(payload)
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
 
     model_payload = _compact_model_payload(payload)
     model_candidates = model_payload.get("candidates") if isinstance(model_payload.get("candidates"), list) else []
@@ -2012,105 +2357,246 @@ def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
         "architecture_contract_version": ARCHITECTURE_CONTRACT_VERSION,
     }
 
+    memory_store = _trade_memory_store()
+    if FILE_BUS_LIFECYCLE is not None:
+        try:
+            memory_summary = memory_store.ingest_completed_ledger(
+                FILE_BUS_LIFECYCLE.root / "logs" / "completed_ai_trades.jsonl"
+            )
+            if any(memory_summary.values()):
+                log("[trade_memory_ingest] " + json.dumps(memory_summary, sort_keys=True, separators=(",", ":")))
+        except Exception as exc:
+            # Historical memory is contextual only. A corrupt store cannot
+            # crash the file bus and cannot be converted into a fabricated prior.
+            log(f"[trade_memory_ingest] status=unavailable error={type(exc).__name__}")
+    request_id = str(payload.get("id") or "")
+    lineage_id = str(payload.get("setup_lineage_id") or payload.get("story_id") or request_id)
+    retrieval_by_hash: Dict[str, Any] = {}
+    analogue_rows: list[Dict[str, Any]] = []
+    for candidate in candidates:
+        candidate_hash = str(candidate.get("candidate_hash") or "")
+        try:
+            retrieval = memory_store.retrieve_analogues(
+                candidate,
+                request_id=request_id,
+                lineage_id=lineage_id,
+                top_k=AI_CONFIG.local_retrieval_top_k,
+            )
+            retrieval_by_hash[candidate_hash] = retrieval
+            for analogue in retrieval.analogues:
+                analogue_rows.append({"for_candidate_hash": candidate_hash, **dict(analogue)})
+        except Exception as exc:
+            log(
+                f"[historical_retrieval] candidate_hash={candidate_hash}"
+                f" state=INSUFFICIENT_SAMPLE error={type(exc).__name__}"
+            )
+
+    evidence_payload = dict(payload)
+    evidence_candidates: list[Dict[str, Any]] = []
+    for index, candidate in enumerate(candidates):
+        row = dict(candidate)
+        row["candidate_index"] = int(candidate.get("candidate_index", index))
+        row["rule_score"] = float(enriched_candidates[index]["rule_score"])
+        retrieval = retrieval_by_hash.get(str(candidate.get("candidate_hash") or ""))
+        row["historical_evidence_state"] = retrieval.state if retrieval is not None else "INSUFFICIENT_SAMPLE"
+        row["retrieved_analogue_ids"] = list(retrieval.analogue_ids) if retrieval is not None else []
+        evidence_candidates.append(row)
+    evidence_payload["candidates"] = evidence_candidates
+    evidence_result = build_decision_evidence_envelope(
+        evidence_payload,
+        historical_analogues=analogue_rows,
+        provider_identity=provider.identity("analyst"),
+    )
+    if not evidence_result.valid:
+        return _degraded_non_trading_decision(
+            payload,
+            "canonical deterministic evidence envelope invalid",
+            missing=list(evidence_result.missing_fields),
+            invalid=[*evidence_result.invalid_fields, *evidence_result.hard_blockers],
+            source="decision_evidence_no_trade",
+        )
+    model_payload = evidence_result.envelope
+    request_identity_hash = str(payload.get("request_identity_hash") or "")
+    ordered_candidate_identities = list(
+        payload.get("ordered_candidate_identities") or []
+    )
     snapshot_parts, snapshot_notes = _snapshot_parts(payload)
     symbol = str(payload.get("symbol", "") or "unknown_symbol")
-    request_id = str(payload.get("id") or "")
     if snapshot_notes:
         log(f"[ai_gate] snapshot status for {symbol}: {'; '.join(snapshot_notes)}")
 
     runtime = _as_dict(payload.get("runtime"))
     snapshots_required = _runtime_bool(runtime.get("require_snapshots"), False)
-    system_msg = f"""You are a disciplined PO3 + FVG trade auditor. Assess every candidate independently. Never copy a score, veto, target choice, confidence, or risk multiplier between candidates. Candidate identity is immutable: echo candidate_index, candidate_id, candidate_hash, and request_execution_fingerprint exactly from that candidate. Return entry and SL unchanged. Return TP1, TP2, selected_target_identity, and selected_target_price for the target model you actually assessed. assessed_execution_fingerprint is mandatory but Python replaces it with a deterministic hash of the normalized assessed plan before trading.
+    system_msg = f"""You are the independent Analyst in a disciplined PO3 + FVG trade audit. Assess every candidate independently. Never copy a score, veto, target choice, confidence, or risk multiplier between candidates. Reference candidates only by the supplied candidate_index. Python exclusively owns request IDs, hashes, provider/model identity, candidate IDs/hashes, execution fingerprints, schema versions, and final plan prices; do not return or reconstruct those fields.
+
+For each candidate return candidate_index and verdict equal to decision_state. Fill thesis_supported, material_contradictions, missing_required_evidence, historical_evidence_state, major_risks, evidence_refs, confidence_band, and summary. Evidence refs must point to exact paths in the canonical evidence envelope. Historical evidence state must be SUPPORTIVE, MIXED, ADVERSE, or INSUFFICIENT_SAMPLE. Do not request or reveal hidden chain-of-thought; provide only concise auditable conclusions.
 
 Structured MT5 fields are primary evidence; chart snapshots are supporting evidence. Missing or failed chart captures are not a rejection when runtime.require_snapshots is false. The field opposing_clearance_score is favorable when high and means a nearby obstruction when low.
 
 Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is mixed, timing/follow-through is unclear, data is incomplete, a prior is statistically weak, target choice is unstable, or the assessed plan may not survive execution. ABSTAIN is never a reduced-risk approval. raw_allow must agree with decision_state: true only for APPROVE.
 
-Score semantics are strict. rule_score is the supplied deterministic score. llm_quality_score is your 0..10 technical-quality assessment. blended_legacy_score and legacy_agreement_confidence are diagnostic compatibility fields only and have no trade authority. llm_self_reported_confidence is your uncertainty report, not a probability. There is no validated out-of-sample calibration yet: calibration_available=false; calibrated_win_probability, expected_net_r, oos_predicted_probability, calibration bounds must be null; calibration strings empty and sample size zero. Never fabricate probability or expected R.
+Score semantics are strict. rule_score is supplied deterministic evidence and must not be returned. llm_quality_score is your 0..10 technical-quality assessment. llm_self_reported_confidence is your uncertainty report, not a probability. Do not return calibrated probability, expected R, blended scores, or transport identity. Never fabricate probability or expected R.
 
 Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_fields must list the exact payload field paths that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, evidence_fields, and reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
 
 Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Fill target_arbitration_schema_version and prompt_contract_version with the exact current constants. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
-Echo setup_taxonomy_version, setup_taxonomy_enum, and taxonomy_mapping_source exactly for each candidate. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
+The deterministic setup taxonomy is evidence, not a model output. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
 
-Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and one selected candidate id/hash that exactly identifies an item in that array. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score is not compressed or capped. Scores above 8 should be rare but must be returned unchanged. Keep text concise ASCII."""
+Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and selected_candidate_index identifying one item. Assessment order may differ from request order; Python normalizes it by candidate_index. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score is not compressed or capped. Scores above 8 should be rare but must be returned unchanged. Keep text concise ASCII and return strict JSON only."""
     snapshot_status = ", ".join(snapshot_notes) if snapshot_notes else "none"
-    user_text = (
-        "PO3 gate request. "
-        f"candidate_count={len(candidates) if isinstance(candidates, list) else 0}; "
-        f"snapshots_required={str(snapshots_required).lower()}; "
-        f"snapshot_status={snapshot_status}; "
-        f"payload={json.dumps(model_payload, ensure_ascii=False, separators=(',',':'))}"
-    )
-
-    user_content: list[Dict[str, Any]] = [{"type": "input_text", "text": user_text}]
-    user_content.extend(snapshot_parts)
-
     errors: list[str] = []
-    for model_name in _candidate_models():
-        reasoning = _reasoning_config_for_model(model_name)
-        if reasoning:
-            log(f"[ai_gate] Using model={model_name} reasoning_effort={reasoning['effort']}")
-        for budget in _token_budgets_for_model(model_name):
+    # A single provider call owns its same-provider model fallback and bounded
+    # schema/transport retry. This loop deliberately has one iteration so the
+    # existing strict post-processing remains one linear authority path.
+    for _provider_attempt in range(1):
             try:
-                text_format = _responses_text_format_param(AIGateEnvelope)
-                request_kwargs: Dict[str, Any] = {
-                    "model": model_name,
-                    "instructions": system_msg,
-                    "input": [{"role": "user", "content": user_content}],
-                    "max_output_tokens": budget,
-                    "store": False,
-                    "truncation": "auto",
-                }
-                if text_format is not None:
-                    request_kwargs["text"] = {"format": text_format, "verbosity": "low"}
-                else:
-                    request_kwargs["text_format"] = AIGateEnvelope
-                    request_kwargs["text"] = {"verbosity": "low"}
-                if reasoning:
-                    request_kwargs["reasoning"] = reasoning
-                _apply_prompt_cache_kwargs(request_kwargs)
-                service_tier, flex_used = _apply_service_tier_kwargs(request_kwargs, payload)
-                if text_format is not None:
-                    resp = _call_responses_create(
-                        client,
-                        **request_kwargs,
-                    )
-                    operation = "trade_gate.create_structured"
-                else:
-                    resp = _call_responses_parse(
-                        client,
-                        **request_kwargs,
-                    )
-                    operation = "trade_gate.structured_parse"
-                log_openai_usage(
+                service_tier, flex_used, disabled_reason = _effective_service_tier(payload)
+                if disabled_reason:
+                    log(f"[ai_gate] {disabled_reason}")
+                provider_result = provider.generate_structured(
+                    role="analyst",
+                    system_prompt=system_msg,
+                    evidence=model_payload,
+                    response_schema=ModelAIGateOutput,
+                    request_metadata={
+                        "request_id": request_id,
+                        "request_identity_hash": request_identity_hash,
+                        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+                        "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+                        "symbol": symbol,
+                        "image_parts": snapshot_parts,
+                        "snapshot_status": snapshot_status,
+                        "service_tier": service_tier if provider.provider_mode == PROVIDER_MODE_REMOTE else "auto",
+                        "timeout_sec": _provider_request_metadata(payload, provider)["timeout_sec"],
+                        "workload_mode": _payload_workload_mode(payload),
+                        "non_trading_shadow": bool(non_authoritative_shadow),
+                    },
+                )
+                resp = provider_result.raw_response
+                out = provider_result.parsed
+                model_name = provider_result.actual_model
+                budget = (
+                    AI_CONFIG.max_output_tokens
+                    if provider_result.provider_mode == PROVIDER_MODE_REMOTE
+                    else AI_CONFIG.local_max_output_tokens
+                )
+                reasoning = _reasoning_config_for_model(model_name) if provider_result.provider_mode == PROVIDER_MODE_REMOTE else None
+                log_ai_usage(
                     source="ai_gate",
-                    operation=operation,
+                    operation="trade_gate.provider_neutral_analyst",
                     model=model_name,
                     response=resp,
                     request_id=request_id,
                     reasoning_effort=reasoning.get("effort", "") if reasoning else "",
                     max_output_tokens=budget,
-                    extra={"symbol": symbol, "snapshot_count": len(snapshot_parts), "service_tier": service_tier, "flex_used": flex_used},
+                    provider_mode=provider_result.provider_mode,
+                    provider_id=provider_result.provider_id,
+                    endpoint_class=provider_result.endpoint_class,
+                    model_fingerprint=provider_result.model_fingerprint,
+                    tokens_per_second=provider_result.tokens_per_second,
+                    estimated_context_tokens=provider_result.estimated_context_tokens,
+                    extra={
+                        "symbol": symbol,
+                        "snapshot_count": len(snapshot_parts),
+                        "service_tier": service_tier,
+                        "flex_used": flex_used,
+                    },
                 )
-                out = _parse_structured_decision(resp, AIGateEnvelope)
                 _write_ai_cost_report(
                     payload,
                     request_id=request_id,
-                    decision_source="llm_full_structured",
+                    decision_source="ai_provider_full_structured",
                     model=model_name,
                     reasoning_effort=reasoning.get("effort", "") if reasoning else "",
                     service_tier=service_tier,
                     prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
-                    cache_status="openai_call",
+                    cache_status="provider_call",
                     batch_used=False,
                     flex_used=flex_used,
                     response=resp,
-                    openai_called=True,
+                    openai_called=provider_result.provider_mode == PROVIDER_MODE_REMOTE,
                     skip_reason="",
                 )
-                raw_envelope = out.model_dump()
+                frozen_request.assert_unchanged(payload)
+                raw_model_output = out.model_dump()
+                try:
+                    raw_envelope, mapping_diagnostics = (
+                        _bind_python_owned_analyst_envelope(
+                            model_output=raw_model_output,
+                            candidates=candidates,
+                            enriched_candidates=enriched_candidates,
+                            request_id=request_id,
+                            request_identity_hash=request_identity_hash,
+                            ordered_candidate_identities=ordered_candidate_identities,
+                            provider_result=provider_result,
+                        )
+                    )
+                except Exception as mapping_error:
+                    log(
+                        "[identity_validation] valid=false"
+                        f" request_id={request_id}"
+                        f" request_identity_hash={request_identity_hash[:16]}"
+                        " reason=model_candidate_mapping_invalid"
+                        f" error={_ascii_compact(str(mapping_error))}"
+                    )
+                    return _degraded_non_trading_decision(
+                        payload,
+                        "provider analytical response could not be bound to frozen candidates",
+                        invalid=[str(mapping_error)],
+                        source="structured_response_invalid",
+                    )
+                identity_echo = validate_request_identity_echo(
+                    raw_envelope,
+                    {
+                        "request_id": request_id,
+                        "request_identity_hash": request_identity_hash,
+                        "provider_id": str(provider_result.provider_id),
+                        "model_id": str(provider_result.actual_model),
+                        "candidate_count": len(candidates),
+                        "ordered_candidate_identities": ordered_candidate_identities,
+                    },
+                )
+                if not identity_echo.valid:
+                    log(
+                        "[identity_validation] valid=false"
+                        f" request_id={request_id}"
+                        f" request_identity_hash={request_identity_hash[:16]}"
+                        f" provider={provider.provider_id}"
+                        f" model={provider_result.actual_model}"
+                        f" missing={','.join(identity_echo.missing_fields)}"
+                        f" mismatched={','.join(identity_echo.invalid_fields)}"
+                        f" expected_count={len(candidates)}"
+                        f" actual_count={mapping_diagnostics.get('actual_count', -1)}"
+                        f" expected_order={mapping_diagnostics.get('expected_order', [])}"
+                        f" actual_order={mapping_diagnostics.get('actual_order', [])}"
+                        f" missing_candidate_indexes={mapping_diagnostics.get('missing_candidate_indexes', [])}"
+                        f" duplicate_candidate_indexes={mapping_diagnostics.get('duplicate_candidate_indexes', [])}"
+                        f" unknown_candidate_indexes={mapping_diagnostics.get('unknown_candidate_indexes', [])}"
+                        f" request_hash_expected={request_identity_hash[:16]}"
+                        f" request_hash_actual={str(raw_envelope.get('request_identity_hash') or '')[:16]}"
+                        f" identity_schema_version={AI_REQUEST_IDENTITY_VERSION}"
+                        f" canonicalization_version={AI_IDENTITY_CANONICALIZATION_VERSION}"
+                    )
+                    return _degraded_non_trading_decision(
+                        payload,
+                        "provider response request identity mismatch",
+                        missing=list(identity_echo.missing_fields),
+                        invalid=list(identity_echo.invalid_fields),
+                        source="request_identity_mismatch",
+                    )
+                log(
+                    "[identity_validation] valid=true"
+                    f" request_id={request_id}"
+                    f" request_identity_hash={request_identity_hash[:16]}"
+                    f" expected_count={len(candidates)}"
+                    f" actual_count={mapping_diagnostics.get('actual_count', -1)}"
+                    f" expected_order={mapping_diagnostics.get('expected_order', [])}"
+                    f" model_assessment_order={mapping_diagnostics.get('actual_order', [])}"
+                    f" normalized_order={mapping_diagnostics.get('expected_order', [])}"
+                    f" identity_schema_version={AI_REQUEST_IDENTITY_VERSION}"
+                    f" canonicalization_version={AI_IDENTITY_CANONICALIZATION_VERSION}"
+                )
                 validation = validate_decision_envelope(raw_envelope, candidates)
                 if not validation.valid:
                     log(
@@ -2138,6 +2624,46 @@ Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_ti
                 for assessment in raw_envelope["candidate_assessments"]:
                     canonical = dict(assessment)
                     assessment_hash = str(canonical["candidate_hash"])
+                    binding_mismatches = [
+                        field
+                        for field, expected in (
+                            ("request_id", request_id),
+                            ("request_identity_hash", request_identity_hash),
+                            ("provider_id", str(provider_result.provider_id)),
+                            ("model_id", str(provider_result.actual_model)),
+                            ("role_schema_version", ROLE_CONTRACT_VERSION),
+                        )
+                        if str(canonical.get(field) or "") != str(expected)
+                    ]
+                    if binding_mismatches:
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "candidate assessment request identity mismatch",
+                            invalid=[
+                                f"candidate[{assessment_hash}].{field}"
+                                for field in binding_mismatches
+                            ],
+                            source="request_identity_mismatch",
+                        )
+                    evidence_refs = list(canonical.get("evidence_refs") or [])
+                    if any(not evidence_path_exists(model_payload, str(ref)) for ref in evidence_refs):
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "Analyst cited an invalid canonical evidence path",
+                            invalid=[f"candidate[{assessment_hash}].evidence_refs"],
+                            source="decision_evidence_reference_reject",
+                        )
+                    analyst_veto = _as_dict(canonical.get("veto"))
+                    if bool(analyst_veto.get("enabled")) and any(
+                        not evidence_path_exists(model_payload, str(ref))
+                        for ref in (analyst_veto.get("evidence_fields") or [])
+                    ):
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "Analyst veto cited an invalid canonical evidence path",
+                            invalid=[f"candidate[{assessment_hash}].veto.evidence_fields"],
+                            source="decision_evidence_reference_reject",
+                        )
                     statistical_authority_violations: list[str] = []
                     for field in (
                         "calibrated_win_probability",
@@ -2239,6 +2765,7 @@ Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_ti
                     canonical["calibration_model_version"] = ""
                     canonical["calibration_data_window_start"] = ""
                     canonical["calibration_data_window_end"] = ""
+                    canonical["model_id"] = str(provider_result.actual_model or model_name)
                     canonical["request_execution_fingerprint"] = str(candidate.get("request_execution_fingerprint") or "")
                     canonical["assessed_execution_fingerprint"] = deterministic_assessed_execution_fingerprint(candidate, canonical)
                     assessments.append(canonical)
@@ -2299,14 +2826,14 @@ Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_ti
                     expected_net_r=None,
                     oos_predicted_probability=None,
                     calibration_available=False,
-                    reasons=f"model={model_name}; tokens={budget}; snapshots={len(snapshot_parts)}; {selected.get('reasons', '')}",
-                    decision_source="llm_full_structured",
+                    reasons=f"provider={provider_result.provider_id}; model={model_name}; tokens={budget}; snapshots={len(snapshot_parts)}; {selected.get('reasons', '')}",
+                    decision_source="ai_provider_full_structured",
                     rejection_codes=list(selected.get("rejection_codes") or []),
                     narrative_state=str(selected.get("narrative_state") or "audited"),
                     invalidation_risks=list(selected.get("invalidation_risks") or []),
                     missing_confirmations=list(selected.get("missing_confirmations") or []),
                     suggested_risk_multiplier=risk_multiplier,
-                    model_version=str(selected.get("model_version") or AI_GATE_MODEL_VERSION),
+                    model_version=str(provider_result.actual_model or model_name),
                     structure_quality_score=float(selected["structure_quality_score"]),
                     entry_timing_score=float(selected["entry_timing_score"]),
                     follow_through_probability=float(selected["follow_through_probability"]),
@@ -2322,8 +2849,196 @@ Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_ti
                     veto_evidence_fields=list(veto.get("evidence_fields") or []),
                     veto_reason=str(veto.get("reason") or ""),
                     bucket_prior_override_justification=str(selected.get("bucket_prior_override_justification") or ""),
+                    provider_mode=provider_result.provider_mode,
+                    provider_id=provider_result.provider_id,
+                    endpoint_class=provider_result.endpoint_class,
+                    endpoint_identity_hash=str(
+                        provider.identity("analyst").get("endpoint_identity_hash") or ""
+                    ),
+                    configured_models_hash=str(
+                        provider.identity("analyst").get("configured_models_hash") or ""
+                    ),
+                    actual_model_id=provider_result.actual_model,
+                    fallback_model=provider_result.fallback_model,
+                    model_fingerprint=provider_result.model_fingerprint or "unavailable",
+                    generation_settings_hash=provider_result.generation_settings_hash,
+                    input_fingerprint=str(model_payload.get("input_fingerprint") or ""),
+                    retrieved_analogue_ids=list(
+                        retrieval_by_hash.get(selected_hash).analogue_ids
+                        if retrieval_by_hash.get(selected_hash) is not None
+                        else []
+                    ),
+                    historical_evidence_state=(
+                        retrieval_by_hash.get(selected_hash).state
+                        if retrieval_by_hash.get(selected_hash) is not None
+                        else "INSUFFICIENT_SAMPLE"
+                    ),
+                    analyst_response_fingerprint=canonical_hash(selected),
+                    provider_health_state=provider_result.health_state,
+                    role_latencies={"analyst": provider_result.latency_sec},
+                    provider_retry_counts={
+                        "analyst_transport": provider_result.transport_retry_count,
+                        "analyst_schema": provider_result.schema_retry_count,
+                    },
+                    provider_usage={
+                        "analyst": {
+                            "prompt_tokens": provider_result.prompt_tokens,
+                            "completion_tokens": provider_result.completion_tokens,
+                            "total_tokens": provider_result.total_tokens,
+                            "tokens_per_second": provider_result.tokens_per_second,
+                        }
+                    },
+                    estimated_context_tokens=provider_result.estimated_context_tokens,
+                    unsupported_generation_parameters=list(
+                        provider_result.unsupported_generation_parameters
+                    ),
+                    analyst_output=dict(selected),
                     **target_kwargs,
                 )
+                consensus = run_qualitative_consensus(
+                    provider=provider,
+                    evidence=model_payload,
+                    analyst_assessment=selected,
+                    request_metadata={
+                        **_provider_request_metadata(payload, provider),
+                        "request_id": request_id,
+                        "symbol": symbol,
+                        "non_trading_shadow": bool(
+                            non_authoritative_shadow
+                            or _as_dict(payload.get("shadow_repeat")).get("trading_authority") is False
+                        ),
+                    },
+                    near_deterministic_boundary=False,
+                )
+                decision.critic_output = dict(consensus.critic)
+                decision.adjudicator_output = dict(consensus.adjudicator)
+                decision.critic_response_fingerprint = canonical_hash(consensus.critic)
+                decision.adjudicator_response_fingerprint = (
+                    canonical_hash(consensus.adjudicator) if consensus.adjudicator else ""
+                )
+                decision.final_resolver_reason = consensus.reason
+                decision.role_latencies = dict(decision.role_latencies or {})
+                decision.role_latencies["critic"] = consensus.critic_result.latency_sec
+                if consensus.adjudicator_result is not None:
+                    decision.role_latencies["adjudicator"] = consensus.adjudicator_result.latency_sec
+                decision.provider_retry_counts = dict(decision.provider_retry_counts or {})
+                decision.provider_retry_counts.update(
+                    {
+                        "critic_transport": consensus.critic_result.transport_retry_count,
+                        "critic_schema": consensus.critic_result.schema_retry_count,
+                        "adjudicator_transport": (
+                            consensus.adjudicator_result.transport_retry_count
+                            if consensus.adjudicator_result is not None
+                            else 0
+                        ),
+                        "adjudicator_schema": (
+                            consensus.adjudicator_result.schema_retry_count
+                            if consensus.adjudicator_result is not None
+                            else 0
+                        ),
+                    }
+                )
+                decision.provider_usage = dict(decision.provider_usage or {})
+                decision.provider_usage["critic"] = {
+                    "prompt_tokens": consensus.critic_result.prompt_tokens,
+                    "completion_tokens": consensus.critic_result.completion_tokens,
+                    "total_tokens": consensus.critic_result.total_tokens,
+                    "tokens_per_second": consensus.critic_result.tokens_per_second,
+                }
+                if consensus.adjudicator_result is not None:
+                    decision.provider_usage["adjudicator"] = {
+                        "prompt_tokens": consensus.adjudicator_result.prompt_tokens,
+                        "completion_tokens": consensus.adjudicator_result.completion_tokens,
+                        "total_tokens": consensus.adjudicator_result.total_tokens,
+                        "tokens_per_second": consensus.adjudicator_result.tokens_per_second,
+                    }
+                for role_name, role_result in (
+                    ("critic", consensus.critic_result),
+                    ("adjudicator", consensus.adjudicator_result),
+                ):
+                    if role_result is None:
+                        continue
+                    log_ai_usage(
+                        source="ai_gate",
+                        operation=f"trade_gate.provider_neutral_{role_name}",
+                        model=role_result.actual_model,
+                        response=role_result.raw_response,
+                        request_id=request_id,
+                        reasoning_effort=(
+                            AI_CONFIG.reasoning_effort
+                            if role_result.provider_mode == PROVIDER_MODE_REMOTE
+                            else ""
+                        ),
+                        max_output_tokens=(
+                            AI_CONFIG.max_output_tokens
+                            if role_result.provider_mode == PROVIDER_MODE_REMOTE
+                            else AI_CONFIG.local_max_output_tokens
+                        ),
+                        provider_mode=role_result.provider_mode,
+                        provider_id=role_result.provider_id,
+                        endpoint_class=role_result.endpoint_class,
+                        model_fingerprint=role_result.model_fingerprint,
+                        tokens_per_second=role_result.tokens_per_second,
+                        estimated_context_tokens=role_result.estimated_context_tokens,
+                        extra={"symbol": symbol, "role": role_name},
+                    )
+                unsupported = set(decision.unsupported_generation_parameters or [])
+                unsupported.update(consensus.critic_result.unsupported_generation_parameters)
+                if consensus.adjudicator_result is not None:
+                    unsupported.update(consensus.adjudicator_result.unsupported_generation_parameters)
+                decision.unsupported_generation_parameters = sorted(unsupported)
+                if not consensus.python_allow:
+                    decision.allow = False
+                    decision.python_final_allow = False
+                    decision.decision_state = consensus.decision_state
+                    decision.suggested_risk_multiplier = 0.0
+                    if decision.rejection_codes is None:
+                        decision.rejection_codes = []
+                    resolver_code = (
+                        "ai_qualitative_consensus_reject"
+                        if consensus.decision_state == DECISION_REJECT
+                        else "ai_qualitative_consensus_abstain"
+                    )
+                    if resolver_code not in decision.rejection_codes:
+                        decision.rejection_codes.append(resolver_code)
+                decision.decision_source = "ai_consensus_full_structured"
+                try:
+                    if not non_authoritative_shadow:
+                        memory_store.record_pending_decision(
+                            request_id=request_id,
+                            lineage_id=lineage_id,
+                            candidate_hash=selected_hash,
+                            immutable_pre_entry_evidence={
+                                "candidate": candidate_by_hash[selected_hash],
+                                "evidence_input_fingerprint": model_payload.get("input_fingerprint"),
+                                "family_profile_version": FAMILY_PROFILE_VERSION,
+                                "retrieval_policy_version": RETRIEVAL_POLICY_VERSION,
+                            },
+                            provider_observability={
+                                "provider_mode": decision.provider_mode,
+                                "provider_id": decision.provider_id,
+                                "endpoint_class": decision.endpoint_class,
+                                "actual_model_id": decision.actual_model_id,
+                                "fallback_model": decision.fallback_model,
+                                "model_fingerprint": decision.model_fingerprint,
+                                "generation_settings_hash": decision.generation_settings_hash,
+                                "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+                                "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+                            },
+                            analyst_output=selected,
+                            critic_output=consensus.critic,
+                            adjudicator_output=consensus.adjudicator,
+                            python_final_decision={
+                                "decision_state": decision.decision_state,
+                                "python_final_allow": bool(decision.allow),
+                                "final_resolver_reason": consensus.reason,
+                            },
+                        )
+                except Exception as exc:
+                    log(
+                        f"[trade_memory] pending_snapshot_failed request_id={request_id}"
+                        f" candidate_hash={selected_hash} error={type(exc).__name__}"
+                    )
                 log(
                     "[decision_scores]"
                     f" rule_score={decision.rule_score:.4f}"
@@ -2339,45 +3054,23 @@ Return decision_schema_version={AI_DECISION_SCHEMA_VERSION}, decision_quality_ti
                 )
                 return decision
             except Exception as e:
-                if _needs_compact_json_retry(e):
-                    try:
-                        log(f"[ai_gate] Structured output incomplete/invalid for model {model_name} with max_output_tokens={budget}; trying full-schema compact JSON fallback.")
-                        out = _request_decision_text_fallback(
-                            client,
-                            model_name=model_name,
-                            system_msg=system_msg,
-                            user_content=user_content,
-                            budget=budget,
-                            schema=AIGateEnvelope,
-                            request_id=request_id,
-                            payload=payload,
-                        )
-                        raw_fallback = out.model_dump()
-                        validation = validate_decision_envelope(raw_fallback, candidates)
-                        if not validation.valid:
-                            return _degraded_non_trading_decision(
-                                payload,
-                                "full-schema JSON fallback failed validation",
-                                missing=list(validation.missing_fields),
-                                invalid=list(validation.invalid_fields),
-                            )
-                        # Re-run the normal path on the next model attempt rather than
-                        # granting trade authority to a separately interpreted object.
-                        errors.append(f"{model_name}@{budget}: full-schema JSON fallback requires structured retry")
-                        continue
-                    except Exception as fallback_error:
-                        errors.append(f"{model_name}@{budget}: {e}")
-                        errors.append(f"{model_name}@{budget}: full_schema_json_fallback failed: {fallback_error}")
-                        log(
-                            f"[ai_gate] Full-schema JSON recovery failed for model {model_name} with max_output_tokens={budget}; "
-                            "no minimal trading fallback will be used."
-                        )
-                        continue
-                msg = f"{model_name}@{budget}: {e}"
+                identity = provider.identity("analyst")
+                msg = (
+                    f"provider={identity.get('provider_id')} model={identity.get('model_id')}"
+                    f" error={type(e).__name__}:{e}"
+                )
                 errors.append(msg)
-                log(f"[ai_gate] OpenAI call failed for model {model_name} with max_output_tokens={budget}: {e}")
+                log(f"[ai_gate] selected_provider_call_failed {msg} cross_provider_fallback=false")
+                if isinstance(e, ProviderCallError):
+                    raise
 
-    raise RuntimeError("All OpenAI model attempts failed: " + " | ".join(errors))
+    raise RuntimeError("selected_ai_provider_failed_closed: " + " | ".join(errors))
+
+
+def _score_setup_openai(payload: Dict[str, Any]) -> Decision:
+    """Compatibility hook for existing callers/tests; transport is provider-neutral."""
+
+    return _score_setup_ai(payload)
 
 # ---------- Model placeholders ----------
 
@@ -2479,6 +3172,38 @@ class Decision:
     target_arbitration_schema_version: str = AI_TARGET_ARBITRATION_SCHEMA_VERSION
     prompt_contract_version: str = AI_PROMPT_CONTRACT_VERSION
     target_comparison_json: str = "{}"
+    provider_mode: str = "UNAVAILABLE"
+    provider_id: str = "unavailable"
+    endpoint_class: str = "invalid"
+    endpoint_identity_hash: str = ""
+    configured_models_hash: str = ""
+    actual_model_id: str = ""
+    fallback_model: str = ""
+    model_fingerprint: str = ""
+    provider_contract_version: str = PROVIDER_CONTRACT_VERSION
+    evidence_envelope_version: str = EVIDENCE_ENVELOPE_VERSION
+    family_profile_version: str = FAMILY_PROFILE_VERSION
+    memory_schema_version: str = TRADE_MEMORY_SCHEMA_VERSION
+    retrieval_policy_version: str = RETRIEVAL_POLICY_VERSION
+    role_contract_version: str = ROLE_CONTRACT_VERSION
+    consensus_resolver_version: str = CONSENSUS_RESOLVER_VERSION
+    generation_settings_hash: str = ""
+    input_fingerprint: str = ""
+    retrieved_analogue_ids: list[str] | None = None
+    historical_evidence_state: str = "INSUFFICIENT_SAMPLE"
+    analyst_response_fingerprint: str = ""
+    critic_response_fingerprint: str = ""
+    adjudicator_response_fingerprint: str = ""
+    final_resolver_reason: str = ""
+    provider_health_state: str = "unavailable"
+    role_latencies: Dict[str, float] | None = None
+    provider_retry_counts: Dict[str, int] | None = None
+    provider_usage: Dict[str, Any] | None = None
+    estimated_context_tokens: int | None = None
+    unsupported_generation_parameters: list[str] | None = None
+    analyst_output: Dict[str, Any] | None = None
+    critic_output: Dict[str, Any] | None = None
+    adjudicator_output: Dict[str, Any] | None = None
 
     @property
     def response_quality(self) -> str:
@@ -2841,6 +3566,74 @@ def _synchronize_selected_assessment_contract(payload: Dict[str, Any], decision:
     return decision
 
 
+def _bind_cached_decision_to_current_request(
+    payload: Dict[str, Any],
+    decision: Decision,
+) -> tuple[bool, str]:
+    """Rebind a semantically identical cached decision to one bus request.
+
+    Economic identity is enforced by the cache signature and candidate
+    fingerprints. Request ID and request-identity hash are transport bindings,
+    so a cached assessment must echo the current request before it can be
+    serialized back to MQL.
+    """
+
+    request_id = str(payload.get("id") or "")
+    request_identity_hash = str(payload.get("request_identity_hash") or "")
+    candidates = payload.get("candidates")
+    assessments = decision.candidate_assessments
+    if not request_id or not request_identity_hash:
+        return False, "cache_current_request_identity_missing"
+    if not isinstance(candidates, list) or not isinstance(assessments, list):
+        return False, "cache_candidate_contract_missing"
+    if len(candidates) != len(assessments):
+        return False, "cache_candidate_count_mismatch"
+
+    assessment_by_index: dict[int, Dict[str, Any]] = {}
+    for raw in assessments:
+        if not isinstance(raw, dict):
+            return False, "cache_candidate_assessment_invalid"
+        try:
+            index = int(raw.get("candidate_index"))
+        except (TypeError, ValueError):
+            return False, "cache_candidate_index_invalid"
+        if index in assessment_by_index:
+            return False, "cache_candidate_index_duplicate"
+        assessment_by_index[index] = raw
+
+    provider_id = str(decision.provider_id or "")
+    model_id = str(decision.actual_model_id or decision.model_version or "")
+    if not provider_id or not model_id:
+        return False, "cache_provider_identity_missing"
+    rebound: list[Dict[str, Any]] = []
+    for position, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            return False, "cache_current_candidate_invalid"
+        try:
+            candidate_index = int(candidate.get("candidate_index"))
+        except (TypeError, ValueError):
+            return False, "cache_current_candidate_index_invalid"
+        assessment = assessment_by_index.get(candidate_index)
+        if assessment is None:
+            return False, "cache_candidate_index_mismatch"
+        for field in (
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+        ):
+            if str(assessment.get(field) or "") != str(candidate.get(field) or ""):
+                return False, f"cache_{field}_mismatch"
+        assessment["request_id"] = request_id
+        assessment["request_identity_hash"] = request_identity_hash
+        assessment["provider_id"] = provider_id
+        assessment["model_id"] = model_id
+        assessment["role_schema_version"] = ROLE_CONTRACT_VERSION
+        rebound.append(assessment)
+
+    decision.candidate_assessments = rebound
+    return True, ""
+
+
 def _synchronize_candidate_authority_fields(decision: Decision) -> Decision:
     decision = _synchronize_decision_authority_fields(decision)
     assessments = list(decision.candidate_assessments or [])
@@ -3113,6 +3906,7 @@ def _write_ai_cost_report(
         first_cand = cands[0] if cands and isinstance(cands[0], dict) else {}
         if input_tokens is None and output_tokens is None and response is not None:
             input_tokens, output_tokens = _response_usage_tokens(response)
+        provider_identity = _provider().identity("analyst")
         row = {
             "timestamp": int(time.time()),
             "request_id": str(request_id or payload.get("id") or ""),
@@ -3123,6 +3917,9 @@ def _write_ai_cost_report(
             ),
             "decision_source": str(decision_source or ""),
             "model": str(model or ""),
+            "provider_mode": str(provider_identity.get("provider_mode") or "UNAVAILABLE"),
+            "provider_id": str(provider_identity.get("provider_id") or "unavailable"),
+            "endpoint_class": str(provider_identity.get("endpoint_class") or "invalid"),
             "reasoning_effort": str(reasoning_effort or ""),
             "service_tier": str(service_tier or ""),
             "prompt_cache_enabled": bool(AI_CONFIG.prompt_cache_enable if prompt_cache_enabled is None else prompt_cache_enabled),
@@ -3133,6 +3930,10 @@ def _write_ai_cost_report(
             "output_tokens": output_tokens,
             "estimated_cost": None,
             "openai_called": bool(openai_called),
+            "provider_called": bool(response is not None or openai_called),
+            "remote_cost_applicable": bool(
+                str(provider_identity.get("provider_mode") or "") == PROVIDER_MODE_REMOTE
+            ),
             "skip_reason": str(skip_reason or ""),
             "llm_quality_score_threshold": llm_quality_score_threshold,
             "llm_quality_threshold_source": str(llm_quality_threshold_source or ""),
@@ -3178,16 +3979,27 @@ def _runtime_inputs(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 AI_GATE_COUNTERS: Dict[str, int] = {
+    "requests_processed": 0,
+    "schema_valid_responses": 0,
+    "schema_invalid_responses": 0,
+    "degraded_responses": 0,
+    "identity_mismatches": 0,
+    "ai_approvals": 0,
+    "ai_rejections": 0,
+    "ai_abstentions": 0,
+    "cache_writes": 0,
     "hard_pre_gate_checked": 0,
     "hard_pre_gate_rejected": 0,
     "ai_calls_skipped_by_hard_gate": 0,
     "ai_cache_hit": 0,
     "ai_cache_miss": 0,
 }
+AI_GATE_COUNTERS_LOCK = Lock()
 
 
 def _inc_counter(name: str) -> None:
-    AI_GATE_COUNTERS[name] = AI_GATE_COUNTERS.get(name, 0) + 1
+    with AI_GATE_COUNTERS_LOCK:
+        AI_GATE_COUNTERS[name] = AI_GATE_COUNTERS.get(name, 0) + 1
 
 
 CRITICAL_RUNTIME_INPUT_KEYS = [
@@ -3261,9 +4073,9 @@ CRITICAL_RUNTIME_INPUT_KEYS = [
 ]
 
 # Workflow/debug-only tester controls must not enter the AI decision cache key.
-# RECORD_ONLY or LIVE_WAIT_DEBUG responses must replay in CACHE_ONLY for the
-# same market setup; MQL may still include these values in runtime_input_hash
-# and logs for diagnostics.
+# RECORD_ONLY decisions may replay in CACHE_ONLY for the same market setup;
+# LIVE_WAIT_DEBUG remains diagnostic and is not an authoritative replay source.
+# MQL may still include these values in runtime_input_hash and logs.
 AI_DECISION_CACHE_SIGNATURE_IGNORED_FIELDS = {
     "runtime_input_hash",
     "inp_tester_ai_cache",
@@ -3325,10 +4137,39 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         )
     candidate_contract_blob = json.dumps(candidate_contracts, sort_keys=True, separators=(",", ":"))
     prior_artifact = _load_live_bucket_priors()
+    provider_identity = _provider().generation_identity(
+        "analyst",
+        _provider_request_metadata(payload),
+    )
+    try:
+        retrieval_contract = _trade_memory_store().retrieve_analogues(
+            merged,
+            request_id=str(payload.get("id") or ""),
+            lineage_id=str(payload.get("setup_lineage_id") or payload.get("story_id") or payload.get("id") or ""),
+            top_k=AI_CONFIG.local_retrieval_top_k,
+        )
+        retrieval_contract_hash = retrieval_contract.retrieval_hash
+    except Exception:
+        retrieval_contract_hash = canonical_hash(
+            {
+                "state": "INSUFFICIENT_SAMPLE",
+                "policy_version": RETRIEVAL_POLICY_VERSION,
+                "candidate_hash": str(merged.get("candidate_hash") or ""),
+            }
+        )
     repeatability_artifact = _load_repeatability_artifact()
     repeatability_groups = repeatability_artifact.get("groups") if isinstance(repeatability_artifact.get("groups"), dict) else {}
     repeatability_group = repeatability_groups.get(
-        _repeatability_group_key(AI_CONFIG.model, DECISION_QUALITY_FULL_STRUCTURED), {}
+        canonical_hash(
+            _repeatability_group_fields(
+                str(provider_identity.get("model_id") or AI_CONFIG.model),
+                DECISION_QUALITY_FULL_STRUCTURED,
+                provider_mode=str(provider_identity.get("provider_mode") or ""),
+                provider_id=str(provider_identity.get("provider_id") or ""),
+                model_fingerprint=str(provider_identity.get("model_fingerprint") or ""),
+                generation_settings_hash=str(provider_identity.get("generation_settings_hash") or ""),
+            )
+        ), {}
     )
     fields = {
         "semantic_cache_schema_version": SEMANTIC_CACHE_SCHEMA_VERSION,
@@ -3336,6 +4177,16 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
         "ai_decision_schema_version": AI_DECISION_SCHEMA_VERSION,
         "ai_target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
         "ai_prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+        "provider_contract_version": PROVIDER_CONTRACT_VERSION,
+        "provider_mode": str(provider_identity.get("provider_mode") or "UNAVAILABLE"),
+        "provider_id": str(provider_identity.get("provider_id") or "unavailable"),
+        "endpoint_identity_hash": str(provider_identity.get("endpoint_identity_hash") or ""),
+        "configured_models_hash": str(provider_identity.get("configured_models_hash") or ""),
+        "model_fingerprint": str(provider_identity.get("model_fingerprint") or "unavailable"),
+        "family_profile_version": FAMILY_PROFILE_VERSION,
+        "retrieval_policy_version": RETRIEVAL_POLICY_VERSION,
+        "retrieval_contract_hash": retrieval_contract_hash,
+        "generation_settings_hash": str(provider_identity.get("generation_settings_hash") or ""),
         "candidate_contract_hash": sha256(candidate_contract_blob.encode("utf-8")).hexdigest(),
         "symbol": str(payload.get("symbol") or ""),
         "entry_bar_id": str(
@@ -3423,7 +4274,7 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
             or runtime_inputs.get("active_policy_id")
             or ""
         ),
-        "model_version": AI_CONFIG.model,
+        "model_version": str(provider_identity.get("model_id") or AI_CONFIG.model),
         "hierarchical_prior_schema_version": HIERARCHICAL_PRIOR_SCHEMA_VERSION,
         "hierarchical_prior_artifact_hash": str(prior_artifact.get("artifact_hash") or ""),
         "repeatability_schema_version": REPEATABILITY_SCHEMA_VERSION,
@@ -3479,7 +4330,10 @@ def _decision_cache_signature(payload: Dict[str, Any], best_index: int) -> tuple
     return sha256(full_blob.encode("utf-8")).hexdigest(), sha256(base_blob.encode("utf-8")).hexdigest(), fields
 
 
-def _cached_decision_schema_miss_reason(dec_raw: Dict[str, Any]) -> str:
+def _cached_decision_schema_miss_reason(
+    dec_raw: Dict[str, Any],
+    current_fields: Mapping[str, Any] | None = None,
+) -> str:
     if str(dec_raw.get("decision_schema_version") or "") != AI_DECISION_SCHEMA_VERSION:
         return "cache_miss_due_to_schema_version"
     tier = str(dec_raw.get("decision_quality_tier") or "")
@@ -3518,10 +4372,62 @@ def _cached_decision_schema_miss_reason(dec_raw: Dict[str, Any]) -> str:
         "veto_code",
         "veto_evidence_fields",
         "llm_numeric_diagnostics_authority",
+        "provider_contract_version",
+        "provider_mode",
+        "provider_id",
+        "endpoint_class",
+        "endpoint_identity_hash",
+        "configured_models_hash",
+        "actual_model_id",
+        "model_fingerprint",
+        "family_profile_version",
+        "retrieval_policy_version",
+        "role_contract_version",
+        "consensus_resolver_version",
+        "generation_settings_hash",
+        "input_fingerprint",
+        "analyst_response_fingerprint",
+        "critic_response_fingerprint",
+        "final_resolver_reason",
     ):
         if required not in dec_raw or dec_raw.get(required) is None:
             if required != "mql_final_allow":
                 return "cache_miss_due_to_schema_version"
+    provider_identity = _provider().identity("analyst")
+    if str(dec_raw.get("provider_contract_version") or "") != PROVIDER_CONTRACT_VERSION:
+        return "cache_miss_due_to_schema_version"
+    if current_fields is not None:
+        if str(dec_raw.get("provider_mode") or "") != str(provider_identity.get("provider_mode") or ""):
+            return "cache_miss_due_to_provider_identity"
+        if str(dec_raw.get("provider_id") or "") != str(provider_identity.get("provider_id") or ""):
+            return "cache_miss_due_to_provider_identity"
+        if str(dec_raw.get("endpoint_identity_hash") or "") != str(
+            provider_identity.get("endpoint_identity_hash") or ""
+        ):
+            return "cache_miss_due_to_provider_identity"
+        if str(dec_raw.get("configured_models_hash") or "") != str(
+            provider_identity.get("configured_models_hash") or ""
+        ):
+            return "cache_miss_due_to_provider_identity"
+        allowed_models = {
+            str(value)
+            for value in provider_identity.get("configured_model_ids") or []
+            if str(value)
+        }
+        if str(dec_raw.get("actual_model_id") or "") not in allowed_models:
+            return "cache_miss_due_to_provider_identity"
+        if str(dec_raw.get("generation_settings_hash") or "") != str(
+            current_fields.get("generation_settings_hash") or ""
+        ):
+            return "cache_miss_due_to_provider_identity"
+    if str(dec_raw.get("family_profile_version") or "") != FAMILY_PROFILE_VERSION:
+        return "cache_miss_due_to_schema_version"
+    if str(dec_raw.get("retrieval_policy_version") or "") != RETRIEVAL_POLICY_VERSION:
+        return "cache_miss_due_to_schema_version"
+    if str(dec_raw.get("role_contract_version") or "") != ROLE_CONTRACT_VERSION:
+        return "cache_miss_due_to_schema_version"
+    if str(dec_raw.get("consensus_resolver_version") or "") != CONSENSUS_RESOLVER_VERSION:
+        return "cache_miss_due_to_schema_version"
     if "mql_final_allow" not in dec_raw or dec_raw.get("mql_final_allow") is not None:
         return "cache_miss_due_to_schema_version"
     if dec_raw.get("missing_mandatory_fields") or dec_raw.get("invalid_mandatory_fields"):
@@ -3623,6 +4529,38 @@ class AIDecisionCache:
         self.ttl_sec = ttl_sec
         self._lock = Lock()
 
+    def _acquire_write_lock(self, timeout_sec: float = 3.0) -> Path:
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        deadline = time.monotonic() + max(0.1, timeout_sec)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w", encoding="ascii") as handle:
+                    handle.write(f"{os.getpid()}|{int(time.time())}")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                return lock_path
+            except FileExistsError:
+                try:
+                    if time.time() - lock_path.stat().st_mtime > 60.0:
+                        lock_path.unlink()
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("ai_decision_cache_write_lock_timeout")
+                time.sleep(0.025)
+
+    @staticmethod
+    def _release_write_lock(lock_path: Path | None) -> None:
+        if lock_path is None:
+            return
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
     def lookup(
         self,
         signature: str,
@@ -3661,7 +4599,7 @@ class AIDecisionCache:
                     if ts and now - ts > self.ttl_sec:
                         return None, "expired_ttl"
                     dec_raw = item.get("decision") if isinstance(item.get("decision"), dict) else {}
-                    schema_miss = _cached_decision_schema_miss_reason(dec_raw)
+                    schema_miss = _cached_decision_schema_miss_reason(dec_raw, current_fields)
                     if schema_miss:
                         log(
                             "[ai_cache] hit=false reason=cache_miss_due_to_schema_version"
@@ -3765,6 +4703,44 @@ class AIDecisionCache:
                         target_arbitration_schema_version=str(dec_raw.get("target_arbitration_schema_version") or AI_TARGET_ARBITRATION_SCHEMA_VERSION),
                         prompt_contract_version=str(dec_raw.get("prompt_contract_version") or AI_PROMPT_CONTRACT_VERSION),
                         target_comparison_json=json.dumps(dec_raw.get("target_comparison") or {}, ensure_ascii=False, separators=(",", ":")) if isinstance(dec_raw.get("target_comparison"), dict) else str(dec_raw.get("target_comparison_json") or "{}"),
+                        provider_mode=str(dec_raw.get("provider_mode") or "UNAVAILABLE"),
+                        provider_id=str(dec_raw.get("provider_id") or "unavailable"),
+                        endpoint_class=str(dec_raw.get("endpoint_class") or "invalid"),
+                        endpoint_identity_hash=str(dec_raw.get("endpoint_identity_hash") or ""),
+                        configured_models_hash=str(dec_raw.get("configured_models_hash") or ""),
+                        actual_model_id=str(dec_raw.get("actual_model_id") or ""),
+                        fallback_model=str(dec_raw.get("fallback_model") or ""),
+                        model_fingerprint=str(dec_raw.get("model_fingerprint") or "unavailable"),
+                        provider_contract_version=str(dec_raw.get("provider_contract_version") or ""),
+                        evidence_envelope_version=str(dec_raw.get("evidence_envelope_version") or ""),
+                        family_profile_version=str(dec_raw.get("family_profile_version") or ""),
+                        memory_schema_version=str(dec_raw.get("memory_schema_version") or ""),
+                        retrieval_policy_version=str(dec_raw.get("retrieval_policy_version") or ""),
+                        role_contract_version=str(dec_raw.get("role_contract_version") or ""),
+                        consensus_resolver_version=str(dec_raw.get("consensus_resolver_version") or ""),
+                        generation_settings_hash=str(dec_raw.get("generation_settings_hash") or ""),
+                        input_fingerprint=str(dec_raw.get("input_fingerprint") or ""),
+                        retrieved_analogue_ids=list(dec_raw.get("retrieved_analogue_ids") or []),
+                        historical_evidence_state=str(dec_raw.get("historical_evidence_state") or "INSUFFICIENT_SAMPLE"),
+                        analyst_response_fingerprint=str(dec_raw.get("analyst_response_fingerprint") or ""),
+                        critic_response_fingerprint=str(dec_raw.get("critic_response_fingerprint") or ""),
+                        adjudicator_response_fingerprint=str(dec_raw.get("adjudicator_response_fingerprint") or ""),
+                        final_resolver_reason=str(dec_raw.get("final_resolver_reason") or ""),
+                        provider_health_state=str(dec_raw.get("provider_health_state") or "unavailable"),
+                        role_latencies=dict(dec_raw.get("role_latencies") or {}),
+                        provider_retry_counts=dict(dec_raw.get("provider_retry_counts") or {}),
+                        provider_usage=dict(dec_raw.get("provider_usage") or {}),
+                        estimated_context_tokens=(
+                            int(dec_raw["estimated_context_tokens"])
+                            if dec_raw.get("estimated_context_tokens") is not None
+                            else None
+                        ),
+                        unsupported_generation_parameters=list(
+                            dec_raw.get("unsupported_generation_parameters") or []
+                        ),
+                        analyst_output=dict(dec_raw.get("analyst_output") or {}),
+                        critic_output=dict(dec_raw.get("critic_output") or {}),
+                        adjudicator_output=dict(dec_raw.get("adjudicator_output") or {}),
                     )
                     return dec, "hit"
                 if item.get("base_signature") == base_signature:
@@ -3783,10 +4759,20 @@ class AIDecisionCache:
                 return None, base_semantic_reason
             return None, "invalidated_material_field_changed" if base_seen else "miss"
 
-    def store(self, signature: str, base_signature: str, fields: Dict[str, Any], decision: Decision) -> None:
+    def store(
+        self,
+        signature: str,
+        base_signature: str,
+        fields: Dict[str, Any],
+        decision: Decision,
+        *,
+        request_identity_hash: str = "",
+    ) -> None:
         with self._lock:
+            process_lock: Path | None = None
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
+                process_lock = self._acquire_write_lock()
                 target_comparison: Dict[str, Any] = {}
                 if decision.target_comparison_json:
                     try:
@@ -3799,9 +4785,46 @@ class AIDecisionCache:
                     "timestamp": int(time.time()),
                     "signature": signature,
                     "base_signature": base_signature,
+                    "source_request_identity_hash": str(request_identity_hash),
                     "fields": fields,
                     "semantic_state": semantic_cache_row(semantic_cache_state(fields)),
                     "decision": {
+                        "request_id": str(
+                            (decision.candidate_assessments or [{}])[0].get("request_id")
+                            if isinstance((decision.candidate_assessments or [{}])[0], dict)
+                            else ""
+                        ),
+                        "request_identity_hash": str(
+                            request_identity_hash
+                            or (
+                                (decision.candidate_assessments or [{}])[0].get(
+                                    "request_identity_hash"
+                                )
+                                if isinstance(
+                                    (decision.candidate_assessments or [{}])[0],
+                                    dict,
+                                )
+                                else ""
+                            )
+                        ),
+                        "provider_id": str(decision.provider_id),
+                        "model_id": str(
+                            decision.actual_model_id or decision.model_version
+                        ),
+                        "role_schema_version": ROLE_CONTRACT_VERSION,
+                        "candidate_count": len(decision.candidate_assessments or []),
+                        "ordered_candidate_identities": [
+                            {
+                                "candidate_index": assessment.get("candidate_index"),
+                                "candidate_id": assessment.get("candidate_id"),
+                                "candidate_hash": assessment.get("candidate_hash"),
+                                "request_execution_fingerprint": assessment.get(
+                                    "request_execution_fingerprint"
+                                ),
+                            }
+                            for assessment in (decision.candidate_assessments or [])
+                            if isinstance(assessment, dict)
+                        ],
                         "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
                         "decision_quality_tier": DECISION_QUALITY_FULL_STRUCTURED,
                         "response_quality": DECISION_QUALITY_FULL_STRUCTURED,
@@ -3893,12 +4916,72 @@ class AIDecisionCache:
                         "prompt_contract_version": str(decision.prompt_contract_version or AI_PROMPT_CONTRACT_VERSION),
                         "target_comparison": target_comparison,
                         "target_comparison_json": str(decision.target_comparison_json or "{}"),
+                        "provider_contract_version": str(decision.provider_contract_version),
+                        "provider_mode": str(decision.provider_mode),
+                        "provider_id": str(decision.provider_id),
+                        "endpoint_class": str(decision.endpoint_class),
+                        "endpoint_identity_hash": str(decision.endpoint_identity_hash),
+                        "configured_models_hash": str(decision.configured_models_hash),
+                        "actual_model_id": str(decision.actual_model_id),
+                        "fallback_model": str(decision.fallback_model),
+                        "model_fingerprint": str(decision.model_fingerprint),
+                        "evidence_envelope_version": str(decision.evidence_envelope_version),
+                        "family_profile_version": str(decision.family_profile_version),
+                        "memory_schema_version": str(decision.memory_schema_version),
+                        "retrieval_policy_version": str(decision.retrieval_policy_version),
+                        "role_contract_version": str(decision.role_contract_version),
+                        "consensus_resolver_version": str(decision.consensus_resolver_version),
+                        "generation_settings_hash": str(decision.generation_settings_hash),
+                        "input_fingerprint": str(decision.input_fingerprint),
+                        "retrieved_analogue_ids": list(decision.retrieved_analogue_ids or []),
+                        "historical_evidence_state": str(decision.historical_evidence_state),
+                        "analyst_response_fingerprint": str(decision.analyst_response_fingerprint),
+                        "critic_response_fingerprint": str(decision.critic_response_fingerprint),
+                        "adjudicator_response_fingerprint": str(decision.adjudicator_response_fingerprint),
+                        "final_resolver_reason": str(decision.final_resolver_reason),
+                        "provider_health_state": str(decision.provider_health_state),
+                        "role_latencies": dict(decision.role_latencies or {}),
+                        "provider_retry_counts": dict(decision.provider_retry_counts or {}),
+                        "provider_usage": dict(decision.provider_usage or {}),
+                        "estimated_context_tokens": decision.estimated_context_tokens,
+                        "unsupported_generation_parameters": list(
+                            decision.unsupported_generation_parameters or []
+                        ),
+                        "analyst_output": dict(decision.analyst_output or {}),
+                        "critic_output": dict(decision.critic_output or {}),
+                        "adjudicator_output": dict(decision.adjudicator_output or {}),
                     },
                 }
-                with self.path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                row_line = json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+                previous = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
+                temp_path = self.path.with_name(
+                    f".{self.path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+                )
+                try:
+                    with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(previous)
+                        handle.write(row_line)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temp_path, self.path)
+                finally:
+                    try:
+                        temp_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                log(
+                    "[cache_write]"
+                    f" request_identity_hash={str(request_identity_hash)[:16]}"
+                    f" signature={signature[:12]}"
+                    f" provider={decision.provider_id}"
+                    f" model={decision.actual_model_id}"
+                    " quality_tier=FULL_STRUCTURED"
+                )
+                _inc_counter("cache_writes")
             except Exception as exc:
                 log(f"[ai_gate] ai_decision_cache_store_failed error={exc}")
+            finally:
+                self._release_write_lock(process_lock)
 
 
 AI_DECISION_CACHE = AIDecisionCache(AI_CONFIG.decision_cache_file, AI_CONFIG.decision_cache_ttl_sec)
@@ -4938,6 +6021,10 @@ def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision,
     repeatability = _repeatability_authority_for(
         str(decision.model_version or AI_CONFIG.model),
         str(decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+        provider_mode=decision.provider_mode,
+        provider_id=decision.provider_id,
+        model_fingerprint=decision.model_fingerprint,
+        generation_settings_hash=decision.generation_settings_hash,
     )
     # Preserve configured values for longitudinal diagnostics. They are not
     # calibrated and therefore cannot independently approve or reject.
@@ -5107,7 +6194,192 @@ def _strict_taxonomy_failures(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
                     handle.write(json.dumps(failure, sort_keys=True, separators=(",", ":")) + "\n")
     return failures
 
-def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
+
+def _provider_shadow_comparison_path() -> Path | None:
+    if FILE_BUS_LIFECYCLE is None:
+        return None
+    return FILE_BUS_LIFECYCLE.root / "logs" / "ai_provider_shadow_comparisons.jsonl"
+
+
+def _append_provider_shadow_comparison(row: Mapping[str, Any]) -> bool:
+    path = _provider_shadow_comparison_path()
+    comparison_id = str(row.get("comparison_id") or "")
+    if path is None or not comparison_id:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _SHADOW_COMPARISON_LOG_LOCK:
+        if path.is_file():
+            try:
+                with path.open("r", encoding="utf-8") as existing:
+                    for line in existing:
+                        if comparison_id not in line:
+                            continue
+                        try:
+                            parsed = json.loads(line)
+                        except Exception:
+                            continue
+                        if str(parsed.get("comparison_id") or "") == comparison_id:
+                            return False
+            except OSError:
+                pass
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(dict(row), sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n")
+            handle.flush()
+    return True
+
+
+def _shadow_decision_summary(decision: Decision) -> Dict[str, Any]:
+    critic = dict(decision.critic_output or {})
+    return {
+        "provider_mode": decision.provider_mode,
+        "provider_id": decision.provider_id,
+        "actual_model_id": decision.actual_model_id,
+        "model_fingerprint": decision.model_fingerprint,
+        "generation_settings_hash": decision.generation_settings_hash,
+        "decision_state": decision.decision_state,
+        "python_final_allow": bool(decision.allow),
+        "selected_candidate_id": decision.selected_candidate_id,
+        "selected_candidate_hash": decision.selected_candidate_hash,
+        "veto_code": decision.veto_code,
+        "veto_evidence_fields": list(decision.veto_evidence_fields or []),
+        "critic_verdict": str(critic.get("verdict") or ""),
+        "critic_blocking_objections": list(critic.get("blocking_objections") or []),
+        "historical_evidence_state": decision.historical_evidence_state,
+        "final_resolver_reason": decision.final_resolver_reason,
+        "role_latencies": dict(decision.role_latencies or {}),
+        "provider_retry_counts": dict(decision.provider_retry_counts or {}),
+        "schema_valid": bool(decision.mandatory_fields_complete),
+    }
+
+
+def _run_provider_shadow_comparison(payload: Dict[str, Any], selected_decision: Decision) -> None:
+    """Compare a non-selected provider without changing live authority or memory."""
+
+    if not AI_CONFIG.shadow_compare_providers:
+        return
+    workload = canonical_workload_mode(payload)
+    if workload == LIVE_FORWARD:
+        log("[provider_shadow_compare] skipped=true reason=live_forward_non_authoritative_only")
+        return
+    shadow = _shadow_provider()
+    selected_identity = _provider().identity("analyst")
+    shadow_identity = shadow.identity("analyst")
+    request_id = str(payload.get("id") or "")
+    comparison_id = canonical_hash(
+        {
+            "request_id": request_id,
+            "selected_provider": selected_identity,
+            "shadow_provider": shadow_identity,
+            "input_fingerprint": selected_decision.input_fingerprint,
+            "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+            "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        }
+    )
+    row: Dict[str, Any] = {
+        "schema_version": "20260718_provider_shadow_comparison_v1",
+        "comparison_id": comparison_id,
+        "request_id": request_id,
+        "workload_mode": workload,
+        "trading_authority": False,
+        "outcome_attribution": False,
+        "outcome_join_candidate_hash": selected_decision.selected_candidate_hash,
+        "selected": _shadow_decision_summary(selected_decision),
+        "shadow_provider_identity": shadow_identity,
+        "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        "family_profile_version": FAMILY_PROFILE_VERSION,
+        "retrieval_policy_version": RETRIEVAL_POLICY_VERSION,
+    }
+    health = shadow.healthcheck(probe_structured=shadow.provider_mode == PROVIDER_MODE_LOCAL)
+    if not health.healthy:
+        row.update(
+            {
+                "shadow_status": "UNAVAILABLE",
+                "malformed_output": False,
+                "failure_reason": health.reason,
+            }
+        )
+        _append_provider_shadow_comparison(row)
+        log(
+            "[provider_shadow_compare] completed=false trading_authority=false"
+            f" reason={health.reason} request_id={request_id}"
+        )
+        return
+    try:
+        shadow_decision = _score_setup_ai(
+            payload,
+            provider_override=shadow,
+            non_authoritative_shadow=True,
+        )
+        shadow_authority = _repeatability_authority_for(
+            str(shadow_decision.model_version or shadow.model_for_role("analyst")),
+            str(shadow_decision.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+            provider_mode=shadow_decision.provider_mode,
+            provider_id=shadow_decision.provider_id,
+            model_fingerprint=shadow_decision.model_fingerprint,
+            generation_settings_hash=shadow_decision.generation_settings_hash,
+        )
+        shadow_decision = _apply_repeatability_authority(
+            shadow_decision,
+            shadow_authority,
+            payload=payload,
+        )
+        shadow_decision = _validate_ai_target_choice_against_feasibility(
+            payload,
+            shadow_decision,
+            shadow_decision.chosen_index,
+        )
+        shadow_decision = _synchronize_selected_assessment_contract(payload, shadow_decision)
+        shadow_decision = _apply_ai_veto_gate(payload, shadow_decision)
+        shadow_decision = _apply_family_ai_threshold_gate(
+            payload,
+            shadow_decision,
+            shadow_decision.chosen_index,
+        )
+        shadow_decision = _synchronize_candidate_authority_fields(shadow_decision)
+        row.update(
+            {
+                "shadow_status": "COMPLETE",
+                "malformed_output": False,
+                "shadow": _shadow_decision_summary(shadow_decision),
+                "shadow_repeatability_status": str(shadow_authority.get("status") or UNAVAILABLE),
+                "decision_agreement": bool(
+                    selected_decision.decision_state == shadow_decision.decision_state
+                    and bool(selected_decision.allow) == bool(shadow_decision.allow)
+                ),
+                "candidate_agreement": bool(
+                    selected_decision.selected_candidate_hash == shadow_decision.selected_candidate_hash
+                ),
+                "veto_agreement": bool(selected_decision.veto_code == shadow_decision.veto_code),
+            }
+        )
+        written = _append_provider_shadow_comparison(row)
+        log(
+            "[provider_shadow_compare] completed=true trading_authority=false"
+            f" request_id={request_id} written={str(written).lower()}"
+            f" selected={selected_decision.provider_id}:{selected_decision.actual_model_id}"
+            f" shadow={shadow_decision.provider_id}:{shadow_decision.actual_model_id}"
+        )
+    except Exception as exc:
+        row.update(
+            {
+                "shadow_status": "FAILED_CLOSED_NON_TRADING",
+                "malformed_output": isinstance(exc, (ValueError, TypeError)),
+                "failure_reason": f"{type(exc).__name__}:{exc}",
+            }
+        )
+        _append_provider_shadow_comparison(row)
+        log(
+            "[provider_shadow_compare] completed=false trading_authority=false"
+            f" request_id={request_id} error={type(exc).__name__}"
+        )
+
+
+def _score_setup_impl(
+    payload: Dict[str, Any],
+    *,
+    frozen_request: FrozenAIRequest | None = None,
+) -> Decision:
     """
     Rule-based scoring blended with LLM advisory reranking/veto metadata.
     MT5 remains the final execution authority.
@@ -5211,10 +6483,29 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         )
         return decision
 
+    health = _refresh_provider_health(force=False)
+    if _is_live_payload(payload) and not bool(health.get("healthy")):
+        decision = _degraded_non_trading_decision(
+            payload,
+            "selected provider health or structured-output capability unavailable",
+            missing=["healthy_selected_ai_provider"],
+            invalid=[str(health.get("reason") or "provider_health_unavailable")],
+            source="provider_health_no_trade",
+        )
+        decision.decision_state = DECISION_ABSTAIN
+        decision.rejection_codes = ["provider_unavailable_no_trade", "degraded_ai_response_non_trading"]
+        decision.suggested_risk_multiplier = 0.0
+        return decision
+
     cache_signature = ""
     cache_base_signature = ""
     cache_fields: Dict[str, Any] = {}
-    if AI_CONFIG.decision_cache_enable:
+    tester_workflow_source = _tester_workflow_source(payload)
+    decision_cache_allowed = (
+        AI_CONFIG.decision_cache_enable
+        and tester_workflow_source != "live_wait_debug"
+    )
+    if decision_cache_allowed:
         cache_signature, cache_base_signature, cache_fields = _decision_cache_signature(payload, best_index)
         cached_decision, cache_status = AI_DECISION_CACHE.lookup(
             cache_signature,
@@ -5222,29 +6513,50 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             cache_fields,
         )
         if cached_decision is not None:
-            _inc_counter("ai_cache_hit")
-            log(f"[ai_gate] ai_cache_hit request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
-            cached_decision = _validate_ai_target_choice_against_feasibility(payload, cached_decision, cached_decision.chosen_index)
-            cached_decision = _synchronize_selected_assessment_contract(payload, cached_decision)
-            cached_decision = _apply_repeatability_authority(cached_decision, payload=payload)
-            cached_decision = _apply_ai_veto_gate(payload, cached_decision)
-            cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
-            cached_decision = _synchronize_candidate_authority_fields(cached_decision)
-            _write_ai_cost_report(
+            cache_bound, cache_bind_reason = _bind_cached_decision_to_current_request(
                 payload,
-                request_id=str(payload.get("id") or ""),
-                decision_source=cached_decision.decision_source,
-                model=cached_decision.model_version,
-                reasoning_effort=AI_CONFIG.reasoning_effort,
-                service_tier="",
-                prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
-                cache_status="hit",
-                batch_used=False,
-                flex_used=False,
-                openai_called=False,
-                skip_reason="ai_cache_hit",
+                cached_decision,
             )
-            return cached_decision
+            if cache_bound:
+                _inc_counter("ai_cache_hit")
+                log(
+                    "[cache_hit]"
+                    f" request_id={str(payload.get('id') or '')}"
+                    f" request_identity_hash={str(payload.get('request_identity_hash') or '')[:16]}"
+                    f" signature={cache_signature[:12]}"
+                    f" provider={cached_decision.provider_id}"
+                    f" model={cached_decision.actual_model_id}"
+                    " quality_tier=CACHE_OF_FULL_STRUCTURED"
+                )
+                cached_decision = _validate_ai_target_choice_against_feasibility(payload, cached_decision, cached_decision.chosen_index)
+                cached_decision = _synchronize_selected_assessment_contract(payload, cached_decision)
+                cached_decision = _apply_repeatability_authority(cached_decision, payload=payload)
+                cached_decision = _apply_ai_veto_gate(payload, cached_decision)
+                cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
+                cached_decision = _synchronize_candidate_authority_fields(cached_decision)
+                _write_ai_cost_report(
+                    payload,
+                    request_id=str(payload.get("id") or ""),
+                    decision_source=cached_decision.decision_source,
+                    model=cached_decision.model_version,
+                    reasoning_effort=AI_CONFIG.reasoning_effort,
+                    service_tier="",
+                    prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
+                    cache_status="hit",
+                    batch_used=False,
+                    flex_used=False,
+                    openai_called=False,
+                    skip_reason="ai_cache_hit",
+                )
+                return cached_decision
+            cache_status = cache_bind_reason
+            log(
+                "[cache_miss]"
+                f" request_id={str(payload.get('id') or '')}"
+                f" request_identity_hash={str(payload.get('request_identity_hash') or '')[:16]}"
+                f" reason={cache_bind_reason}"
+                f" signature={cache_signature[:12]}"
+            )
         _inc_counter("ai_cache_miss")
         if cache_status == "cache_miss_due_to_schema_version":
             _inc_counter("ai_cache_miss_due_to_schema_version")
@@ -5255,23 +6567,47 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             log(f"[ai_gate] ai_cache_miss request_id={str(payload.get('id') or '')} signature={cache_signature[:12]}")
 
     try:
-        dec = _score_setup_openai(payload)
+        dec = _score_setup_ai(payload, frozen_request=frozen_request)
     except Exception as e:
+        category = (
+            e.category
+            if isinstance(e, ProviderCallError)
+            else "PROVIDER_TRANSPORT_ERROR"
+        )
+        source = category.lower()
+        rejection_code = {
+            "PROVIDER_CONFIGURATION_ERROR": "provider_configuration_block",
+            "PROVIDER_TRANSPORT_ERROR": "provider_transport_error",
+            "STRUCTURED_SCHEMA_INVALID": "structured_schema_invalid",
+            "STRUCTURED_RESPONSE_INVALID": "structured_response_invalid",
+            "REQUEST_IDENTITY_MISMATCH": "request_identity_mismatch",
+            "RESPONSE_STALE": "response_stale",
+            "REPEATABILITY_UNAVAILABLE": "repeatability_unavailable",
+        }.get(category, "provider_transport_error")
         log(
-            f"[ai_gate] AI unavailable for {str(payload.get('symbol', '') or 'unknown_symbol')}; "
-            "rule-only output is diagnostic and non-trading."
+            "[provider_call_failed]"
+            f" request_id={str(payload.get('id') or '')}"
+            f" request_identity_hash={str(payload.get('request_identity_hash') or '')[:16]}"
+            f" symbol={str(payload.get('symbol', '') or 'unknown_symbol')}"
+            f" provider={_provider().provider_id}"
+            f" model={_provider().model_for_role('analyst')}"
+            f" error_category={category}"
+            f" http_status={getattr(e, 'status_code', None) or 0}"
+            f" repair_attempted={str(bool(getattr(e, 'repair_attempted', False))).lower()}"
+            f" repair_result={getattr(e, 'repair_result', 'not_attempted')}"
+            " final_quality_tier=DEGRADED_NON_TRADING"
         )
         decision = _degraded_non_trading_decision(
             payload,
-            f"OpenAI unavailable: {e}",
+            f"Selected AI provider unavailable: {e}",
             missing=["full_structured_ai_response"],
-            source="rule_only_non_trading",
+            source=source,
         )
-        decision.decision_quality_tier = DECISION_QUALITY_RULE_ONLY_NON_TRADING
-        decision.decision_source = "rule_only_non_trading"
-        decision.rejection_codes = ["ai_unavailable_rule_only_non_trading", "degraded_ai_response_non_trading"]
+        decision.decision_quality_tier = DECISION_QUALITY_DEGRADED_NON_TRADING
+        decision.decision_source = source
+        decision.rejection_codes = [rejection_code, "degraded_ai_response_non_trading"]
         decision.rule_score = float(rule_score)
-        decision.score = float(rule_score)
+        decision.score = 0.0
         decision.reasons = {
             "error": str(e),
             "rule_score": rule_score,
@@ -5286,10 +6622,10 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
             reasoning_effort=AI_CONFIG.reasoning_effort,
             service_tier="",
             prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
-            cache_status="openai_failure",
+            cache_status="provider_failure",
             batch_used=False,
             flex_used=False,
-            openai_called=True,
+            openai_called=AI_CONFIG.use_remote_api is True,
             skip_reason="degraded_ai_response_non_trading",
         )
         return decision
@@ -5297,6 +6633,10 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     repeatability_authority_before_shadow = _repeatability_authority_for(
         str(dec.model_version or AI_CONFIG.model),
         str(dec.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+        provider_mode=dec.provider_mode,
+        provider_id=dec.provider_id,
+        model_fingerprint=dec.model_fingerprint,
+        generation_settings_hash=dec.generation_settings_hash,
     )
     _run_shadow_repeat_evaluation(payload, dec)
     dec = _apply_repeatability_authority(dec, repeatability_authority_before_shadow, payload=payload)
@@ -5386,6 +6726,25 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     final_decision = _apply_ai_veto_gate(payload, final_decision)
     final_decision = _apply_family_ai_threshold_gate(payload, final_decision, chosen_index)
     final_decision = _synchronize_candidate_authority_fields(final_decision)
+    if final_decision.decision_quality_tier == DECISION_QUALITY_FULL_STRUCTURED:
+        prior_source = str(final_decision.decision_source or "")
+        if prior_source not in {
+            "request_identity_mismatch",
+            "structured_response_invalid",
+            "provider_failure",
+            "repeatability_unavailable",
+            "risk_gate_rejected",
+        }:
+            if (
+                final_decision.allow
+                and final_decision.decision_state == DECISION_APPROVE
+            ):
+                final_decision.decision_source = "ai_approved"
+            elif final_decision.decision_state == DECISION_ABSTAIN:
+                final_decision.decision_source = "ai_abstained"
+            else:
+                final_decision.decision_source = "ai_rejected"
+    _run_provider_shadow_comparison(payload, final_decision)
     repeatability_blocked_live = bool(
         AI_CONFIG.require_repeatability_live
         and _is_live_payload(payload)
@@ -5393,9 +6752,15 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
         and isinstance(final_decision.reasons.get("repeatability_authority"), dict)
         and final_decision.reasons["repeatability_authority"].get("status") != REPEATABLE
     )
-    if AI_CONFIG.decision_cache_enable and cache_signature and not repeatability_blocked_live:
+    if decision_cache_allowed and cache_signature and not repeatability_blocked_live:
         if final_decision.decision_quality_tier == DECISION_QUALITY_FULL_STRUCTURED and final_decision.mandatory_fields_complete:
-            AI_DECISION_CACHE.store(cache_signature, cache_base_signature, cache_fields, final_decision)
+            AI_DECISION_CACHE.store(
+                cache_signature,
+                cache_base_signature,
+                cache_fields,
+                final_decision,
+                request_identity_hash=str(payload.get("request_identity_hash") or ""),
+            )
     elif repeatability_blocked_live:
         log(
             f"[ai_cache] store_skipped request_id={str(payload.get('id') or '')} "
@@ -5404,12 +6769,22 @@ def _score_setup_impl(payload: Dict[str, Any]) -> Decision:
     return final_decision
 
 
-def score_setup_live(payload: Dict[str, Any]) -> Decision:
-    return _synchronize_decision_authority_fields(_score_setup_impl(payload))
+def score_setup_live(
+    payload: Dict[str, Any],
+    *,
+    frozen_request: FrozenAIRequest | None = None,
+) -> Decision:
+    return _synchronize_decision_authority_fields(
+        _score_setup_impl(payload, frozen_request=frozen_request)
+    )
 
 
-def score_setup(payload: Dict[str, Any]) -> Decision:
-    return score_setup_live(payload)
+def score_setup(
+    payload: Dict[str, Any],
+    *,
+    frozen_request: FrozenAIRequest | None = None,
+) -> Decision:
+    return score_setup_live(payload, frozen_request=frozen_request)
 
 
 def _batch_output_dir() -> Path:
@@ -5456,10 +6831,20 @@ def score_setup_batch_research(payloads: list[Dict[str, Any]]) -> Dict[str, Any]
         return {"batch_used": False, "reason": "batch_api_disabled"}
     if not payloads:
         return {"batch_used": False, "reason": "empty_payloads"}
+    # Live entry approval is never a Batch workload. Check this before
+    # provider capability/configuration so no unrelated startup error can
+    # obscure or weaken the unconditional live prohibition.
     live_ids = [str(p.get("id") or "") for p in payloads if _is_live_payload(p)]
     if live_ids:
         log("[ai_gate] batch_api_disabled_for_live")
         return {"batch_used": False, "reason": "batch_api_disabled_for_live", "live_request_ids": live_ids}
+    if _provider().provider_mode != PROVIDER_MODE_REMOTE:
+        return {
+            "batch_used": False,
+            "reason": "batch_api_not_supported_by_selected_provider",
+            "provider_mode": _provider().provider_mode,
+            "cross_provider_fallback": False,
+        }
     allowed_modes = {"backtest", "replay", "research", "analytics"}
     disallowed = [str(p.get("id") or "") for p in payloads if _payload_workload_mode(p) not in allowed_modes]
     if disallowed:
@@ -5495,7 +6880,7 @@ def score_setup_batch_research(payloads: list[Dict[str, Any]]) -> Dict[str, Any]
         "error": "",
     }
     try:
-        client = _openai_client(AI_CONFIG.openai_timeout_sec)
+        client = _remote_batch_client(AI_CONFIG.openai_timeout_sec)
         with jsonl_path.open("rb") as batch_file:
             upload = client.files.create(file=batch_file, purpose="batch")
         batch = client.batches.create(
@@ -5674,7 +7059,27 @@ def _acquire_request_claim(lock_dir: Path, req_path: Path) -> Path | None:
     for attempt in range(2):
         try:
             with lock_path.open("x", encoding="utf-8") as f:
-                f.write(json.dumps({"pid": os.getpid(), "ts": now}))
+                f.write(
+                    json.dumps(
+                        {
+                            "pid": os.getpid(),
+                            "process_id": os.getpid(),
+                            "hostname": socket.gethostname(),
+                            "worker_id": (
+                                FILE_BUS_LIFECYCLE.session_id
+                                if FILE_BUS_LIFECYCLE is not None
+                                else f"python_{os.getpid()}"
+                            ),
+                            "claimed_at": now,
+                            "heartbeat_at": now,
+                            "expected_max_provider_duration_sec": (
+                                EXPECTED_MAX_PROVIDER_DURATION_SEC
+                            ),
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
             return lock_path
         except FileExistsError:
             try:
@@ -5710,21 +7115,104 @@ def _normalize_request_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         return merged
     return payload
 
-def _is_stable_input_file(path: Path) -> bool:
+def _stable_input_status(path: Path) -> tuple[bool, str]:
     lowered = path.name.lower()
     if lowered.endswith((".tmp", ".partial", ".lock")):
-        return False
+        return False, "partial_extension"
     try:
-        size1 = path.stat().st_size
+        stat1 = path.stat()
+        size1 = stat1.st_size
         if size1 <= 0:
-            return False
+            return False, "empty"
         time.sleep(REQUEST_STABLE_MS / 1000.0)
-        size2 = path.stat().st_size
-        return size1 == size2 and size2 > 0
+        stat2 = path.stat()
+        if (
+            size1 != stat2.st_size
+            or stat1.st_mtime_ns != stat2.st_mtime_ns
+            or stat2.st_size <= 0
+        ):
+            return False, "producer_write_in_progress"
+        read_json_any_encoding(path)
+        return True, "stable_complete_json"
     except FileNotFoundError:
+        return False, "missing"
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        return False, f"invalid_json:{type(exc).__name__}"
+    except Exception as exc:
+        return False, f"stability_check_error:{type(exc).__name__}"
+
+
+def _is_stable_input_file(path: Path) -> bool:
+    stable, _ = _stable_input_status(path)
+    return stable
+
+
+def _quarantine_unstable_input_if_terminal(path: Path, reason: str) -> bool:
+    key = str(path.resolve())
+    now = time.time()
+    state = _UNSTABLE_FILE_STATE.setdefault(
+        key,
+        {"first_seen": now, "attempts": 0.0},
+    )
+    state["attempts"] += 1.0
+    if now - state["first_seen"] < PRODUCER_LOCK_TIMEOUT_SEC:
         return False
-    except Exception:
+    moved, move_reason = _archive_request_terminal(
+        path,
+        "quarantined",
+        f"producer_input_never_stabilized:{reason}",
+    )
+    log(
+        "[response_quarantined]"
+        f" request_file={path.name}"
+        f" reason=producer_input_never_stabilized"
+        f" detail={reason}"
+        f" attempts={int(state['attempts'])}"
+        f" moved={str(moved).lower()}"
+        f" move_reason={move_reason}"
+        " provider_call=false"
+    )
+    if moved:
+        _UNSTABLE_FILE_STATE.pop(key, None)
+    return moved
+
+
+def _handle_claim_deferred(
+    req_path: Path,
+    exc: FileBusClaimDeferredError,
+) -> bool:
+    key = str(req_path.resolve())
+    now = time.time()
+    state = _CLAIM_DEFERRED_STATE.setdefault(
+        key,
+        {"first_seen": now, "attempts": 0.0},
+    )
+    state["attempts"] += 1.0
+    elapsed = now - state["first_seen"]
+    log(
+        f"[file_bus] claim_deferred request={req_path.name}"
+        f" reason=producer_file_lock retries={exc.attempts}"
+        f" attempts_total={int(state['attempts'])}"
+        f" elapsed_sec={elapsed:.3f}"
+    )
+    if elapsed < PRODUCER_LOCK_TIMEOUT_SEC:
         return False
+    moved, move_reason = _archive_request_terminal(
+        req_path,
+        "quarantined",
+        "producer_file_lock_timeout_no_provider_call",
+    )
+    log(
+        "[response_quarantined]"
+        f" request_file={req_path.name}"
+        " reason=producer_file_lock_timeout"
+        f" moved={str(moved).lower()}"
+        f" move_reason={move_reason}"
+        " provider_call=false"
+    )
+    if moved:
+        _CLAIM_DEFERRED_STATE.pop(key, None)
+    return moved
 
 def _write_error_response(req_id: str, resp_dir: Path, reason: str, payload_summary: Dict[str, Any] | None = None) -> None:
     resp_dir.mkdir(parents=True, exist_ok=True)
@@ -5803,12 +7291,59 @@ def _tester_cache_identity(payload: Dict[str, Any]) -> tuple[str, str, str]:
     return signature, safe_key, ""
 
 def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
+    if str(resp.get("request_identity_version") or "") != AI_REQUEST_IDENTITY_VERSION:
+        return "legacy_request_identity"
+    request_id = str(resp.get("id") or "")
+    request_identity_hash = str(resp.get("request_identity_hash") or "")
+    if not request_id:
+        return "missing_request_id"
+    if not request_identity_hash:
+        return "missing_request_identity_hash"
+    ordered_identities = resp.get("ordered_candidate_identities")
+    assessments = resp.get("candidate_assessments")
+    if not isinstance(ordered_identities, list) or not ordered_identities:
+        return "missing_ordered_candidate_identities"
+    try:
+        candidate_count = int(resp.get("candidate_count"))
+    except (TypeError, ValueError):
+        return "invalid_candidate_count"
+    if candidate_count != len(ordered_identities):
+        return "candidate_count_identity_mismatch"
     if str(resp.get("decision_schema_version") or "") != AI_DECISION_SCHEMA_VERSION:
         return "legacy_decision_schema"
     if str(resp.get("target_arbitration_schema_version") or "") != AI_TARGET_ARBITRATION_SCHEMA_VERSION:
         return "legacy_target_arbitration_schema"
     if str(resp.get("prompt_contract_version") or "") != AI_PROMPT_CONTRACT_VERSION:
         return "legacy_prompt_contract"
+    if str(resp.get("provider_contract_version") or "") != PROVIDER_CONTRACT_VERSION:
+        return "legacy_provider_contract"
+    if str(resp.get("evidence_envelope_version") or "") != EVIDENCE_ENVELOPE_VERSION:
+        return "legacy_evidence_envelope"
+    if str(resp.get("family_profile_version") or "") != FAMILY_PROFILE_VERSION:
+        return "legacy_family_profile"
+    if str(resp.get("memory_schema_version") or "") != TRADE_MEMORY_SCHEMA_VERSION:
+        return "legacy_memory_schema"
+    if str(resp.get("retrieval_policy_version") or "") != RETRIEVAL_POLICY_VERSION:
+        return "legacy_retrieval_policy"
+    if str(resp.get("role_contract_version") or "") != ROLE_CONTRACT_VERSION:
+        return "legacy_role_contract"
+    if str(resp.get("consensus_resolver_version") or "") != CONSENSUS_RESOLVER_VERSION:
+        return "legacy_consensus_resolver"
+    if str(resp.get("provider_mode") or "") not in {PROVIDER_MODE_REMOTE, PROVIDER_MODE_LOCAL}:
+        return "invalid_provider_mode"
+    for field_name in (
+        "provider_id",
+        "endpoint_identity_hash",
+        "configured_models_hash",
+        "actual_model_id",
+        "model_fingerprint",
+        "generation_settings_hash",
+        "input_fingerprint",
+        "analyst_response_fingerprint",
+        "critic_response_fingerprint",
+    ):
+        if not str(resp.get(field_name) or "").strip():
+            return f"missing_{field_name}"
     tier = str(resp.get("decision_quality_tier") or "")
     if tier not in {
         DECISION_QUALITY_FULL_STRUCTURED,
@@ -5819,16 +7354,38 @@ def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
         return "decision_quality_alias_conflict"
     if resp.get("mandatory_fields_complete") is not True:
         return "incomplete_mandatory_fields"
-    assessments = resp.get("candidate_assessments")
     if not isinstance(assessments, list) or not assessments:
         return "missing_candidate_assessments"
+    if len(assessments) != candidate_count:
+        return "candidate_assessment_count_mismatch"
     seen_hashes: set[str] = set()
-    for assessment in assessments:
+    for index, assessment in enumerate(assessments):
         if not isinstance(assessment, dict):
             return "invalid_candidate_assessment"
         validation = validate_candidate_assessment(assessment)
         if not validation.valid:
             return "invalid_candidate_assessment"
+        if str(assessment.get("request_id") or "") != request_id:
+            return "candidate_request_id_mismatch"
+        if str(assessment.get("request_identity_hash") or "") != request_identity_hash:
+            return "candidate_request_identity_mismatch"
+        if str(assessment.get("provider_id") or "") != str(resp.get("provider_id") or ""):
+            return "candidate_provider_identity_mismatch"
+        if str(assessment.get("model_id") or "") != str(resp.get("actual_model_id") or ""):
+            return "candidate_model_identity_mismatch"
+        if str(assessment.get("role_schema_version") or "") != ROLE_CONTRACT_VERSION:
+            return "candidate_role_schema_mismatch"
+        identity = ordered_identities[index]
+        if not isinstance(identity, dict):
+            return "invalid_ordered_candidate_identity"
+        for identity_field in (
+            "candidate_index",
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+        ):
+            if assessment.get(identity_field) != identity.get(identity_field):
+                return f"ordered_candidate_identity_mismatch_{identity_field}"
         assessment_hash = str(assessment.get("candidate_hash") or "")
         if not assessment_hash or assessment_hash in seen_hashes:
             return "duplicate_candidate_assessment"
@@ -5867,6 +7424,13 @@ def _mql_tester_cache_contract_current(resp: Dict[str, Any]) -> bool:
         and resp.get("mandatory_fields_complete") is True
         and str(resp.get("target_arbitration_schema_version") or "") == AI_TARGET_ARBITRATION_SCHEMA_VERSION
         and str(resp.get("prompt_contract_version") or "") == AI_PROMPT_CONTRACT_VERSION
+        and str(resp.get("provider_contract_version") or "") == PROVIDER_CONTRACT_VERSION
+        and str(resp.get("evidence_envelope_version") or "") == EVIDENCE_ENVELOPE_VERSION
+        and str(resp.get("family_profile_version") or "") == FAMILY_PROFILE_VERSION
+        and str(resp.get("memory_schema_version") or "") == TRADE_MEMORY_SCHEMA_VERSION
+        and str(resp.get("retrieval_policy_version") or "") == RETRIEVAL_POLICY_VERSION
+        and str(resp.get("role_contract_version") or "") == ROLE_CONTRACT_VERSION
+        and str(resp.get("consensus_resolver_version") or "") == CONSENSUS_RESOLVER_VERSION
     )
 
 def _mql_tester_replay_cache_path(payload: Dict[str, Any], bus: Path) -> tuple[Path | None, str, str, str]:
@@ -5878,6 +7442,14 @@ def _mql_tester_replay_cache_path(payload: Dict[str, Any], bus: Path) -> tuple[P
 def _export_mql_tester_replay_cache(payload: Dict[str, Any], resp: Dict[str, Any], bus: Path) -> str:
     # This is the MQL Strategy Tester replay cache. It is intentionally separate
     # from Python's AI_DECISION_CACHE_FILE signature cache; MQL provides the key.
+    workflow_source = _tester_workflow_source(payload)
+    if workflow_source == "live_wait_debug":
+        log(
+            "[tester_cache_export] skipped"
+            " reason=live_wait_debug_not_replay_authoritative"
+            f" request_id={str(payload.get('id') or '')}"
+        )
+        return "skipped:live_wait_debug_not_replay_authoritative"
     cache_path, signature, key, identity_error = _mql_tester_replay_cache_path(payload, bus)
     if identity_error:
         log(f"[tester_cache_export] skipped reason={identity_error}")
@@ -5893,6 +7465,15 @@ def _export_mql_tester_replay_cache(payload: Dict[str, Any], resp: Dict[str, Any
     cache_obj["cache_signature"] = signature
     cache_obj["decision_quality_tier"] = DECISION_QUALITY_CACHE_FULL_STRUCTURED
     cache_obj["response_quality"] = DECISION_QUALITY_CACHE_FULL_STRUCTURED
+    # The quality tier is part of both bindings. Recompute after promotion to a
+    # replay-cache record; retaining the live-response hashes would make the
+    # cache internally inconsistent and MQL must reject it.
+    cache_obj["response_binding_hash"] = response_binding_hash(cache_obj)
+    cache_obj.pop("response_fingerprint_contract", None)
+    cache_contract = response_fingerprint(cache_obj)
+    cache_obj["response_fingerprint"] = cache_contract["response_fingerprint"]
+    cache_obj["full_structured_response_hash"] = cache_contract["full_structured_response_hash"]
+    cache_obj["response_fingerprint_contract"] = cache_contract
     if cache_path.exists():
         try:
             existing = read_json_any_encoding(cache_path)
@@ -5900,13 +7481,38 @@ def _export_mql_tester_replay_cache(payload: Dict[str, Any], resp: Dict[str, Any
                 existing.get("cache_signature") == signature
                 and not _mql_tester_cache_skip_reason(existing)
                 and _mql_tester_cache_contract_current(existing)
+                and str(existing.get("request_identity_hash") or "") == str(cache_obj.get("request_identity_hash") or "")
+                and str(existing.get("provider_mode") or "") == str(cache_obj.get("provider_mode") or "")
+                and str(existing.get("provider_id") or "") == str(cache_obj.get("provider_id") or "")
+                and str(existing.get("model_fingerprint") or "") == str(cache_obj.get("model_fingerprint") or "")
+                and str(existing.get("generation_settings_hash") or "") == str(cache_obj.get("generation_settings_hash") or "")
             ):
                 log(f"[tester_cache_export] existing=true key={key} signature={signature}")
                 return "existing"
-        except Exception:
-            pass
+            quarantine_dir = cache_path.parent / "quarantined"
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            quarantine_path = quarantine_dir / (
+                f"{cache_path.stem}__collision_{int(time.time() * 1000)}.json"
+            )
+            os.replace(cache_path, quarantine_path)
+            log(
+                "[cache_quarantine]"
+                " reason=cache_identity_collision"
+                f" key={key} signature={signature}"
+                f" old_request_identity={str(existing.get('request_identity_hash') or '')[:16]}"
+                f" new_request_identity={str(cache_obj.get('request_identity_hash') or '')[:16]}"
+                f" quarantine={quarantine_path.name}"
+            )
+            return "skipped:cache_identity_collision"
+        except Exception as exc:
+            log(
+                "[tester_cache_export] skipped"
+                " reason=cache_existing_read_or_quarantine_failed"
+                f" key={key} signature={signature} error={type(exc).__name__}"
+            )
+            return "skipped:cache_existing_read_or_quarantine_failed"
     atomic_write_json(cache_path, cache_obj, encoding=RESP_ENCODING)
-    log(f"[tester_cache_export] written=true key={key} signature={signature} source={_tester_workflow_source(payload)}")
+    log(f"[tester_cache_export] written=true key={key} signature={signature} source={workflow_source}")
     return "written"
 
 def _repair_mql_tester_replay_cache_from_existing_response(req_path: Path, resp_path: Path, bus: Path) -> str:
@@ -5920,18 +7526,6 @@ def _repair_mql_tester_replay_cache_from_existing_response(req_path: Path, resp_
         log(f"[tester_cache_export] skipped reason={identity_error} request={req_path.name}")
         return f"skipped:{identity_error}"
     assert cache_path is not None
-    if cache_path.exists():
-        try:
-            existing = read_json_any_encoding(cache_path)
-            if (
-                existing.get("cache_signature") == signature
-                and not _mql_tester_cache_skip_reason(existing)
-                and _mql_tester_cache_contract_current(existing)
-            ):
-                log(f"[tester_cache_export] existing=true key={key} signature={signature} request={req_path.name}")
-                return "existing"
-        except Exception:
-            pass
     try:
         resp = read_json_any_encoding(resp_path)
     except Exception as exc:
@@ -5943,7 +7537,15 @@ def _repair_mql_tester_replay_cache_from_existing_response(req_path: Path, resp_
     return status
 
 
-def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
+def process_one(
+    req_path: Path,
+    resp_dir: Path,
+    stale_dir: Path,
+    *,
+    lock_path: Path | None = None,
+    idempotency_ledger: RequestIdempotencyLedger | None = None,
+) -> None:
+    _inc_counter("requests_processed")
     log(f"[ai_gate] Processing {req_path.name}")
 
     last_err: Exception | None = None
@@ -5972,9 +7574,107 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         raise ValueError("file_bus_transport_contract_missing:" + ",".join(missing_transport))
 
     prior_artifact = _load_live_bucket_priors()
+    provider_identity = _provider().generation_identity(
+        "analyst",
+        _provider_request_metadata(payload),
+    )
+    schema_preflight = strict_structured_schema(ModelAIGateOutput)
+    if not schema_preflight.valid:
+        raise ValueError(
+            "structured_schema_preflight_failed:"
+            + "|".join(schema_preflight.errors)
+        )
+    frozen_request = freeze_ai_request(
+        payload,
+        provider_identity=provider_identity,
+        schema_fingerprint=schema_preflight.schema_fingerprint,
+        family_profile_version=FAMILY_PROFILE_VERSION,
+        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
+        candidate_cap=12,
+    )
+    payload = frozen_request.thaw_payload()
+    _attach_frozen_identity(payload, frozen_request)
+    request_identity = frozen_request.identity
+    log(
+        "[request_created]"
+        f" request_id={req_id}"
+        f" request_identity_hash={request_identity['request_identity_hash'][:16]}"
+        f" symbol={payload.get('symbol', '')}"
+        f" provider={provider_identity.get('provider_id', '')}"
+        f" model={provider_identity.get('model_id', '')}"
+        f" schema_fingerprint={schema_preflight.schema_fingerprint[:16]}"
+        f" identity_schema_version={AI_REQUEST_IDENTITY_VERSION}"
+        f" canonicalization_version={AI_IDENTITY_CANONICALIZATION_VERSION}"
+    )
+    ledger = idempotency_ledger or REQUEST_IDEMPOTENCY_LEDGER
+    lifecycle_disposition = None
+    if ledger is not None:
+        lifecycle_disposition = ledger.begin(
+            request_id=str(req_id),
+            request_identity_hash=frozen_request.request_identity_hash,
+            provider_id=str(provider_identity.get("provider_id") or ""),
+            model_id=str(provider_identity.get("model_id") or ""),
+            prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+            schema_fingerprint=schema_preflight.schema_fingerprint,
+            response_path=resp_dir / f"{req_id}.json",
+            stale_after_sec=REQUEST_LOCK_STALE_SEC,
+        )
+        if lifecycle_disposition.action == "REUSE":
+            assert lifecycle_disposition.response is not None
+            atomic_write_json(
+                resp_dir / f"{req_id}.json",
+                lifecycle_disposition.response,
+                encoding=RESP_ENCODING,
+            )
+            _export_mql_tester_replay_cache(
+                payload,
+                lifecycle_disposition.response,
+                resp_dir.parent,
+            )
+            log(
+                "[idempotency_hit]"
+                f" request_id={req_id}"
+                f" request_identity_hash={frozen_request.request_identity_hash[:16]}"
+                f" reason={lifecycle_disposition.reason}"
+                " provider_call=false"
+            )
+            moved, _ = _archive_request_terminal(
+                req_path,
+                "completed",
+                "idempotent_response_reused",
+            )
+            ledger.transition(
+                str(req_id),
+                "ARCHIVED" if moved else "COMPLETED",
+                extra={"archive_reason": "idempotent_response_reused"},
+            )
+            return
+        if lifecycle_disposition.action == "COLLISION":
+            log(
+                "[duplicate_request_blocked]"
+                f" request_id={req_id}"
+                f" request_identity_hash={frozen_request.request_identity_hash[:16]}"
+                f" reason={lifecycle_disposition.reason}"
+            )
+            raise ValueError(lifecycle_disposition.reason)
+        if lifecycle_disposition.action == "ACTIVE":
+            log(
+                "[duplicate_request_blocked]"
+                f" request_id={req_id}"
+                f" request_identity_hash={frozen_request.request_identity_hash[:16]}"
+                " reason=duplicate_request_already_running"
+            )
+            raise ValueError("duplicate_request_already_running")
+        log(
+            "[request_claimed]"
+            f" request_id={req_id}"
+            f" request_identity_hash={frozen_request.request_identity_hash[:16]}"
+            f" worker_id={ledger.worker_id}"
+            f" lifecycle_version={REQUEST_LIFECYCLE_VERSION}"
+        )
     request_contract = request_fingerprint(
         payload,
-        model=AI_CONFIG.model,
+        model=str(provider_identity.get("model_id") or AI_CONFIG.model),
         reasoning_effort=AI_CONFIG.reasoning_effort,
         decision_quality_tier="FULL_STRUCTURED_REQUIRED",
         prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
@@ -5982,13 +7682,39 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         target_schema_version=AI_TARGET_ARBITRATION_SCHEMA_VERSION,
         prior_artifact_hash=str(prior_artifact.get("artifact_hash") or ""),
         prior_artifact_version=str(prior_artifact.get("prior_version") or HIERARCHICAL_PRIOR_SCHEMA_VERSION),
+        provider_mode=str(provider_identity.get("provider_mode") or "UNAVAILABLE"),
+        provider_id=str(provider_identity.get("provider_id") or "unavailable"),
+        model_fingerprint=str(provider_identity.get("model_fingerprint") or "unavailable"),
+        family_profile_version=FAMILY_PROFILE_VERSION,
+        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
+        generation_settings_hash=str(provider_identity.get("generation_settings_hash") or ""),
     )
     payload["request_fingerprint"] = request_contract["request_fingerprint"]
     payload["request_fingerprint_contract"] = request_contract
     payload["hierarchical_prior_artifact_hash"] = request_contract["prior_artifact_hash"]
     payload["hierarchical_prior_schema_version"] = HIERARCHICAL_PRIOR_SCHEMA_VERSION
 
-    dec = score_setup(payload)
+    frozen_request.assert_unchanged(payload)
+    if ledger is not None and lock_path is not None:
+        with RequestHeartbeat(
+            ledger=ledger,
+            request_id=str(req_id),
+            lock_path=lock_path,
+            expected_max_provider_duration_sec=(
+                EXPECTED_MAX_PROVIDER_DURATION_SEC
+            ),
+        ):
+            log(
+                "[provider_call_started]"
+                f" request_id={req_id}"
+                f" request_identity_hash={frozen_request.request_identity_hash[:16]}"
+                f" provider={provider_identity.get('provider_id', '')}"
+                f" model={provider_identity.get('model_id', '')}"
+            )
+            dec = score_setup(payload, frozen_request=frozen_request)
+    else:
+        dec = score_setup(payload, frozen_request=frozen_request)
+    frozen_request.assert_unchanged(payload)
 
     po3 = _as_dict(payload.get("po3"))
     plan = _as_dict(payload.get("plan"))
@@ -6139,6 +7865,10 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         decision_repeatability = _repeatability_authority_for(
             str(dec.model_version or AI_CONFIG.model),
             str(dec.decision_quality_tier or DECISION_QUALITY_FULL_STRUCTURED),
+            provider_mode=dec.provider_mode,
+            provider_id=dec.provider_id,
+            model_fingerprint=dec.model_fingerprint,
+            generation_settings_hash=dec.generation_settings_hash,
         )
     trade_authorized_by_contract = response_can_trade(
         dec.decision_quality_tier,
@@ -6154,6 +7884,16 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "id": req_id,
         "session_id": str(payload.get("session_id") or ""),
         "request_nonce": str(payload.get("request_nonce") or ""),
+        "request_identity_version": AI_REQUEST_IDENTITY_VERSION,
+        "identity_schema_version": AI_REQUEST_IDENTITY_VERSION,
+        "canonicalization_version": AI_IDENTITY_CANONICALIZATION_VERSION,
+        "request_identity_hash": str(payload.get("request_identity_hash") or ""),
+        "request_created_sim_time": int(payload.get("request_created_sim_time") or 0),
+        "request_created_wall_time": int(payload.get("request_created_wall_time") or 0),
+        "candidate_count": int(payload.get("candidate_count") or len(cands)),
+        "ordered_candidate_identities": list(
+            payload.get("ordered_candidate_identities") or []
+        ),
         # Preserve the exact canonical tester mode in the transport envelope;
         # _payload_workload_mode intentionally collapses tester modes only for
         # OpenAI service-tier/batch routing.
@@ -6165,8 +7905,53 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         "cohort_schema_version": COHORT_SCHEMA_VERSION,
         "hierarchical_outcome_model_version": HIERARCHICAL_OUTCOME_MODEL_VERSION,
         "response_id": str(dec.decision_id or f"{req_id}:{dec.decision_source or 'decision'}"),
-        "model_returned": str(dec.model_version or AI_CONFIG.model),
-        "reasoning_configuration": str(AI_CONFIG.reasoning_effort),
+        "provider_contract_version": str(dec.provider_contract_version or PROVIDER_CONTRACT_VERSION),
+        "provider_mode": str(dec.provider_mode or provider_identity.get("provider_mode") or "UNAVAILABLE"),
+        "provider_id": str(dec.provider_id or provider_identity.get("provider_id") or "unavailable"),
+        "endpoint_class": str(dec.endpoint_class or provider_identity.get("endpoint_class") or "invalid"),
+        "endpoint_identity_hash": str(
+            dec.endpoint_identity_hash or provider_identity.get("endpoint_identity_hash") or ""
+        ),
+        "configured_models_hash": str(
+            dec.configured_models_hash or provider_identity.get("configured_models_hash") or ""
+        ),
+        "model_returned": str(dec.actual_model_id or dec.model_version or AI_CONFIG.model),
+        "actual_model_id": str(dec.actual_model_id or dec.model_version or AI_CONFIG.model),
+        "fallback_model": str(dec.fallback_model or ""),
+        "model_fingerprint": str(dec.model_fingerprint or "unavailable"),
+        "reasoning_configuration": (
+            str(AI_CONFIG.reasoning_effort)
+            if dec.provider_mode == PROVIDER_MODE_REMOTE
+            else (
+                f"temperature={AI_CONFIG.local_temperature:.4f};top_p={AI_CONFIG.local_top_p:.4f};"
+                f"seed={AI_CONFIG.local_seed};thinking={str(AI_CONFIG.local_enable_thinking).lower()}"
+            )
+        ),
+        "evidence_envelope_version": str(dec.evidence_envelope_version or EVIDENCE_ENVELOPE_VERSION),
+        "family_profile_version": str(dec.family_profile_version or FAMILY_PROFILE_VERSION),
+        "memory_schema_version": str(dec.memory_schema_version or TRADE_MEMORY_SCHEMA_VERSION),
+        "retrieval_policy_version": str(dec.retrieval_policy_version or RETRIEVAL_POLICY_VERSION),
+        "role_contract_version": str(dec.role_contract_version or ROLE_CONTRACT_VERSION),
+        "consensus_resolver_version": str(dec.consensus_resolver_version or CONSENSUS_RESOLVER_VERSION),
+        "generation_settings_hash": str(dec.generation_settings_hash or provider_identity.get("generation_settings_hash") or ""),
+        "input_fingerprint": str(dec.input_fingerprint or ""),
+        "retrieved_analogue_ids": list(dec.retrieved_analogue_ids or []),
+        "historical_evidence_state": str(dec.historical_evidence_state or "INSUFFICIENT_SAMPLE"),
+        "analyst_response_fingerprint": str(dec.analyst_response_fingerprint or ""),
+        "critic_response_fingerprint": str(dec.critic_response_fingerprint or ""),
+        "adjudicator_response_fingerprint": str(dec.adjudicator_response_fingerprint or ""),
+        "final_resolver_reason": str(dec.final_resolver_reason or ""),
+        "provider_health_state": str(dec.provider_health_state or "unavailable"),
+        "role_latencies": dict(dec.role_latencies or {}),
+        "provider_retry_counts": dict(dec.provider_retry_counts or {}),
+        "provider_usage": dict(dec.provider_usage or {}),
+        "estimated_context_tokens": dec.estimated_context_tokens,
+        "unsupported_generation_parameters": list(
+            dec.unsupported_generation_parameters or []
+        ),
+        "analyst_output": dict(dec.analyst_output or {}),
+        "critic_output": dict(dec.critic_output or {}),
+        "adjudicator_output": dict(dec.adjudicator_output or {}),
         "bucket_prior_hash": request_contract["prior_artifact_hash"],
         "calibration_artifact_id": "",
         "request_fingerprint": request_contract["request_fingerprint"],
@@ -6319,8 +8104,71 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
 
     resp_path = resp_dir / f"{req_id}.json"
     resp_dir.mkdir(parents=True, exist_ok=True)
+    if ledger is not None:
+        ledger.transition(
+            str(req_id),
+            "RESPONSE_VALIDATED",
+            extra={
+                "validated_response": resp,
+                "decision_quality_tier": str(
+                    resp.get("decision_quality_tier") or ""
+                ),
+                "identity_valid": (
+                    str(resp.get("decision_source") or "")
+                    != "request_identity_mismatch"
+                ),
+            },
+        )
     atomic_write_json(resp_path, resp, encoding=RESP_ENCODING)
+    if ledger is not None:
+        ledger.transition(
+            str(req_id),
+            "RESPONSE_WRITTEN",
+            extra={"response_path": str(resp_path)},
+        )
+    log(
+        "[response_written]"
+        f" request_id={req_id}"
+        f" request_identity_hash={str(resp.get('request_identity_hash') or '')[:16]}"
+        f" quality_tier={resp.get('decision_quality_tier', '')}"
+        f" path={resp_path.name}"
+    )
     _export_mql_tester_replay_cache(payload, resp, resp_dir.parent)
+    quality_tier = str(resp.get("decision_quality_tier") or "")
+    if (
+        quality_tier
+        in {
+            DECISION_QUALITY_FULL_STRUCTURED,
+            DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+        }
+        and bool(resp.get("mandatory_fields_complete"))
+    ):
+        _inc_counter("schema_valid_responses")
+    else:
+        _inc_counter("schema_invalid_responses")
+        if quality_tier not in {
+            DECISION_QUALITY_FULL_STRUCTURED,
+            DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+        }:
+            _inc_counter("degraded_responses")
+    response_rejection_codes = {
+        str(code) for code in (resp.get("rejection_codes") or [])
+    }
+    if response_rejection_codes.intersection(
+        {
+            "request_identity_mismatch",
+            "candidate_hash_mismatch",
+            "execution_fingerprint_mismatch",
+        }
+    ):
+        _inc_counter("identity_mismatches")
+    decision_state = str(resp.get("decision_state") or "").upper()
+    if bool(resp.get("python_final_allow")):
+        _inc_counter("ai_approvals")
+    elif decision_state == DECISION_ABSTAIN:
+        _inc_counter("ai_abstentions")
+    else:
+        _inc_counter("ai_rejections")
     write_debug_json(
         resp_dir.parent / "response_debug" / f"{req_id}.json",
         {
@@ -6351,6 +8199,28 @@ def process_one(req_path: Path, resp_dir: Path, stale_dir: Path) -> None:
         + ";".join(dec.rejection_codes or [dec.decision_source or "python_reject"])
     )
     moved, move_reason = _archive_request_terminal(req_path, terminal_state, terminal_reason)
+    if ledger is not None:
+        ledger.transition(
+            str(req_id),
+            "COMPLETED",
+            extra={
+                "terminal_state": terminal_state,
+                "terminal_reason": terminal_reason,
+            },
+        )
+        if moved:
+            ledger.transition(
+                str(req_id),
+                "ARCHIVED",
+                extra={"archive_state": terminal_state},
+            )
+    log(
+        "[request_completed]"
+        f" request_id={req_id}"
+        f" request_identity_hash={str(resp.get('request_identity_hash') or '')[:16]}"
+        f" terminal_state={terminal_state}"
+        f" archived={str(moved).lower()}"
+    )
     if not moved and move_reason == "permission_denied":
         log(f"[ai_gate] request cleanup deferred {req_path.name}: permission_denied")
     elif not moved and move_reason != "missing":
@@ -6365,7 +8235,13 @@ def _process_claimed_request(
 ) -> None:
     req_id = req_path.stem
     try:
-        process_one(req_path, resp_dir, stale_dir)
+        process_one(
+            req_path,
+            resp_dir,
+            stale_dir,
+            lock_path=lock_path,
+            idempotency_ledger=REQUEST_IDEMPOTENCY_LEDGER,
+        )
     except Exception as exc:
         log(f"[ai_gate] ERROR {req_path.name}: {exc}")
         payload_summary: Dict[str, Any] = {"bridge_error": str(exc)}
@@ -6408,33 +8284,16 @@ def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
     }
 
     for req_path in sorted(req_dir.glob("*.json")):
-        if req_path.name.endswith(".tmp") or not _is_stable_input_file(req_path):
+        stable, stability_reason = _stable_input_status(req_path)
+        if not stable:
+            _quarantine_unstable_input_if_terminal(req_path, stability_reason)
             continue
+        _UNSTABLE_FILE_STATE.pop(str(req_path.resolve()), None)
         summary["requests_seen"] += 1
         req_id = req_path.stem
         resp_path = resp_dir / f"{req_id}.json"
 
         try:
-            if resp_path.exists():
-                status = _repair_mql_tester_replay_cache_from_existing_response(req_path, resp_path, bus)
-                summary["repaired_existing_response"] += 1
-                if status == "written":
-                    summary["cache_written"] += 1
-                elif status == "existing":
-                    summary["cache_existing"] += 1
-                else:
-                    summary["skipped"] += 1
-                moved, move_reason = _archive_request_terminal(
-                    req_path,
-                    "completed",
-                    "existing_response_reconciled",
-                )
-                if moved:
-                    summary["moved_to_stale"] += 1
-                elif move_reason not in {"missing", "permission_denied"}:
-                    log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
-                continue
-
             lock_path = _acquire_request_claim(lock_dir, req_path)
             if lock_path is None:
                 summary["skipped"] += 1
@@ -6451,7 +8310,14 @@ def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
             except Exception:
                 before_cache_path = None
 
-            processing_path = _move_claimed_request_to_processing(req_path)
+            try:
+                processing_path = _move_claimed_request_to_processing(req_path)
+            except FileBusClaimDeferredError as exc:
+                _release_request_claim(lock_path)
+                _handle_claim_deferred(req_path, exc)
+                summary["skipped"] += 1
+                continue
+            _CLAIM_DEFERRED_STATE.pop(str(req_path.resolve()), None)
             _process_claimed_request(processing_path, resp_dir, stale_dir, lock_path)
             summary["processed_new"] += 1
             if not req_path.exists():
@@ -6504,22 +8370,29 @@ def _write_startup_policy_manifest(bus: Path) -> Dict[str, Any]:
     policy_dir = bus / "logs" / "policies"
     config_dir = bus / "config"
     ledger_status = _ledger_status_for_policy_manifest(bus)
+    management_path = bus / "logs" / "analytics" / "management_policy.json"
+    calibration_path = resolve_project_path("data/calibration_artifact.json")
+    analytics_policy_enabled = bool(ANALYTICS_AUTO_ACTIVATE)
+    hierarchical_prior_enabled = bool(AI_CONFIG.require_live_bucket_priors)
+    repeatability_enabled = bool(
+        AI_CONFIG.require_repeatability_live or AI_CONFIG.shadow_repeat_enable
+    )
     # Python starts before it has an EA request and therefore cannot prove the
     # active runtime-input contract.  An empty expected hash would incorrectly
     # look compatible; active policy authority remains blocked at this stage.
     ea_runtime_required = "__EA_RUNTIME_INPUT_HASH_REQUIRED__"
     specs = [
-        PolicySpec("active", "active_policy", policy_dir / "active_policy.json", True, "active", expected_runtime_input_hash=ea_runtime_required),
-        PolicySpec("context", "context_policy", policy_dir / "context_policy.ndjson", True, "active", expected_runtime_input_hash=ea_runtime_required),
-        PolicySpec("subtype", "subtype_policy", policy_dir / "subtype_policy.ndjson", True, "active", expected_runtime_input_hash=ea_runtime_required),
-        PolicySpec("session", "session_weekday_policy", policy_dir / "session_weekday_policy.ndjson", True, "active", expected_runtime_input_hash=ea_runtime_required),
-        PolicySpec("hierarchical_priors", "hierarchical_priors", AI_CONFIG.live_bucket_priors_file, True, "active", HIERARCHICAL_PRIOR_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
+        PolicySpec("active", "active_policy", policy_dir / "active_policy.json", analytics_policy_enabled, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("context", "context_policy", policy_dir / "context_policy.ndjson", analytics_policy_enabled, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("subtype", "subtype_policy", policy_dir / "subtype_policy.ndjson", analytics_policy_enabled, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("session", "session_weekday_policy", policy_dir / "session_weekday_policy.ndjson", analytics_policy_enabled, "active", expected_runtime_input_hash=ea_runtime_required),
+        PolicySpec("hierarchical_priors", "hierarchical_priors", AI_CONFIG.live_bucket_priors_file, hierarchical_prior_enabled, "active", HIERARCHICAL_PRIOR_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
         PolicySpec("risk_factors", "risk_factor_policy", config_dir / "risk_factor_policy.v1.json", True, "active", RISK_FACTOR_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
         PolicySpec("invalidation", "invalidation_policy", config_dir / "invalidation_policy.v1.json", True, "active", INVALIDATION_POLICY_SCHEMA_VERSION, ea_runtime_required, AI_DECISION_SCHEMA_VERSION, SETUP_TAXONOMY_VERSION),
         PolicySpec("normalized_fvg", "normalized_fvg_policy", config_dir / "normalized_fvg_policy.v2.json", True, "shadow", NORMALIZED_FVG_SCHEMA_VERSION),
-        PolicySpec("management", "management_policy", bus / "logs" / "analytics" / "management_policy.json", True, "shadow", MANAGEMENT_SCHEMA_VERSION),
-        PolicySpec("calibration", "calibration_artifact", resolve_project_path("data/calibration_artifact.json"), True, "shadow", CALIBRATION_CONTRACT_VERSION),
-        PolicySpec("repeatability", "repeatability_artifact", AI_CONFIG.shadow_repeat_artifact_file, True, "shadow", REPEATABILITY_SCHEMA_VERSION),
+        PolicySpec("management", "management_policy", management_path, management_path.is_file(), "shadow", MANAGEMENT_SCHEMA_VERSION),
+        PolicySpec("calibration", "calibration_artifact", calibration_path, calibration_path.is_file(), "shadow", CALIBRATION_CONTRACT_VERSION),
+        PolicySpec("repeatability", "repeatability_artifact", AI_CONFIG.shadow_repeat_artifact_file, repeatability_enabled, "shadow", REPEATABILITY_SCHEMA_VERSION),
     ]
     manifest = build_startup_policy_manifest(
         specs,
@@ -6537,6 +8410,7 @@ def _write_startup_policy_manifest(bus: Path) -> Dict[str, Any]:
         log(
             "[startup_policy_manifest]"
             f" policy_type={row['policy_type']} policy_id={row['policy_id']}"
+            f" enabled={str(bool(row['enabled'])).lower()}"
             f" status={row['status']} authority={row['authority']}"
             f" reason={';'.join(row['rejection_reasons']) or 'none'}"
         )
@@ -6548,11 +8422,225 @@ def _log_file_bus_summary() -> None:
         return
     summary = FILE_BUS_LIFECYCLE.summary()
     log("[file_bus_final_summary] " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
+    with AI_GATE_COUNTERS_LOCK:
+        ai_summary = dict(AI_GATE_COUNTERS)
+    log(
+        "[ai_gate_final_summary] "
+        + json.dumps(ai_summary, sort_keys=True, separators=(",", ":"))
+    )
+
+
+def _audit_runtime_caches(bus: Path, *, quarantine_incompatible: bool) -> Dict[str, Any]:
+    tester_dir = bus / "logs" / "tester_ai_cache"
+    tester_quarantine = tester_dir / "quarantined"
+    tester_valid = 0
+    tester_invalid = 0
+    tester_quarantined = 0
+    tester_reasons: Dict[str, int] = {}
+    if tester_dir.is_dir():
+        for path in sorted(tester_dir.glob("*.json")):
+            reason = ""
+            try:
+                row = read_json_any_encoding(path)
+                reason = _mql_tester_cache_skip_reason(row)
+                if not reason:
+                    stored_binding = str(row.get("response_binding_hash") or "")
+                    expected_binding = response_binding_hash(row)
+                    if not stored_binding or stored_binding != expected_binding:
+                        reason = "response_binding_hash_mismatch"
+            except Exception as exc:
+                reason = "cache_json_invalid_" + type(exc).__name__
+            if not reason:
+                tester_valid += 1
+                continue
+            tester_invalid += 1
+            tester_reasons[reason] = tester_reasons.get(reason, 0) + 1
+            log(
+                "[cache_quarantine]"
+                f" pending={str(quarantine_incompatible).lower()}"
+                f" cache=tester key={path.stem} reason={reason}"
+            )
+            if quarantine_incompatible:
+                tester_quarantine.mkdir(parents=True, exist_ok=True)
+                target = tester_quarantine / (
+                    f"{path.stem}__{reason}_{int(time.time() * 1000)}.json"
+                )
+                os.replace(path, target)
+                tester_quarantined += 1
+
+    python_path = AI_CONFIG.decision_cache_file
+    python_valid = 0
+    python_invalid = 0
+    python_quarantined = 0
+    python_reasons: Dict[str, int] = {}
+    retained_lines: list[str] = []
+    rejected_lines: list[str] = []
+    if python_path.is_file():
+        for raw_line in python_path.read_text(encoding="utf-8").splitlines():
+            if not raw_line.strip():
+                continue
+            reason = ""
+            try:
+                row = strict_json_loads(raw_line)
+                if not isinstance(row, dict):
+                    reason = "cache_row_not_object"
+                else:
+                    decision_row = row.get("decision")
+                    if not isinstance(decision_row, dict):
+                        reason = "cache_decision_missing"
+                    else:
+                        reason = _cached_decision_schema_miss_reason(decision_row)
+            except Exception as exc:
+                reason = "cache_json_invalid_" + type(exc).__name__
+            if reason:
+                python_invalid += 1
+                python_reasons[reason] = python_reasons.get(reason, 0) + 1
+                rejected_lines.append(raw_line)
+            else:
+                python_valid += 1
+                retained_lines.append(raw_line)
+        if quarantine_incompatible and rejected_lines:
+            quarantine_dir = python_path.parent / "cache_quarantine"
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+            quarantine_path = quarantine_dir / (
+                f"{python_path.stem}__incompatible_{int(time.time() * 1000)}.jsonl"
+            )
+            quarantine_path.write_text(
+                "\n".join(rejected_lines) + "\n",
+                encoding="utf-8",
+            )
+            replacement = "\n".join(retained_lines)
+            if replacement:
+                replacement += "\n"
+            temp_path = python_path.with_name(
+                f".{python_path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+            )
+            try:
+                with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(replacement)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_path, python_path)
+            finally:
+                try:
+                    temp_path.unlink()
+                except FileNotFoundError:
+                    pass
+            python_quarantined = len(rejected_lines)
+
+    summary = {
+        "tester_cache": {
+            "valid": tester_valid,
+            "invalid": tester_invalid,
+            "quarantined": tester_quarantined,
+            "reasons": tester_reasons,
+        },
+        "python_decision_cache": {
+            "valid": python_valid,
+            "invalid": python_invalid,
+            "quarantined": python_quarantined,
+            "reasons": python_reasons,
+        },
+    }
+    log("[cache_audit] " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
+    return summary
+
+
+def _runtime_repeatability_block_reason(
+    required_live: bool,
+    authority: Mapping[str, Any],
+) -> str:
+    if not required_live or authority.get("status") == REPEATABLE:
+        return ""
+    return str(
+        authority.get("reason")
+        or "repeatability_authority_unavailable"
+    )
+
+
+def _validate_runtime_authority(bus: Path) -> tuple[bool, Dict[str, Any]]:
+    preflight = _run_structured_schema_preflight()
+    health = _refresh_provider_health(force=True)
+    policy_manifest = _write_startup_policy_manifest(bus)
+    cache_summary = _audit_runtime_caches(bus, quarantine_incompatible=False)
+    repeatability = _load_repeatability_artifact()
+    primary_identity = _provider().identity("analyst")
+    repeatability_authority = _repeatability_authority_for(
+        AI_CONFIG.model,
+        DECISION_QUALITY_FULL_STRUCTURED,
+        provider_mode=str(primary_identity.get("provider_mode") or ""),
+        provider_id=str(primary_identity.get("provider_id") or ""),
+        model_fingerprint=str(primary_identity.get("model_fingerprint") or ""),
+        generation_settings_hash=str(
+            primary_identity.get("generation_settings_hash") or ""
+        ),
+    )
+    prior = _load_live_bucket_priors()
+    bus_paths = {
+        name: (bus / name).is_dir()
+        for name in (
+            "requests",
+            "responses",
+            "processing",
+            "completed",
+            "rejected",
+            "timed_out",
+            "stale",
+            "quarantined",
+        )
+    }
+    blocking: list[str] = []
+    if not AI_CONFIG.provider_config_valid:
+        blocking.append("provider_configuration_invalid")
+    if not preflight.get("valid"):
+        blocking.append("structured_schema_preflight_failed")
+    if not health.get("healthy"):
+        blocking.append("provider_health_failed")
+    if not all(bus_paths.values()):
+        blocking.append("file_bus_directory_missing")
+    repeatability_block = _runtime_repeatability_block_reason(
+        AI_CONFIG.require_repeatability_live,
+        repeatability_authority,
+    )
+    if repeatability_block:
+        blocking.append(repeatability_block)
+    if AI_CONFIG.require_live_bucket_priors and not str(prior.get("artifact_hash") or ""):
+        blocking.append("hierarchical_priors_unavailable")
+    report = {
+        "valid_for_live_authority": not blocking,
+        "blocking_reasons": blocking,
+        "provider": AI_CONFIG.safe_log_dict(),
+        "provider_health": health,
+        "structured_schemas": preflight,
+        "bus_paths": bus_paths,
+        "policy_manifest_hash": policy_manifest.get("manifest_hash"),
+        "policy_authorities": {
+            str(row.get("policy_type")): str(row.get("authority"))
+            for row in policy_manifest.get("policies") or []
+            if isinstance(row, Mapping)
+        },
+        "cache": cache_summary,
+        "ledger_integrity_status": _ledger_status_for_policy_manifest(bus),
+        "repeatability_status": str(repeatability.get("_load_status") or "unknown"),
+        "repeatability_groups": len(repeatability.get("groups") or {}),
+        "repeatability_authority": repeatability_authority,
+        "hierarchical_prior_status": str(prior.get("_load_status") or "unknown"),
+    }
+    governance_atomic_write_json(bus / "logs" / "runtime_validation_latest.json", report)
+    log("[runtime_validation] " + json.dumps(report, sort_keys=True, separators=(",", ":")))
+    return not blocking, report
 
 # ---------- Main loop ----------
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "command",
+        nargs="?",
+        choices=("run", "validate-runtime", "cache-audit", "cache-clear-incompatible"),
+        default="run",
+        help="Run the bridge or execute one maintenance command.",
+    )
     ap.add_argument("--common-files-dir", type=str, default="",
                     help="Path to MT5 Common/Files folder. If omitted, uses COMMON_FILES_DIR env var.")
     ap.add_argument("--bus-root", type=str, default=DEFAULT_BUS_ROOT,
@@ -6604,15 +8692,19 @@ def main() -> None:
     lock_dir = bus / "locks"
     analytics_jobs_dir = bus / "logs" / "analytics_jobs"
 
-    global LOG_FILE, FILE_BUS_LIFECYCLE
+    global LOG_FILE, FILE_BUS_LIFECYCLE, REQUEST_IDEMPOTENCY_LEDGER
     LOG_FILE = bus / "logs" / "ai_gate.log"
-    set_openai_usage_bus(bus)
+    set_ai_usage_bus(bus)
 
     FILE_BUS_LIFECYCLE = FileBusLifecycle(
         bus,
         session_id=f"python_{os.getpid()}_{int(time.time())}",
     )
     FILE_BUS_LIFECYCLE.ensure()
+    REQUEST_IDEMPOTENCY_LEDGER = RequestIdempotencyLedger(
+        bus / "request_ledger",
+        worker_id=FILE_BUS_LIFECYCLE.session_id,
+    )
     recovered = FILE_BUS_LIFECYCLE.recover_processing(stale_after_sec=REQUEST_LOCK_STALE_SEC)
 
     req_dir.mkdir(parents=True, exist_ok=True)
@@ -6622,14 +8714,39 @@ def main() -> None:
     analytics_jobs_dir.mkdir(parents=True, exist_ok=True)
 
     poll_s = max(0.05, args.poll_ms / 1000.0)
+    if args.command == "cache-audit":
+        summary = _audit_runtime_caches(bus, quarantine_incompatible=False)
+        invalid = (
+            int(summary["tester_cache"]["invalid"])
+            + int(summary["python_decision_cache"]["invalid"])
+        )
+        raise SystemExit(1 if invalid else 0)
+    if args.command == "cache-clear-incompatible":
+        _audit_runtime_caches(bus, quarantine_incompatible=True)
+        raise SystemExit(0)
+    if args.command == "validate-runtime":
+        valid, _ = _validate_runtime_authority(bus)
+        raise SystemExit(0 if valid else 2)
+
+    selected_provider = _provider()
+    if set_expectancy_ai_provider is not None:
+        set_expectancy_ai_provider(selected_provider)
     worker_count = max(1, min(16, args.workers))
+    if selected_provider.provider_mode == PROVIDER_MODE_LOCAL:
+        worker_count = 1
     request_pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ai-gate")
 
     log(f"[ai_gate] Bus root: {bus}")
     log(f"[ai_gate] Watching requests:  {req_dir}")
     log(f"[ai_gate] Writing responses: {resp_dir}")
     log(f"[ai_gate] Stale/bin:         {stale_dir}")
-    log(f"[ai_gate] Model chain:       {', '.join(_candidate_models())}")
+    log(
+        "[ai_gate] Selected provider:"
+        f" mode={selected_provider.provider_mode} id={selected_provider.provider_id}"
+        f" endpoint_class={selected_provider.endpoint_class}"
+        f" analyst_model={selected_provider.model_for_role('analyst')}"
+        " cross_provider_fallback=false"
+    )
     log(f"[ai_gate] Request workers:    {worker_count}")
     log(f"[ai_gate] Analytics jobs:    {analytics_jobs_dir}")
     log(
@@ -6637,7 +8754,10 @@ def main() -> None:
         f" session_id={FILE_BUS_LIFECYCLE.session_id} recovered={len(recovered)}"
     )
     _log_ai_runtime_config_once()
+    _run_structured_schema_preflight()
+    _refresh_provider_health(force=True)
     _refresh_prior_startup_audit()
+    _ensure_repeatability_artifact_container()
     _write_startup_policy_manifest(bus)
     repeatability_artifact = _load_repeatability_artifact()
     log(
@@ -6657,30 +8777,29 @@ def main() -> None:
     while True:
         try:
             for req_path in sorted(req_dir.glob("*.json")):
-                # Skip partial writes
-                if req_path.name.endswith(".tmp") or not _is_stable_input_file(req_path):
-                    continue
-                req_id = req_path.stem
-                resp_path = resp_dir / f"{req_id}.json"
-                if resp_path.exists():
-                    _repair_mql_tester_replay_cache_from_existing_response(req_path, resp_path, bus)
-                    moved, move_reason = _archive_request_terminal(
+                stable, stability_reason = _stable_input_status(req_path)
+                if not stable:
+                    _quarantine_unstable_input_if_terminal(
                         req_path,
-                        "completed",
-                        "existing_response_reconciled",
+                        stability_reason,
                     )
-                    if not moved and move_reason not in {"missing", "permission_denied"}:
-                        log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
                     continue
+                _UNSTABLE_FILE_STATE.pop(str(req_path.resolve()), None)
+                req_id = req_path.stem
                 lock_path = _acquire_request_claim(lock_dir, req_path)
                 if lock_path is None:
                     continue
                 try:
                     processing_path = _move_claimed_request_to_processing(req_path)
+                except FileBusClaimDeferredError as exc:
+                    _release_request_claim(lock_path)
+                    _handle_claim_deferred(req_path, exc)
+                    continue
                 except Exception as exc:
                     _release_request_claim(lock_path)
                     log(f"[file_bus] claim_failed request={req_path.name} error={exc}")
                     continue
+                _CLAIM_DEFERRED_STATE.pop(str(req_path.resolve()), None)
                 request_pool.submit(
                     _process_claimed_request,
                     processing_path,

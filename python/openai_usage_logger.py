@@ -29,6 +29,10 @@ CSV_FIELDS = [
     "status",
     "request_id",
     "response_id",
+    "provider_mode",
+    "provider_id",
+    "endpoint_class",
+    "model_fingerprint",
     "model",
     "reasoning_effort",
     "max_output_tokens",
@@ -38,15 +42,23 @@ CSV_FIELDS = [
     "reasoning_output_tokens",
     "total_tokens",
     "estimated_cost_usd",
+    "tokens_per_second",
+    "estimated_context_tokens",
     "error_type",
     "error_message",
 ]
 
 
-def set_openai_usage_bus(bus_path: str | Path) -> None:
+def set_ai_usage_bus(bus_path: str | Path) -> None:
     global _BUS_PATH
     _BUS_PATH = Path(bus_path)
     os.environ["PO3_AI_BUS_PATH"] = str(_BUS_PATH)
+
+
+def set_openai_usage_bus(bus_path: str | Path) -> None:
+    """Compatibility alias for existing dashboard/report callers."""
+
+    set_ai_usage_bus(bus_path)
 
 
 def _default_bus_path() -> Path:
@@ -145,7 +157,7 @@ def _estimated_cost(model: str, input_tokens: int, cached_input_tokens: int, out
     return round(cost, 8)
 
 
-def log_openai_usage(
+def log_ai_usage(
     *,
     source: str,
     operation: str,
@@ -157,8 +169,18 @@ def log_openai_usage(
     max_output_tokens: int | str | None = None,
     error: Exception | str | None = None,
     extra: Optional[Dict[str, Any]] = None,
+    provider_mode: str = "REMOTE_API",
+    provider_id: str = "openai_remote_api",
+    endpoint_class: str = "official_remote",
+    model_fingerprint: str = "",
+    tokens_per_second: float | None = None,
+    estimated_context_tokens: int | None = None,
 ) -> Dict[str, Any]:
-    if os.getenv("OPENAI_USAGE_LOG_ENABLE", "true").strip().lower() not in {"1", "true", "yes", "on"}:
+    enabled = os.getenv(
+        "AI_USAGE_LOG_ENABLE",
+        os.getenv("OPENAI_USAGE_LOG_ENABLE", "true"),
+    )
+    if enabled.strip().lower() not in {"1", "true", "yes", "on"}:
         return {}
 
     usage = _usage_from_response(response)
@@ -188,6 +210,10 @@ def log_openai_usage(
         "status": str(status or ""),
         "request_id": str(request_id or ""),
         "response_id": _response_id(response),
+        "provider_mode": str(provider_mode or ""),
+        "provider_id": str(provider_id or ""),
+        "endpoint_class": str(endpoint_class or ""),
+        "model_fingerprint": str(model_fingerprint or ""),
         "model": str(model or ""),
         "reasoning_effort": str(reasoning_effort or ""),
         "max_output_tokens": _int_value(max_output_tokens),
@@ -196,7 +222,13 @@ def log_openai_usage(
         "output_tokens": output_tokens,
         "reasoning_output_tokens": reasoning_output_tokens,
         "total_tokens": total_tokens,
-        "estimated_cost_usd": _estimated_cost(str(model or ""), input_tokens, cached_input_tokens, output_tokens),
+        "estimated_cost_usd": (
+            _estimated_cost(str(model or ""), input_tokens, cached_input_tokens, output_tokens)
+            if str(provider_mode or "").upper() == "REMOTE_API"
+            else 0.0
+        ),
+        "tokens_per_second": tokens_per_second,
+        "estimated_context_tokens": estimated_context_tokens,
         "error_type": error_type,
         "error_message": error_message[:500],
         "raw_usage": usage,
@@ -224,3 +256,11 @@ def log_openai_usage(
 
     return row
 
+
+def log_openai_usage(**kwargs: Any) -> Dict[str, Any]:
+    """Compatibility alias that explicitly records remote OpenAI transport."""
+
+    kwargs.setdefault("provider_mode", "REMOTE_API")
+    kwargs.setdefault("provider_id", "openai_remote_api")
+    kwargs.setdefault("endpoint_class", "official_remote")
+    return log_ai_usage(**kwargs)

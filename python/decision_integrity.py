@@ -8,9 +8,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping, Sequence
 
 
-AI_DECISION_SCHEMA_VERSION = "20260718_ai_decision_authority_v6"
+AI_DECISION_SCHEMA_VERSION = "20260724_python_owned_identity_v9"
 AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260717_target_fingerprint_authority_v6"
-AI_PROMPT_CONTRACT_VERSION = "20260718_qualitative_veto_repeatability_v8"
+AI_PROMPT_CONTRACT_VERSION = "20260724_python_owned_identity_v11"
+AI_ROLE_CONTRACT_VERSION = "20260724_python_bound_roles_v3"
+AI_REQUEST_IDENTITY_VERSION = "20260724_ai_request_identity_v2"
+AI_IDENTITY_CANONICALIZATION_VERSION = "20260724_canonical_json_ticks_v1"
 
 DECISION_APPROVE = "APPROVE"
 DECISION_REJECT = "REJECT"
@@ -48,6 +51,11 @@ LLM_VETO_CODES = {
     "ai_veto_data_integrity_failure",
 }
 MANDATORY_ASSESSMENT_FIELDS = (
+    "request_id",
+    "request_identity_hash",
+    "provider_id",
+    "model_id",
+    "role_schema_version",
     "candidate_index",
     "candidate_id",
     "candidate_hash",
@@ -95,6 +103,17 @@ MANDATORY_ASSESSMENT_FIELDS = (
     "calibration_data_window_start",
     "calibration_data_window_end",
     "calibration_available",
+    "role_contract_version",
+    "role",
+    "verdict",
+    "thesis_supported",
+    "material_contradictions",
+    "missing_required_evidence",
+    "historical_evidence_state",
+    "major_risks",
+    "evidence_refs",
+    "confidence_band",
+    "summary",
 )
 
 MANDATORY_NULLABLE_CALIBRATION_FIELDS = (
@@ -157,6 +176,361 @@ class BrokerIdentityResolution:
     position_identifier: int = 0
 
 
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def canonical_decimal(value: Any, *, places: int = 12) -> str:
+    """Locale-independent finite decimal used by identity sort keys."""
+
+    number = Decimal(str(value))
+    if not number.is_finite():
+        raise ValueError("identity_non_finite_number")
+    quantum = Decimal(1).scaleb(-max(0, int(places)))
+    normalized = number.quantize(quantum, rounding=ROUND_HALF_UP).normalize()
+    text = format(normalized, "f")
+    return "0" if text in {"-0", "-0.0"} else text
+
+
+def _candidate_identity_row(raw_candidate: Mapping[str, Any], position: int) -> dict[str, Any]:
+    identity = {
+        "candidate_index": int(raw_candidate.get("candidate_index", position)),
+        "candidate_id": str(raw_candidate.get("candidate_id") or ""),
+        "candidate_hash": str(raw_candidate.get("candidate_hash") or ""),
+        "request_execution_fingerprint": str(
+            raw_candidate.get("request_execution_fingerprint") or ""
+        ),
+        "setup_snapshot_time": int(raw_candidate.get("setup_snapshot_time") or 0),
+        "setup_taxonomy_enum": str(raw_candidate.get("setup_taxonomy_enum") or ""),
+    }
+    missing = [
+        name
+        for name in (
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+        )
+        if not identity[name]
+    ]
+    if missing:
+        raise ValueError(
+            f"request_identity_candidate_fields_missing:{position}:{','.join(missing)}"
+        )
+    return identity
+
+
+def _candidate_stable_sort_key(candidate: Mapping[str, Any], position: int) -> tuple[Any, ...]:
+    direction = str(
+        candidate.get("direction")
+        or ("BUY" if bool(candidate.get("is_buy")) else "SELL")
+    ).upper()
+    return (
+        int(candidate.get("candidate_index", position)),
+        str(candidate.get("symbol") or "").upper(),
+        direction,
+        str(candidate.get("setup_taxonomy_enum") or "").upper(),
+        str(candidate.get("entry_branch") or candidate.get("entry_model") or "").lower(),
+        int(candidate.get("setup_snapshot_time") or 0),
+        canonical_decimal(candidate.get("entry_est") or candidate.get("entry") or 0.0),
+        canonical_decimal(candidate.get("sl") or 0.0),
+        canonical_decimal(candidate.get("tp2") or candidate.get("tp") or 0.0),
+        str(candidate.get("candidate_hash") or ""),
+    )
+
+
+def normalize_and_freeze_candidates(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    candidate_cap: int = 12,
+) -> list[dict[str, Any]]:
+    """Normalize, deduplicate, cap, and freeze ordering before identity hashing."""
+
+    if not candidates:
+        raise ValueError("request_identity_candidates_missing")
+    normalized: list[dict[str, Any]] = []
+    seen_identity: set[tuple[str, str, str]] = set()
+    seen_indexes: dict[int, tuple[str, str, str]] = {}
+    for position, raw_candidate in enumerate(candidates):
+        if not isinstance(raw_candidate, Mapping):
+            raise ValueError(f"request_identity_candidate_not_object:{position}")
+        # A JSON round trip removes mutable mapping subclasses and rejects NaN.
+        candidate = json.loads(_canonical_json(dict(raw_candidate)))
+        identity = _candidate_identity_row(candidate, position)
+        identity_key = (
+            identity["candidate_id"],
+            identity["candidate_hash"],
+            identity["request_execution_fingerprint"],
+        )
+        candidate_index = int(identity["candidate_index"])
+        prior = seen_indexes.get(candidate_index)
+        if prior is not None and prior != identity_key:
+            raise ValueError(f"request_identity_candidate_index_collision:{candidate_index}")
+        if identity_key in seen_identity:
+            continue
+        seen_identity.add(identity_key)
+        seen_indexes[candidate_index] = identity_key
+        normalized.append(candidate)
+
+    normalized.sort(
+        key=lambda row: _candidate_stable_sort_key(
+            row, int(row.get("candidate_index", 0))
+        )
+    )
+    normalized = normalized[: max(1, int(candidate_cap))]
+    indexes = [int(row.get("candidate_index", -1)) for row in normalized]
+    if indexes != list(range(len(normalized))):
+        raise ValueError(
+            "request_identity_candidate_indexes_not_contiguous:"
+            + ",".join(str(value) for value in indexes)
+        )
+    return normalized
+
+
+def _build_ai_request_identity_from_frozen_candidates(
+    payload: Mapping[str, Any],
+    *,
+    frozen_candidates: Sequence[Mapping[str, Any]],
+    provider_identity: Mapping[str, Any],
+    schema_fingerprint: str,
+    family_profile_version: str,
+    retrieval_policy_version: str,
+) -> dict[str, Any]:
+    ordered_candidates = [
+        _candidate_identity_row(candidate, index)
+        for index, candidate in enumerate(frozen_candidates)
+    ]
+
+    runtime_inputs = payload.get("runtime_inputs")
+    if not isinstance(runtime_inputs, Mapping):
+        runtime_inputs = {}
+    identity = {
+        "identity_version": AI_REQUEST_IDENTITY_VERSION,
+        "identity_schema_version": AI_REQUEST_IDENTITY_VERSION,
+        "canonicalization_version": AI_IDENTITY_CANONICALIZATION_VERSION,
+        "request_id": str(payload.get("id") or ""),
+        "request_created_sim_time": int(payload.get("request_created_sim_time") or 0),
+        # Persisted for diagnostics, deliberately excluded from the identity
+        # hash because retries and offline replay have different wall clocks.
+        "request_created_wall_time": int(payload.get("request_created_wall_time") or 0),
+        "symbol": str(payload.get("symbol") or ""),
+        "direction": "BUY" if bool(payload.get("is_buy")) else "SELL",
+        "ordered_candidate_identities": ordered_candidates,
+        "candidate_count": len(ordered_candidates),
+        "runtime_input_hash": str(payload.get("runtime_input_hash") or ""),
+        "engine_version": str(
+            payload.get("engine_version")
+            or runtime_inputs.get("engine_version")
+            or ""
+        ),
+        "input_schema_version": str(
+            payload.get("input_schema_version")
+            or runtime_inputs.get("engine_input_schema")
+            or ""
+        ),
+        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        "target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+        "setup_taxonomy_version": str(
+            ordered_candidates[0].get("setup_taxonomy_enum") and
+            frozen_candidates[0].get("setup_taxonomy_version")
+            or ""
+        ),
+        "provider_mode": str(provider_identity.get("provider_mode") or ""),
+        "provider_id": str(provider_identity.get("provider_id") or ""),
+        "model_id": str(provider_identity.get("model_id") or ""),
+        "model_fingerprint": str(provider_identity.get("model_fingerprint") or ""),
+        "family_context_version": str(family_profile_version),
+        "retrieval_policy_version": str(retrieval_policy_version),
+        "generation_settings_hash": str(
+            provider_identity.get("generation_settings_hash") or ""
+        ),
+        "schema_fingerprint": str(schema_fingerprint),
+    }
+    missing_root = [
+        name
+        for name in (
+            "request_id",
+            "request_created_sim_time",
+            "request_created_wall_time",
+            "symbol",
+            "runtime_input_hash",
+            "engine_version",
+            "input_schema_version",
+            "provider_mode",
+            "provider_id",
+            "model_id",
+            "schema_fingerprint",
+        )
+        if not identity[name]
+    ]
+    if missing_root:
+        raise ValueError("request_identity_fields_missing:" + ",".join(missing_root))
+    hash_payload = {
+        key: value
+        for key, value in identity.items()
+        if key not in {"request_created_wall_time", "request_identity_hash"}
+    }
+    identity["request_identity_hash"] = _canonical_sha256(hash_payload)
+    return identity
+
+
+@dataclass(frozen=True)
+class FrozenAIRequest:
+    """Immutable canonical request snapshot retained across provider latency."""
+
+    payload_json: str
+    candidate_json: tuple[str, ...]
+    identity_json: str
+    provider_identity_json: str
+    schema_fingerprint: str
+    family_profile_version: str
+    retrieval_policy_version: str
+
+    @property
+    def identity(self) -> dict[str, Any]:
+        return json.loads(self.identity_json)
+
+    @property
+    def request_identity_hash(self) -> str:
+        return str(self.identity["request_identity_hash"])
+
+    @property
+    def ordered_candidate_identities(self) -> tuple[dict[str, Any], ...]:
+        return tuple(self.identity["ordered_candidate_identities"])
+
+    def thaw_payload(self) -> dict[str, Any]:
+        return json.loads(self.payload_json)
+
+    def assert_unchanged(self, payload: Mapping[str, Any]) -> None:
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list):
+            raise AssertionError("frozen_request_candidates_missing")
+        actual_candidate_json = tuple(_canonical_json(candidate) for candidate in candidates)
+        if actual_candidate_json != self.candidate_json:
+            raise AssertionError("frozen_request_candidate_mutation")
+        rebuilt = _build_ai_request_identity_from_frozen_candidates(
+            payload,
+            frozen_candidates=candidates,
+            provider_identity=json.loads(self.provider_identity_json),
+            schema_fingerprint=self.schema_fingerprint,
+            family_profile_version=self.family_profile_version,
+            retrieval_policy_version=self.retrieval_policy_version,
+        )
+        if rebuilt["request_identity_hash"] != self.request_identity_hash:
+            raise AssertionError("frozen_request_identity_mutation")
+        if rebuilt["ordered_candidate_identities"] != list(
+            self.ordered_candidate_identities
+        ):
+            raise AssertionError("frozen_request_candidate_order_mutation")
+
+
+def freeze_ai_request(
+    payload: Mapping[str, Any],
+    *,
+    provider_identity: Mapping[str, Any],
+    schema_fingerprint: str,
+    family_profile_version: str,
+    retrieval_policy_version: str,
+    candidate_cap: int = 12,
+) -> FrozenAIRequest:
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("request_identity_candidates_missing")
+    frozen_candidates = normalize_and_freeze_candidates(
+        candidates,
+        candidate_cap=candidate_cap,
+    )
+    normalized_payload = json.loads(_canonical_json(dict(payload)))
+    normalized_payload["candidates"] = frozen_candidates
+    identity = _build_ai_request_identity_from_frozen_candidates(
+        normalized_payload,
+        frozen_candidates=frozen_candidates,
+        provider_identity=provider_identity,
+        schema_fingerprint=schema_fingerprint,
+        family_profile_version=family_profile_version,
+        retrieval_policy_version=retrieval_policy_version,
+    )
+    return FrozenAIRequest(
+        payload_json=_canonical_json(normalized_payload),
+        candidate_json=tuple(_canonical_json(candidate) for candidate in frozen_candidates),
+        identity_json=_canonical_json(identity),
+        provider_identity_json=_canonical_json(dict(provider_identity)),
+        schema_fingerprint=str(schema_fingerprint),
+        family_profile_version=str(family_profile_version),
+        retrieval_policy_version=str(retrieval_policy_version),
+    )
+
+
+def build_ai_request_identity(
+    payload: Mapping[str, Any],
+    *,
+    provider_identity: Mapping[str, Any],
+    schema_fingerprint: str,
+    family_profile_version: str,
+    retrieval_policy_version: str,
+) -> dict[str, Any]:
+    """Compatibility entry point backed by the single frozen identity path."""
+
+    return freeze_ai_request(
+        payload,
+        provider_identity=provider_identity,
+        schema_fingerprint=schema_fingerprint,
+        family_profile_version=family_profile_version,
+        retrieval_policy_version=retrieval_policy_version,
+    ).identity
+
+
+def validate_request_identity_echo(
+    response: Mapping[str, Any],
+    expected: Mapping[str, Any],
+) -> SchemaValidationResult:
+    missing: list[str] = []
+    invalid: list[str] = []
+    for field in (
+        "request_id",
+        "request_identity_hash",
+        "provider_id",
+        "model_id",
+        "candidate_count",
+        "ordered_candidate_identities",
+    ):
+        if field not in response:
+            missing.append(field)
+    for field in (
+        "request_id",
+        "request_identity_hash",
+        "provider_id",
+        "model_id",
+        "candidate_count",
+        "ordered_candidate_identities",
+    ):
+        if field in response and response.get(field) != expected.get(field):
+            invalid.append(field)
+    return SchemaValidationResult(
+        valid=not missing and not invalid,
+        missing_fields=tuple(missing),
+        invalid_fields=tuple(invalid),
+    )
+
+
 def _finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
 
@@ -186,6 +560,37 @@ def validate_candidate_assessment(
         invalid.append("decision_state")
     if not isinstance(assessment.get("raw_allow"), bool):
         invalid.append("raw_allow")
+    role = str(assessment.get("role") or "").lower()
+    verdict = str(assessment.get("verdict") or "").upper()
+    if str(assessment.get("role_contract_version") or "") != AI_ROLE_CONTRACT_VERSION:
+        invalid.append("role_contract_version")
+    if role != "analyst":
+        invalid.append("role")
+    if verdict not in DECISION_STATES or verdict != state:
+        invalid.append("verdict")
+    if not isinstance(assessment.get("thesis_supported"), bool):
+        invalid.append("thesis_supported")
+    if state == DECISION_APPROVE and assessment.get("thesis_supported") is not True:
+        invalid.append("approve_without_supported_thesis")
+    for name in (
+        "material_contradictions",
+        "missing_required_evidence",
+        "major_risks",
+        "evidence_refs",
+    ):
+        if not isinstance(assessment.get(name), list):
+            invalid.append(name)
+    if isinstance(assessment.get("evidence_refs"), list) and not assessment.get("evidence_refs"):
+        invalid.append("evidence_refs")
+    if str(assessment.get("confidence_band") or "").upper() not in {"LOW", "MEDIUM", "HIGH"}:
+        invalid.append("confidence_band")
+    if str(assessment.get("historical_evidence_state") or "").upper() not in {
+        "SUPPORTIVE",
+        "MIXED",
+        "ADVERSE",
+        "INSUFFICIENT_SAMPLE",
+    }:
+        invalid.append("historical_evidence_state")
     for name in SCORE_FIELDS:
         value = assessment.get(name)
         if value is not None and (not _finite_number(value) or not 0.0 <= float(value) <= 10.0):
@@ -275,6 +680,17 @@ def validate_candidate_assessment(
     for name in ("candidate_id", "candidate_hash", "request_execution_fingerprint", "assessed_execution_fingerprint", "model_version", "selected_target_identity"):
         if name in assessment and not str(assessment.get(name) or "").strip():
             invalid.append(name)
+    for name in (
+        "request_id",
+        "request_identity_hash",
+        "provider_id",
+        "model_id",
+        "role_schema_version",
+    ):
+        if not str(assessment.get(name) or "").strip():
+            invalid.append(name)
+    if str(assessment.get("role_schema_version") or "") != AI_ROLE_CONTRACT_VERSION:
+        invalid.append("role_schema_version")
     for name in ("rejection_codes", "invalidation_risks", "missing_confirmations"):
         if name in assessment and not isinstance(assessment.get(name), list):
             invalid.append(name)
@@ -355,6 +771,13 @@ def validate_decision_envelope(
     missing: list[str] = []
     invalid: list[str] = []
     for name in (
+        "request_id",
+        "request_identity_hash",
+        "provider_id",
+        "model_id",
+        "role_schema_version",
+        "candidate_count",
+        "ordered_candidate_identities",
         "decision_schema_version",
         "decision_quality_tier",
         "selected_candidate_id",
@@ -377,6 +800,31 @@ def validate_decision_envelope(
     assessments = raw_assessments if isinstance(raw_assessments, list) else []
     if len(assessments) != len(candidates):
         invalid.append("candidate_assessment_count")
+    try:
+        candidate_count = int(envelope.get("candidate_count"))
+    except (TypeError, ValueError):
+        candidate_count = -1
+        invalid.append("candidate_count")
+    if candidate_count != len(candidates):
+        invalid.append("candidate_count")
+    ordered = envelope.get("ordered_candidate_identities")
+    if not isinstance(ordered, list) or len(ordered) != len(candidates):
+        invalid.append("ordered_candidate_identities")
+        ordered = []
+    else:
+        for index, candidate in enumerate(candidates):
+            identity = ordered[index]
+            if not isinstance(identity, Mapping):
+                invalid.append("ordered_candidate_identity_type")
+                continue
+            for field in (
+                "candidate_index",
+                "candidate_id",
+                "candidate_hash",
+                "request_execution_fingerprint",
+            ):
+                if identity.get(field) != candidate.get(field):
+                    invalid.append(f"ordered_candidate_{field}")
 
     candidate_by_hash = {str(c.get("candidate_hash") or ""): c for c in candidates}
     seen: set[str] = set()
@@ -396,6 +844,15 @@ def validate_decision_envelope(
         result = validate_candidate_assessment(assessment, candidate)
         missing.extend(result.missing_fields)
         invalid.extend(result.invalid_fields)
+        for field in (
+            "request_id",
+            "request_identity_hash",
+            "provider_id",
+            "model_id",
+            "role_schema_version",
+        ):
+            if assessment.get(field) != envelope.get(field):
+                invalid.append(f"candidate_{field}_mismatch")
 
     selected_hash = str(envelope.get("selected_candidate_hash") or "")
     selected_id = str(envelope.get("selected_candidate_id") or "")

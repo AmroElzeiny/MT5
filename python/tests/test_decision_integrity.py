@@ -9,6 +9,7 @@ import ai_gate
 from decision_integrity import (
     AI_DECISION_SCHEMA_VERSION,
     AI_PROMPT_CONTRACT_VERSION,
+    AI_ROLE_CONTRACT_VERSION,
     AI_TARGET_ARBITRATION_SCHEMA_VERSION,
     DECISION_ABSTAIN,
     MANDATORY_ASSESSMENT_FIELDS,
@@ -106,6 +107,11 @@ def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> d
     approve = state == "APPROVE"
     reject = state == "REJECT"
     item = {
+        "request_id": "request-integrity",
+        "request_identity_hash": "REQUESTIDENTITY1234567890",
+        "provider_id": "test-provider",
+        "model_id": "integrity-test-model",
+        "role_schema_version": AI_ROLE_CONTRACT_VERSION,
         "candidate_index": cand["candidate_index"],
         "candidate_id": cand["candidate_id"],
         "candidate_hash": cand["candidate_hash"],
@@ -129,6 +135,17 @@ def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> d
         "calibration_data_window_start": "",
         "calibration_data_window_end": "",
         "calibration_available": False,
+        "role_contract_version": AI_ROLE_CONTRACT_VERSION,
+        "role": "analyst",
+        "verdict": state,
+        "thesis_supported": approve,
+        "material_contradictions": ["structure evidence conflict"] if reject else [],
+        "missing_required_evidence": ["timing evidence unresolved"] if state == DECISION_ABSTAIN else [],
+        "historical_evidence_state": "MIXED" if state == DECISION_ABSTAIN else "SUPPORTIVE",
+        "major_risks": [],
+        "evidence_refs": ["candidates[0].structure_state"],
+        "confidence_band": "MEDIUM",
+        "summary": "independent candidate assessment",
         "raw_allow": approve,
         "decision_state": state,
         "structure_quality_score": 8.1,
@@ -170,6 +187,21 @@ def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> d
 
 def envelope(candidates: list[dict], assessments: list[dict], selected: int = 0) -> dict:
     return {
+        "request_id": assessments[selected]["request_id"],
+        "request_identity_hash": assessments[selected]["request_identity_hash"],
+        "provider_id": assessments[selected]["provider_id"],
+        "model_id": assessments[selected]["model_id"],
+        "role_schema_version": assessments[selected]["role_schema_version"],
+        "candidate_count": len(candidates),
+        "ordered_candidate_identities": [
+            {
+                "candidate_index": candidate["candidate_index"],
+                "candidate_id": candidate["candidate_id"],
+                "candidate_hash": candidate["candidate_hash"],
+                "request_execution_fingerprint": candidate["request_execution_fingerprint"],
+            }
+            for candidate in candidates
+        ],
         "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
         "decision_quality_tier": RESPONSE_FULL_STRUCTURED,
         "response_quality": RESPONSE_FULL_STRUCTURED,
@@ -415,6 +447,20 @@ class DecisionIntegrityTests(unittest.TestCase):
             "synthetic_rr_fallback": {},
         }
         cached = {
+            "request_id": item["request_id"],
+            "request_identity_hash": item["request_identity_hash"],
+            "provider_id": item["provider_id"],
+            "model_id": item["model_id"],
+            "role_schema_version": item["role_schema_version"],
+            "candidate_count": 1,
+            "ordered_candidate_identities": [
+                {
+                    "candidate_index": cand["candidate_index"],
+                    "candidate_id": cand["candidate_id"],
+                    "candidate_hash": cand["candidate_hash"],
+                    "request_execution_fingerprint": cand["request_execution_fingerprint"],
+                }
+            ],
             "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
             "decision_quality_tier": RESPONSE_FULL_STRUCTURED,
             "response_quality": RESPONSE_FULL_STRUCTURED,
@@ -441,6 +487,22 @@ class DecisionIntegrityTests(unittest.TestCase):
             "veto_code": item["veto"]["code"],
             "veto_evidence_fields": item["veto"]["evidence_fields"],
             "llm_numeric_diagnostics_authority": "uncalibrated_diagnostic_only_no_direct_trade_authority",
+            "provider_contract_version": ai_gate.PROVIDER_CONTRACT_VERSION,
+            "provider_mode": "REMOTE_API",
+            "endpoint_class": "non_loopback",
+            "endpoint_identity_hash": "endpoint-hash",
+            "configured_models_hash": "configured-models-hash",
+            "actual_model_id": "integrity-test-model",
+            "model_fingerprint": "model-fingerprint",
+            "family_profile_version": ai_gate.FAMILY_PROFILE_VERSION,
+            "retrieval_policy_version": ai_gate.RETRIEVAL_POLICY_VERSION,
+            "role_contract_version": ai_gate.ROLE_CONTRACT_VERSION,
+            "consensus_resolver_version": ai_gate.CONSENSUS_RESOLVER_VERSION,
+            "generation_settings_hash": "generation-settings-hash",
+            "input_fingerprint": "input-fingerprint",
+            "analyst_response_fingerprint": "analyst-fingerprint",
+            "critic_response_fingerprint": "critic-fingerprint",
+            "final_resolver_reason": "analyst_critic_agree",
             "selected_target_identity": item["selected_target_identity"],
             "selected_target_price": item["selected_target_price"],
             "target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,

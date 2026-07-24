@@ -22,7 +22,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 MODULE_ROOT = Path(__file__).resolve().parent
 
 RUNTIME_GOVERNANCE_VERSION = "20260718_repeatability_priors_risk_v2"
-REPEATABILITY_SCHEMA_VERSION = "20260718_repeatability_v2"
+REPEATABILITY_SCHEMA_VERSION = "20260718_provider_neutral_repeatability_v3"
 HIERARCHICAL_PRIOR_SCHEMA_VERSION = "20260717_hierarchical_prior_v1"
 RISK_FACTOR_SCHEMA_VERSION = "20260717_risk_factor_v1"
 COMMISSION_MODEL_SCHEMA_VERSION = "20260717_broker_cost_v1"
@@ -130,6 +130,12 @@ def request_fingerprint(
     target_schema_version: str,
     prior_artifact_hash: str,
     prior_artifact_version: str,
+    provider_mode: str = "",
+    provider_id: str = "",
+    model_fingerprint: str = "",
+    family_profile_version: str = "",
+    retrieval_policy_version: str = "",
+    generation_settings_hash: str = "",
 ) -> dict[str, Any]:
     candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
     candidate_contracts = [
@@ -153,10 +159,16 @@ def request_fingerprint(
         "decision_schema_version": decision_schema_version,
         "target_schema_version": target_schema_version,
         "model": model,
+        "provider_mode": provider_mode,
+        "provider_id": provider_id,
+        "model_fingerprint": model_fingerprint,
         "reasoning_effort": reasoning_effort,
         "decision_quality_tier": decision_quality_tier,
         "prior_artifact_hash": prior_artifact_hash,
         "prior_artifact_version": prior_artifact_version,
+        "family_profile_version": family_profile_version,
+        "retrieval_policy_version": retrieval_policy_version,
+        "generation_settings_hash": generation_settings_hash,
         "canonical_payload_hash": canonical_payload_hash,
         "fingerprint_schema_version": REPEATABILITY_SCHEMA_VERSION,
     }
@@ -171,6 +183,10 @@ def response_fingerprint(response: Mapping[str, Any]) -> dict[str, Any]:
     contract = {
         "response_id": _text(response.get("response_id") or response.get("id"), ""),
         "model_returned": _text(response.get("model_returned") or response.get("model_version"), ""),
+        "provider_mode": _text(response.get("provider_mode"), ""),
+        "provider_id": _text(response.get("provider_id"), ""),
+        "model_fingerprint": _text(response.get("model_fingerprint"), ""),
+        "generation_settings_hash": _text(response.get("generation_settings_hash"), ""),
         "decision_quality_tier": _text(response.get("decision_quality_tier"), ""),
         "decision_state": _text(response.get("decision_state"), ""),
         "candidate_assessments": assessments,

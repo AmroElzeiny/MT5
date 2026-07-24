@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import tempfile
 import unittest
 from pathlib import Path
 import importlib.util
+from unittest.mock import patch
 
 from architecture_contracts import (
     COHORT_FIELDS,
@@ -242,6 +244,20 @@ class ArchitectureContractsTests(unittest.TestCase):
             self.assertEqual(row["authority"], "blocked")
             self.assertIn("ledger_not_clean", row["rejection_reasons"])
 
+    def test_missing_optional_policy_is_disabled_not_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            missing = Path(temp) / "optional-policy.json"
+            manifest = build_startup_policy_manifest(
+                [PolicySpec("calibration", "optional", missing, False, "shadow", "policy-v1")],
+                ledger_integrity_status="UNKNOWN",
+                runtime_input_hash="runtime-a",
+            )
+            row = manifest["policies"][0]
+            self.assertEqual(row["status"], "disabled")
+            self.assertEqual(row["activation_state"], "disabled")
+            self.assertEqual(row["authority"], "shadow")
+            self.assertEqual(row["rejection_reasons"], [])
+
     def test_three_decision_stages_remain_distinct(self) -> None:
         multiplier = resolve_multiplier(1.0, present=True, optional=False, source="ai")
         python = resolve_python_decision_authority(
@@ -322,6 +338,28 @@ class ArchitectureContractsTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 bus.submit_request("duplicate", {"id": 1})
                 bus.submit_request("duplicate", {"id": 2})
+
+    def test_file_bus_claim_retries_transient_windows_sharing_violation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            bus = FileBusLifecycle(Path(temp), "session-a")
+            request = bus.submit_request("req", {"id": "req", "nonce": "n"})
+            real_replace = os.replace
+            calls = 0
+
+            def sharing_violation_then_replace(src: str | Path, dst: str | Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls < 3:
+                    raise PermissionError(13, "sharing violation", str(src))
+                real_replace(src, dst)
+
+            with patch("architecture_contracts.os.replace", side_effect=sharing_violation_then_replace), patch(
+                "architecture_contracts.time.sleep"
+            ):
+                claimed = bus.claim(request)
+            self.assertEqual(calls, 3)
+            self.assertTrue(claimed.is_file())
+            self.assertFalse(request.exists())
 
     def test_homogeneous_cohort_passes_and_mixed_blocks(self) -> None:
         first = _cohort("a")

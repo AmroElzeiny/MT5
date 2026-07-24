@@ -204,9 +204,22 @@ class RepeatabilityRuntimeTests(unittest.TestCase):
 
     def test_shadow_repeat_failure_never_crashes_or_creates_authoritative_artifact(self) -> None:
         payload = {"id": "shadow-failure", "candidates": [], "workload_mode": "LIVE_FORWARD"}
-        with patch.object(ai_gate, "_score_setup_openai", side_effect=RuntimeError("transport down")):
+        with patch.object(ai_gate, "_score_setup_ai", side_effect=RuntimeError("transport down")):
             ai_gate._run_shadow_repeat_evaluation(payload, approving_decision())
         self.assertFalse(self.artifact.exists())
+
+    def test_repeatability_container_is_non_authoritative_and_idempotent(self) -> None:
+        self.assertTrue(ai_gate._ensure_repeatability_artifact_container())
+        artifact = json.loads(self.artifact.read_text(encoding="utf-8"))
+        self.assertEqual(artifact["schema_version"], ai_gate.REPEATABILITY_SCHEMA_VERSION)
+        self.assertEqual(artifact["groups"], {})
+        self.assertFalse(ai_gate._ensure_repeatability_artifact_container())
+        authority = ai_gate._repeatability_authority_for(
+            "gpt-5.4-nano",
+            ai_gate.DECISION_QUALITY_FULL_STRUCTURED,
+        )
+        self.assertFalse(authority["trading_eligible"])
+        self.assertEqual(authority["artifact_state"], "missing_group")
 
     def test_sampling_is_deterministic_and_retries_do_not_duplicate_observations(self) -> None:
         payload = {

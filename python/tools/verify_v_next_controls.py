@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +21,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import ai_gate
+from ai_provider import RemoteAPIProvider
 from decision_integrity import assessed_execution_fingerprint
+from structured_models import StrictStructuredModel
 from tools import analyze_ai_trade_outcomes
 from tools import repair_trade_ledger
 
@@ -35,8 +40,10 @@ def _assert(condition: bool, message: str) -> None:
 
 def _test_config(extra: Dict[str, str] | None = None) -> ai_gate.AIGateRuntimeConfig:
     env = {
-        "OPENAI_MODEL": "gpt-5.5-mini",
-        "OPENAI_FALLBACK_MODELS": "gpt-5.4-mini,gpt-5.4-nano",
+        "AI_USE_REMOTE_API": "true",
+        "OPENAI_API_KEY": "verifier-remote-key-not-used-for-network",
+        "AI_GATE_MODEL": "gpt-5.5-mini",
+        "AI_GATE_FALLBACK_MODELS": "gpt-5.4-mini,gpt-5.4-nano",
         "AI_REASONING_EFFORT": "low",
         "AI_MAX_OUTPUT_TOKENS": "25000",
         "AI_MIN_CONFIDENCE": "0.45",
@@ -84,6 +91,14 @@ def _install_config(cfg: ai_gate.AIGateRuntimeConfig) -> None:
     ai_gate.LIVE_BUCKET_PRIORS_FILE = cfg.live_bucket_priors_file
     ai_gate._LIVE_BUCKET_PRIORS_CACHE = (0.0, {})
     ai_gate.AI_DECISION_CACHE = ai_gate.AIDecisionCache(cfg.decision_cache_file, cfg.decision_cache_ttl_sec)
+    # Verifier providers are constructed but never sent to the network. Reset
+    # the startup singleton so provider-aware cache fixtures use this test
+    # configuration instead of the module-import environment.
+    if cfg.use_remote_api is True:
+        os.environ["OPENAI_API_KEY"] = "verifier-remote-key-not-used-for-network"
+    ai_gate.AI_PROVIDER = None
+    ai_gate.SHADOW_AI_PROVIDER = None
+    ai_gate._PROVIDER_STARTUP_HEALTH = {}
 
 
 def _runtime_inputs(**overrides: Any) -> Dict[str, Any]:
@@ -202,6 +217,10 @@ def _payload(**overrides: Any) -> Dict[str, Any]:
     }
     payload = {
         "id": "verify_1",
+        "request_created_sim_time": 1779066000,
+        "request_created_wall_time": 1780000000000,
+        "engine_version": "verify-engine-v1",
+        "input_schema_version": "verify-input-v1",
         "session_id": "verify_session",
         "request_nonce": "verify_nonce",
         "symbol": "XAUUSD",
@@ -286,7 +305,22 @@ def _full_structured_decision(
         "target_comparison": comparison,
     }
     state = ai_gate.DECISION_APPROVE if allow else ai_gate.DECISION_REJECT
+    provider = ai_gate._provider()
+    provider_identity = provider.generation_identity(
+        "analyst",
+        ai_gate._provider_request_metadata(payload, provider),
+    )
+    request_id = str(payload.get("id") or "verifier-request")
+    request_identity_hash = str(
+        payload.get("request_identity_hash")
+        or "VERIFIERREQUESTIDENTITY1234567890"
+    )
     assessment: Dict[str, Any] = {
+        "request_id": request_id,
+        "request_identity_hash": request_identity_hash,
+        "provider_id": str(provider_identity.get("provider_id") or ""),
+        "model_id": str(provider_identity.get("model_id") or ""),
+        "role_schema_version": ai_gate.ROLE_CONTRACT_VERSION,
         "candidate_index": int(candidate["candidate_index"]),
         "candidate_id": str(candidate["candidate_id"]),
         "candidate_hash": str(candidate["candidate_hash"]),
@@ -310,6 +344,17 @@ def _full_structured_decision(
         "calibration_data_window_start": "",
         "calibration_data_window_end": "",
         "calibration_available": False,
+        "role_contract_version": ai_gate.ROLE_CONTRACT_VERSION,
+        "role": "analyst",
+        "verdict": state,
+        "thesis_supported": bool(allow),
+        "material_contradictions": [] if allow else ["verification rejection"],
+        "missing_required_evidence": [],
+        "historical_evidence_state": "INSUFFICIENT_SAMPLE",
+        "major_risks": [],
+        "evidence_refs": ["entry_and_invalidation.candidates.0.candidate_hash"],
+        "confidence_band": "MEDIUM",
+        "summary": "Complete provider-neutral verifier assessment.",
         "raw_allow": bool(allow),
         "decision_state": state,
         "structure_quality_score": 8.0,
@@ -428,15 +473,74 @@ def _full_structured_decision(
         target_arbitration_schema_version=ai_gate.AI_TARGET_ARBITRATION_SCHEMA_VERSION,
         prompt_contract_version=ai_gate.AI_PROMPT_CONTRACT_VERSION,
         target_comparison_json=json.dumps(comparison, separators=(",", ":")),
+        provider_mode=str(provider_identity.get("provider_mode") or ""),
+        provider_id=str(provider_identity.get("provider_id") or ""),
+        endpoint_class=str(provider_identity.get("endpoint_class") or ""),
+        endpoint_identity_hash=str(provider_identity.get("endpoint_identity_hash") or ""),
+        configured_models_hash=str(provider_identity.get("configured_models_hash") or ""),
+        actual_model_id=str(provider_identity.get("model_id") or ""),
+        fallback_model="",
+        model_fingerprint=str(provider_identity.get("model_fingerprint") or "unavailable"),
+        generation_settings_hash=str(provider_identity.get("generation_settings_hash") or ""),
+        input_fingerprint="verifier-provider-neutral-input-fingerprint",
+        retrieved_analogue_ids=[],
+        historical_evidence_state="INSUFFICIENT_SAMPLE",
+        analyst_response_fingerprint=ai_gate.canonical_hash(assessment),
+        critic_response_fingerprint="verifier-critic-response-fingerprint",
+        adjudicator_response_fingerprint="",
+        final_resolver_reason="analyst_approve_critic_pass" if allow else "analyst_reject",
+        provider_health_state="healthy",
+        role_latencies={"analyst": 0.01, "critic": 0.01},
+        provider_retry_counts={"analyst_transport": 0, "critic_transport": 0},
+        provider_usage={},
+        analyst_output=assessment,
+        critic_output={
+            "role_contract_version": ai_gate.ROLE_CONTRACT_VERSION,
+            "role": "critic",
+            "candidate_id": str(assessment["candidate_id"]),
+            "candidate_hash": str(assessment["candidate_hash"]),
+            "verdict": "PASS" if allow else "BLOCK",
+        },
+        adjudicator_output={},
     )
 
 
 def _full_structured_response(payload: Dict[str, Any], req_id: str) -> Dict[str, Any]:
+    payload = copy.deepcopy(payload)
+    payload["id"] = req_id
+    if not payload.get("request_identity_hash"):
+        provider = ai_gate._provider()
+        provider_identity = provider.generation_identity(
+            "analyst",
+            ai_gate._provider_request_metadata(payload, provider),
+        )
+        preflight = ai_gate.strict_structured_schema(ai_gate.AIGateEnvelope)
+        identity = ai_gate.build_ai_request_identity(
+            payload,
+            provider_identity=provider_identity,
+            schema_fingerprint=preflight.schema_fingerprint,
+            family_profile_version=ai_gate.FAMILY_PROFILE_VERSION,
+            retrieval_policy_version=ai_gate.RETRIEVAL_POLICY_VERSION,
+        )
+        payload["request_identity_version"] = ai_gate.AI_REQUEST_IDENTITY_VERSION
+        payload["request_identity_hash"] = identity["request_identity_hash"]
+        payload["candidate_count"] = identity["candidate_count"]
+        payload["ordered_candidate_identities"] = identity[
+            "ordered_candidate_identities"
+        ]
     decision = _full_structured_decision(payload)
     response = asdict(decision)
     response.update(
         {
             "id": req_id,
+            "request_identity_version": ai_gate.AI_REQUEST_IDENTITY_VERSION,
+            "request_identity_hash": payload["request_identity_hash"],
+            "request_created_sim_time": payload["request_created_sim_time"],
+            "request_created_wall_time": payload["request_created_wall_time"],
+            "candidate_count": payload["candidate_count"],
+            "ordered_candidate_identities": payload[
+                "ordered_candidate_identities"
+            ],
             "score": decision.llm_quality_score,
             "confidence": decision.llm_self_reported_confidence,
             "target_comparison": json.loads(decision.target_comparison_json),
@@ -493,26 +597,80 @@ def test_flex_unavailable_retries() -> None:
     class FlexUnavailableError(Exception):
         status_code = 503
 
-    calls = {"count": 0}
+    class Probe(StrictStructuredModel):
+        ok: bool
 
-    def flaky_call(**kwargs: Any) -> Dict[str, Any]:
-        calls["count"] += 1
-        if calls["count"] < 3:
-            raise FlexUnavailableError("503 - flex unavailable, try again later")
-        return {"ok": True, "service_tier": kwargs.get("service_tier")}
+    class Responses:
+        def __init__(self, succeed_after: int | None) -> None:
+            self.calls = 0
+            self.succeed_after = succeed_after
 
-    result = ai_gate._call_openai_with_flex_retries(flaky_call, {"service_tier": "flex"})
-    _assert(result["ok"] is True, "flex retry should eventually return success")
-    _assert(calls["count"] == 3, "flex retry should retry transient failures")
+        def create(self, **kwargs: Any) -> Any:
+            self.calls += 1
+            if self.succeed_after is None or self.calls < self.succeed_after:
+                raise FlexUnavailableError("503 - flex unavailable, try again later")
+            return SimpleNamespace(
+                model=kwargs.get("model"),
+                output_text='{"ok":true}',
+                usage=SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2),
+            )
 
-    calls["count"] = 0
+    class Client:
+        def __init__(self, responses: Responses) -> None:
+            self.responses = responses
+
+        def with_options(self, **kwargs: Any) -> "Client":
+            return self
+
+    def provider_for(responses: Responses) -> RemoteAPIProvider:
+        client = Client(responses)
+        return RemoteAPIProvider(
+            api_key="verifier",
+            base_url="",
+            primary_model="remote-test",
+            fallback_models=(),
+            analytics_model="remote-test",
+            reasoning_effort="low",
+            timeout_sec=30,
+            max_output_tokens=256,
+            prompt_cache_enable=False,
+            prompt_cache_key="",
+            prompt_cache_retention="24h",
+            service_tier="auto",
+            flex_unavailable_retry_enable=True,
+            flex_unavailable_max_retries=20,
+            flex_unavailable_cooldown_sec=0,
+            circuit_failure_threshold=100,
+            circuit_cooldown_sec=30,
+            log=lambda message: None,
+            client_factory=lambda **kwargs: client,
+        )
+
+    flex_responses = Responses(succeed_after=3)
+    result = provider_for(flex_responses).generate_structured(
+        role="analyst",
+        system_prompt="Return JSON.",
+        evidence={"probe": True},
+        response_schema=Probe,
+        request_metadata={"service_tier": "flex"},
+    )
+    _assert(result.parsed.ok is True, "flex retry should eventually return success")
+    _assert(flex_responses.calls == 3, "flex retry should retry transient failures")
+
+    normal_responses = Responses(succeed_after=None)
     try:
-        ai_gate._call_openai_with_flex_retries(flaky_call, {"service_tier": "auto"})
-    except FlexUnavailableError:
+        provider_for(normal_responses).generate_structured(
+            role="analyst",
+            system_prompt="Return JSON.",
+            evidence={"probe": True},
+            response_schema=Probe,
+            request_metadata={"service_tier": "auto"},
+        )
+    except RuntimeError:
         pass
     else:
-        raise AssertionError("non-flex call should not use flex retry loop")
-    _assert(calls["count"] == 1, "non-flex failure should not be retried by flex loop")
+        raise AssertionError("non-flex call should fail after the bounded transport retry")
+    _assert(normal_responses.calls == 2, "non-flex failure must not use the long flex retry loop")
 
 
 def _expect_reject(payload: Dict[str, Any], code: str) -> None:
@@ -573,17 +731,17 @@ def test_hard_pre_gate() -> None:
     _expect_reject(missing, "runtime_inputs_missing_live_reject")
 
     called = {"openai": False}
-    original = ai_gate._score_setup_openai
+    original = ai_gate._score_setup_ai
     def _boom(_payload: Dict[str, Any]) -> ai_gate.Decision:
         called["openai"] = True
         raise AssertionError("OpenAI should not be called")
-    ai_gate._score_setup_openai = _boom
+    ai_gate._score_setup_ai = _boom
     try:
         dec = ai_gate.score_setup_live(_payload(candidate={"execution_cost_r": 0.10}))
         _assert(not dec.allow and "execution_cost_r_too_high" in (dec.rejection_codes or []), "hard pre-gate should reject")
         _assert(not called["openai"], "hard pre-gate should skip OpenAI")
     finally:
-        ai_gate._score_setup_openai = original
+        ai_gate._score_setup_ai = original
 
 
 def test_decision_cache() -> None:
@@ -938,6 +1096,28 @@ def test_mql_target_safety_source() -> None:
     ]
     for needle in bridge_required:
         _assert(needle in bridge_src, f"AIGateBridge source missing {needle}")
+    build_start = bridge_src.find("string BuildRequestJson(")
+    plan_start = bridge_src.find('j += "\\\"plan\\\":{";', build_start)
+    root_alias_start = bridge_src.find("// Root-level aliases", plan_start)
+    build_end = bridge_src.find("return j;", root_alias_start)
+    _assert(build_start >= 0 and plan_start >= 0 and root_alias_start >= 0 and build_end >= 0, "BuildRequestJson boundaries missing")
+    canonical_root_aliases = (
+        "candidate_id",
+        "setup_taxonomy_version",
+        "setup_taxonomy_enum",
+        "taxonomy_mapping_source",
+        "configured_stop_model",
+    )
+    for key in canonical_root_aliases:
+        token = f'JsonKVStr("{key}"'
+        _assert(
+            bridge_src[build_start:plan_start].count(token) == 0,
+            f"{key} must not be emitted before the canonical root alias block",
+        )
+        _assert(
+            bridge_src[root_alias_start:build_end].count(token) == 1,
+            f"{key} must be emitted exactly once at the request root",
+        )
     ea_required = [
         "_EffectivePauseScanWhilePendingAI",
         "_TesterLiveAiWaitMode",
@@ -1232,7 +1412,10 @@ def test_mql_tester_replay_cache_export() -> None:
 
         original_score_setup = ai_gate.score_setup
 
-        def fake_score_setup(_payload_obj: Dict[str, Any]) -> ai_gate.Decision:
+        def fake_score_setup(
+            _payload_obj: Dict[str, Any],
+            **_kwargs: Any,
+        ) -> ai_gate.Decision:
             return _full_structured_decision(_payload_obj, llm_quality_score=8.2)
 
         try:
@@ -1349,7 +1532,10 @@ def test_fill_tester_cache_once_processes_record_only_exports() -> None:
 
         original_score_setup = ai_gate.score_setup
 
-        def fake_score_setup(_payload_obj: Dict[str, Any]) -> ai_gate.Decision:
+        def fake_score_setup(
+            _payload_obj: Dict[str, Any],
+            **_kwargs: Any,
+        ) -> ai_gate.Decision:
             return _full_structured_decision(_payload_obj, llm_quality_score=8.4)
 
         try:

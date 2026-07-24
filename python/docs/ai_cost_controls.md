@@ -1,5 +1,9 @@
 # AI cost controls
 
+Provider selection and local-server configuration are documented in
+`docs/ai_provider_configuration.md`. The cost controls below apply to the
+startup-selected provider; they never authorize switching providers.
+
 The Python bridge reads AI runtime settings once at startup through
 `AIGateRuntimeConfig` in `ai_gate.py`.
 
@@ -29,9 +33,10 @@ payload is live, the bridge logs `batch_api_disabled_for_live` and uses the
 normal immediate path.
 
 `score_setup_batch_research()` is only for `backtest`, `replay`, `research`, or
-`analytics` payloads. It writes JSONL requests under `AI_BATCH_OUTPUT_DIR` and
-may submit a delayed OpenAI Batch job, but delayed results are never used to
-execute trades.
+`analytics` payloads and only when `AI_USE_REMOTE_API=true`. It writes JSONL
+requests under `AI_BATCH_OUTPUT_DIR` and may submit a delayed remote Batch job,
+but delayed results are never used to execute trades. Local mode reports
+`batch_api_not_supported_by_selected_provider`; it never switches to remote.
 
 ## Flex
 
@@ -43,6 +48,9 @@ Live Flex requires all three:
 
 Without all three, live requests log `flex_disabled_for_live` and use
 `service_tier=auto`.
+
+Flex is a remote-provider service tier. Local mode ignores it and stays on the
+configured local OpenAI-compatible endpoint.
 
 `AI_OPENAI_TIMEOUT_SEC` controls the normal synchronous Responses API timeout.
 `AI_OPENAI_FLEX_TIMEOUT_SEC` controls the timeout when the request is actually
@@ -73,8 +81,11 @@ end of the request.
 
 When `AI_DECISION_CACHE_ENABLE=true`, repeated identical setup signatures reuse
 the prior decision within `AI_DECISION_CACHE_TTL_SEC` and log `ai_cache_hit`.
-Material changes to target, obstacle, cost, spread, or runtime hash miss or
-invalidate the cache.
+Material changes to target, obstacle, cost, spread, provider/model identity,
+generation settings, family profile, retrieval policy/result, or an economic
+runtime input miss or invalidate the cache. Tester workflow/debug flags remain
+excluded so RECORD_ONLY responses can replay in CACHE_ONLY under the same
+economic and provider contract.
 
 Cached AI decisions are still rechecked against the current runtime family AI
 threshold before being returned. Because the EA includes all family threshold

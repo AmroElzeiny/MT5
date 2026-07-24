@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
-import inspect
 import json
 import math
 import os
@@ -29,8 +28,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from openai_usage_logger import log_openai_usage
-from po3_env import load_dotenv
+from openai_usage_logger import log_ai_usage
+from po3_env import load_dotenv, peek_dotenv_value
 from calibration_pipeline import run_shadow_calibration, write_calibration_reports
 from experiment_registry import ExperimentRegistry
 from architecture_contracts import partition_homogeneous_cohorts
@@ -47,8 +46,41 @@ from governance_contracts import (
     write_feature_lineage,
 )
 
-# Analytics should use this project's .env, not a stale shell-level API key.
-load_dotenv(override=True)
+# Standalone analytics uses the same explicit provider selector as ai_gate.
+# In local/invalid mode the remote secret is neither parsed nor retained.
+_EXPECTANCY_PROVIDER_SWITCH = (
+    peek_dotenv_value(None, "AI_USE_REMOTE_API")
+    or os.environ.get("AI_USE_REMOTE_API")
+    or ""
+).strip().lower()
+_EXPECTANCY_REMOTE_MODE = _EXPECTANCY_PROVIDER_SWITCH == "true"
+load_dotenv(
+    override=True,
+    exclude_keys=(
+        ("LOCAL_AI_API_KEY", "LOCAL_AI_MODEL_PATH")
+        if _EXPECTANCY_REMOTE_MODE
+        else ("OPENAI_API_KEY", "OPENAI_BASE_URL")
+    ),
+)
+if _EXPECTANCY_REMOTE_MODE:
+    os.environ.pop("LOCAL_AI_API_KEY", None)
+    os.environ.pop("LOCAL_AI_MODEL_PATH", None)
+else:
+    os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("OPENAI_BASE_URL", None)
+
+_EXPECTANCY_AI_PROVIDER: Any = None
+
+
+def set_expectancy_ai_provider(provider: Any) -> None:
+    """Inject the single startup-selected provider from ai_gate.
+
+    Analytics has no independent transport authority and cannot instantiate a
+    remote client behind the local/remote provider switch.
+    """
+
+    global _EXPECTANCY_AI_PROVIDER
+    _EXPECTANCY_AI_PROVIDER = provider
 
 
 # This hand-built scorecard is diagnostic only.  It uses immutable pre-entry
@@ -2532,29 +2564,6 @@ def _expectancy_ai_config() -> Dict[str, Any]:
     }
 
 
-def _filter_supported_kwargs(func: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        supported = inspect.signature(func).parameters
-    except Exception:
-        return dict(kwargs)
-    return {key: value for key, value in kwargs.items() if key in supported}
-
-
-def _openai_client_for_expectancy() -> Any:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise RuntimeError("Missing dependency 'openai'. Install it in the Python environment.") from exc
-    kwargs: Dict[str, Any] = {"api_key": api_key}
-    base_url = os.getenv("OPENAI_BASE_URL", "").strip()
-    if base_url:
-        kwargs["base_url"] = base_url
-    return OpenAI(**kwargs)
-
-
 def _expectancy_ai_audit_model() -> Any:
     try:
         from pydantic import BaseModel, Field
@@ -2600,67 +2609,6 @@ def _plain_model_dump(value: Any) -> Dict[str, Any]:
     if hasattr(value, "dict"):
         return value.dict()
     return {}
-
-
-def _responses_text_format_param(schema_model: Any) -> Optional[Dict[str, Any]]:
-    if schema_model is None:
-        return None
-    try:
-        from openai.lib._parsing._responses import type_to_text_format_param
-
-        value = type_to_text_format_param(schema_model)
-        if isinstance(value, dict):
-            return value
-        if hasattr(value, "model_dump"):
-            return value.model_dump()
-        if hasattr(value, "dict"):
-            return value.dict()
-    except Exception:
-        return None
-    return None
-
-
-def _response_text(response: Any) -> str:
-    text = getattr(response, "output_text", "")
-    if text:
-        return str(text)
-    try:
-        payload = response.model_dump()
-    except Exception:
-        try:
-            payload = json.loads(response.model_dump_json())
-        except Exception:
-            payload = response
-
-    chunks: List[str] = []
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            if value.get("type") in {"output_text", "text"} and isinstance(value.get("text"), str):
-                chunks.append(value["text"])
-            for child in value.values():
-                walk(child)
-        elif isinstance(value, list):
-            for child in value:
-                walk(child)
-
-    walk(payload)
-    return "\n".join(chunks).strip()
-
-
-def _parse_json_object(text: str) -> Dict[str, Any]:
-    raw = str(text or "").strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\s*```$", "", raw)
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start >= 0 and end > start:
-        raw = raw[start : end + 1]
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("AI audit response was not a JSON object")
-    return parsed
 
 
 def _ai_decision_pack(suite: Dict[str, Any]) -> Dict[str, Any]:
@@ -2947,7 +2895,9 @@ def _expectancy_ai_audit(suite: Dict[str, Any]) -> Dict[str, Any]:
         return audit
 
     try:
-        client = _openai_client_for_expectancy()
+        provider = _EXPECTANCY_AI_PROVIDER
+        if provider is None:
+            raise RuntimeError("expectancy_ai_provider_not_injected")
         system_prompt = (
             "You are a conservative quantitative trading risk auditor for a PO3/FVG scalping system. "
             "Review only the provided evidence. You may disagree with mechanical policy decisions, "
@@ -2989,82 +2939,56 @@ def _expectancy_ai_audit(suite: Dict[str, Any]) -> Dict[str, Any]:
             "instructions": schema_prompt,
             "decision_pack": _ai_decision_pack(suite),
         }
-        kwargs: Dict[str, Any] = {
-            "model": cfg["model"],
-            "input": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, separators=(",", ":"))},
-            ],
-            "max_output_tokens": cfg["max_output_tokens"],
-            "store": False,
-            "truncation": "auto",
-        }
-        prompt_cache_key = os.getenv("EXPECTANCY_AI_PROMPT_CACHE_KEY", "po3_expectancy_ai_audit_v1").strip()
-        if prompt_cache_key:
-            kwargs["prompt_cache_key"] = prompt_cache_key
-            kwargs["prompt_cache_retention"] = "24h"
-        if cfg["reasoning_effort"] in {"low", "medium", "high", "xhigh"}:
-            kwargs["reasoning"] = {"effort": cfg["reasoning_effort"]}
         schema_model = _expectancy_ai_audit_model()
-        response = None
-        usage_logged = False
-        parse_fn = getattr(client.responses, "parse", None)
-        create_fn = client.responses.create
-        text_format = _responses_text_format_param(schema_model)
+        if schema_model is None:
+            raise RuntimeError("expectancy_ai_schema_dependency_unavailable")
         request_id = str(
             (suite.get("active_policy") or {}).get("policy_id")
             or (suite.get("governance") or {}).get("generated_at")
             or suite.get("generated_at")
             or ""
         )
-        if text_format is not None:
-            create_kwargs = dict(kwargs)
-            create_kwargs["text"] = {"format": text_format, "verbosity": "low"}
-            response = create_fn(**_filter_supported_kwargs(create_fn, create_kwargs))
-            log_openai_usage(
-                source="expectancy_report",
-                operation="expectancy_ai_audit.create_structured",
-                model=cfg["model"],
-                response=response,
-                request_id=request_id,
-                reasoning_effort=cfg["reasoning_effort"],
-                max_output_tokens=cfg["max_output_tokens"],
-            )
-            usage_logged = True
-            parsed = _parse_json_object(_response_text(response))
-        elif schema_model is not None and parse_fn is not None:
-            parse_kwargs = dict(kwargs)
-            parse_kwargs["text_format"] = schema_model
-            response = parse_fn(**_filter_supported_kwargs(parse_fn, parse_kwargs))
-            log_openai_usage(
-                source="expectancy_report",
-                operation="expectancy_ai_audit.parse_structured",
-                model=cfg["model"],
-                response=response,
-                request_id=request_id,
-                reasoning_effort=cfg["reasoning_effort"],
-                max_output_tokens=cfg["max_output_tokens"],
-            )
-            usage_logged = True
-            parsed_model = getattr(response, "output_parsed", None)
-            parsed = _plain_model_dump(parsed_model) if parsed_model is not None else _parse_json_object(_response_text(response))
-        else:
-            create_kwargs = dict(kwargs)
-            create_kwargs["text"] = {"verbosity": "low"}
-            response = create_fn(**_filter_supported_kwargs(create_fn, create_kwargs))
-            log_openai_usage(
-                source="expectancy_report",
-                operation="expectancy_ai_audit.create_json",
-                model=cfg["model"],
-                response=response,
-                request_id=request_id,
-                reasoning_effort=cfg["reasoning_effort"],
-                max_output_tokens=cfg["max_output_tokens"],
-            )
-            usage_logged = True
-            parsed = _parse_json_object(_response_text(response))
+        result = provider.generate_structured(
+            role="analytics",
+            system_prompt=system_prompt,
+            evidence=user_payload,
+            response_schema=schema_model,
+            request_metadata={
+                "request_id": request_id,
+                "workload_mode": "analytics",
+                "non_trading": True,
+                "max_output_tokens": cfg["max_output_tokens"],
+            },
+        )
+        parsed = _plain_model_dump(result.parsed)
+        log_ai_usage(
+            source="expectancy_report",
+            operation="expectancy_ai_audit.provider_neutral_structured",
+            model=result.actual_model,
+            response=result.raw_response,
+            request_id=request_id,
+            reasoning_effort=(
+                cfg["reasoning_effort"] if result.provider_mode == "REMOTE_API" else ""
+            ),
+            max_output_tokens=cfg["max_output_tokens"],
+            provider_mode=result.provider_mode,
+            provider_id=result.provider_id,
+            endpoint_class=result.endpoint_class,
+            model_fingerprint=result.model_fingerprint,
+            tokens_per_second=result.tokens_per_second,
+            estimated_context_tokens=result.estimated_context_tokens,
+            extra={"role": "analytics", "non_trading": True},
+        )
         audit.update(parsed)
         audit["status"] = "ok"
+        audit["model"] = result.actual_model
+        audit["provider_mode"] = result.provider_mode
+        audit["provider_id"] = result.provider_id
+        audit["endpoint_class"] = result.endpoint_class
+        audit["model_fingerprint"] = result.model_fingerprint or "unavailable"
+        audit["generation_settings_hash"] = result.generation_settings_hash
+        audit["retry_count"] = result.retry_count
+        audit["latency_sec"] = round(result.latency_sec, 6)
         audit["confidence"] = _clamp(_safe_float(audit.get("confidence"), 0.0), 0.0, 1.0)
         audit["weighted_confidence"] = round(audit["confidence"] * cfg["decision_weight"], 6)
         audit["decision_weight"] = cfg["decision_weight"]
@@ -3073,22 +2997,9 @@ def _expectancy_ai_audit(suite: Dict[str, Any]) -> Dict[str, Any]:
         requested_veto = _safe_bool(adjustments.get("block_live_activation"), False) and audit["weighted_confidence"] >= 0.50
         audit["activation_veto"] = bool(disagree_veto or requested_veto)
     except Exception as exc:
-        response = locals().get("response")
-        usage_logged = bool(locals().get("usage_logged", False))
-        if response is not None and not usage_logged:
-            log_openai_usage(
-                source="expectancy_report",
-                operation="expectancy_ai_audit.error_after_response",
-                model=cfg["model"],
-                response=response,
-                status="error",
-                request_id=str((suite.get("active_policy") or {}).get("policy_id") or suite.get("generated_at") or ""),
-                reasoning_effort=cfg["reasoning_effort"],
-                max_output_tokens=cfg["max_output_tokens"],
-                error=exc,
-            )
         audit["status"] = "error"
-        audit["summary"] = str(exc)
+        audit["activation_veto"] = True
+        audit["summary"] = f"provider_neutral_expectancy_audit_failed:{type(exc).__name__}:{exc}"
     return audit
 
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_execution_path_v7"
+LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_provider_identity_v8"
 SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1"
 FEATURE_LINEAGE_VERSION = "20260718_tick_path_evidence_v3"
 CALIBRATION_CONTRACT_VERSION = "20260716_oos_calibration_v1"

@@ -19,8 +19,10 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from request_lifecycle import heartbeat_allows_recovery
 
-ARCHITECTURE_CONTRACT_VERSION = "20260718_version_z_reliability_v3"
+
+ARCHITECTURE_CONTRACT_VERSION = "20260718_provider_neutral_architecture_v4"
 LIVE_FORWARD_CONTRACT_VERSION = "20260717_live_forward_v1"
 SEMANTIC_CACHE_SCHEMA_VERSION = "20260717_semantic_cache_v1"
 POLICY_MANIFEST_SCHEMA_VERSION = "20260717_policy_manifest_v1"
@@ -30,7 +32,9 @@ HIERARCHICAL_OUTCOME_MODEL_VERSION = "20260717_hierarchical_outcome_shadow_v2"
 ENTRY_MODEL_VERSION = "20260717_entry_path_shadow_v2"
 MANAGEMENT_MODEL_VERSION = "20260717_management_alpha_shadow_v2"
 SHADOW_OUTCOME_SCHEMA_VERSION = "20260717_shadow_outcome_complete_v2"
-FILE_BUS_LIFECYCLE_VERSION = "20260717_file_bus_lifecycle_v2"
+FILE_BUS_LIFECYCLE_VERSION = "20260724_file_bus_lifecycle_v3"
+FILE_BUS_CLAIM_RETRY_ATTEMPTS = 6
+FILE_BUS_CLAIM_RETRY_DELAY_SEC = 0.05
 
 LIVE_FORWARD = "LIVE_FORWARD"
 TESTER_RECORD_ONLY = "TESTER_AI_RECORD_ONLY"
@@ -45,6 +49,27 @@ FILE_BUS_TERMINAL_STATES = {
     "quarantined",
     "shutdown",
 }
+
+
+class FileBusClaimDeferredError(OSError):
+    """A request remains locked by its producer after bounded claim retries."""
+
+    def __init__(self, request_path: Path, target_path: Path, attempts: int) -> None:
+        super().__init__(
+            f"file_bus_claim_deferred:request={request_path.name}:target={target_path.name}:attempts={attempts}"
+        )
+        self.request_path = request_path
+        self.target_path = target_path
+        self.attempts = attempts
+
+
+def _is_transient_file_claim_error(exc: OSError) -> bool:
+    """Windows reports producer-held request files as sharing/lock violations."""
+
+    return (
+        getattr(exc, "winerror", None) in {32, 33}
+        or getattr(exc, "errno", None) in {13, 16}
+    )
 
 SEMANTIC_CACHE_REASONS = (
     "cache_stale_new_entry_bar",
@@ -310,8 +335,14 @@ def response_binding_material(response: Mapping[str, Any]) -> str:
             str(response.get("id") or ""),
             str(response.get("session_id") or ""),
             str(response.get("request_nonce") or ""),
+            str(response.get("request_identity_hash") or ""),
             str(response.get("decision_schema_version") or ""),
             str(response.get("decision_quality_tier") or ""),
+            str(response.get("provider_mode") or ""),
+            str(response.get("provider_id") or ""),
+            str(response.get("actual_model_id") or response.get("model_returned") or ""),
+            str(response.get("model_fingerprint") or ""),
+            str(response.get("generation_settings_hash") or ""),
             str(response.get("decision_state") or ""),
             "1" if bool(response.get("model_raw_allow")) else "0",
             "1" if bool(response.get("python_final_allow")) else "0",
@@ -2087,8 +2118,16 @@ def policy_manifest_entry(
         "status": "missing",
     }
     if not spec.path.is_file():
-        entry["rejection_reasons"] = ["policy_file_missing"] if spec.enabled else []
-        entry["authority"] = "blocked" if spec.enabled else "shadow"
+        if spec.enabled:
+            entry["rejection_reasons"] = ["policy_file_missing"]
+            entry["authority"] = "blocked"
+        else:
+            # An optional policy that was not requested is not a failed policy.
+            # Keep it visible in the manifest without presenting it as a live
+            # authority blocker.
+            entry["status"] = "disabled"
+            entry["activation_state"] = "disabled"
+            entry["authority"] = "shadow"
         return entry
     try:
         if spec.path.suffix.lower() in {".ndjson", ".jsonl"}:
@@ -2226,9 +2265,22 @@ class FileBusLifecycle:
         target = self.directories["processing"] / f"{self.session_id}__{request_path.name}"
         if target.exists():
             raise FileExistsError(f"duplicate_processing_claim:{target.name}")
-        os.replace(request_path, target)
-        self.counters["processing"] += 1
-        return target
+        for attempt in range(1, FILE_BUS_CLAIM_RETRY_ATTEMPTS + 1):
+            try:
+                os.replace(request_path, target)
+                self.counters["processing"] += 1
+                return target
+            except FileNotFoundError:
+                # Another owner or a terminal cleanup won the race. Do not retry
+                # a path that no longer exists.
+                raise
+            except OSError as exc:
+                if not _is_transient_file_claim_error(exc):
+                    raise
+                if attempt >= FILE_BUS_CLAIM_RETRY_ATTEMPTS:
+                    raise FileBusClaimDeferredError(request_path, target, attempt) from exc
+                time.sleep(FILE_BUS_CLAIM_RETRY_DELAY_SEC * attempt)
+        raise AssertionError("unreachable_file_bus_claim_state")
 
     def write_response(self, request_id: str, response: Mapping[str, Any]) -> Path:
         path = self.directories["responses"] / f"{request_id}.json"
@@ -2255,14 +2307,63 @@ class FileBusLifecycle:
         self.counters[state] += 1
         return target
 
-    def recover_processing(self, *, stale_after_sec: int = 1800) -> list[Path]:
+    def recover_processing(
+        self,
+        *,
+        stale_after_sec: int = 1800,
+        stale_grace_sec: int = 120,
+    ) -> list[Path]:
         self.ensure()
         recovered: list[Path] = []
         now = time.time()
         for path in self.directories["processing"].glob("*.json"):
-            if now - path.stat().st_mtime < stale_after_sec:
+            original_name = (
+                path.name.split("__", 1)[1]
+                if "__" in path.name
+                else path.name
+            )
+            request_id = Path(original_name).stem
+            response_path = self.directories["responses"] / f"{request_id}.json"
+            completed_exists = any(
+                item.name.endswith(original_name)
+                for item in self.directories["completed"].glob("*.json")
+            )
+            if response_path.exists() or completed_exists:
+                recovered.append(
+                    self.archive(
+                        path,
+                        "completed",
+                        reason="startup_recovery_existing_terminal_response",
+                    )
+                )
+                self.counters["recovered"] += 1
                 continue
-            recovered.append(self.archive(path, "quarantined", reason="startup_recovery_orphaned_processing"))
+
+            lock_path = self.root / "locks" / f"{original_name}.lock"
+            if lock_path.exists():
+                if not heartbeat_allows_recovery(
+                    lock_path,
+                    now=now,
+                    stale_after_sec=stale_after_sec,
+                    stale_grace_sec=stale_grace_sec,
+                ):
+                    continue
+            elif now - path.stat().st_mtime <= stale_after_sec + stale_grace_sec:
+                continue
+
+            target = self.directories["requests"] / original_name
+            if target.exists():
+                recovered.append(
+                    self.archive(
+                        path,
+                        "quarantined",
+                        reason="startup_recovery_request_collision",
+                    )
+                )
+            else:
+                os.replace(path, target)
+                recovered.append(target)
+            lock_path.unlink(missing_ok=True)
             self.counters["recovered"] += 1
         return recovered
 
