@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import json
@@ -21,10 +21,13 @@ from ai_provider import (
     endpoint_class,
 )
 from architecture_contracts import LIVE_FORWARD
+from compatibility_manifest import compatibility_manifest_hash
 from decision_integrity import DECISION_ABSTAIN, DECISION_APPROVE
 from decision_pipeline import ROLE_CONTRACT_VERSION, run_qualitative_consensus
 from structured_models import ModelCandidateAssessment, StrictStructuredModel
 from tests.test_decision_integrity import assessment as integrity_assessment
+from tests.test_decision_integrity import model_assessment as model_integrity_assessment
+from tests.test_decision_integrity import catalog_ids_for
 from tests.test_decision_integrity import candidate as integrity_candidate
 from trade_memory import TRADE_MEMORY_SCHEMA_VERSION, TradeMemoryStore
 
@@ -141,8 +144,10 @@ class _FullOrchestrationProvider(_IdentityProvider):
         evidence = dict(kwargs.get("evidence") or {})
         request_metadata = dict(kwargs.get("request_metadata") or {})
         if role == "analyst":
-            item = integrity_assessment(self.candidate)
-            item["evidence_refs"] = ["entry_and_invalidation.candidates.0.candidate_hash"]
+            item = model_integrity_assessment(
+                self.candidate,
+                evidence_ref_ids=catalog_ids_for(evidence, 0),
+            )
             comparison_item = {
                 "usable": True,
                 "reason": "Deterministic candidate is feasible.",
@@ -297,6 +302,14 @@ def _consensus_evidence() -> dict:
     }
 
 
+def _consensus_catalog():
+    """The same Python-owned catalog the analyst used, shared with the critic."""
+
+    from evidence_catalog import build_evidence_catalog
+
+    return build_evidence_catalog(_consensus_evidence())
+
+
 def _analyst_assessment() -> dict:
     return {
         "candidate_index": 0,
@@ -308,13 +321,14 @@ def _analyst_assessment() -> dict:
     }
 
 
-def _critic(verdict: str = "PASS") -> dict:
+def _critic(verdict: str = "PASS", *, evidence_ref_ids: list[int] | None = None) -> dict:
+    ids = list(evidence_ref_ids or [0])
     blocking = []
     if verdict == "BLOCK":
         blocking = [
             {
                 "code": "ai_veto_structural_contradiction",
-                "evidence_refs": ["candidate.structure_state"],
+                "evidence_ref_ids": ids,
                 "reason": "The supplied structure state contradicts the proposed narrative.",
             }
         ]
@@ -324,13 +338,13 @@ def _critic(verdict: str = "PASS") -> dict:
         "blocking_objections": blocking,
         "non_blocking_objections": [],
         "missing_required_evidence": [],
-        "evidence_refs": ["candidate.candidate_hash"],
+        "evidence_ref_ids": ids,
         "confidence_band": "HIGH",
         "summary": "Independent evidence audit.",
     }
 
 
-def _adjudicator(verdict: str) -> dict:
+def _adjudicator(verdict: str, *, evidence_ref_ids: list[int] | None = None) -> dict:
     resolved = ["ai_veto_structural_contradiction"] if verdict == "UPHOLD_APPROVE" else []
     unresolved = [] if verdict == "UPHOLD_APPROVE" else ["ai_veto_structural_contradiction"]
     return {
@@ -338,7 +352,7 @@ def _adjudicator(verdict: str) -> dict:
         "verdict": verdict,
         "resolved_objection_codes": resolved,
         "unresolved_objection_codes": unresolved,
-        "evidence_refs": ["candidate.structure_state"],
+        "evidence_ref_ids": list(evidence_ref_ids or [0]),
         "resolution_reason": "The exact structured evidence was reviewed without changing the plan.",
     }
 
@@ -631,6 +645,7 @@ class ConsensusPipelineTests(unittest.TestCase):
             provider=provider,
             evidence=_consensus_evidence(),
             analyst_assessment=_analyst_assessment(),
+            evidence_catalog=_consensus_catalog(),
             request_metadata={
                 "request_id": "request-A",
                 "request_identity_hash": "REQUESTIDENTITYCONSENSUS123",
@@ -652,6 +667,7 @@ class ConsensusPipelineTests(unittest.TestCase):
             provider=provider,
             evidence=_consensus_evidence(),
             analyst_assessment=_analyst_assessment(),
+            evidence_catalog=_consensus_catalog(),
             request_metadata={
                 "request_id": "request-A",
                 "request_identity_hash": "REQUESTIDENTITYCONSENSUS123",
@@ -671,6 +687,7 @@ class ConsensusPipelineTests(unittest.TestCase):
             provider=provider,
             evidence=_consensus_evidence(),
             analyst_assessment=_analyst_assessment(),
+            evidence_catalog=_consensus_catalog(),
             request_metadata={
                 "request_id": "request-A",
                 "request_identity_hash": "REQUESTIDENTITYCONSENSUS123",
@@ -680,19 +697,54 @@ class ConsensusPipelineTests(unittest.TestCase):
         self.assertEqual(result.decision_state, DECISION_ABSTAIN)
 
     def test_unknown_critic_veto_code_fails_closed(self) -> None:
+        """Fails closed at the provider boundary now, not after the call.
+
+        ``ModelCriticObjection.code`` is a strict enum over the canonical
+        vocabulary, so an unknown code is rejected while parsing the provider
+        response.  Previously the schema accepted any string and only
+        ``_validate_objections`` caught it, which meant a structurally valid
+        response could be paid for and counted before failing as
+        ``critic_objection_code_unknown``.
+        """
+
         critic = _critic("BLOCK")
         critic["blocking_objections"][0]["code"] = "free_text_block"
         provider = _ScriptedProvider({"critic": [critic]})
-        with self.assertRaisesRegex(ValueError, "critic_objection_code_unknown"):
+        # pydantic.ValidationError is a subclass of ValueError, so this still
+        # asserts the same fail-closed guarantee, just at an earlier stage.
+        with self.assertRaises(ValueError) as ctx:
             run_qualitative_consensus(
                 provider=provider,
                 evidence=_consensus_evidence(),
                 analyst_assessment=_analyst_assessment(),
+                evidence_catalog=_consensus_catalog(),
                 request_metadata={
                     "request_id": "request-A",
                     "request_identity_hash": "REQUESTIDENTITYCONSENSUS123",
                 },
             )
+        self.assertIn("free_text_block", str(ctx.exception))
+
+    def test_unknown_critic_veto_code_still_caught_by_the_deterministic_validator(
+        self,
+    ) -> None:
+        """The second layer must remain, for payloads that skip the schema.
+
+        Cache replay and any future non-strict path reconstruct a critic dict
+        without re-parsing it through ``ModelCriticDecision``, so the
+        deterministic validator has to keep its own check.
+        """
+
+        from decision_pipeline import _validate_objections
+
+        critic = _critic("BLOCK")
+        critic["blocking_objections"][0]["code"] = "free_text_block"
+        critic["blocking_objections"][0]["evidence_refs"] = ["x"]
+        critic["evidence_refs"] = ["x"]
+        critic["role"] = "critic"
+        critic["role_contract_version"] = ROLE_CONTRACT_VERSION
+        with self.assertRaisesRegex(ValueError, "critic_objection_code_unknown"):
+            _validate_objections(critic, {})
 
 
 class TradeMemoryRetrievalTests(unittest.TestCase):
@@ -872,6 +924,9 @@ class PreModelSafetyTests(unittest.TestCase):
         provider = _FullOrchestrationProvider(candidate)
         payload = {
             "id": "local-e2e-request",
+            "session_id": "local-e2e-session",
+            "request_nonce": "local-e2e-nonce",
+            "contract_manifest_hash": compatibility_manifest_hash(),
             "request_identity_version": ai_gate.AI_REQUEST_IDENTITY_VERSION,
             "request_identity_hash": "REQUESTIDENTITYE2E1234567890",
             "request_created_sim_time": 1780000000,

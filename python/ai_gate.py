@@ -27,10 +27,11 @@ import time
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from ai_provider import (
     AIProvider,
@@ -55,9 +56,11 @@ from architecture_contracts import (
     SEMANTIC_CACHE_SCHEMA_VERSION,
     FileBusClaimDeferredError,
     FileBusLifecycle,
+    RUNTIME_AUTHORITY_PENDING,
     PolicySpec,
     build_startup_policy_manifest,
     decision_field_authority_manifest,
+    file_sha256,
     live_forward_behavior_contract,
     resolve_multiplier,
     response_binding_hash,
@@ -65,7 +68,13 @@ from architecture_contracts import (
     semantic_cache_row,
     semantic_cache_state,
     strict_json_loads,
+    utc_now,
     workload_mode as canonical_workload_mode,
+)
+from compatibility_manifest import (
+    compatibility_manifest,
+    compatibility_manifest_hash,
+    validate_mql_contract,
 )
 from decision_integrity import (
     AI_DECISION_SCHEMA_VERSION,
@@ -95,7 +104,14 @@ from decision_integrity import (
     validate_decision_envelope,
     validate_request_identity_echo,
 )
+from bus_cohort_migration import CohortIdentity, migrate_bus_cohorts
 from decision_evidence import EVIDENCE_ENVELOPE_VERSION, build_decision_evidence_envelope
+from evidence_catalog import (
+    EVIDENCE_CATALOG_VERSION,
+    EvidenceCatalog,
+    build_evidence_catalog,
+    resolve_legacy_references,
+)
 from decision_pipeline import (
     CONSENSUS_RESOLVER_VERSION,
     ROLE_CONTRACT_VERSION,
@@ -143,12 +159,49 @@ from request_lifecycle import (
     RequestHeartbeat,
     RequestIdempotencyLedger,
 )
+from pipeline_integrity import (
+    FROZEN_REQUEST_MUTATION,
+    LOCAL_PIPELINE_ERROR,
+    PipelineIntegrityError,
+    classify_local_pipeline_failure,
+)
 from trade_memory import RETRIEVAL_POLICY_VERSION, TRADE_MEMORY_SCHEMA_VERSION, TradeMemoryStore
+from provider_deadline import (
+    DEADLINE_CONTRACT_VERSION,
+    LATE_RESULT_QUARANTINE,
+    STAGE_POSTPROCESS,
+    DeadlinePolicy,
+    RequestDeadline,
+)
+from request_terminal_state import (
+    REQUEST_TERMINAL_REGISTRY,
+    TERMINAL_COMPLETED,
+    TERMINAL_ERROR,
+    TERMINAL_TEST_END_INTERRUPTED,
+    TERMINAL_TIMEOUT,
+)
+from run_manifest import (
+    RunManifest,
+    absorb_mql_identity,
+    build_manifest as build_run_manifest,
+    stamp as stamp_run_id,
+    write_manifest as write_run_manifest,
+)
+from repeatability_state import (
+    RepeatabilityBinding,
+    # ai_gate already defines its own RepeatabilityThresholds with different
+    # field names for the per-candidate shadow comparison; the qualification
+    # state machine's thresholds are a separate concept and must not shadow it.
+    RepeatabilityThresholds as QualificationThresholds,
+    evaluate_artifact as evaluate_repeatability_artifact,
+)
 from structured_models import (
+    CONFIDENCE_BANDS,
     AIGateEnvelope,
     CandidateAssessment,
     ModelAIGateOutput,
     all_authoritative_structured_models,
+    normalize_confidence_band,
     strict_structured_schema,
 )
 
@@ -297,6 +350,10 @@ class AIGateRuntimeConfig:
     service_tier: str
     openai_timeout_sec: float
     openai_flex_timeout_sec: float
+    mt5_terminal_timeout_sec: float
+    response_write_margin_sec: float
+    min_provider_attempt_sec: float
+    live_candidate_budget: int
     flex_unavailable_retry_enable: bool
     flex_unavailable_max_retries: int
     flex_unavailable_cooldown_sec: float
@@ -485,6 +542,16 @@ class AIGateRuntimeConfig:
             service_tier=service_tier,
             openai_timeout_sec=_env_float(env, "AI_OPENAI_TIMEOUT_SEC", 180.0, warnings, min_value=10.0, max_value=1800.0),
             openai_flex_timeout_sec=_env_float(env, "AI_OPENAI_FLEX_TIMEOUT_SEC", 600.0, warnings, min_value=30.0, max_value=1800.0),
+            # Mirrors the MQL InpAiWaitTimeoutRealMin terminal deadline.  The
+            # request payload overrides it when MT5 publishes its own value.
+            mt5_terminal_timeout_sec=_env_float(env, "AI_MT5_TERMINAL_TIMEOUT_SEC", 120.0, warnings, min_value=5.0, max_value=3600.0),
+            response_write_margin_sec=_env_float(env, "AI_RESPONSE_WRITE_MARGIN_SEC", 15.0, warnings, min_value=1.0, max_value=600.0),
+            min_provider_attempt_sec=_env_float(env, "AI_MIN_PROVIDER_ATTEMPT_SEC", 10.0, warnings, min_value=1.0, max_value=600.0),
+            # Benchmarked live cohort ceiling: 3 candidates completed in 64.8s
+            # against a 90s provider deadline while 6 candidates reached 87.9s
+            # and timed out on 3 of 4 attempts.  Offline record/cache processing
+            # is not subject to this budget.
+            live_candidate_budget=_env_int(env, "AI_LIVE_CANDIDATE_BUDGET", 3, warnings, min_value=1, max_value=12),
             flex_unavailable_retry_enable=_env_bool(env, "AI_FLEX_UNAVAILABLE_RETRY_ENABLE", True, warnings, safe_default=True),
             flex_unavailable_max_retries=_env_int(env, "AI_FLEX_UNAVAILABLE_MAX_RETRIES", 20, warnings, min_value=0, max_value=100),
             flex_unavailable_cooldown_sec=_env_float(env, "AI_FLEX_UNAVAILABLE_COOLDOWN_SEC", 30.0, warnings, min_value=0.0, max_value=3600.0),
@@ -580,6 +647,10 @@ class AIGateRuntimeConfig:
             "service_tier": self.service_tier,
             "openai_timeout_sec": self.openai_timeout_sec,
             "openai_flex_timeout_sec": self.openai_flex_timeout_sec,
+            "mt5_terminal_timeout_sec": self.mt5_terminal_timeout_sec,
+            "response_write_margin_sec": self.response_write_margin_sec,
+            "min_provider_attempt_sec": self.min_provider_attempt_sec,
+            "live_candidate_budget": self.live_candidate_budget,
             "flex_unavailable_retry_enable": self.flex_unavailable_retry_enable,
             "flex_unavailable_max_retries": self.flex_unavailable_max_retries,
             "flex_unavailable_cooldown_sec": self.flex_unavailable_cooldown_sec,
@@ -671,6 +742,32 @@ AI_GATE_MODEL_VERSION = "po3-provider-neutral-consensus-20260718-v1"
 LIVE_BUCKET_PRIORS_FILE = AI_CONFIG.live_bucket_priors_file
 LOG_FILE = None  # will be set in main() once the bus path is known
 _AI_RUNTIME_CONFIG_LOGGED = False
+# Configured request-pool size; main() overrides it from --workers.  Effective
+# concurrency is derived per request via effective_worker_count().
+AI_CONFIG_WORKERS = 1
+
+# Minted at gate start; binds this Python session, the provider process, and the
+# MQL session that talks to it into one nameable run.  Kept as a module global
+# so every log site can stamp the same id without threading it through.
+RUN_MANIFEST = RunManifest()
+
+ARTIFACT_COMPATIBILITY_REPORT_VERSION = "20260730_artifact_compatibility_v1"
+DEPLOYMENT_MANIFEST_SCHEMA_VERSION = "20260730_deployment_manifest_v1"
+# The deployed MQL sources the terminal actually compiles and runs.  The
+# deployment manifest hashes these, never the repository working copy, because
+# only the deployed build participates in a live or tester run.
+MQL_DEPLOYED_INCLUDE_DIR = Path(
+    os.environ.get("MT5_INCLUDE_DIR")
+    or (
+        Path(os.environ.get("APPDATA", ""))
+        / "MetaQuotes"
+        / "Terminal"
+        / "0148BD5691B65B0F2157627A4231F3DE"
+        / "MQL5"
+        / "Include"
+        / "MT5_PO3_Codex"
+    )
+)
 _REPEATABILITY_LOCK = Lock()
 _FINGERPRINT_LOG_LOCK = Lock()
 FILE_BUS_LIFECYCLE: FileBusLifecycle | None = None
@@ -932,6 +1029,68 @@ def _repeatability_group_fields(
 
 def _repeatability_group_key(model: str, quality_tier: str) -> str:
     return canonical_hash(_repeatability_group_fields(model, quality_tier))
+
+
+def _log_repeatability_state(artifact: Mapping[str, Any], provider: Any) -> None:
+    """Report the five-state qualification, not a single opaque label.
+
+    ``repeatability_status=UNAVAILABLE`` covered four different situations --
+    never measured, measured but under-sampled, measured for a different
+    binding, and artifact corrupt -- which need four different operator
+    responses.  Only one of them is a genuine cold start.
+
+    This is reporting only: it neither fabricates samples nor changes
+    ``require_repeatability_live``.  A group becomes QUALIFIED solely from real
+    recorded observations that met real thresholds.
+    """
+
+    model = provider.model_for_role("analyst")
+    group_key = _repeatability_group_key(model, DECISION_QUALITY_FULL_STRUCTURED)
+    try:
+        generation_settings_hash = str(
+            provider.generation_identity("analyst", {}).get("generation_settings_hash") or ""
+        )
+    except Exception:  # pragma: no cover - diagnostics must never block startup
+        generation_settings_hash = ""
+
+    binding = RepeatabilityBinding(
+        provider_id=str(provider.provider_id),
+        model_snapshot=str(model),
+        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+        evidence_catalog_version=EVIDENCE_CATALOG_VERSION,
+        generation_settings_hash=generation_settings_hash,
+        candidate_count=int(AI_CONFIG.live_candidate_budget or 0),
+    )
+    thresholds = QualificationThresholds(
+        min_samples=int(AI_CONFIG.shadow_repeat_min_evaluated_candidates or 0),
+        min_decision_agreement=float(AI_CONFIG.shadow_repeat_min_decision_agreement or 0.0),
+        min_chosen_candidate_agreement=float(
+            AI_CONFIG.shadow_repeat_min_chosen_candidate_agreement or 0.0
+        ),
+        min_target_choice_agreement=float(
+            AI_CONFIG.shadow_repeat_min_target_choice_agreement or 0.0
+        ),
+        min_veto_agreement=float(AI_CONFIG.shadow_repeat_min_veto_agreement or 0.0),
+        max_score_stddev=float(AI_CONFIG.shadow_repeat_max_score_stddev or 0.0),
+    )
+    evaluation = evaluate_repeatability_artifact(
+        artifact,
+        group_key=group_key,
+        current_binding=binding,
+        thresholds=thresholds,
+    )
+    log(evaluation.startup_line())
+    if AI_CONFIG.require_repeatability_live and not evaluation.trading_authority:
+        # Say plainly that live trading is gated, and by what, rather than
+        # letting an operator discover it one rejected trade at a time.
+        log(
+            "[repeatability_gate]"
+            f" require_repeatability_live=true state={evaluation.state}"
+            f" trading_authority=false samples_remaining={evaluation.samples_remaining}"
+            f" action=collect_offline_qualification_samples"
+            f" group_key={group_key}"
+        )
 
 
 def _empty_repeatability_artifact(load_status: str, detail: str = "") -> Dict[str, Any]:
@@ -1441,9 +1600,56 @@ def _openai_timeout_for_payload(payload: Dict[str, Any] | None) -> float:
     return float(AI_CONFIG.openai_timeout_sec)
 
 
+def _mt5_terminal_timeout_sec(payload: Dict[str, Any] | None) -> float:
+    """The terminal's own wait budget, published by MQL when available."""
+
+    runtime = _as_dict((payload or {}).get("runtime_inputs"))
+    published_ms = runtime.get("ai_wait_timeout_ms")
+    try:
+        if published_ms is not None and float(published_ms) > 0:
+            return float(published_ms) / 1000.0
+    except (TypeError, ValueError):
+        pass
+    return float(AI_CONFIG.mt5_terminal_timeout_sec)
+
+
+def _deadline_policy_for_payload(payload: Dict[str, Any] | None) -> DeadlinePolicy:
+    return DeadlinePolicy.derive(
+        mt5_terminal_timeout_sec=_mt5_terminal_timeout_sec(payload),
+        response_write_margin_sec=float(AI_CONFIG.response_write_margin_sec),
+        min_attempt_sec=float(AI_CONFIG.min_provider_attempt_sec),
+    )
+
+
+def _start_request_deadline(payload: Dict[str, Any] | None) -> RequestDeadline:
+    """One absolute monotonic deadline per request identity."""
+
+    return REQUEST_TERMINAL_REGISTRY.register_deadline(
+        RequestDeadline.start(
+            str((payload or {}).get("id") or ""),
+            _deadline_policy_for_payload(payload),
+        )
+    )
+
+
+def _request_deadline_for(payload: Dict[str, Any] | None) -> RequestDeadline:
+    """The already-registered deadline, or a freshly started one.
+
+    Registration is idempotent, so a nested call never restarts the clock.
+    """
+
+    request_id = str((payload or {}).get("id") or "")
+    existing = REQUEST_TERMINAL_REGISTRY.deadline_for(request_id)
+    if existing is not None:
+        return existing
+    return _start_request_deadline(payload)
+
+
 def _provider_request_metadata(
     payload: Dict[str, Any] | None,
     provider: AIProvider | None = None,
+    *,
+    deadline: RequestDeadline | None = None,
 ) -> Dict[str, Any]:
     selected_provider = provider or _provider()
     service_tier, _flex_used, _disabled_reason = _effective_service_tier(payload)
@@ -1452,7 +1658,11 @@ def _provider_request_metadata(
         if selected_provider.provider_mode == PROVIDER_MODE_REMOTE
         else AI_CONFIG.local_timeout_sec
     )
-    return {
+    # timeout_sec stays the deterministic *configured* value: it feeds
+    # generation_settings_hash, which is part of request identity and cache
+    # compatibility.  The absolute deadline narrows the real SDK timeout inside
+    # generate_structured instead, where it cannot perturb any hash.
+    metadata: Dict[str, Any] = {
         "service_tier": service_tier if selected_provider.provider_mode == PROVIDER_MODE_REMOTE else "auto",
         "timeout_sec": float(timeout_sec),
         "workload_mode": _payload_workload_mode(payload or {}),
@@ -1461,6 +1671,9 @@ def _provider_request_metadata(
         "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
         "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
     }
+    if deadline is not None:
+        metadata["deadline"] = deadline
+    return metadata
 
 
 def _apply_prompt_cache_kwargs(kwargs: Dict[str, Any]) -> None:
@@ -2080,8 +2293,20 @@ def _freeze_request_for_provider(
             "structured_schema_preflight_failed:"
             + "|".join(schema_preflight.errors)
         )
-    return freeze_ai_request(
+    initial = freeze_ai_request(
         payload,
+        provider_identity=provider_identity,
+        schema_fingerprint=schema_preflight.schema_fingerprint,
+        family_profile_version=FAMILY_PROFILE_VERSION,
+        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
+        candidate_cap=12,
+    )
+    canonical_payload = initial.thaw_payload()
+    _attach_frozen_identity(canonical_payload, initial)
+    # Seal the transport identity fields into the canonical payload. From this
+    # point forward both the complete payload and every candidate are immutable.
+    return freeze_ai_request(
+        canonical_payload,
         provider_identity=provider_identity,
         schema_fingerprint=schema_preflight.schema_fingerprint,
         family_profile_version=FAMILY_PROFILE_VERSION,
@@ -2106,6 +2331,221 @@ def _attach_frozen_identity(
     payload["candidate_count"] = int(identity["candidate_count"])
 
 
+# Contract fields that Python owns exclusively.  A model or a legacy cache entry
+# may still echo them; the echo is diagnostic only and is always overwritten.
+_PYTHON_OWNED_ARBITRATION_FIELDS: tuple[tuple[str, str], ...] = (
+    ("target_arbitration_schema_version", AI_TARGET_ARBITRATION_SCHEMA_VERSION),
+    ("prompt_contract_version", AI_PROMPT_CONTRACT_VERSION),
+)
+
+
+def _resolve_python_owned_arbitration(
+    arbitration: Mapping[str, Any],
+    *,
+    candidate_index: int,
+    echo_diagnostics: list[str],
+) -> Dict[str, Any]:
+    """Overwrite Python-owned arbitration versions and record any wrong echo."""
+
+    resolved = dict(arbitration)
+    for field, active_value in _PYTHON_OWNED_ARBITRATION_FIELDS:
+        echoed = resolved.get(field)
+        if echoed is not None and str(echoed) != active_value:
+            echo_diagnostics.append(
+                f"candidate[{candidate_index}].target_arbitration.{field}"
+                f"={_ascii_compact(str(echoed))}"
+            )
+        resolved[field] = active_value
+    return resolved
+
+
+def analyst_output_token_budget(candidate_count: int, configured_max: int) -> int:
+    """Bound output tokens by what the schema actually needs.
+
+    An unconditional 25,000-token ceiling lets a slow generation consume the
+    whole provider deadline even when the schema can only produce a fraction of
+    that.  One ModelCandidateAssessment serializes to roughly 900-1,100 tokens
+    including target_arbitration and target_comparison, so the budget is sized
+    per candidate with headroom, then clamped to the configured maximum.
+    """
+
+    per_candidate = 1600
+    envelope_overhead = 1200
+    needed = envelope_overhead + per_candidate * max(1, int(candidate_count))
+    return max(1024, min(int(configured_max), needed))
+
+
+def select_live_candidate_cohort(
+    candidates: Sequence[Mapping[str, Any]],
+    enriched: Sequence[Mapping[str, Any]],
+    *,
+    budget: int,
+) -> tuple[list[int], list[int], str]:
+    """Pick a latency-safe cohort for live / live-wait requests.
+
+    Benchmarked on the captured 2026-07-30 cohort, provider latency tracked
+    payload size almost linearly: 1 candidate 24.4s, 3 candidates 64.8s,
+    6 candidates 87.9s against a 90s provider deadline -- and three of the four
+    six-candidate calls timed out.  Six candidates is not a safe live cohort.
+
+    Selection is deterministic: highest authoritative rule score first, with one
+    candidate per setup family before any family repeats, so the cohort keeps
+    family diversity instead of stacking near-duplicates.  Nothing is silently
+    dropped; deferred candidates are returned for logging and remain fully
+    evaluated by the offline record/cache workflow.
+    """
+
+    order = sorted(
+        range(len(candidates)),
+        key=lambda position: (
+            -float(enriched[position].get("rule_score") or 0.0),
+            int(candidates[position].get("candidate_index", position)),
+        ),
+    )
+    if budget <= 0 or len(candidates) <= budget:
+        return list(order), [], "within_live_candidate_budget"
+
+    chosen: list[int] = []
+    seen_families: set[str] = set()
+    for position in order:
+        if len(chosen) >= budget:
+            break
+        family = str(candidates[position].get("setup_family") or "").upper()
+        if family and family in seen_families:
+            continue
+        seen_families.add(family)
+        chosen.append(position)
+    for position in order:
+        if len(chosen) >= budget:
+            break
+        if position not in chosen:
+            chosen.append(position)
+    deferred = [position for position in order if position not in chosen]
+    return chosen, deferred, "live_latency_budget_rule_score_family_diverse"
+
+
+def _compact_model_evidence_payload(
+    envelope: Mapping[str, Any],
+    catalog: EvidenceCatalog,
+) -> Dict[str, Any]:
+    """Slim the provider payload without losing any citable evidence.
+
+    Measured on the captured 2026-07-30 requests, the canonical envelope costs
+    ~17,100 characters per candidate, and latency scaled with it almost exactly
+    (1 cand / 19k chars / 24.4s, 3 / 52k / 64.8s, 6 / 102k / 87.9s at the 90s
+    deadline).  Two whole sections were verbatim duplicates of data already
+    present inside each candidate row:
+
+      * ``execution_costs.per_candidate[i]`` is the same object as
+        ``entry_and_invalidation.candidates[i].authoritative_numbers``
+      * ``targets_and_obstacles.candidate_targets[i]`` is the same object as
+        ``entry_and_invalidation.candidates[i].target_candidates``
+
+    and every numeric fact was carried as an eight-field lineage object when the
+    model only needs the value.  The catalog now carries id/path/value, so the
+    duplicates become pointers and the lineage blocks stay Python-side.  Nothing
+    citable is removed: every catalog item remains resolvable.
+    """
+
+    compact = dict(envelope)
+    compact["evidence_catalog"] = {
+        "catalog_version": catalog.catalog_version,
+        "catalog_hash": catalog.catalog_hash,
+        "items": catalog.provider_rows(),
+        "usage": (
+            "Cite evidence only by these integer ids in evidence_ref_ids. "
+            "Candidate-scoped items carry 'c'; items without 'c' are global. "
+            "A candidate may cite its own items and global items only."
+        ),
+    }
+    compact["execution_costs"] = {
+        "authoritative_source": envelope.get("execution_costs", {}).get(
+            "authoritative_source", "MQL5_execution_cost_model"
+        ),
+        "per_candidate_reference": "entry_and_invalidation.candidates[i].authoritative_numbers",
+    }
+    compact["targets_and_obstacles"] = {
+        "candidate_targets_reference": "entry_and_invalidation.candidates[i].target_candidates",
+    }
+
+    section = compact.get("entry_and_invalidation")
+    rows = section.get("candidates") if isinstance(section, Mapping) else None
+    if isinstance(rows, list):
+        slim_rows: list[Dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            slim = dict(row)
+            numbers = slim.get("authoritative_numbers")
+            if isinstance(numbers, Mapping):
+                # Keep the values the model reasons over; the unit/source/
+                # freshness/lineage_hash metadata stays Python-authoritative and
+                # is re-attached to the final envelope, not shipped to the model.
+                slim["authoritative_numbers"] = {
+                    name: body.get("value") if isinstance(body, Mapping) else body
+                    for name, body in numbers.items()
+                }
+            slim_rows.append(slim)
+        compact["entry_and_invalidation"] = {"candidates": slim_rows}
+    return compact
+
+
+class EvidenceReferenceError(ValueError):
+    """A model reference did not resolve to a catalog item, fail-closed."""
+
+    def __init__(self, message: str, diagnostics: Mapping[str, Any]) -> None:
+        super().__init__(message)
+        self.diagnostics = dict(diagnostics)
+
+
+def _resolve_evidence_reference_ids(
+    *,
+    catalog: EvidenceCatalog,
+    raw_ids: Any,
+    legacy_refs: Any,
+    candidate_index: int,
+    field_name: str,
+) -> tuple[list[str], Dict[str, Any]]:
+    """Resolve model catalog IDs (or legacy paths) to canonical evidence.
+
+    Returns the resolved canonical paths for the authoritative envelope plus
+    diagnostics for ``[evidence_reference_validation]``.
+    """
+
+    legacy_diagnostics: Dict[str, Any] = {}
+    if isinstance(raw_ids, list) and raw_ids:
+        resolution = catalog.resolve(raw_ids, candidate_index=candidate_index)
+        returned = list(raw_ids)
+    else:
+        # Migration path for cached/legacy responses that still carry strings.
+        resolution, legacy_diagnostics = resolve_legacy_references(
+            catalog,
+            list(legacy_refs or []),
+            candidate_index=candidate_index,
+        )
+        returned = list(legacy_refs or [])
+
+    diagnostics: Dict[str, Any] = {
+        "field": field_name,
+        "candidate_index": candidate_index,
+        "valid": bool(resolution.valid),
+        "returned_ids": returned,
+        "unknown_ids": list(resolution.unknown_ids),
+        "cross_candidate_ids": list(resolution.cross_candidate_ids),
+        "duplicate_ids": list(resolution.duplicate_ids),
+        "resolved_paths": list(resolution.resolved_paths),
+        "catalog_size": len(catalog),
+        "catalog_hash": catalog.catalog_hash,
+    }
+    if legacy_diagnostics:
+        diagnostics["legacy"] = legacy_diagnostics
+    if not resolution.valid:
+        raise EvidenceReferenceError(
+            f"evidence_reference_invalid:{field_name}", diagnostics
+        )
+    return list(resolution.resolved_paths), diagnostics
+
+
 def _bind_python_owned_analyst_envelope(
     *,
     model_output: Mapping[str, Any],
@@ -2115,6 +2555,7 @@ def _bind_python_owned_analyst_envelope(
     request_identity_hash: str,
     ordered_candidate_identities: list[Dict[str, Any]],
     provider_result: Any,
+    evidence_catalog: EvidenceCatalog,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Map analytical indexes to the immutable request and attach identity."""
 
@@ -2179,9 +2620,61 @@ def _bind_python_owned_analyst_envelope(
         for position, candidate in enumerate(candidates)
     }
     bound_assessments: list[Dict[str, Any]] = []
+    echo_diagnostics: list[str] = []
+    evidence_diagnostics: list[Dict[str, Any]] = []
     for index in expected_indexes:
         candidate = candidate_by_index[index]
         analytical = dict(assessment_by_index[index])
+        canonical_band = normalize_confidence_band(analytical.get("confidence_band"))
+        if canonical_band is None:
+            # Fail closed: an unknown band is never coerced into a tradeable value.
+            raise ValueError(
+                "model_confidence_band_invalid:"
+                + json.dumps(
+                    {
+                        "candidate_index": index,
+                        "value": _ascii_compact(str(analytical.get("confidence_band"))),
+                        "allowed": list(CONFIDENCE_BANDS),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+        analytical["confidence_band"] = canonical_band
+        analytical["target_arbitration"] = _resolve_python_owned_arbitration(
+            _as_dict(analytical.get("target_arbitration")),
+            candidate_index=index,
+            echo_diagnostics=echo_diagnostics,
+        )
+        # Python owns canonical evidence paths.  The model supplies bounded
+        # catalog IDs; unknown, cross-candidate, or duplicate IDs fail closed.
+        resolved_refs, ref_diagnostics = _resolve_evidence_reference_ids(
+            catalog=evidence_catalog,
+            raw_ids=analytical.get("evidence_ref_ids"),
+            legacy_refs=analytical.get("evidence_refs"),
+            candidate_index=index,
+            field_name="evidence_refs",
+        )
+        analytical.pop("evidence_ref_ids", None)
+        analytical["evidence_refs"] = resolved_refs
+        evidence_diagnostics.append(ref_diagnostics)
+
+        analyst_veto = _as_dict(analytical.get("veto"))
+        if bool(analyst_veto.get("enabled")):
+            veto_refs, veto_diagnostics = _resolve_evidence_reference_ids(
+                catalog=evidence_catalog,
+                raw_ids=analyst_veto.get("evidence_ref_ids"),
+                legacy_refs=analyst_veto.get("evidence_fields"),
+                candidate_index=index,
+                field_name="veto.evidence_fields",
+            )
+            evidence_diagnostics.append(veto_diagnostics)
+        else:
+            veto_refs = []
+        analyst_veto.pop("evidence_ref_ids", None)
+        analyst_veto["evidence_fields"] = veto_refs
+        analytical["veto"] = analyst_veto
+
         rule_value = rule_by_index[index]
         quality = float(analytical["llm_quality_score"])
         blended = max(0.0, min(10.0, 0.72 * rule_value + 0.28 * quality))
@@ -2274,6 +2767,10 @@ def _bind_python_owned_analyst_envelope(
             "reasons": str(model_output.get("reasons") or ""),
         }
     ).model_dump()
+    mapping_diagnostics["python_owned_field_echoes"] = echo_diagnostics
+    mapping_diagnostics["evidence_reference_diagnostics"] = evidence_diagnostics
+    mapping_diagnostics["evidence_catalog_hash"] = evidence_catalog.catalog_hash
+    mapping_diagnostics["evidence_catalog_size"] = len(evidence_catalog)
     return final_envelope, mapping_diagnostics
 
 
@@ -2315,8 +2812,12 @@ def _score_setup_ai(
     if frozen_request is None:
         frozen_request = _freeze_request_for_provider(payload, provider)
         payload = frozen_request.thaw_payload()
-        _attach_frozen_identity(payload, frozen_request)
-    frozen_request.assert_unchanged(payload)
+    frozen_request.assert_unchanged(
+        payload,
+        stage="before_provider_call",
+        provider_call_attempted=False,
+        http_request_sent=False,
+    )
     candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
 
     model_payload = _compact_model_payload(payload)
@@ -2416,7 +2917,16 @@ def _score_setup_ai(
             source="decision_evidence_no_trade",
         )
     model_payload = evidence_result.envelope
+    # One deterministic evidence catalog per frozen request, shared by analyst,
+    # critic, adjudicator, cache, and shadow repeats.  It replaces both the
+    # free-form path vocabulary and the duplicated bulk sections below.
+    evidence_catalog = build_evidence_catalog(model_payload)
+    model_payload = _compact_model_evidence_payload(model_payload, evidence_catalog)
     request_identity_hash = str(payload.get("request_identity_hash") or "")
+    # One absolute deadline for the whole remaining lifecycle: provider call,
+    # validation, envelope construction, and the atomic response write.  It is
+    # started once and never reset by a retry, poll, or model fallback.
+    request_deadline = _request_deadline_for(payload)
     ordered_candidate_identities = list(
         payload.get("ordered_candidate_identities") or []
     )
@@ -2429,7 +2939,11 @@ def _score_setup_ai(
     snapshots_required = _runtime_bool(runtime.get("require_snapshots"), False)
     system_msg = f"""You are the independent Analyst in a disciplined PO3 + FVG trade audit. Assess every candidate independently. Never copy a score, veto, target choice, confidence, or risk multiplier between candidates. Reference candidates only by the supplied candidate_index. Python exclusively owns request IDs, hashes, provider/model identity, candidate IDs/hashes, execution fingerprints, schema versions, and final plan prices; do not return or reconstruct those fields.
 
-For each candidate return candidate_index and verdict equal to decision_state. Fill thesis_supported, material_contradictions, missing_required_evidence, historical_evidence_state, major_risks, evidence_refs, confidence_band, and summary. Evidence refs must point to exact paths in the canonical evidence envelope. Historical evidence state must be SUPPORTIVE, MIXED, ADVERSE, or INSUFFICIENT_SAMPLE. Do not request or reveal hidden chain-of-thought; provide only concise auditable conclusions.
+For each candidate return candidate_index and verdict equal to decision_state. Fill thesis_supported, material_contradictions, missing_required_evidence, historical_evidence_state, major_risks, evidence_ref_ids, confidence_band, and summary. Historical evidence state must be SUPPORTIVE, MIXED, ADVERSE, or INSUFFICIENT_SAMPLE. confidence_band must be exactly {" or ".join(CONFIDENCE_BANDS)}. Do not request or reveal hidden chain-of-thought; provide only concise auditable conclusions.
+
+Evidence citation is by integer id only. The payload contains evidence_catalog.items, where each item has id, p (the Python-owned canonical path), v (the observed value), and optionally c (the candidate index it belongs to). Items without c are global. In evidence_ref_ids and veto.evidence_ref_ids return only ids taken from that catalog. A candidate may cite its own items and global items; citing another candidate's item is invalid. Never invent an id, never return a path string, and never construct a canonical path yourself: Python owns all canonical paths, value hashes, and authority labels.
+
+Return analytical content only. Python exclusively owns and injects every internal contract version, schema version, prompt contract version, target arbitration schema version, request identity, and candidate identity. Never emit, guess, or echo those constants.
 
 Structured MT5 fields are primary evidence; chart snapshots are supporting evidence. Missing or failed chart captures are not a rejection when runtime.require_snapshots is false. The field opposing_clearance_score is favorable when high and means a nearby obstruction when low.
 
@@ -2437,9 +2951,9 @@ Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is
 
 Score semantics are strict. rule_score is supplied deterministic evidence and must not be returned. llm_quality_score is your 0..10 technical-quality assessment. llm_self_reported_confidence is your uncertainty report, not a probability. Do not return calibrated probability, expected R, blended scores, or transport identity. Never fabricate probability or expected R.
 
-Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_fields must list the exact payload field paths that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, evidence_fields, and reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
+Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_ref_ids must list the exact evidence_catalog ids that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, empty evidence_ref_ids, and empty reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
 
-Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Fill target_arbitration_schema_version and prompt_contract_version with the exact current constants. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
+Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
 The deterministic setup taxonomy is evidence, not a model output. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
 
@@ -2471,8 +2985,30 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         "timeout_sec": _provider_request_metadata(payload, provider)["timeout_sec"],
                         "workload_mode": _payload_workload_mode(payload),
                         "non_trading_shadow": bool(non_authoritative_shadow),
+                        "deadline": request_deadline,
+                        "max_output_tokens": analyst_output_token_budget(
+                            len(candidates), AI_CONFIG.max_output_tokens
+                        ),
                     },
                 )
+                if request_deadline.expired():
+                    # The result arrived after the Python response deadline.  It
+                    # is quarantined, never authoritative, and never cached.
+                    log(
+                        "[provider_deadline_exceeded]"
+                        f" request_id={request_id}"
+                        f" stage={STAGE_POSTPROCESS}"
+                        f" elapsed_ms={request_deadline.elapsed_ms()}"
+                        f" python_deadline_ms={request_deadline.policy.python_deadline_ms}"
+                        f" late_result_action={LATE_RESULT_QUARANTINE}"
+                        " authoritative=false"
+                    )
+                    return _degraded_non_trading_decision(
+                        payload,
+                        "provider result arrived after the absolute request deadline",
+                        invalid=["provider_deadline_exceeded"],
+                        source="provider_deadline_exceeded",
+                    )
                 resp = provider_result.raw_response
                 out = provider_result.parsed
                 model_name = provider_result.actual_model
@@ -2518,8 +3054,26 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     openai_called=provider_result.provider_mode == PROVIDER_MODE_REMOTE,
                     skip_reason="",
                 )
-                frozen_request.assert_unchanged(payload)
+                frozen_request.assert_unchanged(
+                    payload,
+                    stage="after_provider_call",
+                    provider_call_attempted=True,
+                    http_request_sent=True,
+                )
                 raw_model_output = out.model_dump()
+                # The provider SDK already enforced the strict raw model schema
+                # (ModelAIGateOutput).  Reaching this point means the analytical
+                # payload is valid as model output; anything that fails from here
+                # is a Python-owned envelope concern, not a model schema concern.
+                log(
+                    "[raw_model_schema_validation] valid=true"
+                    f" request_id={request_id}"
+                    f" request_identity_hash={request_identity_hash[:16]}"
+                    f" schema={ModelAIGateOutput.__name__}"
+                    f" schema_fingerprint={provider_result.schema_fingerprint[:16]}"
+                    f" assessments={len(raw_model_output.get('candidate_assessments') or [])}"
+                    f" model_owned_fields_only=true"
+                )
                 try:
                     raw_envelope, mapping_diagnostics = (
                         _bind_python_owned_analyst_envelope(
@@ -2530,9 +3084,54 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             request_identity_hash=request_identity_hash,
                             ordered_candidate_identities=ordered_candidate_identities,
                             provider_result=provider_result,
+                            evidence_catalog=evidence_catalog,
                         )
                     )
+                except EvidenceReferenceError as evidence_error:
+                    diag = evidence_error.diagnostics
+                    log(
+                        "[evidence_reference_validation] valid=false"
+                        f" request_id={request_id}"
+                        f" candidate_index={diag.get('candidate_index')}"
+                        f" field={diag.get('field')}"
+                        f" returned_ids={diag.get('returned_ids')}"
+                        f" unknown_ids={diag.get('unknown_ids')}"
+                        f" cross_candidate_ids={diag.get('cross_candidate_ids')}"
+                        f" duplicate_ids={diag.get('duplicate_ids')}"
+                        f" resolved_paths={diag.get('resolved_paths')}"
+                        f" catalog_size={diag.get('catalog_size')}"
+                        f" catalog_hash={str(diag.get('catalog_hash') or '')[:16]}"
+                    )
+                    for entry in (diag.get("legacy") or {}).get("unresolved", []):
+                        log(
+                            "[evidence_reference_validation] legacy_unresolved"
+                            f" request_id={request_id}"
+                            f" raw_reference={_ascii_compact(str(entry.get('raw_reference')))}"
+                            f" normalized_reference={_ascii_compact(str(entry.get('normalized_reference')))}"
+                            f" first_missing_token={_ascii_compact(str(entry.get('first_missing_token')))}"
+                            f" nearest_valid_paths={entry.get('nearest_valid_paths')}"
+                        )
+                    return _degraded_non_trading_decision(
+                        payload,
+                        "Analyst cited an evidence reference outside the Python-owned catalog",
+                        invalid=[str(diag.get("field") or "evidence_refs")],
+                        source="decision_evidence_reference_reject",
+                    )
                 except Exception as mapping_error:
+                    if str(mapping_error).startswith("model_confidence_band_invalid:"):
+                        log(
+                            "[raw_model_schema_validation] valid=false"
+                            f" request_id={request_id}"
+                            f" request_identity_hash={request_identity_hash[:16]}"
+                            " invalid_fields=confidence_band"
+                            f" detail={_ascii_compact(str(mapping_error))}"
+                        )
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "provider returned a non-contractual confidence band",
+                            invalid=["confidence_band"],
+                            source="structured_response_invalid",
+                        )
                     log(
                         "[identity_validation] valid=false"
                         f" request_id={request_id}"
@@ -2597,13 +3196,57 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     f" identity_schema_version={AI_REQUEST_IDENTITY_VERSION}"
                     f" canonicalization_version={AI_IDENTITY_CANONICALIZATION_VERSION}"
                 )
+                for entry in mapping_diagnostics.get("evidence_reference_diagnostics") or []:
+                    log(
+                        "[evidence_reference_validation] valid=true"
+                        f" request_id={request_id}"
+                        f" candidate_index={entry.get('candidate_index')}"
+                        f" field={entry.get('field')}"
+                        f" returned_ids={entry.get('returned_ids')}"
+                        f" unknown_ids=[]"
+                        f" cross_candidate_ids=[]"
+                        f" resolved_paths={entry.get('resolved_paths')}"
+                        f" catalog_size={entry.get('catalog_size')}"
+                        f" catalog_hash={str(entry.get('catalog_hash') or '')[:16]}"
+                    )
+                python_owned_echoes = list(
+                    mapping_diagnostics.get("python_owned_field_echoes") or []
+                )
+                if python_owned_echoes:
+                    # Diagnostic only.  The echo never carried authority; Python
+                    # already overwrote every field with the active constant.
+                    log(
+                        "[python_owned_field_echo] authority=python action=overwritten"
+                        f" request_id={request_id}"
+                        f" fields={','.join(python_owned_echoes)}"
+                    )
+                log(
+                    "[authoritative_envelope_constructed]"
+                    f" request_id={request_id}"
+                    f" request_identity_hash={request_identity_hash[:16]}"
+                    f" decision_schema_version={AI_DECISION_SCHEMA_VERSION}"
+                    f" prompt_contract_version={AI_PROMPT_CONTRACT_VERSION}"
+                    f" target_arbitration_schema_version={AI_TARGET_ARBITRATION_SCHEMA_VERSION}"
+                    f" role_contract_version={ROLE_CONTRACT_VERSION}"
+                    f" candidate_count={len(candidates)}"
+                    f" assessments={len(raw_envelope.get('candidate_assessments') or [])}"
+                    f" python_owned_echoes={len(python_owned_echoes)}"
+                )
                 validation = validate_decision_envelope(raw_envelope, candidates)
                 if not validation.valid:
+                    log(
+                        "[authoritative_envelope_validation] valid=false"
+                        f" request_id={request_id}"
+                        f" decision_schema_version={raw_envelope.get('decision_schema_version', '')}"
+                        f" missing_fields={','.join(validation.missing_fields)}"
+                        f" invalid_fields={','.join(validation.invalid_fields)}"
+                    )
                     log(
                         "[ai_schema_validation] valid=false"
                         f" decision_schema_version={raw_envelope.get('decision_schema_version', '')}"
                         f" missing_fields={','.join(validation.missing_fields)}"
                         f" invalid_fields={','.join(validation.invalid_fields)}"
+                        " failed_stage=authoritative_envelope"
                     )
                     return _degraded_non_trading_decision(
                         payload,
@@ -2611,6 +3254,13 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         missing=list(validation.missing_fields),
                         invalid=list(validation.invalid_fields),
                     )
+                log(
+                    "[authoritative_envelope_validation] valid=true"
+                    f" request_id={request_id}"
+                    f" request_identity_hash={request_identity_hash[:16]}"
+                    f" decision_schema_version={AI_DECISION_SCHEMA_VERSION}"
+                    f" candidate_count={len(candidates)}"
+                )
 
                 candidate_by_hash = {
                     str(candidate.get("candidate_hash")): candidate
@@ -2645,25 +3295,10 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             ],
                             source="request_identity_mismatch",
                         )
-                    evidence_refs = list(canonical.get("evidence_refs") or [])
-                    if any(not evidence_path_exists(model_payload, str(ref)) for ref in evidence_refs):
-                        return _degraded_non_trading_decision(
-                            payload,
-                            "Analyst cited an invalid canonical evidence path",
-                            invalid=[f"candidate[{assessment_hash}].evidence_refs"],
-                            source="decision_evidence_reference_reject",
-                        )
-                    analyst_veto = _as_dict(canonical.get("veto"))
-                    if bool(analyst_veto.get("enabled")) and any(
-                        not evidence_path_exists(model_payload, str(ref))
-                        for ref in (analyst_veto.get("evidence_fields") or [])
-                    ):
-                        return _degraded_non_trading_decision(
-                            payload,
-                            "Analyst veto cited an invalid canonical evidence path",
-                            invalid=[f"candidate[{assessment_hash}].veto.evidence_fields"],
-                            source="decision_evidence_reference_reject",
-                        )
+                    # Evidence references were already resolved against the
+                    # Python-owned catalog during envelope binding, so the
+                    # canonical paths here are Python-generated by construction.
+                    # No post-hoc path guessing check is needed or correct.
                     statistical_authority_violations: list[str] = []
                     for field in (
                         "calibrated_win_probability",
@@ -2899,8 +3534,9 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     provider=provider,
                     evidence=model_payload,
                     analyst_assessment=selected,
+                    evidence_catalog=evidence_catalog,
                     request_metadata={
-                        **_provider_request_metadata(payload, provider),
+                        **_provider_request_metadata(payload, provider, deadline=request_deadline),
                         "request_id": request_id,
                         "symbol": symbol,
                         "non_trading_shadow": bool(
@@ -2909,6 +3545,12 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         ),
                     },
                     near_deterministic_boundary=False,
+                )
+                frozen_request.assert_unchanged(
+                    payload,
+                    stage="after_critic_and_adjudicator",
+                    provider_call_attempted=True,
+                    http_request_sent=True,
                 )
                 decision.critic_output = dict(consensus.critic)
                 decision.adjudicator_output = dict(consensus.adjudicator)
@@ -3054,6 +3696,8 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 )
                 return decision
             except Exception as e:
+                if isinstance(e, PipelineIntegrityError):
+                    raise
                 identity = provider.identity("analyst")
                 msg = (
                     f"provider={identity.get('provider_id')} model={identity.get('model_id')}"
@@ -6155,8 +6799,47 @@ def _fatal_snapshot_integrity_codes(codes: list[str]) -> list[str]:
 _UNKNOWN_TAXONOMY_LOCK = Lock()
 
 
-def _strict_taxonomy_failures(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
-    """Bind canonical taxonomy before AI; unknown candidates fail closed."""
+def _taxonomy_failure_row(
+    payload: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    index: int,
+    reason: str,
+) -> Dict[str, Any]:
+    po3 = _as_dict(payload.get("po3"))
+    return {
+        "request_id": str(payload.get("id") or ""),
+        "symbol": str(payload.get("symbol") or candidate.get("symbol") or ""),
+        "candidate_index": int(candidate.get("candidate_index", index)),
+        "entry_branch": candidate.get("entry_branch"),
+        "setup_family": candidate.get("setup_family"),
+        "setup_class": candidate.get("setup_class"),
+        "po3_scope": candidate.get("po3_scope") or po3.get("po3_scope"),
+        "structure_state": candidate.get("structure_state")
+        or candidate.get("structure_type"),
+        "fvg_state": candidate.get("fvg_state")
+        or candidate.get("fvg_execution_class"),
+        "mapping_failure_reason": reason,
+    }
+
+
+def _persist_taxonomy_failures(failures: list[Dict[str, Any]]) -> None:
+    if not failures:
+        return
+    output = resolve_project_path("data/unknown_setup_taxonomy.jsonl")
+    with _UNKNOWN_TAXONOMY_LOCK:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("a", encoding="utf-8", newline="\n") as handle:
+            for failure in failures:
+                handle.write(
+                    json.dumps(failure, sort_keys=True, separators=(",", ":"))
+                    + "\n"
+                )
+
+
+def _enrich_candidate_taxonomy_before_freeze(
+    payload: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    """Resolve taxonomy exactly once, before request ordering and hashing."""
 
     failures: list[Dict[str, Any]] = []
     po3 = _as_dict(payload.get("po3"))
@@ -6166,32 +6849,85 @@ def _strict_taxonomy_failures(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
         if not isinstance(candidate, dict):
             failures.append({"candidate_index": index, "reason": "candidate_not_object"})
             continue
-        resolution = classify_setup_taxonomy({**po3, **plan, **candidate})
-        candidate["setup_taxonomy_version"] = SETUP_TAXONOMY_VERSION
-        candidate["setup_taxonomy_enum"] = resolution.taxonomy.value
-        candidate["taxonomy_mapping_source"] = resolution.mapping_source
+        independent_fields = {**po3, **plan, **candidate}
+        supplied_enum = str(candidate.get("setup_taxonomy_enum") or "").strip().upper()
+        independent_fields.pop("setup_taxonomy_enum", None)
+        resolution = classify_setup_taxonomy(independent_fields)
+        supplied_version = str(candidate.get("setup_taxonomy_version") or "")
+        if supplied_version and supplied_version != SETUP_TAXONOMY_VERSION:
+            failures.append(
+                _taxonomy_failure_row(
+                    payload,
+                    candidate,
+                    index,
+                    "setup_taxonomy_version_mismatch",
+                )
+            )
+            continue
         if resolution.taxonomy == SetupTaxonomy.UNKNOWN_UNCLASSIFIED:
             failures.append(
-                {
-                    "request_id": str(payload.get("id") or ""),
-                    "symbol": str(payload.get("symbol") or candidate.get("symbol") or ""),
-                    "candidate_index": int(candidate.get("candidate_index", index)),
-                    "entry_branch": candidate.get("entry_branch"),
-                    "setup_family": candidate.get("setup_family"),
-                    "setup_class": candidate.get("setup_class"),
-                    "po3_scope": candidate.get("po3_scope") or po3.get("po3_scope"),
-                    "structure_state": candidate.get("structure_state") or candidate.get("structure_type"),
-                    "fvg_state": candidate.get("fvg_state") or candidate.get("fvg_execution_class"),
-                    "mapping_failure_reason": resolution.failure_reason,
-                }
+                _taxonomy_failure_row(
+                    payload,
+                    candidate,
+                    index,
+                    resolution.failure_reason or "strict_mapping_failed",
+                )
             )
-    if failures:
-        output = resolve_project_path("data/unknown_setup_taxonomy.jsonl")
-        with _UNKNOWN_TAXONOMY_LOCK:
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with output.open("a", encoding="utf-8", newline="\n") as handle:
-                for failure in failures:
-                    handle.write(json.dumps(failure, sort_keys=True, separators=(",", ":")) + "\n")
+            continue
+        if supplied_enum and supplied_enum != resolution.taxonomy.value:
+            failures.append(
+                _taxonomy_failure_row(
+                    payload,
+                    candidate,
+                    index,
+                    "preexisting_taxonomy_conflict:"
+                    + supplied_enum
+                    + "!="
+                    + resolution.taxonomy.value,
+                )
+            )
+            continue
+        candidate["setup_taxonomy_version"] = SETUP_TAXONOMY_VERSION
+        candidate["setup_taxonomy_enum"] = resolution.taxonomy.value
+        if not str(candidate.get("taxonomy_mapping_source") or ""):
+            candidate["taxonomy_mapping_source"] = resolution.mapping_source
+    _persist_taxonomy_failures(failures)
+    return failures
+
+
+def _strict_taxonomy_failures(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """Read-only validation after the canonical request has been frozen."""
+
+    failures: list[Dict[str, Any]] = []
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, Mapping):
+            failures.append({"candidate_index": index, "reason": "candidate_not_object"})
+            continue
+        version = str(candidate.get("setup_taxonomy_version") or "")
+        enum_value = str(candidate.get("setup_taxonomy_enum") or "").strip().upper()
+        source = str(candidate.get("taxonomy_mapping_source") or "")
+        if version != SETUP_TAXONOMY_VERSION:
+            failures.append(
+                _taxonomy_failure_row(
+                    payload, candidate, index, "setup_taxonomy_version_mismatch"
+                )
+            )
+            continue
+        try:
+            taxonomy = SetupTaxonomy(enum_value)
+        except ValueError:
+            taxonomy = SetupTaxonomy.UNKNOWN_UNCLASSIFIED
+        if taxonomy == SetupTaxonomy.UNKNOWN_UNCLASSIFIED or not source:
+            failures.append(
+                _taxonomy_failure_row(
+                    payload,
+                    candidate,
+                    index,
+                    "taxonomy_incomplete_after_freeze",
+                )
+            )
+    _persist_taxonomy_failures(failures)
     return failures
 
 
@@ -6384,7 +7120,11 @@ def _score_setup_impl(
     Rule-based scoring blended with LLM advisory reranking/veto metadata.
     MT5 remains the final execution authority.
     """
-    taxonomy_failures = _strict_taxonomy_failures(payload)
+    taxonomy_failures = (
+        _strict_taxonomy_failures(payload)
+        if frozen_request is not None
+        else _enrich_candidate_taxonomy_before_freeze(payload)
+    )
     if taxonomy_failures:
         log(
             "[setup_reject] reject_stage=taxonomy reject_reason=unknown_unclassified"
@@ -6534,6 +7274,13 @@ def _score_setup_impl(
                 cached_decision = _apply_ai_veto_gate(payload, cached_decision)
                 cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
                 cached_decision = _synchronize_candidate_authority_fields(cached_decision)
+                if frozen_request is not None:
+                    frozen_request.assert_unchanged(
+                        payload,
+                        stage="after_cache_processing",
+                        provider_call_attempted=False,
+                        http_request_sent=False,
+                    )
                 _write_ai_cost_report(
                     payload,
                     request_id=str(payload.get("id") or ""),
@@ -6569,10 +7316,19 @@ def _score_setup_impl(
     try:
         dec = _score_setup_ai(payload, frozen_request=frozen_request)
     except Exception as e:
-        category = (
-            e.category
-            if isinstance(e, ProviderCallError)
-            else "PROVIDER_TRANSPORT_ERROR"
+        provider_failure = isinstance(e, ProviderCallError)
+        local_failure = classify_local_pipeline_failure(e)
+        category = e.category if provider_failure else local_failure.category
+        stage = (
+            "provider_call"
+            if provider_failure
+            else local_failure.stage
+        )
+        provider_call_attempted = (
+            True if provider_failure else local_failure.provider_call_attempted
+        )
+        http_request_sent = (
+            True if provider_failure else local_failure.http_request_sent
         )
         source = category.lower()
         rejection_code = {
@@ -6583,16 +7339,28 @@ def _score_setup_impl(
             "REQUEST_IDENTITY_MISMATCH": "request_identity_mismatch",
             "RESPONSE_STALE": "response_stale",
             "REPEATABILITY_UNAVAILABLE": "repeatability_unavailable",
-        }.get(category, "provider_transport_error")
+            FROZEN_REQUEST_MUTATION: "frozen_request_mutation",
+            LOCAL_PIPELINE_ERROR: "local_pipeline_error",
+            "LOCAL_REQUEST_INTEGRITY_ERROR": "local_request_integrity_error",
+            "REQUEST_IDENTITY_ERROR": "request_identity_error",
+            "CANDIDATE_IDENTITY_ERROR": "candidate_identity_error",
+        }.get(category, "local_pipeline_error")
+        event = "[provider_call_failed]" if provider_failure else "[pipeline_failure]"
         log(
-            "[provider_call_failed]"
+            event
+            +
             f" request_id={str(payload.get('id') or '')}"
             f" request_identity_hash={str(payload.get('request_identity_hash') or '')[:16]}"
             f" symbol={str(payload.get('symbol', '') or 'unknown_symbol')}"
             f" provider={_provider().provider_id}"
             f" model={_provider().model_for_role('analyst')}"
+            f" stage={stage}"
             f" error_category={category}"
-            f" http_status={getattr(e, 'status_code', None) or 0}"
+            f" exception_type={type(e).__name__}"
+            f" exception_message={_ascii_compact(str(e))}"
+            f" provider_call_attempted={str(provider_call_attempted).lower()}"
+            f" http_request_sent={str(http_request_sent).lower()}"
+            f" http_status={getattr(e, 'status_code', None) or 0 if provider_failure else 'not_applicable'}"
             f" repair_attempted={str(bool(getattr(e, 'repair_attempted', False))).lower()}"
             f" repair_result={getattr(e, 'repair_result', 'not_attempted')}"
             " final_quality_tier=DEGRADED_NON_TRADING"
@@ -6629,6 +7397,13 @@ def _score_setup_impl(
             skip_reason="degraded_ai_response_non_trading",
         )
         return decision
+    if frozen_request is not None:
+        frozen_request.assert_unchanged(
+            payload,
+            stage="after_analyst_critic_adjudicator",
+            provider_call_attempted=True,
+            http_request_sent=True,
+        )
 
     repeatability_authority_before_shadow = _repeatability_authority_for(
         str(dec.model_version or AI_CONFIG.model),
@@ -6640,6 +7415,13 @@ def _score_setup_impl(
     )
     _run_shadow_repeat_evaluation(payload, dec)
     dec = _apply_repeatability_authority(dec, repeatability_authority_before_shadow, payload=payload)
+    if frozen_request is not None:
+        frozen_request.assert_unchanged(
+            payload,
+            stage="after_repeatability_processing",
+            provider_call_attempted=True,
+            http_request_sent=True,
+        )
 
     inherited_codes, inherited_risks, inherited_missing = _normalize_advisory_metadata(payload, dec)
     for risk in integrity_risks:
@@ -6765,6 +7547,13 @@ def _score_setup_impl(
         log(
             f"[ai_cache] store_skipped request_id={str(payload.get('id') or '')} "
             "reason=repeatability_non_authoritative_live_decision"
+        )
+    if frozen_request is not None:
+        frozen_request.assert_unchanged(
+            payload,
+            stage="after_cache_processing",
+            provider_call_attempted=True,
+            http_request_sent=True,
         )
     return final_decision
 
@@ -7214,11 +8003,76 @@ def _handle_claim_deferred(
         _CLAIM_DEFERRED_STATE.pop(key, None)
     return moved
 
-def _write_error_response(req_id: str, resp_dir: Path, reason: str, payload_summary: Dict[str, Any] | None = None) -> None:
+def _error_response_canonical_payload(
+    raw_payload: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    if not isinstance(raw_payload, Mapping):
+        return {}
+    payload = _normalize_request_payload(dict(raw_payload))
+    if _enrich_candidate_taxonomy_before_freeze(payload):
+        return payload
+    try:
+        frozen = _freeze_request_for_provider(payload, _provider())
+        return frozen.thaw_payload()
+    except Exception:
+        return payload
+
+
+def _write_error_response(
+    req_id: str,
+    resp_dir: Path,
+    reason: str,
+    payload_summary: Dict[str, Any] | None = None,
+    *,
+    request_payload: Mapping[str, Any] | None = None,
+    failure_category: str = LOCAL_PIPELINE_ERROR,
+) -> None:
     resp_dir.mkdir(parents=True, exist_ok=True)
     reason_text = _ascii_compact(f"bridge_error={reason}")
+    payload = _error_response_canonical_payload(request_payload)
+    provider = _provider()
+    provider_identity = provider.generation_identity(
+        "analyst", _provider_request_metadata(payload, provider)
+    )
+    candidate_identities = list(payload.get("ordered_candidate_identities") or [])
+    candidate_count = int(payload.get("candidate_count") or len(candidate_identities))
     resp: Dict[str, Any] = {
         "id": req_id,
+        "session_id": str(payload.get("session_id") or ""),
+        "request_nonce": str(payload.get("request_nonce") or ""),
+        "request_identity_version": str(
+            payload.get("request_identity_version") or AI_REQUEST_IDENTITY_VERSION
+        ),
+        "identity_schema_version": AI_REQUEST_IDENTITY_VERSION,
+        "canonicalization_version": AI_IDENTITY_CANONICALIZATION_VERSION,
+        "request_identity_hash": str(payload.get("request_identity_hash") or ""),
+        "request_created_sim_time": int(
+            payload.get("request_created_sim_time") or 0
+        ),
+        "request_created_wall_time": int(
+            payload.get("request_created_wall_time") or 0
+        ),
+        "candidate_count": candidate_count,
+        "ordered_candidate_identities": candidate_identities,
+        "contract_manifest_hash": compatibility_manifest_hash(),
+        "contract_manifest": compatibility_manifest(),
+        "workload_mode": canonical_workload_mode(payload),
+        "behavior_contract_hash": live_forward_behavior_contract()[
+            "behavior_contract_hash"
+        ],
+        "reasoning_configuration": "not_available_pipeline_failure",
+        "bucket_prior_hash": "",
+        "calibration_artifact_id": "",
+        "provider_contract_version": PROVIDER_CONTRACT_VERSION,
+        "provider_mode": str(provider_identity.get("provider_mode") or "UNAVAILABLE"),
+        "provider_id": str(provider_identity.get("provider_id") or "unavailable"),
+        "actual_model_id": str(provider_identity.get("model_id") or "unavailable"),
+        "model_fingerprint": str(
+            provider_identity.get("model_fingerprint") or "unavailable"
+        ),
+        "generation_settings_hash": str(
+            provider_identity.get("generation_settings_hash") or ""
+        ),
         "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
         "decision_quality_tier": DECISION_QUALITY_DEGRADED_NON_TRADING,
         "response_quality": DECISION_QUALITY_DEGRADED_NON_TRADING,
@@ -7229,9 +8083,14 @@ def _write_error_response(req_id: str, resp_dir: Path, reason: str, payload_summ
         "selected_candidate_id": "",
         "selected_candidate_hash": "",
         "assessed_execution_fingerprint": "",
+        "selected_target_identity": "",
+        "selected_target_price": 0.0,
         "candidate_assessments": [],
         "allow": False,
         "raw_allow": False,
+        "model_raw_allow": False,
+        "python_final_allow": False,
+        "mql_final_allow": None,
         "rule_score": 0.0,
         "llm_quality_score": 0.0,
         "blended_legacy_score": 0.0,
@@ -7244,16 +8103,20 @@ def _write_error_response(req_id: str, resp_dir: Path, reason: str, payload_summ
         "score": 0.0,
         "chosen_index": 0,
         "confidence": 0.0,
-        "decision_source": "bridge_error",
+        "decision_source": failure_category.lower(),
         "reasons": reason_text,
         "decision_id": f"{req_id}:bridge_error:{int(time.time())}",
-        "rejection_codes": ["bridge_error"],
+        "rejection_codes": [
+            failure_category.lower(),
+            "degraded_ai_response_non_trading",
+        ],
         "narrative_state": "bridge_error",
         "invalidation_risks": ["ai_bridge_error"],
         "missing_confirmations": ["ai_structured_audit"],
         "suggested_risk_multiplier": 0.0,
         "model_version": AI_GATE_MODEL_VERSION,
     }
+    resp["response_binding_hash"] = response_binding_hash(resp)
     atomic_write_json(resp_dir / f"{req_id}.json", resp, encoding=RESP_ENCODING)
     debug_obj: Dict[str, Any] = {
         "id": req_id,
@@ -7278,6 +8141,77 @@ def _tester_workflow_source(payload: Dict[str, Any]) -> str:
         return "live_wait_debug"
     return "tester"
 
+def current_bus_cohort_identity() -> CohortIdentity:
+    """The contract cohort this build produces and may safely consume."""
+
+    manifest = compatibility_manifest()
+    return CohortIdentity(
+        engine_version=str(manifest.get("engine_version") or ""),
+        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+        identity_schema_version=AI_REQUEST_IDENTITY_VERSION,
+        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+        contract_manifest_hash=compatibility_manifest_hash(),
+        session_id="",
+    )
+
+
+def mark_test_end_interrupted(reason: str = "strategy_tester_period_complete") -> tuple[str, ...]:
+    """Terminalize AI requests still pending when the tester run finishes.
+
+    The Strategy Tester reaching its final simulated timestamp is not a provider
+    timeout: nothing was slow and no deadline was breached.  Classifying it as
+    one hides genuine transport health and inflates timeout counters, so these
+    requests get their own terminal state.  Their request files are preserved
+    for offline processing, and any provider result that arrives afterwards is
+    quarantined because a terminal outcome already exists.
+    """
+
+    interrupted = REQUEST_TERMINAL_REGISTRY.mark_pending_test_end_interrupted(reason)
+    for request_id in interrupted:
+        log(
+            "[test_end_interrupted]"
+            f" request_id={request_id}"
+            f" terminal_state={TERMINAL_TEST_END_INTERRUPTED}"
+            f" reason={reason}"
+            " classified_as_provider_timeout=false"
+            " request_file_preserved=true"
+            f" late_result_action={LATE_RESULT_QUARANTINE}"
+        )
+    if interrupted:
+        log(
+            "[test_end_interrupted] summary"
+            f" pending_requests={len(interrupted)}"
+            f" reason={reason}"
+        )
+    return interrupted
+
+
+def effective_worker_count(configured_workers: int, workflow_source: str) -> int:
+    """Worker concurrency depends on the workload mode, not only the provider.
+
+    Live-wait debug is a single-request diagnostic loop: MT5 blocks on one
+    request, so extra workers can only start calls whose results arrive after
+    the terminal already gave up.
+    """
+
+    workers = max(1, min(16, int(configured_workers)))
+    if str(workflow_source) == "live_wait_debug":
+        return 1
+    return workers
+
+
+def _requires_serial_worker(req_path: Path) -> bool:
+    """True when this request must be processed with one effective worker."""
+
+    try:
+        payload = _normalize_request_payload(read_json_any_encoding(req_path))
+    except Exception:
+        # An unreadable request is handled (and quarantined) downstream; do not
+        # change concurrency based on a file we could not parse.
+        return False
+    return effective_worker_count(AI_CONFIG_WORKERS, _tester_workflow_source(payload)) == 1
+
+
 def _tester_cache_identity(payload: Dict[str, Any]) -> tuple[str, str, str]:
     signature = str(payload.get("tester_cache_signature") or "").strip()
     key = str(payload.get("tester_cache_key") or "").strip()
@@ -7293,6 +8227,8 @@ def _tester_cache_identity(payload: Dict[str, Any]) -> tuple[str, str, str]:
 def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
     if str(resp.get("request_identity_version") or "") != AI_REQUEST_IDENTITY_VERSION:
         return "legacy_request_identity"
+    if str(resp.get("contract_manifest_hash") or "") != compatibility_manifest_hash():
+        return "contract_manifest_mismatch"
     request_id = str(resp.get("id") or "")
     request_identity_hash = str(resp.get("request_identity_hash") or "")
     if not request_id:
@@ -7416,7 +8352,8 @@ def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
 
 def _mql_tester_cache_contract_current(resp: Dict[str, Any]) -> bool:
     return (
-        str(resp.get("decision_schema_version") or "") == AI_DECISION_SCHEMA_VERSION
+        str(resp.get("contract_manifest_hash") or "") == compatibility_manifest_hash()
+        and str(resp.get("decision_schema_version") or "") == AI_DECISION_SCHEMA_VERSION
         and str(resp.get("decision_quality_tier") or "") in {
             DECISION_QUALITY_FULL_STRUCTURED,
             DECISION_QUALITY_CACHE_FULL_STRUCTURED,
@@ -7564,7 +8501,27 @@ def process_one(
 
     payload = _normalize_request_payload(payload)
 
+    # The first request identifies the MQL half of the run.  Re-log the manifest
+    # exactly once, when the run becomes fully identified, so an operator can
+    # see which MQL session and EA this Python session is bound to instead of
+    # inferring it from interleaved logs.
+    if absorb_mql_identity(RUN_MANIFEST, payload):
+        log(RUN_MANIFEST.log_line())
+    stamp_run_id(payload, RUN_MANIFEST)
+
     req_id = payload.get("id") or req_path.stem
+    # Start the absolute deadline at claim time, not at the provider call, so
+    # canonicalization, evidence building, and retrieval all consume the same
+    # single budget the MT5 terminal is actually waiting on.
+    request_deadline = _start_request_deadline(payload)
+    log(
+        "[provider_deadline]"
+        f" request_id={req_id}"
+        + request_deadline.as_log_fields()
+        + f" deadline_contract_version={DEADLINE_CONTRACT_VERSION}"
+        f" workload_mode={_payload_workload_mode(payload)}"
+        f" workflow_source={_tester_workflow_source(payload)}"
+    )
     missing_transport = [
         field
         for field in ("session_id", "request_nonce")
@@ -7573,10 +8530,35 @@ def process_one(
     if missing_transport:
         raise ValueError("file_bus_transport_contract_missing:" + ",".join(missing_transport))
 
+    compatibility = validate_mql_contract(payload)
+    log(
+        "[contract_compatibility]"
+        f" compatible={str(compatibility.compatible).lower()}"
+        f" manifest_hash={compatibility.expected_hash}"
+        f" python_schema={AI_DECISION_SCHEMA_VERSION}"
+        f" mql_schema={str(payload.get('decision_schema_version') or '')}"
+        f" mismatched_fields={','.join(compatibility.mismatches) or 'none'}"
+    )
+    if not compatibility.compatible:
+        raise ValueError(
+            "contract_manifest_incompatible:"
+            + ",".join(compatibility.mismatches)
+        )
+
+    taxonomy_failures = _enrich_candidate_taxonomy_before_freeze(payload)
+    if taxonomy_failures:
+        raise ValueError(
+            "candidate_taxonomy_enrichment_failed:"
+            + ",".join(
+                str(item.get("mapping_failure_reason") or item.get("reason") or "")
+                for item in taxonomy_failures
+            )
+        )
+
     prior_artifact = _load_live_bucket_priors()
-    provider_identity = _provider().generation_identity(
-        "analyst",
-        _provider_request_metadata(payload),
+    selected_provider = _provider()
+    provider_identity = selected_provider.generation_identity(
+        "analyst", _provider_request_metadata(payload)
     )
     schema_preflight = strict_structured_schema(ModelAIGateOutput)
     if not schema_preflight.valid:
@@ -7584,17 +8566,42 @@ def process_one(
             "structured_schema_preflight_failed:"
             + "|".join(schema_preflight.errors)
         )
-    frozen_request = freeze_ai_request(
+    frozen_request = _freeze_request_for_provider(payload, selected_provider)
+    payload = frozen_request.thaw_payload()
+    request_identity = frozen_request.identity
+    request_contract = request_fingerprint(
         payload,
-        provider_identity=provider_identity,
-        schema_fingerprint=schema_preflight.schema_fingerprint,
+        model=str(provider_identity.get("model_id") or AI_CONFIG.model),
+        reasoning_effort=AI_CONFIG.reasoning_effort,
+        decision_quality_tier="FULL_STRUCTURED_REQUIRED",
+        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+        target_schema_version=AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        prior_artifact_hash=str(prior_artifact.get("artifact_hash") or ""),
+        prior_artifact_version=str(prior_artifact.get("prior_version") or HIERARCHICAL_PRIOR_SCHEMA_VERSION),
+        provider_mode=str(provider_identity.get("provider_mode") or "UNAVAILABLE"),
+        provider_id=str(provider_identity.get("provider_id") or "unavailable"),
+        model_fingerprint=str(provider_identity.get("model_fingerprint") or "unavailable"),
         family_profile_version=FAMILY_PROFILE_VERSION,
         retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
-        candidate_cap=12,
+        generation_settings_hash=str(provider_identity.get("generation_settings_hash") or ""),
     )
+    payload["request_fingerprint"] = request_contract["request_fingerprint"]
+    payload["request_fingerprint_contract"] = request_contract
+    payload["hierarchical_prior_artifact_hash"] = request_contract["prior_artifact_hash"]
+    payload["hierarchical_prior_schema_version"] = HIERARCHICAL_PRIOR_SCHEMA_VERSION
+
+    # Request fingerprint and prior identity are decision inputs, so add them
+    # before the final canonical seal rather than mutating a frozen payload.
+    frozen_request = _freeze_request_for_provider(payload, selected_provider)
     payload = frozen_request.thaw_payload()
-    _attach_frozen_identity(payload, frozen_request)
     request_identity = frozen_request.identity
+    frozen_request.assert_unchanged(
+        payload,
+        stage="canonical_request_sealed",
+        provider_call_attempted=False,
+        http_request_sent=False,
+    )
     log(
         "[request_created]"
         f" request_id={req_id}"
@@ -7605,6 +8612,7 @@ def process_one(
         f" schema_fingerprint={schema_preflight.schema_fingerprint[:16]}"
         f" identity_schema_version={AI_REQUEST_IDENTITY_VERSION}"
         f" canonicalization_version={AI_IDENTITY_CANONICALIZATION_VERSION}"
+        f" contract_manifest_hash={compatibility.expected_hash}"
     )
     ledger = idempotency_ledger or REQUEST_IDEMPOTENCY_LEDGER
     lifecycle_disposition = None
@@ -7672,29 +8680,6 @@ def process_one(
             f" worker_id={ledger.worker_id}"
             f" lifecycle_version={REQUEST_LIFECYCLE_VERSION}"
         )
-    request_contract = request_fingerprint(
-        payload,
-        model=str(provider_identity.get("model_id") or AI_CONFIG.model),
-        reasoning_effort=AI_CONFIG.reasoning_effort,
-        decision_quality_tier="FULL_STRUCTURED_REQUIRED",
-        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
-        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
-        target_schema_version=AI_TARGET_ARBITRATION_SCHEMA_VERSION,
-        prior_artifact_hash=str(prior_artifact.get("artifact_hash") or ""),
-        prior_artifact_version=str(prior_artifact.get("prior_version") or HIERARCHICAL_PRIOR_SCHEMA_VERSION),
-        provider_mode=str(provider_identity.get("provider_mode") or "UNAVAILABLE"),
-        provider_id=str(provider_identity.get("provider_id") or "unavailable"),
-        model_fingerprint=str(provider_identity.get("model_fingerprint") or "unavailable"),
-        family_profile_version=FAMILY_PROFILE_VERSION,
-        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
-        generation_settings_hash=str(provider_identity.get("generation_settings_hash") or ""),
-    )
-    payload["request_fingerprint"] = request_contract["request_fingerprint"]
-    payload["request_fingerprint_contract"] = request_contract
-    payload["hierarchical_prior_artifact_hash"] = request_contract["prior_artifact_hash"]
-    payload["hierarchical_prior_schema_version"] = HIERARCHICAL_PRIOR_SCHEMA_VERSION
-
-    frozen_request.assert_unchanged(payload)
     if ledger is not None and lock_path is not None:
         with RequestHeartbeat(
             ledger=ledger,
@@ -7714,7 +8699,12 @@ def process_one(
             dec = score_setup(payload, frozen_request=frozen_request)
     else:
         dec = score_setup(payload, frozen_request=frozen_request)
-    frozen_request.assert_unchanged(payload)
+    frozen_request.assert_unchanged(
+        payload,
+        stage="before_response_serialization",
+        provider_call_attempted=True,
+        http_request_sent=True,
+    )
 
     po3 = _as_dict(payload.get("po3"))
     plan = _as_dict(payload.get("plan"))
@@ -7888,6 +8878,8 @@ def process_one(
         "identity_schema_version": AI_REQUEST_IDENTITY_VERSION,
         "canonicalization_version": AI_IDENTITY_CANONICALIZATION_VERSION,
         "request_identity_hash": str(payload.get("request_identity_hash") or ""),
+        "contract_manifest_hash": compatibility_manifest_hash(),
+        "contract_manifest": compatibility_manifest(),
         "request_created_sim_time": int(payload.get("request_created_sim_time") or 0),
         "request_created_wall_time": int(payload.get("request_created_wall_time") or 0),
         "candidate_count": int(payload.get("candidate_count") or len(cands)),
@@ -8104,6 +9096,35 @@ def process_one(
 
     resp_path = resp_dir / f"{req_id}.json"
     resp_dir.mkdir(parents=True, exist_ok=True)
+    # Exactly one authoritative response per request identity.  A worker that
+    # lost the race to a timeout, a test-end interruption, or another completed
+    # write must not overwrite the terminal outcome.
+    quality_for_terminal = str(resp.get("decision_quality_tier") or "")
+    terminal_state = (
+        TERMINAL_COMPLETED
+        if quality_for_terminal
+        in {DECISION_QUALITY_FULL_STRUCTURED, DECISION_QUALITY_CACHE_FULL_STRUCTURED}
+        else TERMINAL_ERROR
+    )
+    request_deadline = REQUEST_TERMINAL_REGISTRY.deadline_for(str(req_id))
+    won, existing_outcome = REQUEST_TERMINAL_REGISTRY.claim_terminal(
+        str(req_id),
+        terminal_state,
+        reason=str(resp.get("decision_source") or ""),
+        elapsed_ms=request_deadline.elapsed_ms() if request_deadline is not None else -1,
+    )
+    if not won:
+        log(
+            "[late_result_quarantined]"
+            f" request_id={req_id}"
+            f" attempted_state={terminal_state}"
+            f" authoritative_state={existing_outcome.state}"
+            f" authoritative_reason={existing_outcome.reason}"
+            f" late_result_action={LATE_RESULT_QUARANTINE}"
+            " response_written=false"
+        )
+        _inc_counter("late_results_quarantined")
+        return
     if ledger is not None:
         ledger.transition(
             str(req_id),
@@ -8119,6 +9140,10 @@ def process_one(
                 ),
             },
         )
+    # Every response carries the run it belongs to, so a response file found on
+    # disk can be attributed to a specific session instead of being assumed to
+    # belong to whichever run is being investigated.
+    stamp_run_id(resp, RUN_MANIFEST)
     atomic_write_json(resp_path, resp, encoding=RESP_ENCODING)
     if ledger is not None:
         ledger.transition(
@@ -8128,6 +9153,7 @@ def process_one(
         )
     log(
         "[response_written]"
+        f" test_run_id={RUN_MANIFEST.test_run_id}"
         f" request_id={req_id}"
         f" request_identity_hash={str(resp.get('request_identity_hash') or '')[:16]}"
         f" quality_tier={resp.get('decision_quality_tier', '')}"
@@ -8243,8 +9269,25 @@ def _process_claimed_request(
             idempotency_ledger=REQUEST_IDEMPOTENCY_LEDGER,
         )
     except Exception as exc:
-        log(f"[ai_gate] ERROR {req_path.name}: {exc}")
+        local_failure = classify_local_pipeline_failure(exc)
+        category = (
+            exc.category
+            if isinstance(exc, ProviderCallError)
+            else local_failure.category
+        )
+        stage = "provider_call" if isinstance(exc, ProviderCallError) else local_failure.stage
+        log(
+            "[pipeline_failure]"
+            f" stage={stage}"
+            f" category={category}"
+            f" provider_call_attempted={str(isinstance(exc, ProviderCallError) or local_failure.provider_call_attempted).lower()}"
+            f" http_request_sent={str(isinstance(exc, ProviderCallError) or local_failure.http_request_sent).lower()}"
+            f" request_id={req_id}"
+            f" exception_type={type(exc).__name__}"
+            f" exception_message={_ascii_compact(str(exc))}"
+        )
         payload_summary: Dict[str, Any] = {"bridge_error": str(exc)}
+        raw_payload: Dict[str, Any] = {}
         try:
             raw_payload = read_json_any_encoding(req_path)
             raw_payload = _normalize_request_payload(raw_payload)
@@ -8254,8 +9297,40 @@ def _process_claimed_request(
             payload_summary["request_read_error"] = str(inner)
         try:
             resp_path = resp_dir / f"{req_id}.json"
-            if not resp_path.exists():
-                _write_error_response(req_id, resp_dir, str(exc), payload_summary)
+            terminal_deadline = REQUEST_TERMINAL_REGISTRY.deadline_for(str(req_id))
+            error_terminal_state = (
+                TERMINAL_TIMEOUT
+                if category == "PROVIDER_DEADLINE_EXCEEDED"
+                else TERMINAL_ERROR
+            )
+            won, existing_outcome = REQUEST_TERMINAL_REGISTRY.claim_terminal(
+                str(req_id),
+                error_terminal_state,
+                reason=category,
+                elapsed_ms=(
+                    terminal_deadline.elapsed_ms()
+                    if terminal_deadline is not None
+                    else -1
+                ),
+            )
+            if not won:
+                log(
+                    "[late_result_quarantined]"
+                    f" request_id={req_id}"
+                    f" attempted_state={error_terminal_state}"
+                    f" authoritative_state={existing_outcome.state}"
+                    f" late_result_action={LATE_RESULT_QUARANTINE}"
+                    " response_written=false"
+                )
+            elif not resp_path.exists():
+                _write_error_response(
+                    req_id,
+                    resp_dir,
+                    str(exc),
+                    payload_summary,
+                    request_payload=raw_payload,
+                    failure_category=category,
+                )
                 log(f"[ai_gate] Wrote explicit error response for {req_id}")
             else:
                 log(f"[ai_gate] Preserved existing response for {req_id} after error")
@@ -8265,6 +9340,7 @@ def _process_claimed_request(
         if not moved and move_reason not in {"missing", "permission_denied"}:
             log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
     finally:
+        REQUEST_TERMINAL_REGISTRY.release(str(req_id))
         _release_request_claim(lock_path)
 
 def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
@@ -8379,8 +9455,9 @@ def _write_startup_policy_manifest(bus: Path) -> Dict[str, Any]:
     )
     # Python starts before it has an EA request and therefore cannot prove the
     # active runtime-input contract.  An empty expected hash would incorrectly
-    # look compatible; active policy authority remains blocked at this stage.
-    ea_runtime_required = "__EA_RUNTIME_INPUT_HASH_REQUIRED__"
+    # look compatible, so the sentinel keeps active authority fail-closed while
+    # reporting the honest reason (awaiting runtime authority, not incompatible).
+    ea_runtime_required = RUNTIME_AUTHORITY_PENDING
     specs = [
         PolicySpec("active", "active_policy", policy_dir / "active_policy.json", analytics_policy_enabled, "active", expected_runtime_input_hash=ea_runtime_required),
         PolicySpec("context", "context_policy", policy_dir / "context_policy.ndjson", analytics_policy_enabled, "active", expected_runtime_input_hash=ea_runtime_required),
@@ -8412,9 +9489,148 @@ def _write_startup_policy_manifest(bus: Path) -> Dict[str, Any]:
             f" policy_type={row['policy_type']} policy_id={row['policy_id']}"
             f" enabled={str(bool(row['enabled'])).lower()}"
             f" status={row['status']} authority={row['authority']}"
+            f" activation_state={row.get('activation_state', '')}"
             f" reason={';'.join(row['rejection_reasons']) or 'none'}"
+            f" pending={';'.join(row.get('pending_reasons') or []) or 'none'}"
         )
+    _write_artifact_compatibility_report(bus, manifest)
     return manifest
+
+
+def _deployment_manifest_state(bus: Path) -> Dict[str, Any]:
+    """Generate the deployment manifest from real repository/build facts.
+
+    Everything written here is observable: file hashes of the deployed MQL
+    sources, the Python contract constants, and the compatibility manifest hash.
+    Nothing is inferred, and no empirical trading evidence is invented.
+    """
+
+    manifest_path = bus / "config" / "deployment_manifest.json"
+    mql_include = MQL_DEPLOYED_INCLUDE_DIR
+    components: list[Dict[str, Any]] = []
+    for name in ("Config.mqh", "AIGateBridge.mqh", "TradeEngine.mqh", "Types.mqh", "StateStore.mqh"):
+        path = mql_include / name
+        components.append(
+            {
+                "component": name,
+                "path": str(path),
+                "exists": path.is_file(),
+                "sha256": file_sha256(path) if path.is_file() else "",
+                "modified_utc": (
+                    datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+                    if path.is_file()
+                    else ""
+                ),
+            }
+        )
+    deployed = all(component["exists"] for component in components)
+    manifest = {
+        "schema_version": DEPLOYMENT_MANIFEST_SCHEMA_VERSION,
+        "generated_at": utc_now(),
+        "generated_by": "ai_gate_startup",
+        "python_contract": {
+            "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+            "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+            "target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+            "role_contract_version": ROLE_CONTRACT_VERSION,
+            "request_identity_version": AI_REQUEST_IDENTITY_VERSION,
+            "canonicalization_version": AI_IDENTITY_CANONICALIZATION_VERSION,
+            "deadline_contract_version": DEADLINE_CONTRACT_VERSION,
+            "contract_manifest_hash": compatibility_manifest_hash(),
+        },
+        "mql_components": components,
+        "mql_deployment_complete": deployed,
+        "status": "generated" if deployed else "incomplete_mql_deployment",
+    }
+    try:
+        governance_atomic_write_json(manifest_path, manifest)
+        manifest["path"] = str(manifest_path)
+        manifest["written"] = True
+    except Exception as exc:
+        manifest["path"] = str(manifest_path)
+        manifest["written"] = False
+        manifest["write_error"] = f"{type(exc).__name__}"
+    log(
+        "[deployment_manifest]"
+        f" status={manifest['status']}"
+        f" written={str(manifest['written']).lower()}"
+        f" mql_components={len(components)}"
+        f" mql_deployment_complete={str(deployed).lower()}"
+        f" contract_manifest_hash={compatibility_manifest_hash()[:16]}"
+    )
+    return manifest
+
+
+def _write_artifact_compatibility_report(
+    bus: Path,
+    manifest: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """One report reconciling every startup artifact across Python and MQL.
+
+    MQL owns the same artifacts through its own loaders, so the report states
+    both authorities explicitly.  Where Python cannot yet observe MQL's verdict
+    (no EA payload at startup) it says so rather than asserting agreement.
+    """
+
+    mandatory_policy_ids = {"risk_factor_policy", "invalidation_policy"}
+    rows: list[Dict[str, Any]] = []
+    for policy in manifest.get("policies") or []:
+        states = dict(policy.get("compatibility_states") or {})
+        python_authority = str(policy.get("authority") or "")
+        rows.append(
+            {
+                "artifact": str(policy.get("policy_id") or ""),
+                "path": str(policy.get("absolute_path") or ""),
+                "enabled": bool(policy.get("enabled")),
+                "mandatory": str(policy.get("policy_id") or "") in mandatory_policy_ids,
+                "exists": bool(str(policy.get("file_hash") or "")),
+                "schema": str(policy.get("schema_version") or ""),
+                "schema_valid": bool(policy.get("code_compatibility")),
+                "runtime_compatible": states.get("runtime_input", "not_applicable"),
+                "taxonomy_compatible": states.get("taxonomy", "not_applicable"),
+                "ledger_compatible": str(policy.get("ledger_integrity_status") or ""),
+                "python_authority": python_authority,
+                # MQL evaluates the same artifact only once an EA runtime payload
+                # exists.  Claiming agreement here would be fabricated evidence.
+                "mql_authority": "not_observed_at_python_startup",
+                "final_status": str(policy.get("status") or ""),
+                "pending_reasons": list(policy.get("pending_reasons") or []),
+                "rejection_reasons": list(policy.get("rejection_reasons") or []),
+            }
+        )
+
+    deployment = _deployment_manifest_state(bus)
+    report = {
+        "schema_version": ARTIFACT_COMPATIBILITY_REPORT_VERSION,
+        "generated_at": utc_now(),
+        "component_scope": "python_pre_request",
+        "runtime_authority_available": bool(manifest.get("runtime_authority_available")),
+        "runtime_authority_reason": str(manifest.get("runtime_authority_reason") or ""),
+        "ledger_integrity_status": str(manifest.get("ledger_integrity_status") or ""),
+        "deployment_manifest": deployment,
+        "artifacts": rows,
+    }
+    governance_atomic_write_json(bus / "logs" / "artifact_compatibility_report.json", report)
+    governance_atomic_write_json(
+        resolve_project_path("data/artifact_compatibility_report_latest.json"), report
+    )
+    for row in rows:
+        log(
+            "[artifact_compatibility]"
+            f" artifact={row['artifact']}"
+            f" enabled={str(row['enabled']).lower()}"
+            f" mandatory={str(row['mandatory']).lower()}"
+            f" exists={str(row['exists']).lower()}"
+            f" schema={row['schema'] or 'none'}"
+            f" schema_valid={str(row['schema_valid']).lower()}"
+            f" runtime_compatible={row['runtime_compatible']}"
+            f" taxonomy_compatible={row['taxonomy_compatible']}"
+            f" ledger_compatible={row['ledger_compatible']}"
+            f" python_authority={row['python_authority']}"
+            f" mql_authority={row['mql_authority']}"
+            f" final_status={row['final_status']}"
+        )
+    return report
 
 
 def _log_file_bus_summary() -> None:
@@ -8546,6 +9762,63 @@ def _audit_runtime_caches(bus: Path, *, quarantine_incompatible: bool) -> Dict[s
     return summary
 
 
+def _archive_incompatible_bus_cohorts(bus: Path) -> Dict[str, int]:
+    """Archive stale transport cohorts without touching ledgers or outcomes."""
+
+    summary = {"examined": 0, "compatible": 0, "archived": 0, "invalid": 0}
+    quarantine_root = bus / "quarantined" / (
+        "incompatible_contract_" + str(int(time.time()))
+    )
+    for directory_name in (
+        "requests",
+        "processing",
+        "responses",
+        "completed",
+        "rejected",
+        "timed_out",
+        "stale",
+    ):
+        source_dir = bus / directory_name
+        if not source_dir.is_dir():
+            continue
+        for path in sorted(source_dir.glob("*.json")):
+            summary["examined"] += 1
+            try:
+                row = read_json_any_encoding(path)
+                compatible = (
+                    str(row.get("contract_manifest_hash") or "")
+                    == compatibility_manifest_hash()
+                )
+            except Exception:
+                compatible = False
+                summary["invalid"] += 1
+            if compatible:
+                summary["compatible"] += 1
+                continue
+            target_dir = quarantine_root / directory_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / path.name
+            if target.exists():
+                target = target_dir / (
+                    f"{path.stem}_{time.time_ns()}{path.suffix}"
+                )
+            os.replace(path, target)
+            summary["archived"] += 1
+            log(
+                "[response_contract_mismatch]"
+                f" source={directory_name}/{path.name}"
+                f" action=archived path={target}"
+            )
+    governance_atomic_write_json(
+        quarantine_root / "archive_summary.json",
+        {
+            **summary,
+            "contract_manifest_hash": compatibility_manifest_hash(),
+        },
+    )
+    return summary
+
+
 def _runtime_repeatability_block_reason(
     required_live: bool,
     authority: Mapping[str, Any],
@@ -8637,7 +9910,15 @@ def main() -> None:
     ap.add_argument(
         "command",
         nargs="?",
-        choices=("run", "validate-runtime", "cache-audit", "cache-clear-incompatible"),
+        choices=(
+            "run",
+            "validate-runtime",
+            "cache-audit",
+            "cache-clear-incompatible",
+            "archive-incompatible-cohorts",
+            "bus-cohort-inventory",
+            "bus-cohort-migrate",
+        ),
         default="run",
         help="Run the bridge or execute one maintenance command.",
     )
@@ -8696,6 +9977,26 @@ def main() -> None:
     LOG_FILE = bus / "logs" / "ai_gate.log"
     set_ai_usage_bus(bus)
 
+    # Cohort inventory/migration must run before file-bus recovery. Recovery
+    # walks every artifact in the bus, so on a contaminated bus (the incident
+    # bus held 50,867 files) the very command intended to diagnose and clean
+    # that contamination could not finish. These commands only read the bus
+    # tree, so they need neither the lifecycle nor the idempotency ledger.
+    if args.command in {"bus-cohort-inventory", "bus-cohort-migrate"}:
+        summary = migrate_bus_cohorts(
+            bus,
+            current_bus_cohort_identity(),
+            dry_run=args.command == "bus-cohort-inventory",
+        )
+        report = summary.as_dict()
+        log("[bus_cohort_migration] " + json.dumps(report, sort_keys=True, separators=(",", ":")))
+        governance_atomic_write_json(
+            bus / "logs" / f"bus_cohort_{'inventory' if summary.dry_run else 'migration'}.json",
+            report,
+        )
+        print(json.dumps(report, indent=2, sort_keys=True))
+        raise SystemExit(0)
+
     FILE_BUS_LIFECYCLE = FileBusLifecycle(
         bus,
         session_id=f"python_{os.getpid()}_{int(time.time())}",
@@ -8724,14 +10025,22 @@ def main() -> None:
     if args.command == "cache-clear-incompatible":
         _audit_runtime_caches(bus, quarantine_incompatible=True)
         raise SystemExit(0)
+    if args.command == "archive-incompatible-cohorts":
+        summary = _archive_incompatible_bus_cohorts(bus)
+        log(
+            "[contract_cohort_archive] "
+            + json.dumps(summary, sort_keys=True, separators=(",", ":"))
+        )
+        raise SystemExit(0)
     if args.command == "validate-runtime":
         valid, _ = _validate_runtime_authority(bus)
         raise SystemExit(0 if valid else 2)
-
     selected_provider = _provider()
     if set_expectancy_ai_provider is not None:
         set_expectancy_ai_provider(selected_provider)
-    worker_count = max(1, min(16, args.workers))
+    global AI_CONFIG_WORKERS
+    AI_CONFIG_WORKERS = max(1, min(16, args.workers))
+    worker_count = AI_CONFIG_WORKERS
     if selected_provider.provider_mode == PROVIDER_MODE_LOCAL:
         worker_count = 1
     request_pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ai-gate")
@@ -8753,6 +10062,32 @@ def main() -> None:
         f"[file_bus] lifecycle_version={FILE_BUS_LIFECYCLE_VERSION}"
         f" session_id={FILE_BUS_LIFECYCLE.session_id} recovered={len(recovered)}"
     )
+    # Mint the run identity before anything else is logged, so every later line
+    # in this process belongs to a run that can be named.  Evidence from two
+    # different test_run_id values is two runs and must not be merged into one
+    # acceptance report.
+    global RUN_MANIFEST
+    RUN_MANIFEST = build_run_manifest(
+        python_session_id=FILE_BUS_LIFECYCLE.session_id,
+        provider_mode=selected_provider.provider_mode,
+        provider_id=selected_provider.provider_id,
+        model=selected_provider.model_for_role("analyst"),
+        decision_schema_version=AI_DECISION_SCHEMA_VERSION,
+        prompt_contract_version=AI_PROMPT_CONTRACT_VERSION,
+        contract_manifest_hash=str(compatibility_manifest_hash()),
+    )
+    try:
+        write_run_manifest(RUN_MANIFEST, bus)
+    except OSError as exc:
+        log(f"[test_run_manifest] write_failed={type(exc).__name__} detail={exc}")
+    log(RUN_MANIFEST.log_line())
+    log(
+        "[contract_compatibility]"
+        " compatible=awaiting_mql_request"
+        f" manifest_hash={compatibility_manifest_hash()}"
+        f" python_schema={AI_DECISION_SCHEMA_VERSION}"
+        f" engine_version={compatibility_manifest()['engine_version']}"
+    )
     _log_ai_runtime_config_once()
     _run_structured_schema_preflight()
     _refresh_provider_health(force=True)
@@ -8767,6 +10102,7 @@ def main() -> None:
         f"shadow_enabled={str(AI_CONFIG.shadow_repeat_enable).lower()} sample_rate={AI_CONFIG.shadow_repeat_sample_rate:.4f} "
         f"repeat_count={AI_CONFIG.shadow_repeat_count}"
     )
+    _log_repeatability_state(repeatability_artifact, selected_provider)
     if args.fill_tester_cache_once:
         try:
             fill_tester_cache_once(bus)
@@ -8800,13 +10136,23 @@ def main() -> None:
                     log(f"[file_bus] claim_failed request={req_path.name} error={exc}")
                     continue
                 _CLAIM_DEFERRED_STATE.pop(str(req_path.resolve()), None)
-                request_pool.submit(
+                serialize = _requires_serial_worker(processing_path)
+                future = request_pool.submit(
                     _process_claimed_request,
                     processing_path,
                     resp_dir,
                     stale_dir,
                     lock_path,
                 )
+                if serialize:
+                    # TESTER_AI_LIVE_WAIT_DEBUG runs one effective worker.  The
+                    # MT5 terminal blocks on a single request at a time, so any
+                    # extra concurrency only produces orphaned provider calls
+                    # that outlive their terminal deadline, add cost, and
+                    # congest the pool.  Transport cancellation is not proven
+                    # reliable here, so serialization is the safe architecture.
+                    # Production and live-forward concurrency are unaffected.
+                    future.result()
             for job_path in sorted(analytics_jobs_dir.glob("*.json")):
                 if job_path.name.endswith(".tmp") or not _is_stable_input_file(job_path):
                     continue
@@ -8830,6 +10176,10 @@ def main() -> None:
         except KeyboardInterrupt:
             print("\n[ai_gate] Stopped.")
             break
+    # Anything still in flight when the gate stops is interrupted, not timed
+    # out.  Terminalizing it here keeps a late provider result from being
+    # written against a request nobody is waiting for any more.
+    mark_test_end_interrupted("ai_gate_shutdown_with_pending_requests")
     request_pool.shutdown(wait=True)
     _log_file_bus_summary()
 

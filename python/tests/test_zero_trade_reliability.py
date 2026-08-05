@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import ai_gate
 from pydantic import BaseModel
 from ai_provider import ProviderCallError, RemoteAPIProvider
+from compatibility_manifest import compatibility_manifest_hash
 from decision_integrity import (
     AI_REQUEST_IDENTITY_VERSION,
     build_ai_request_identity,
@@ -226,6 +227,9 @@ class RequestIdentityReliabilityTests(unittest.TestCase):
         ]
         return {
             "id": "request-identity-test",
+            "session_id": "request-identity-session",
+            "request_nonce": "request-identity-nonce",
+            "contract_manifest_hash": compatibility_manifest_hash(),
             "request_created_sim_time": 1780000000,
             "request_created_wall_time": 1780000000000,
             "symbol": "GOLD",

@@ -15,9 +15,35 @@ private:
    string m_session_id;
 
    string _NowId(const string symbol) {
-      // unique-ish id
       uint r = (uint)MathRand();
-      return IntegerToString((int)TimeLocal()) + "_" + symbol + "_" + IntegerToString((int)r);
+      // Session scope prevents a stale response from a prior tester/terminal
+      // run sharing the same timestamp/symbol/random suffix.
+      return m_session_id + "_" + IntegerToString((int)TimeLocal())
+             + "_" + symbol + "_" + IntegerToString((int)r);
+   }
+
+   string _ContractManifestJson() const {
+      string j = "{";
+      j += JsonKVStr("contract_manifest_version", CONTRACT_MANIFEST_VERSION) + ",";
+      j += JsonKVStr("engine_version", ENGINE_VERSION) + ",";
+      j += JsonKVStr("engine_input_schema", ENGINE_INPUT_SCHEMA) + ",";
+      j += JsonKVStr("decision_schema_version", AI_DECISION_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("target_arbitration_schema_version", AI_TARGET_ARBITRATION_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("prompt_contract_version", AI_PROMPT_CONTRACT_VERSION) + ",";
+      j += JsonKVStr("role_contract_version", AI_ROLE_CONTRACT_VERSION) + ",";
+      j += JsonKVStr("provider_contract_version", AI_PROVIDER_CONTRACT_VERSION) + ",";
+      j += JsonKVStr("file_bus_lifecycle_version", FILE_BUS_LIFECYCLE_VERSION) + ",";
+      j += JsonKVStr("request_lifecycle_version", REQUEST_LIFECYCLE_VERSION) + ",";
+      j += JsonKVStr("request_identity_version", AI_REQUEST_IDENTITY_VERSION) + ",";
+      j += JsonKVStr("setup_taxonomy_version", SETUP_TAXONOMY_VERSION) + ",";
+      j += JsonKVStr("family_profile_version", AI_FAMILY_PROFILE_VERSION) + ",";
+      j += JsonKVStr("retrieval_policy_version", AI_RETRIEVAL_POLICY_VERSION) + ",";
+      j += JsonKVStr("consensus_resolver_version", AI_CONSENSUS_RESOLVER_VERSION) + ",";
+      j += JsonKVStr("evidence_envelope_version", AI_EVIDENCE_ENVELOPE_VERSION) + ",";
+      j += JsonKVStr("trade_memory_schema_version", AI_TRADE_MEMORY_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("repeatability_schema_version", REPEATABILITY_SCHEMA_VERSION);
+      j += "}";
+      return j;
    }
 
    string _AccountTradeModeLabel() const {
@@ -324,6 +350,13 @@ private:
       j += JsonKVStr("normalized_fvg_schema_version", NORMALIZED_FVG_SCHEMA_VERSION) + ",";
       j += JsonKVStr("runtime_input_hash", RuntimeInputHash()) + ",";
       j += JsonKVStr("decision_input_hash", DecisionInputHash()) + ",";
+      // The terminal's own wait budget. Python derives its response deadline and
+      // write margin from this instead of assuming a literal, so both sides
+      // enforce one absolute deadline. Operational only: deliberately excluded
+      // from RuntimeInputHash(), because changing the wait budget must not
+      // invalidate decision identity or the replay-cache cohort.
+      j += JsonKVInt("ai_wait_timeout_ms", MathMax(1000, InpAiWaitTimeoutRealMin * 60 * 1000)) + ",";
+      j += JsonKVInt("ai_wait_poll_ms", MathMax(50, InpAiWaitPollMs)) + ",";
       j += JsonKVInt("strategy_mode", (int)InpStrategyMode) + ",";
       j += JsonKVStr("strategy_preset", InpStrategyPreset) + ",";
       j += JsonKVStr("stop_model", _StopModelName()) + ",";
@@ -482,6 +515,26 @@ private:
       return true;
    }
 
+   bool _SchemaRequireNullableNumber(const string json, const string key,
+                                     double &value, bool &available,
+                                     const double low, const double high,
+                                     string &missing, string &invalid) const {
+      int count = JsonTopLevelKeyCount(json, key);
+      if(count == 0){ _AppendSchemaField(missing, key); return false; }
+      if(count != 1){ _AppendSchemaField(invalid, key); return false; }
+      if(JsonValueIsNullStrict(json, key)){
+         value = 0.0;
+         available = false;
+         return true;
+      }
+      if(!JsonGetNumberStrict(json, key, value) || value < low || value > high){
+         _AppendSchemaField(invalid, key);
+         return false;
+      }
+      available = true;
+      return true;
+   }
+
    bool _SchemaRequireNull(const string json, const string key,
                            string &missing, string &invalid) const {
       int count = JsonTopLevelKeyCount(json, key);
@@ -562,9 +615,17 @@ private:
       double risk_multiplier_value = -1.0;
       string veto_code_value = "";
       string veto_evidence_value = "";
-      string veto_reason_value = "";
-      string text_value = "";
-      _SchemaRequireNumber(assessment, "candidate_index", number, 0.0, 100000.0, missing, invalid);
+       string veto_reason_value = "";
+       string text_value = "";
+       string request_id_value = "", request_identity_value = "";
+       string provider_id_value = "", model_id_value = "", role_schema_value = "";
+       _SchemaRequireString(assessment, "request_id", request_id_value, missing, invalid);
+       _SchemaRequireString(assessment, "request_identity_hash", request_identity_value, missing, invalid);
+       _SchemaRequireString(assessment, "provider_id", provider_id_value, missing, invalid);
+       _SchemaRequireString(assessment, "model_id", model_id_value, missing, invalid);
+       _SchemaRequireString(assessment, "role_schema_version", role_schema_value, missing, invalid);
+       if(role_schema_value != AI_ROLE_CONTRACT_VERSION) _AppendSchemaField(invalid, "role_schema_version");
+       _SchemaRequireNumber(assessment, "candidate_index", number, 0.0, 100000.0, missing, invalid);
       if(MathAbs(number - MathRound(number)) > 0.000001) _AppendSchemaField(invalid, "candidate_index");
       _SchemaRequireString(assessment, "candidate_id", candidate_id, missing, invalid);
       _SchemaRequireString(assessment, "candidate_hash", candidate_hash, missing, invalid);
@@ -592,6 +653,39 @@ private:
       _SchemaRequireString(assessment, "decision_state", state, missing, invalid);
       StringToUpper(state);
       if(state != "APPROVE" && state != "REJECT" && state != "ABSTAIN") _AppendSchemaField(invalid, "decision_state");
+      string role_contract = "", role = "", verdict = "", historical_state = "", confidence_band = "", summary = "";
+      bool thesis_supported = false;
+      _SchemaRequireString(assessment, "role_contract_version", role_contract, missing, invalid);
+      _SchemaRequireString(assessment, "role", role, missing, invalid);
+      _SchemaRequireString(assessment, "verdict", verdict, missing, invalid);
+      _SchemaRequireBool(assessment, "thesis_supported", thesis_supported, missing, invalid);
+      string role_array = "";
+      _SchemaRequireArray(assessment, "material_contradictions", role_array, missing, invalid);
+      _SchemaRequireArray(assessment, "missing_required_evidence", role_array, missing, invalid);
+      _SchemaRequireString(assessment, "historical_evidence_state", historical_state, missing, invalid);
+      _SchemaRequireArray(assessment, "major_risks", role_array, missing, invalid);
+      string evidence_refs = "";
+      _SchemaRequireArray(assessment, "evidence_refs", evidence_refs, missing, invalid);
+      _SchemaRequireString(assessment, "confidence_band", confidence_band, missing, invalid);
+      _SchemaRequireString(assessment, "summary", summary, missing, invalid);
+      StringToLower(role);
+      StringToUpper(verdict);
+      StringToUpper(historical_state);
+      StringToUpper(confidence_band);
+      string compact_refs = evidence_refs;
+      StringReplace(compact_refs, " ", "");
+      StringReplace(compact_refs, "\r", "");
+      StringReplace(compact_refs, "\n", "");
+      if(role_contract != AI_ROLE_CONTRACT_VERSION) _AppendSchemaField(invalid, "role_contract_version");
+      if(role != "analyst") _AppendSchemaField(invalid, "role");
+      if(verdict != state) _AppendSchemaField(invalid, "verdict");
+      if(state == "APPROVE" && !thesis_supported) _AppendSchemaField(invalid, "approve_without_supported_thesis");
+      if(historical_state != "SUPPORTIVE" && historical_state != "MIXED" &&
+         historical_state != "ADVERSE" && historical_state != "INSUFFICIENT_SAMPLE")
+         _AppendSchemaField(invalid, "historical_evidence_state");
+      if(confidence_band != "LOW" && confidence_band != "MEDIUM" && confidence_band != "HIGH")
+         _AppendSchemaField(invalid, "confidence_band");
+      if(compact_refs == "[]") _AppendSchemaField(invalid, "evidence_refs");
       _SchemaRequireNumber(assessment, "structure_quality_score", number, 0.0, 10.0, missing, invalid);
       _SchemaRequireNumber(assessment, "entry_timing_score", number, 0.0, 10.0, missing, invalid);
       _SchemaRequireNumber(assessment, "follow_through_probability", number, 0.0, 1.0, missing, invalid);
@@ -688,8 +782,15 @@ public:
    string SessionId() const { return m_session_id; }
    string RequestNonce(const string req_id) const { return _RequestNonce(req_id); }
    string ResponseBindingHash(const string req_id, const AiDecision &dec) const {
-      string material = req_id + "|" + m_session_id + "|" + _RequestNonce(req_id)
-                        + "|" + AI_DECISION_SCHEMA_VERSION + "|CACHE_OF_FULL_STRUCTURED|" + dec.decision_state
+       string material = req_id + "|" + m_session_id + "|" + _RequestNonce(req_id)
+                         + "|" + dec.request_identity_hash
+                         + "|" + AI_DECISION_SCHEMA_VERSION + "|CACHE_OF_FULL_STRUCTURED"
+                        + "|" + dec.provider_mode
+                        + "|" + dec.provider_id
+                        + "|" + dec.actual_model_id
+                        + "|" + dec.model_fingerprint
+                        + "|" + dec.generation_settings_hash
+                        + "|" + dec.decision_state
                         + "|" + (dec.model_raw_allow ? "1" : "0")
                         + "|" + (dec.python_final_allow ? "1" : "0")
                         + "|" + dec.selected_candidate_id + "|" + dec.selected_candidate_hash
@@ -721,24 +822,31 @@ public:
           if(reward > 0) liquidity_rr = reward / risk_dist;
        }
        string runtime_input_hash = RuntimeInputHash();
+       datetime server_time = TimeTradeServer();
+       if(server_time <= 0) server_time = TimeLocal();
+       datetime request_sim_time = (p.ai_request_time > 0 ? p.ai_request_time : server_time);
+       long request_wall_time = (long)GetTickCount64();
 
        string j="{";
        j += JsonKVStr("id", p.req_id) + ",";
        j += JsonKVStr("session_id", m_session_id) + ",";
        j += JsonKVStr("request_nonce", _RequestNonce(p.req_id)) + ",";
+       j += JsonKVStr("request_identity_version", AI_REQUEST_IDENTITY_VERSION) + ",";
+       j += JsonKVInt("request_created_sim_time", (int)request_sim_time) + ",";
+       j += "\"request_created_wall_time\":" + IntegerToString(request_wall_time) + ",";
+       j += JsonKVStr("engine_version", ENGINE_VERSION) + ",";
+       j += JsonKVStr("input_schema_version", ENGINE_INPUT_SCHEMA) + ",";
+       j += JsonKVStr("contract_manifest_version", CONTRACT_MANIFEST_VERSION) + ",";
+       j += JsonKVStr("contract_manifest_hash", PO3ContractManifestHash()) + ",";
+       j += "\"contract_manifest\":" + _ContractManifestJson() + ",";
        j += JsonKVStr("workload_mode", _WorkloadMode()) + ",";
        j += JsonKVStr("live_forward_contract_version", LIVE_FORWARD_CONTRACT_VERSION) + ",";
        j += JsonKVStr("behavior_contract_hash_mql", _BehaviorContractHash()) + ",";
        j += JsonKVStr("symbol", p.symbol) + ",";
        j += JsonKVBool("is_buy", p.is_buy) + ",";
-       j += JsonKVStr("candidate_id", p.candidate_id) + ",";
        j += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
-       j += JsonKVStr("setup_taxonomy_version", p.setup_taxonomy_version) + ",";
-       j += JsonKVStr("setup_taxonomy_enum", p.setup_taxonomy_enum) + ",";
-       j += JsonKVStr("taxonomy_mapping_source", p.taxonomy_mapping_source) + ",";
        j += JsonKVStr("request_execution_fingerprint", p.request_execution_fingerprint) + ",";
        j += JsonKVStr("assessed_execution_fingerprint", p.assessed_execution_fingerprint) + ",";
-       j += JsonKVStr("configured_stop_model", _StopModelName()) + ",";
        j += JsonKVStr("runtime_input_hash", runtime_input_hash) + ",";
        j += JsonKVStr("decision_input_hash", DecisionInputHash()) + ",";
        j += JsonKVStr("decision_schema_version", AI_DECISION_SCHEMA_VERSION) + ",";
@@ -747,8 +855,6 @@ public:
        if(StringLen(tester_cache_key) > 0)
           j += JsonKVStr("tester_cache_key", tester_cache_key) + ",";
 
-       datetime server_time = TimeTradeServer();
-       if(server_time <= 0) server_time = TimeLocal();
        MqlTick tick;
        ZeroMemory(tick);
        SymbolInfoTick(p.symbol, tick);
@@ -1406,9 +1512,27 @@ public:
       }
       string rid = "", decision_quality_tier = "", response_quality_alias = "", decision_schema = "";
       _SchemaRequireString(txt, "id", rid, missing, invalid);
-      _SchemaRequireString(txt, "session_id", out.response_session_id, missing, invalid);
-      _SchemaRequireString(txt, "request_nonce", out.response_request_nonce, missing, invalid);
-      _SchemaRequireString(txt, "workload_mode", out.workload_mode, missing, invalid);
+      out.response_request_id = rid;
+       _SchemaRequireString(txt, "session_id", out.response_session_id, missing, invalid);
+       _SchemaRequireString(txt, "request_nonce", out.response_request_nonce, missing, invalid);
+       _SchemaRequireString(txt, "request_identity_version", out.request_identity_version, missing, invalid);
+      _SchemaRequireString(txt, "request_identity_hash", out.request_identity_hash, missing, invalid);
+      _SchemaRequireString(txt, "contract_manifest_hash", out.contract_manifest_hash, missing, invalid);
+       double request_sim_time_value = 0.0;
+       double request_wall_time_value = 0.0;
+       double candidate_count_value = 0.0;
+       _SchemaRequireNumber(txt, "request_created_sim_time", request_sim_time_value, 1.0, 2147483647.0, missing, invalid);
+       _SchemaRequireNumber(txt, "request_created_wall_time", request_wall_time_value, 1.0, 9.0e15, missing, invalid);
+       _SchemaRequireNumber(txt, "candidate_count", candidate_count_value, 1.0, 100000.0, missing, invalid);
+       _SchemaRequireArray(txt, "ordered_candidate_identities", out.ordered_candidate_identities_json, missing, invalid);
+       out.request_created_sim_time = (datetime)request_sim_time_value;
+       out.request_created_wall_time = (long)request_wall_time_value;
+       out.response_candidate_count = (int)candidate_count_value;
+      if(out.request_identity_version != AI_REQUEST_IDENTITY_VERSION) _AppendSchemaField(invalid, "request_identity_version");
+      if(out.contract_manifest_hash != PO3ContractManifestHash()) _AppendSchemaField(invalid, "contract_manifest_hash");
+       if(MathAbs(candidate_count_value - MathRound(candidate_count_value)) > 0.000001)
+          _AppendSchemaField(invalid, "candidate_count");
+       _SchemaRequireString(txt, "workload_mode", out.workload_mode, missing, invalid);
       _SchemaRequireString(txt, "behavior_contract_hash", out.behavior_contract_hash, missing, invalid);
       _SchemaRequireString(txt, "reasoning_configuration", out.reasoning_configuration, missing, invalid);
       _SchemaRequireString(txt, "bucket_prior_hash", out.bucket_prior_hash, missing, invalid, true);
@@ -1439,15 +1563,66 @@ public:
          out.decision_source = JsonGetString(txt, "decision_source", "degraded_non_trading");
          out.reasons_json = JsonGetString(txt, "reasons", "degraded response cannot authorize trading");
          out.rejection_codes_json = JsonGetArray(txt, "rejection_codes", "[\"degraded_ai_response_non_trading\"]");
-         Print("[ai_schema_validation] valid=false decision_schema_version=", decision_schema,
-               " decision_quality_tier=", decision_quality_tier,
-               " missing_fields=", missing,
-               " invalid_fields=degraded_ai_response_non_trading");
-         m_bus.ArchiveTerminal(resp_path, "rejected");
+         if(StringLen(missing) > 0 || StringLen(invalid) > 0){
+            Print("[ai_schema_validation] valid=false decision_schema_version=", decision_schema,
+                  " decision_quality_tier=", decision_quality_tier,
+                  " error_envelope=true missing_fields=", missing,
+                  " invalid_fields=", invalid);
+            m_bus.ArchiveTerminal(resp_path, "quarantined");
+         } else {
+            Print("[ai_schema_validation] valid=true decision_schema_version=", decision_schema,
+                  " decision_quality_tier=", decision_quality_tier,
+                  " error_envelope=true trading_authority=false identity_bound=true");
+            m_bus.ArchiveTerminal(resp_path, "rejected");
+         }
          return true;
       }
 
       if(decision_schema != AI_DECISION_SCHEMA_VERSION) _AppendSchemaField(invalid, "decision_schema_version");
+      _SchemaRequireString(txt, "provider_contract_version", out.provider_contract_version, missing, invalid);
+      _SchemaRequireString(txt, "provider_mode", out.provider_mode, missing, invalid);
+      _SchemaRequireString(txt, "provider_id", out.provider_id, missing, invalid);
+      _SchemaRequireString(txt, "endpoint_class", out.endpoint_class, missing, invalid);
+      _SchemaRequireString(txt, "endpoint_identity_hash", out.endpoint_identity_hash, missing, invalid);
+      _SchemaRequireString(txt, "configured_models_hash", out.configured_models_hash, missing, invalid);
+      _SchemaRequireString(txt, "actual_model_id", out.actual_model_id, missing, invalid);
+      _SchemaRequireString(txt, "fallback_model", out.fallback_model, missing, invalid, true);
+      _SchemaRequireString(txt, "model_fingerprint", out.model_fingerprint, missing, invalid);
+      _SchemaRequireString(txt, "evidence_envelope_version", out.evidence_envelope_version, missing, invalid);
+      _SchemaRequireString(txt, "family_profile_version", out.family_profile_version, missing, invalid);
+      _SchemaRequireString(txt, "memory_schema_version", out.memory_schema_version, missing, invalid);
+      _SchemaRequireString(txt, "retrieval_policy_version", out.retrieval_policy_version, missing, invalid);
+      _SchemaRequireString(txt, "role_contract_version", out.role_contract_version, missing, invalid);
+      _SchemaRequireString(txt, "consensus_resolver_version", out.consensus_resolver_version, missing, invalid);
+      _SchemaRequireString(txt, "generation_settings_hash", out.generation_settings_hash, missing, invalid);
+      _SchemaRequireString(txt, "input_fingerprint", out.input_fingerprint, missing, invalid);
+      _SchemaRequireArray(txt, "retrieved_analogue_ids", out.retrieved_analogue_ids_json, missing, invalid);
+      _SchemaRequireString(txt, "historical_evidence_state", out.historical_evidence_state, missing, invalid);
+      _SchemaRequireString(txt, "analyst_response_fingerprint", out.analyst_response_fingerprint, missing, invalid);
+      _SchemaRequireString(txt, "critic_response_fingerprint", out.critic_response_fingerprint, missing, invalid);
+      _SchemaRequireString(txt, "adjudicator_response_fingerprint", out.adjudicator_response_fingerprint, missing, invalid, true);
+      _SchemaRequireString(txt, "final_resolver_reason", out.final_resolver_reason, missing, invalid);
+      _SchemaRequireString(txt, "provider_health_state", out.provider_health_state, missing, invalid);
+      _SchemaRequireObject(txt, "role_latencies", out.role_latencies_json, missing, invalid);
+      _SchemaRequireObject(txt, "provider_retry_counts", out.provider_retry_counts_json, missing, invalid);
+      _SchemaRequireObject(txt, "provider_usage", out.provider_usage_json, missing, invalid);
+      _SchemaRequireNullableNumber(txt, "estimated_context_tokens", out.estimated_context_tokens,
+                                   out.estimated_context_tokens_available, 0.0, 1.0e9, missing, invalid);
+      _SchemaRequireArray(txt, "unsupported_generation_parameters", out.unsupported_generation_parameters_json, missing, invalid);
+      _SchemaRequireObject(txt, "analyst_output", out.analyst_output_json, missing, invalid);
+      _SchemaRequireObject(txt, "critic_output", out.critic_output_json, missing, invalid);
+      _SchemaRequireObject(txt, "adjudicator_output", out.adjudicator_output_json, missing, invalid);
+      if(out.provider_contract_version != AI_PROVIDER_CONTRACT_VERSION) _AppendSchemaField(invalid, "provider_contract_version");
+      if(out.provider_mode != "REMOTE_API" && out.provider_mode != "LOCAL_OPENAI_COMPATIBLE")
+         _AppendSchemaField(invalid, "provider_mode");
+      if(out.endpoint_class != "official_remote" && out.endpoint_class != "loopback" && out.endpoint_class != "non_loopback")
+         _AppendSchemaField(invalid, "endpoint_class");
+      if(out.evidence_envelope_version != AI_EVIDENCE_ENVELOPE_VERSION) _AppendSchemaField(invalid, "evidence_envelope_version");
+      if(out.family_profile_version != AI_FAMILY_PROFILE_VERSION) _AppendSchemaField(invalid, "family_profile_version");
+      if(out.memory_schema_version != AI_TRADE_MEMORY_SCHEMA_VERSION) _AppendSchemaField(invalid, "memory_schema_version");
+      if(out.retrieval_policy_version != AI_RETRIEVAL_POLICY_VERSION) _AppendSchemaField(invalid, "retrieval_policy_version");
+      if(out.role_contract_version != AI_ROLE_CONTRACT_VERSION) _AppendSchemaField(invalid, "role_contract_version");
+      if(out.consensus_resolver_version != AI_CONSENSUS_RESOLVER_VERSION) _AppendSchemaField(invalid, "consensus_resolver_version");
       _SchemaRequireString(txt, "request_fingerprint", out.request_fingerprint, missing, invalid);
       _SchemaRequireString(txt, "response_fingerprint", out.response_fingerprint, missing, invalid);
       _SchemaRequireString(txt, "full_structured_response_hash", out.full_structured_response_hash, missing, invalid);
@@ -1678,9 +1853,10 @@ public:
          if(arb_why_synth != out.why_not_synthetic_fallback) _AppendSchemaField(invalid, "why_not_synthetic_fallback_mismatch");
       }
 
-      _SchemaRequireArray(txt, "candidate_assessments", out.candidate_assessments_json, missing, invalid);
-      int assessment_count = JsonArrayObjectCount(out.candidate_assessments_json);
-      if(assessment_count <= 0) _AppendSchemaField(invalid, "candidate_assessments_empty");
+       _SchemaRequireArray(txt, "candidate_assessments", out.candidate_assessments_json, missing, invalid);
+       int assessment_count = JsonArrayObjectCount(out.candidate_assessments_json);
+       if(assessment_count <= 0) _AppendSchemaField(invalid, "candidate_assessments_empty");
+       if(assessment_count != out.response_candidate_count) _AppendSchemaField(invalid, "candidate_count_mismatch");
       string hashes[];
       ArrayResize(hashes, 0);
       int selected_matches = 0;
@@ -1690,8 +1866,18 @@ public:
          if(!JsonArrayGetObject(out.candidate_assessments_json, i, item)){
             _AppendSchemaField(invalid, "candidate_assessment_parse");
             continue;
-         }
-         _ValidateStrictCandidateAssessment(item, item_id, item_hash, item_fp, missing, invalid);
+          }
+          _ValidateStrictCandidateAssessment(item, item_id, item_hash, item_fp, missing, invalid);
+          string item_request_id = "", item_identity_hash = "", item_provider_id = "", item_model_id = "";
+          JsonGetStringStrict(item, "request_id", item_request_id);
+          JsonGetStringStrict(item, "request_identity_hash", item_identity_hash);
+          JsonGetStringStrict(item, "provider_id", item_provider_id);
+          JsonGetStringStrict(item, "model_id", item_model_id);
+          if(item_request_id != rid) _AppendSchemaField(invalid, "candidate_request_id_mismatch");
+          if(item_identity_hash != out.request_identity_hash) _AppendSchemaField(invalid, "candidate_request_identity_hash_mismatch");
+          if(item_provider_id != out.provider_id) _AppendSchemaField(invalid, "candidate_provider_id_mismatch");
+          if(item_model_id != out.actual_model_id && item_model_id != JsonGetString(txt, "model_returned", ""))
+             _AppendSchemaField(invalid, "candidate_model_id_mismatch");
          for(int h=0; h<ArraySize(hashes); h++){
             if(hashes[h] == item_hash) _AppendSchemaField(invalid, "candidate_hash_duplicate");
          }
@@ -1810,8 +1996,16 @@ public:
       if(out.decision_state == "APPROVE" && (out.selected_target_price <= 0.0 || out.assessed_entry <= 0.0 || out.assessed_sl <= 0.0 || out.assessed_tp2 <= 0.0))
          _AppendSchemaField(invalid, "approve_plan_prices_invalid");
 
-      string binding_material = rid + "|" + out.response_session_id + "|" + out.response_request_nonce
-                                + "|" + decision_schema + "|" + decision_quality_tier + "|" + out.decision_state
+       string binding_material = rid + "|" + out.response_session_id + "|" + out.response_request_nonce
+                                 + "|" + out.request_identity_hash
+                                 + "|" + out.contract_manifest_hash
+                                 + "|" + decision_schema + "|" + decision_quality_tier
+                                + "|" + out.provider_mode
+                                + "|" + out.provider_id
+                                + "|" + out.actual_model_id
+                                + "|" + out.model_fingerprint
+                                + "|" + out.generation_settings_hash
+                                + "|" + out.decision_state
                                 + "|" + (out.model_raw_allow ? "1" : "0")
                                 + "|" + (out.python_final_allow ? "1" : "0")
                                 + "|" + out.selected_candidate_id + "|" + out.selected_candidate_hash

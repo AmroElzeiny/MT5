@@ -19,6 +19,8 @@ bool     g_scan_active = false;
 datetime g_last_ai_pause_log = 0;
 datetime g_last_busy_pause_log = 0;
 datetime g_last_persist_time = 0;
+datetime g_tester_start_sim_time = 0;
+bool     g_tester_live_wait_duration_warning_logged = false;
 
 bool _ShouldJournalEA() {
    if(!InpVerboseJournal) return false;
@@ -75,26 +77,35 @@ bool _WaitForPendingAIInTester() {
    int poll_ms = MathMax(50, InpAiWaitPollMs);
    int progress_ms = MathMax(1000, InpAiWaitSliceSeconds * 1000);
    int timeout_ms = MathMax(1000, InpAiWaitTimeoutRealMin * 60 * 1000);
-   ulong started_ms = (ulong)GetTickCount();
+   ulong started_ms = g_engine.PendingAIOldestWallStartMs();
+   if(started_ms == 0) started_ms = (ulong)GetTickCount64();
+   ulong deadline_ms = started_ms + (ulong)timeout_ms;
    ulong next_progress_ms = (ulong)progress_ms;
    int timeout_total_before = g_engine.TesterAiWaitTimeoutTotal();
 
    g_engine.NoteTesterAiWaitStarted();
-   _JournalEA("[tester_ai_wait] started req_id=" + req_ids
+   _JournalEA("[tester_ai_wait_started] request_id=" + req_ids
+              + " wall_start_ms=" + IntegerToString((long)started_ms)
+              + " timeout_ms=" + IntegerToString(timeout_ms)
+              + " deadline_ms=" + IntegerToString((long)deadline_ms)
               + " pause_scan=true"
               + " snapshot_saved=" + (snapshot_saved ? "true" : "false")
               + " pending_candidates=" + IntegerToString(g_engine.PendingAICount())
               + " requests=" + IntegerToString(g_engine.PendingAIRequestCount())
               + " poll_ms=" + IntegerToString(poll_ms)
-              + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin));
+              + " simulated_time=" + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
 
    while(g_engine.HasPendingAI() && !IsStopped()){
-      ulong now_ms = (ulong)GetTickCount();
+      ulong now_ms = (ulong)GetTickCount64();
       ulong elapsed_ms = (now_ms >= started_ms ? now_ms - started_ms : 0);
       if(elapsed_ms >= (ulong)timeout_ms) break;
       if(elapsed_ms >= next_progress_ms){
-         _JournalEA("[tester_ai_wait] poll req_id=" + req_ids
-                    + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_ms / 1000))
+         _JournalEA("[tester_ai_wait_progress] request_id=" + req_ids
+                    + " elapsed_wall_ms=" + IntegerToString((long)elapsed_ms)
+                    + " remaining_wall_ms=" + IntegerToString((long)((ulong)timeout_ms - elapsed_ms))
+                    + " simulated_elapsed_sec=diagnostic_only"
+                    + " response_present=" + (g_engine.PendingAIResponsePresent() ? "true" : "false")
+                    + " response_valid=false"
                     + " pending_candidates=" + IntegerToString(g_engine.PendingAICount())
                     + " requests=" + IntegerToString(g_engine.PendingAIRequestCount())
                     + " pause_scan=true");
@@ -106,27 +117,26 @@ bool _WaitForPendingAIInTester() {
    }
    g_engine.ProcessPendingAI();
 
-   ulong finished_ms = (ulong)GetTickCount();
+   ulong finished_ms = (ulong)GetTickCount64();
    ulong elapsed_final_ms = (finished_ms >= started_ms ? finished_ms - started_ms : 0);
    bool engine_timed_out = (g_engine.TesterAiWaitTimeoutTotal() > timeout_total_before);
    if(g_engine.HasPendingAI()){
       g_engine.NoteTesterAiWaitTimeout();
-      _JournalEA("[tester_ai_wait] timeout req_id=" + req_ids
-                 + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_final_ms / 1000))
-                 + " requests=" + IntegerToString(g_engine.PendingAIRequestCount())
-                 + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin)
-                 + " action=fail_closed");
+      _JournalEA("[tester_ai_wait_completed] request_id=" + req_ids
+                 + " result=timeout"
+                 + " elapsed_wall_ms=" + IntegerToString((long)elapsed_final_ms)
+                 + " configured_timeout_ms=" + IntegerToString(timeout_ms));
    } else if(engine_timed_out){
-      _JournalEA("[tester_ai_wait] timeout req_id=" + req_ids
-                 + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_final_ms / 1000))
-                 + " requests=0"
-                 + " timeout_min=" + IntegerToString(InpAiWaitTimeoutRealMin)
-                 + " action=fail_closed");
+      _JournalEA("[tester_ai_wait_completed] request_id=" + req_ids
+                 + " result=timeout"
+                 + " elapsed_wall_ms=" + IntegerToString((long)elapsed_final_ms)
+                 + " configured_timeout_ms=" + IntegerToString(timeout_ms));
    } else {
       g_engine.NoteTesterAiWaitCompleted();
-      _JournalEA("[tester_ai_wait] completed req_id=" + req_ids
-                 + " elapsed_wall_sec=" + IntegerToString((int)(elapsed_final_ms / 1000))
-                 + " applying_response_before_resuming_scan=true");
+      _JournalEA("[tester_ai_wait_completed] request_id=" + req_ids
+                 + " result=response_applied"
+                 + " elapsed_wall_ms=" + IntegerToString((long)elapsed_final_ms)
+                 + " configured_timeout_ms=" + IntegerToString(timeout_ms));
       _JournalEA("[tester_ai_wait] scan_resumed req_id=" + req_ids);
    }
    return !g_engine.HasPendingAI();
@@ -134,6 +144,10 @@ bool _WaitForPendingAIInTester() {
 
 int OnInit() {
    Print("[PO3_AIGate] ENGINE_VERSION=", ENGINE_VERSION, " input_schema=", ENGINE_INPUT_SCHEMA);
+   Print("[PO3_AIGate] [contract_compatibility] compatible=awaiting_python_request_validation",
+         " manifest_hash=", PO3ContractManifestHash(),
+         " mql_schema=", AI_DECISION_SCHEMA_VERSION,
+         " engine_version=", ENGINE_VERSION);
    Print("[PO3_AIGate] Exclusive model mode: ", (InpOnlyBreakerRetestVirginStrongOrigin ? "ON" : "OFF"));
    Print("[PO3_AIGate] Exclusive model: breaker_retest + virgin_fvg + strong_origin");
    Print("[PO3_AIGate] Strong origin min score: ", DoubleToString(InpStrongOriginMinScore, 2));
@@ -149,6 +163,8 @@ int OnInit() {
 
    g_next_scan_time = TimeLocal(); // start immediately
    g_last_persist_time = TimeLocal();
+   g_tester_start_sim_time = TimeCurrent();
+   g_tester_live_wait_duration_warning_logged = false;
    g_scan_active = false;
    bool effective_pause = _EffectivePauseScanWhilePendingAI();
    if(_TesterLiveAiWaitMode() && !InpPauseScanWhilePendingAI){
@@ -215,9 +231,20 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 }
 
 void _StartScan() {
-   g_scanner.Refresh(InpScanAllMarketWatch, _Symbol);
+   string tester_symbols = (MQLInfoInteger(MQL_TESTER) ? InpTesterSymbols : "");
+   g_scanner.Refresh(InpScanAllMarketWatch, _Symbol, tester_symbols, PO3EffectiveEntryTF());
    g_engine.BeginScan();
    g_scan_active = true;
+   _JournalEA("[scanner_universe]"
+              + " requested_scan_all=" + (InpScanAllMarketWatch ? "true" : "false")
+              + " market_watch_symbols_detected=" + IntegerToString(g_scanner.MarketWatchDetected())
+              + " eligible_symbols=" + IntegerToString(g_scanner.Total())
+              + " tester_symbols_available=" + IntegerToString(g_scanner.TesterSymbolsAvailable())
+              + " final_scan_symbols=" + IntegerToString(g_scanner.Total())
+              + " explicit_tester_symbols=" + (StringLen(tester_symbols) > 0 ? tester_symbols : "<none>")
+              + " excluded_count=" + IntegerToString(g_scanner.ExcludedCount())
+              + " excluded_reasons=" + (StringLen(g_scanner.ExcludedReasons()) > 0
+                                         ? g_scanner.ExcludedReasons() : "none"));
    _JournalEA("scan started symbols=" + IntegerToString(g_scanner.Total())
               + " mode=" + (InpScanAllMarketWatch ? "market_watch" : _Symbol));
 }
@@ -245,6 +272,18 @@ void _EndScan() {
 }
 
 void OnTimer() {
+   if(_TesterLiveAiWaitMode() && !g_tester_live_wait_duration_warning_logged &&
+      g_tester_start_sim_time > 0 && InpTesterLiveWaitDebugMaxDurationHours > 0 &&
+      TimeCurrent() - g_tester_start_sim_time >
+         InpTesterLiveWaitDebugMaxDurationHours * 3600){
+      _JournalEA("[tester_ai_mode] mode=live_wait_debug"
+                 + " backtest_safe=false"
+                 + " warning=test_duration_exceeds_live_wait_debug_limit"
+                 + " configured_short_duration_hours=" + IntegerToString(InpTesterLiveWaitDebugMaxDurationHours)
+                 + " recommended_mode=record_then_cache");
+      g_tester_live_wait_duration_warning_logged = true;
+   }
+
    // Global stop / exposure maintenance
    CTrade tmp;
    if(EnforceGlobalStops(tmp)) return;

@@ -13,6 +13,7 @@ from unittest.mock import patch
 import ai_gate
 from ai_provider import PROVIDER_MODE_LOCAL, ProviderResult
 from architecture_contracts import FileBusLifecycle
+from compatibility_manifest import compatibility_manifest_hash
 from decision_integrity import (
     AI_IDENTITY_CANONICALIZATION_VERSION,
     canonical_decimal,
@@ -24,7 +25,13 @@ from request_lifecycle import (
     heartbeat_allows_recovery,
 )
 from structured_models import ModelCandidateAssessment
-from tests.test_decision_integrity import assessment, candidate
+from pipeline_integrity import FrozenRequestMutationError
+from tests.test_decision_integrity import (
+    assessment,
+    candidate,
+    catalog_ids_for,
+    model_assessment,
+)
 
 
 def _result(parsed: object, role: str) -> ProviderResult:
@@ -82,6 +89,8 @@ class ReverseAssessmentProvider:
     def __init__(self, candidates: list[dict]) -> None:
         self.candidates = candidates
         self.calls: list[str] = []
+        # Set by tests that need a genuine evidence-reference failure.
+        self.force_evidence_ref_ids: list[int] | None = None
 
     def model_for_role(self, role: str) -> str:
         return "identity-test-model"
@@ -111,28 +120,26 @@ class ReverseAssessmentProvider:
         *,
         role: str,
         response_schema: type,
-        evidence: dict,
-        request_metadata: dict,
+        evidence: dict | None = None,
+        request_metadata: dict | None = None,
         **_: object,
     ) -> ProviderResult:
+        evidence = dict(evidence or {})
         self.calls.append(role)
         if role == "analyst":
             rows: list[dict] = []
             for position, cand in enumerate(self.candidates):
-                row = assessment(
+                row = model_assessment(
                     cand,
                     quality=7.25 if position == 0 else 8.75,
+                    evidence_ref_ids=(
+                        self.force_evidence_ref_ids
+                        if self.force_evidence_ref_ids is not None
+                        else catalog_ids_for(evidence, position)
+                    ),
                 )
-                row["evidence_refs"] = [
-                    f"entry_and_invalidation.candidates.{position}.candidate_hash"
-                ]
                 row["target_arbitration"]["target_comparison"] = _comparison()
-                rows.append(
-                    {
-                        name: row[name]
-                        for name in ModelCandidateAssessment.model_fields
-                    }
-                )
+                rows.append(row)
             parsed = response_schema.model_validate(
                 {
                     "decision_quality_tier": "FULL_STRUCTURED",
@@ -151,7 +158,7 @@ class ReverseAssessmentProvider:
                     "blocking_objections": [],
                     "non_blocking_objections": [],
                     "missing_required_evidence": [],
-                    "evidence_refs": ["candidate.candidate_hash"],
+                    "evidence_ref_ids": catalog_ids_for(evidence, 1),
                     "confidence_band": "HIGH",
                     "summary": "No evidence-backed contradiction.",
                 }
@@ -183,6 +190,7 @@ def _payload(candidates: list[dict]) -> dict:
         "request_nonce": "nonce-e2e",
         "request_created_sim_time": 1_780_000_000,
         "request_created_wall_time": 1_780_000_001,
+        "contract_manifest_hash": compatibility_manifest_hash(),
         "symbol": "GOLD",
         "asset_class": "metal",
         "is_buy": True,
@@ -242,7 +250,7 @@ class FrozenIdentityTests(unittest.TestCase):
         thawed = frozen.thaw_payload()
         thawed["candidates"][0]["entry_est"] += 0.01
         with self.assertRaisesRegex(
-            AssertionError,
+            FrozenRequestMutationError,
             "frozen_request_candidate_mutation",
         ):
             frozen.assert_unchanged(thawed)

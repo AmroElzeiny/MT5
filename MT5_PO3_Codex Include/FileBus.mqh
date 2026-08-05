@@ -72,19 +72,65 @@ public:
       return moved;
    }
 
-   bool ReadText(const string rel_path, string &out) {
-      int h = FileOpen(rel_path, FILE_READ|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
-      if(h == INVALID_HANDLE) return false;
+   // Decode UTF-16LE/BE (with or without BOM) and UTF-8 (with or without BOM).
+   bool DecodeTextBytes(const uchar &bytes[], const int count, string &out) const {
       out = "";
-      bool first_line = true;
-      while(!FileIsEnding(h)){
-         string line = FileReadString(h);
-         if(!first_line) out += "\n";
-         out += line;
-         first_line = false;
+      if(count <= 0) return true;
+
+      bool utf16le = (count >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE);
+      bool utf16be = (count >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF);
+      int start = 0;
+      if(utf16le || utf16be) start = 2;
+      else if(count >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) start = 3;
+      else if(count >= 2 && bytes[0] != 0 && bytes[1] == 0){
+         // No BOM, but an ASCII first byte followed by a zero high byte is
+         // UTF-16LE in practice for every writer in this system.
+         utf16le = true;
       }
-      FileClose(h);
+
+      if(utf16le || utf16be){
+         int units = (count - start) / 2;
+         if(units <= 0) return true;
+         ushort chars[];
+         if(ArrayResize(chars, units) != units) return false;
+         for(int i = 0; i < units; i++){
+            int b = start + i * 2;
+            chars[i] = utf16le
+                       ? (ushort)(bytes[b] | ((ushort)bytes[b + 1] << 8))
+                       : (ushort)(bytes[b + 1] | ((ushort)bytes[b] << 8));
+         }
+         out = ShortArrayToString(chars, 0, units);
+         return true;
+      }
+
+      out = CharArrayToString(bytes, start, count - start, CP_UTF8);
       return true;
+   }
+
+   // Encoding-aware reader.
+   //
+   // FILE_TXT without FILE_ANSI/FILE_UNICODE defaults to UTF-16 in MQL5. Python
+   // writes bus *responses* as UTF-16 (AI_RESPONSE_ENCODING) but writes config,
+   // policy, and deployment artifacts as UTF-8, and hand-authored config files
+   // are UTF-8 as well. Reading a UTF-8 document under the UTF-16 default makes
+   // the first "character" of `{"schema...` the value 0x227B instead of '{',
+   // which surfaced as json_root_not_object on files Python considered
+   // perfectly valid. Both sides must read the same bytes, so this reads binary
+   // and decodes by BOM/heuristic exactly like Python's read_json_any_encoding.
+   bool ReadText(const string rel_path, string &out) {
+      out = "";
+      int h = FileOpen(rel_path, FILE_READ|FILE_BIN|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      if(h == INVALID_HANDLE) return false;
+      ulong size64 = FileSize(h);
+      if(size64 == 0){ FileClose(h); return true; }
+      if(size64 > 268435456){ FileClose(h); return false; }
+      int size = (int)size64;
+      uchar bytes[];
+      if(ArrayResize(bytes, size) != size){ FileClose(h); return false; }
+      uint got = FileReadArray(h, bytes, 0, size);
+      FileClose(h);
+      if((int)got != size) return false;
+      return DecodeTextBytes(bytes, (int)got, out);
    }
 
    bool AppendText(const string rel_path, const string content) {

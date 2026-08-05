@@ -22,6 +22,10 @@ if str(ROOT) not in sys.path:
 
 import ai_gate
 from ai_provider import RemoteAPIProvider
+from compatibility_manifest import (
+    compatibility_manifest,
+    compatibility_manifest_hash,
+)
 from decision_integrity import assessed_execution_fingerprint
 from structured_models import StrictStructuredModel
 from tools import analyze_ai_trade_outcomes
@@ -219,8 +223,10 @@ def _payload(**overrides: Any) -> Dict[str, Any]:
         "id": "verify_1",
         "request_created_sim_time": 1779066000,
         "request_created_wall_time": 1780000000000,
-        "engine_version": "verify-engine-v1",
-        "input_schema_version": "verify-input-v1",
+        "engine_version": compatibility_manifest()["engine_version"],
+        "input_schema_version": compatibility_manifest()["engine_input_schema"],
+        "contract_manifest_hash": compatibility_manifest_hash(),
+        "contract_manifest": compatibility_manifest(),
         "session_id": "verify_session",
         "request_nonce": "verify_nonce",
         "symbol": "XAUUSD",
@@ -533,8 +539,12 @@ def _full_structured_response(payload: Dict[str, Any], req_id: str) -> Dict[str,
     response.update(
         {
             "id": req_id,
+            "session_id": str(payload.get("session_id") or ""),
+            "request_nonce": str(payload.get("request_nonce") or ""),
             "request_identity_version": ai_gate.AI_REQUEST_IDENTITY_VERSION,
             "request_identity_hash": payload["request_identity_hash"],
+            "contract_manifest_hash": compatibility_manifest_hash(),
+            "contract_manifest": compatibility_manifest(),
             "request_created_sim_time": payload["request_created_sim_time"],
             "request_created_wall_time": payload["request_created_wall_time"],
             "candidate_count": payload["candidate_count"],
@@ -1123,10 +1133,13 @@ def test_mql_target_safety_source() -> None:
         "_TesterLiveAiWaitMode",
         "forcing_pause_scan_while_pending_ai=true",
         "[ai_mode] tester=",
-        "[tester_ai_wait] started req_id=",
-        "[tester_ai_wait] poll req_id=",
-        "[tester_ai_wait] completed req_id=",
-        "[tester_ai_wait] timeout req_id=",
+        "[tester_ai_wait_started] request_id=",
+        "[tester_ai_wait_progress] request_id=",
+        "[tester_ai_wait_completed] request_id=",
+        "timeout_ms = MathMax(1000, InpAiWaitTimeoutRealMin * 60 * 1000)",
+        "started_ms = g_engine.PendingAIOldestWallStartMs()",
+        "GetTickCount64()",
+        "deadline_ms = started_ms + (ulong)timeout_ms",
         "[tester_ai_wait] scan_resumed req_id=",
         "g_engine.FinalizeScan();",
         "g_engine.EvaluateSymbol(sym);",
@@ -1147,6 +1160,10 @@ def test_mql_target_safety_source() -> None:
     ]
     for needle in ea_required:
         _assert(needle in ea_src, f"EA tester wait source missing {needle}")
+    _assert(
+        "elapsed > 15000" not in src,
+        "tester processing must not contain the removed 15-second request cutoff",
+    )
 
 
 def test_live_mode_sim_age_guard_source() -> None:
@@ -1160,7 +1177,7 @@ def test_live_mode_sim_age_guard_source() -> None:
     )
     _assert(
         "bool tester_live_wait_sim_time_jump = (tester_live_wait_debug_mode &&" in src,
-        "sim-time jump must depend on tester-only LIVE_WAIT_DEBUG mode",
+        "sim-time jump diagnostics must depend on tester-only LIVE_WAIT_DEBUG mode",
     )
     _assert(
         "bool tester_stale_ai = (tester_runtime &&" in src,
@@ -1170,9 +1187,14 @@ def test_live_mode_sim_age_guard_source() -> None:
         'live_mode_sim_age_ignored=" + (!tester_runtime ? "true" : "false")' in src,
         "live/demo AI freshness log should prove sim age is ignored",
     )
-    reject_idx = src.find("tester_live_wait_result_not_tradeable_due_to_sim_time_jump")
-    guard_idx = src.rfind("if(tester_live_wait_non_tradeable)", 0, reject_idx)
-    _assert(reject_idx > 0 and guard_idx > 0, "tester sim-jump reject should live only under non-tradeable tester branch")
+    _assert(
+        "bool tester_live_wait_non_tradeable = tester_live_wait_debug_trading_disabled;" in src,
+        "blocking LIVE_WAIT freshness must be governed by explicit debug trading acknowledgement, not simulated age",
+    )
+    _assert(
+        "sim_age_diagnostic_only=" in src,
+        "blocking tester wait must log simulated age as diagnostic-only",
+    )
 
 
 def test_mql_tester_cache_contract_strict_reject_source() -> None:

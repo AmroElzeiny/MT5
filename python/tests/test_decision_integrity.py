@@ -103,6 +103,64 @@ def target_arbitration() -> dict:
     }
 
 
+def model_target_arbitration() -> dict:
+    """Provider-facing arbitration: analysis only, no Python-owned versions."""
+
+    arbitration = target_arbitration()
+    arbitration.pop("target_arbitration_schema_version", None)
+    arbitration.pop("prompt_contract_version", None)
+    return arbitration
+
+
+def model_assessment(
+    cand: dict,
+    *,
+    quality: float = 8.0,
+    state: str = "APPROVE",
+    evidence_ref_ids: list[int] | None = None,
+    veto_evidence_ref_ids: list[int] | None = None,
+) -> dict:
+    """A realistic raw provider assessment.
+
+    The mocked provider must never return Python-owned contract fields or
+    canonical evidence paths, so this keeps only the strict
+    ``ModelAIGateOutput`` analytical surface and cites evidence by catalog id.
+    """
+
+    from structured_models import ModelCandidateAssessment
+
+    row = assessment(cand, quality=quality, state=state)
+    row["target_arbitration"] = model_target_arbitration()
+    # Explicit None check: an empty list is a meaningful fixture (fail-closed
+    # test), not a request for the default.
+    row["evidence_ref_ids"] = list([0] if evidence_ref_ids is None else evidence_ref_ids)
+    veto = dict(row.get("veto") or {})
+    veto.pop("evidence_fields", None)
+    veto["evidence_ref_ids"] = list(
+        veto_evidence_ref_ids
+        if veto_evidence_ref_ids is not None
+        else ([0] if veto.get("enabled") else [])
+    )
+    row["veto"] = veto
+    return {name: row[name] for name in ModelCandidateAssessment.model_fields}
+
+
+def catalog_ids_for(evidence: dict, candidate_index: int, count: int = 2) -> list[int]:
+    """Pick valid catalog ids from the payload the provider actually received.
+
+    Mirrors what a compliant model does: read ``evidence_catalog.items`` and
+    cite only ids scoped to this candidate or global.
+    """
+
+    items = ((evidence or {}).get("evidence_catalog") or {}).get("items") or []
+    usable = [
+        int(item["id"])
+        for item in items
+        if item.get("c") in (None, candidate_index)
+    ]
+    return usable[:count] or [0]
+
+
 def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> dict:
     approve = state == "APPROVE"
     reject = state == "REJECT"

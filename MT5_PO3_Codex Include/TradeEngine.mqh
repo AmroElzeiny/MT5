@@ -6,6 +6,7 @@
 #include <Trade/Trade.mqh>
 #include "Config.mqh"
 #include "Types.mqh"
+#include "ExecutionAdjustmentContract.mqh"
 #include "Indicators.mqh"
 #include "PO3.mqh"
 #include "FVG.mqh"
@@ -15,9 +16,22 @@
 #include "PenaltyWatcher.mqh"
 #include "JsonLite.mqh"
 
+// The broker boundary is the only thing a harness build replaces. Every stage
+// above it -- response parsing, identity validation, candidate binding, target
+// arbitration, watchlist admission, confirmation, risk sizing, and order
+// construction -- stays the production implementation in all builds.
+// PO3_TEST_ORDER_ADAPTER is never defined by a production compile, so a
+// production binary is unchanged.
+#ifdef PO3_TEST_ORDER_ADAPTER
+   #include "TestOrderAdapter.mqh"
+   #define PO3_TRADE_CLASS CPO3TestTrade
+#else
+   #define PO3_TRADE_CLASS CTrade
+#endif
+
 class CTradeEngine {
 private:
-   CTrade m_trade;
+   PO3_TRADE_CLASS m_trade;
    CFileBus m_bus;
    CAIGateBridge m_ai;
    CStateStore m_state;
@@ -137,6 +151,10 @@ private:
    datetime m_last_penalty_persist;
    datetime m_last_rollover_log;
    string m_last_execution_reject_reason;
+   // Counted separately from pre-order execution checks: "attempted execution"
+   // was previously indistinguishable from "constructed an order", so 1,149
+   // attempts and 0 order constructions looked like the same number.
+   bool   m_last_order_construction_attempted;
    string m_ai_wait_log_req_ids[];
    ulong m_ai_wait_log_ms[];
    string m_bucket_policy_json;
@@ -361,7 +379,7 @@ private:
    }
 
    ulong _WallClockMs() const {
-      return (ulong)GetTickCount();
+      return (ulong)GetTickCount64();
    }
 
    ulong _WallElapsedMs(const ulong started_ms) const {
@@ -1075,6 +1093,12 @@ private:
       row += JsonKVStr("runtime_input_hash", p.runtime_input_hash) + ",";
       row += JsonKVStr("prompt_contract_version", p.prompt_contract_version) + ",";
       row += JsonKVStr("model_version", p.ai.model_version) + ",";
+      row += JsonKVStr("provider_mode", p.ai.provider_mode) + ",";
+      row += JsonKVStr("provider_id", p.ai.provider_id) + ",";
+      row += JsonKVStr("model_fingerprint", p.ai.model_fingerprint) + ",";
+      row += JsonKVStr("family_profile_version", p.ai.family_profile_version) + ",";
+      row += JsonKVStr("retrieval_policy_version", p.ai.retrieval_policy_version) + ",";
+      row += JsonKVStr("generation_settings_hash", p.ai.generation_settings_hash) + ",";
       row += JsonKVStr("reasoning_configuration", p.reasoning_configuration) + ",";
       row += JsonKVStr("decision_schema_version", p.ai.decision_schema_version) + ",";
       row += JsonKVStr("target_schema_version", p.target_arbitration_schema_version) + ",";
@@ -1193,6 +1217,14 @@ private:
       row += JsonKVStr("decision_schema_version", dec.decision_schema_version) + ",";
       row += JsonKVStr("model_version", dec.model_version) + ",";
       row += JsonKVStr("prompt_contract_version", dec.prompt_contract_version) + ",";
+      row += JsonKVStr("provider_mode", dec.provider_mode) + ",";
+      row += JsonKVStr("provider_id", dec.provider_id) + ",";
+      row += JsonKVStr("actual_model_id", dec.actual_model_id) + ",";
+      row += JsonKVStr("model_fingerprint", dec.model_fingerprint) + ",";
+      row += JsonKVStr("family_profile_version", dec.family_profile_version) + ",";
+      row += JsonKVStr("retrieval_policy_version", dec.retrieval_policy_version) + ",";
+      row += JsonKVStr("generation_settings_hash", dec.generation_settings_hash) + ",";
+      row += JsonKVStr("input_fingerprint", dec.input_fingerprint) + ",";
       row += JsonKVStr("target_schema_version", dec.target_arbitration_schema_version) + ",";
       row += "\"decision_field_authority\":" + (StringLen(dec.decision_field_authority_json) > 0 ? dec.decision_field_authority_json : "{}") + ",";
       row += JsonKVStr("cohort_id", source.cohort_id) + ",";
@@ -1796,6 +1828,25 @@ private:
 
    double _TotalExecutionCostR(const TradePlan &p) const {
       return MathMax(0.0, p.execution_cost_r) + MathMax(0.0, p.slippage_r) + MathMax(0.0, p.commission_r);
+   }
+
+   double _CanonicalNetRewardAfterCostR(const TradePlan &p) const {
+      // TP2 is the authoritative full-position objective. Partial and runner
+      // metadata remain separate; costs are deducted exactly once here.
+      double gross_reward_r = MathMax(0.0, _ExecutionRR2(p));
+      return gross_reward_r - _TotalExecutionCostR(p);
+   }
+
+   void _FinalizePlanEconomics(TradePlan &p, const string stage, const bool emit_log) {
+      p.net_reward_after_cost_r = _CanonicalNetRewardAfterCostR(p);
+      if(!emit_log) return;
+      _Journal("[plan_economics] symbol=" + p.symbol
+               + " stage=" + stage
+               + " gross_reward_r=" + DoubleToString(MathMax(0.0, _ExecutionRR2(p)), 6)
+               + " spread_r=" + DoubleToString(MathMax(0.0, p.execution_cost_r), 6)
+               + " slippage_r=" + DoubleToString(MathMax(0.0, p.slippage_r), 6)
+               + " commission_r=" + DoubleToString(MathMax(0.0, p.commission_r), 6)
+               + " net_reward_after_cost_r=" + DoubleToString(p.net_reward_after_cost_r, 6));
    }
 
    bool _ExecutionCostHardGate(TradePlan &p, string &reason) {
@@ -2438,7 +2489,10 @@ private:
    string _CohortIdForPlan(const TradePlan &p) const {
       string material = COHORT_SCHEMA_VERSION + "|" + p.engine_version + "|" + p.git_commit + "|"
                         + p.dirty_tree_status + "|" + p.set_file_hash + "|" + p.runtime_input_hash + "|"
-                        + p.prompt_contract_version + "|" + p.ai.model_version + "|" + p.reasoning_configuration + "|"
+                        + p.prompt_contract_version + "|" + p.ai.provider_mode + "|" + p.ai.provider_id + "|"
+                        + p.ai.actual_model_id + "|" + p.ai.model_fingerprint + "|" + p.ai.generation_settings_hash + "|"
+                        + p.ai.family_profile_version + "|" + p.ai.retrieval_policy_version + "|"
+                        + p.ai.model_version + "|" + p.reasoning_configuration + "|"
                         + p.ai.decision_schema_version + "|" + AI_TARGET_ARBITRATION_SCHEMA_VERSION + "|"
                         + p.policy_snapshot_id + "|" + p.policy_hash + "|" + p.bucket_prior_hash + "|"
                         + p.management_version + "|" + p.setup_taxonomy_version + "|" + p.feature_version + "|"
@@ -2468,6 +2522,13 @@ private:
                            _CohortValueKnown(p.set_file_hash) &&
                            _CohortValueKnown(p.runtime_input_hash) &&
                            _CohortValueKnown(p.prompt_contract_version) &&
+                           _CohortValueKnown(p.ai.provider_mode) &&
+                           _CohortValueKnown(p.ai.provider_id) &&
+                           _CohortValueKnown(p.ai.actual_model_id) &&
+                           _CohortValueKnown(p.ai.model_fingerprint) &&
+                           _CohortValueKnown(p.ai.generation_settings_hash) &&
+                           _CohortValueKnown(p.ai.family_profile_version) &&
+                           _CohortValueKnown(p.ai.retrieval_policy_version) &&
                            _CohortValueKnown(p.ai.model_version) &&
                            _CohortValueKnown(p.reasoning_configuration) &&
                            _CohortValueKnown(p.ai.decision_schema_version) &&
@@ -2527,6 +2588,7 @@ private:
       canonical += _CanonicalPrice(p.symbol, p.tp1) + "|" + _CanonicalPrice(p.symbol, p.tp2) + "|";
       canonical += DoubleToString(rr, 6) + "|" + DoubleToString(p.spread_r, 6) + "|";
       canonical += DoubleToString(p.slippage_r, 6) + "|" + DoubleToString(p.execution_cost_r, 6) + "|";
+      canonical += DoubleToString(p.net_reward_after_cost_r, 6) + "|";
       canonical += p.target_source + "|" + p.target_model + "|" + p.obstacle_kind + "|";
       canonical += p.obstacle_tf + "|" + _CanonicalPrice(p.symbol, p.obstacle_price) + "|";
       canonical += m_ai.DecisionHash() + "|" + ENGINE_INPUT_SCHEMA + "|" + AI_DECISION_SCHEMA_VERSION;
@@ -2571,6 +2633,26 @@ private:
       p.final_execution_fingerprint = "";
       p.execution_fingerprint_match = false;
       p.execution_fingerprint_changed_components = "";
+      // The assessed plan is not locked until Python approves and the approved
+      // target has been applied.  Until then this is still a request plan.
+      p.assessed_plan_locked = false;
+      p.assessed_tp_model = p.tp_model;
+      p.assessed_selected_target_identity = "";
+      p.assessed_selected_target_price = 0.0;
+      p.assessed_stop_distance = MathAbs(p.entry_est - p.sl);
+      p.semantic_plan_match = false;
+      p.execution_adjustment_valid = false;
+      p.semantic_immutable_fields_changed = "";
+      p.semantic_authorized_fields_changed = "";
+      p.semantic_unauthorized_fields_changed = "";
+      p.execution_adjustment_bounds = "";
+      p.execution_adjustment_reason = "";
+      p.execution_failure_class = EXEC_FAIL_NONE;
+      p.execution_failure_state_fingerprint = "";
+      p.execution_precheck_attempts = 0;
+      p.execution_order_construction_attempts = 0;
+      p.execution_attempts_suppressed = 0;
+      p.execution_retry_not_before = 0;
    }
 
    string _AssessedFingerprintFromDecision(const TradePlan &p, const AiDecision &dec) const {
@@ -2635,7 +2717,51 @@ private:
       list += name;
    }
 
+   //+---------------------------------------------------------------+
+   //| Composition of the two checks.                                 |
+   //|                                                                |
+   //| Kept under the original name and signature so every existing    |
+   //| call site keeps its behaviour, but the decision is now made by  |
+   //| _EvaluateSemanticPlanMatch: immutable semantic identity is      |
+   //| compared exactly, authorized adjustments are compared against   |
+   //| the contract's bounds, and the two are reported separately.     |
+   //| A separate fingerprint is still computed for the final order.   |
+   //+---------------------------------------------------------------+
+   bool _SemanticExecutionCheck(TradePlan &p, const string stage, SemanticPlanMatchResult &out) {
+      ExecutionAdjustmentContract contract;
+      _BuildExecutionAdjustmentContract(p, contract);
+      _EvaluateSemanticPlanMatch(p, contract, out);
+      _LogSemanticPlanMatch(p, contract, out, stage);
+
+      p.semantic_plan_match                   = out.semantic_match;
+      p.execution_adjustment_valid            = out.adjustment_valid;
+      p.semantic_immutable_fields_changed     = out.immutable_fields_changed;
+      p.semantic_authorized_fields_changed    = out.authorized_fields_changed;
+      p.semantic_unauthorized_fields_changed  = out.unauthorized_fields_changed;
+      p.execution_adjustment_bounds           = out.adjustment_bounds;
+      p.execution_adjustment_reason           = out.result;
+      if(!out.Ok()) p.execution_failure_class = out.failure_class;
+
+      // The final order gets its own fingerprint, distinct from the assessment
+      // fingerprint it was validated against.
+      p.final_execution_fingerprint = _ExecutionFingerprint(p);
+      p.candidate_hash_match        = (p.candidate_hash == p.ai_selected_candidate_hash);
+      return out.Ok();
+   }
+
    bool _ExecutionFingerprintWithinTolerance(TradePlan &p, string &changed_components) {
+      if(p.assessed_plan_locked){
+         SemanticPlanMatchResult result;
+         bool ok = _SemanticExecutionCheck(p, "execution_fingerprint", result);
+         changed_components = result.immutable_fields_changed;
+         if(StringLen(result.unauthorized_fields_changed) > 0){
+            if(StringLen(changed_components) > 0) changed_components += ",";
+            changed_components += result.unauthorized_fields_changed;
+         }
+         p.execution_fingerprint_changed_components = changed_components;
+         p.execution_fingerprint_match = ok;
+         return ok;
+      }
       changed_components = "";
       double tick = SymbolInfoDouble(p.symbol, SYMBOL_TRADE_TICK_SIZE);
       double point = SymbolInfoDouble(p.symbol, SYMBOL_POINT);
@@ -3688,7 +3814,7 @@ private:
       _EstimateExecutionCosts(p);
       p.heuristic_quality_estimate_gross = _HeuristicQualityEstimateGrossDiagnostic(p);
       p.heuristic_quality_estimate = _HeuristicQualityEstimateDiagnostic(p);
-      p.net_reward_after_cost_r = MathMax(0.0, _ExecutionRR2(p)) - _TotalExecutionCostR(p);
+      _FinalizePlanEconomics(p, "derived_plan_fields", false);
       // Explicit migration aliases: persisted for old diagnostics, never authoritative.
       p.gross_expected_r = p.heuristic_quality_estimate_gross;
       p.net_expected_r = p.heuristic_quality_estimate;
@@ -4000,6 +4126,20 @@ private:
 
    bool _NormalizePlanPO3State(TradePlan &p, const string context) {
       bool changed = false;
+      if(p.po3.t_disp <= 0 && p.source_t_disp > 0){
+         p.po3.t_disp = p.source_t_disp;
+         _Journal("[po3_lineage] symbol=" + p.symbol
+                  + " stage=" + context
+                  + " field=t_disp action=restored_from_source_story"
+                  + " value=" + IntegerToString((int)p.po3.t_disp));
+      }
+      if(p.po3.t_bos <= 0 && p.source_t_bos > 0){
+         p.po3.t_bos = p.source_t_bos;
+         _Journal("[po3_lineage] symbol=" + p.symbol
+                  + " stage=" + context
+                  + " field=t_bos action=restored_from_source_story"
+                  + " value=" + IntegerToString((int)p.po3.t_bos));
+      }
       if(StringLen(p.po3.po3_state) > 0)
          p.po3.state = PO3StateFromString(p.po3.po3_state);
 
@@ -4016,31 +4156,46 @@ private:
       }
 
       if(p.po3.has_displacement && p.po3.t_disp <= 0){
-         p.po3.has_displacement = false;
-         p.po3.t_disp = 0;
-         changed = true;
+         _Journal("[po3_lineage] symbol=" + p.symbol
+                  + " stage=" + context
+                  + " action=reject reason=has_displacement_missing_t_disp"
+                  + " sweep=" + IntegerToString((int)p.po3.t_sweep)
+                  + " disp=" + IntegerToString((int)p.po3.t_disp)
+                  + " bos=" + IntegerToString((int)p.po3.t_bos));
+         return false;
       }
 
       if(p.po3.has_bos && p.po3.t_bos <= 0){
-         p.po3.has_bos = false;
-         p.po3.t_bos = 0;
-         p.po3.htf_mss = false;
-         p.po3.htf_choch = false;
-         changed = true;
+         _Journal("[po3_lineage] symbol=" + p.symbol
+                  + " stage=" + context
+                  + " action=reject reason=has_bos_missing_t_bos"
+                  + " sweep=" + IntegerToString((int)p.po3.t_sweep)
+                  + " disp=" + IntegerToString((int)p.po3.t_disp)
+                  + " bos=" + IntegerToString((int)p.po3.t_bos));
+         return false;
       }
 
-      if(p.po3.has_displacement && p.po3.t_sweep > 0 && p.po3.t_disp <= p.po3.t_sweep){
-         p.po3.has_displacement = false;
-         p.po3.t_disp = 0;
-         changed = true;
+      bool requires_complete_sequence = _FamilyRequiresFullPO3Sequence(p);
+      if(requires_complete_sequence && p.po3.has_displacement &&
+         p.po3.t_sweep > 0 && p.po3.t_disp <= p.po3.t_sweep){
+         _Journal("[po3_lineage] symbol=" + p.symbol
+                  + " stage=" + context
+                  + " action=reject reason=t_disp_not_after_t_sweep"
+                  + " sweep=" + IntegerToString((int)p.po3.t_sweep)
+                  + " disp=" + IntegerToString((int)p.po3.t_disp)
+                  + " bos=" + IntegerToString((int)p.po3.t_bos));
+         return false;
       }
 
-      if(p.po3.has_bos && p.po3.t_disp > 0 && p.po3.t_bos > 0 && p.po3.t_bos <= p.po3.t_disp){
-         p.po3.has_bos = false;
-         p.po3.t_bos = 0;
-         p.po3.htf_mss = false;
-         p.po3.htf_choch = false;
-         changed = true;
+      if(requires_complete_sequence && p.po3.has_bos &&
+         p.po3.t_disp > 0 && p.po3.t_bos <= p.po3.t_disp){
+         _Journal("[po3_lineage] symbol=" + p.symbol
+                  + " stage=" + context
+                  + " action=reject reason=t_bos_not_after_t_disp"
+                  + " sweep=" + IntegerToString((int)p.po3.t_sweep)
+                  + " disp=" + IntegerToString((int)p.po3.t_disp)
+                  + " bos=" + IntegerToString((int)p.po3.t_bos));
+         return false;
       }
 
       if(changed){
@@ -4375,6 +4530,14 @@ private:
       j += JsonKVStr("cache_signature", signature) + ",";
       j += JsonKVStr("session_id", m_ai.SessionId()) + ",";
       j += JsonKVStr("request_nonce", m_ai.RequestNonce(req_id)) + ",";
+      j += JsonKVStr("request_identity_version", dec.request_identity_version) + ",";
+      j += JsonKVStr("request_identity_hash", dec.request_identity_hash) + ",";
+      j += JsonKVInt("request_created_sim_time", (int)dec.request_created_sim_time) + ",";
+      j += "\"request_created_wall_time\":" + IntegerToString(dec.request_created_wall_time) + ",";
+      j += JsonKVInt("candidate_count", dec.response_candidate_count) + ",";
+      j += "\"ordered_candidate_identities\":"
+           + (StringLen(dec.ordered_candidate_identities_json) > 2
+              ? dec.ordered_candidate_identities_json : "[]") + ",";
       j += JsonKVStr("workload_mode", m_ai.WorkloadMode()) + ",";
       j += JsonKVStr("live_forward_contract_version", LIVE_FORWARD_CONTRACT_VERSION) + ",";
       j += JsonKVStr("behavior_contract_hash", m_ai.BehaviorContractHash()) + ",";
@@ -4386,6 +4549,38 @@ private:
       j += JsonKVStr("decision_schema_version", AI_DECISION_SCHEMA_VERSION) + ",";
       j += JsonKVStr("decision_quality_tier", "CACHE_OF_FULL_STRUCTURED") + ",";
       j += JsonKVStr("response_quality", "CACHE_OF_FULL_STRUCTURED") + ",";
+      j += JsonKVStr("provider_contract_version", dec.provider_contract_version) + ",";
+      j += JsonKVStr("provider_mode", dec.provider_mode) + ",";
+      j += JsonKVStr("provider_id", dec.provider_id) + ",";
+      j += JsonKVStr("endpoint_class", dec.endpoint_class) + ",";
+      j += JsonKVStr("endpoint_identity_hash", dec.endpoint_identity_hash) + ",";
+      j += JsonKVStr("configured_models_hash", dec.configured_models_hash) + ",";
+      j += JsonKVStr("actual_model_id", dec.actual_model_id) + ",";
+      j += JsonKVStr("fallback_model", dec.fallback_model) + ",";
+      j += JsonKVStr("model_fingerprint", dec.model_fingerprint) + ",";
+      j += JsonKVStr("evidence_envelope_version", dec.evidence_envelope_version) + ",";
+      j += JsonKVStr("family_profile_version", dec.family_profile_version) + ",";
+      j += JsonKVStr("memory_schema_version", dec.memory_schema_version) + ",";
+      j += JsonKVStr("retrieval_policy_version", dec.retrieval_policy_version) + ",";
+      j += JsonKVStr("role_contract_version", dec.role_contract_version) + ",";
+      j += JsonKVStr("consensus_resolver_version", dec.consensus_resolver_version) + ",";
+      j += JsonKVStr("generation_settings_hash", dec.generation_settings_hash) + ",";
+      j += JsonKVStr("input_fingerprint", dec.input_fingerprint) + ",";
+      j += "\"retrieved_analogue_ids\":" + (StringLen(dec.retrieved_analogue_ids_json) > 0 ? dec.retrieved_analogue_ids_json : "[]") + ",";
+      j += JsonKVStr("historical_evidence_state", dec.historical_evidence_state) + ",";
+      j += JsonKVStr("analyst_response_fingerprint", dec.analyst_response_fingerprint) + ",";
+      j += JsonKVStr("critic_response_fingerprint", dec.critic_response_fingerprint) + ",";
+      j += JsonKVStr("adjudicator_response_fingerprint", dec.adjudicator_response_fingerprint) + ",";
+      j += JsonKVStr("final_resolver_reason", dec.final_resolver_reason) + ",";
+      j += JsonKVStr("provider_health_state", dec.provider_health_state) + ",";
+      j += "\"role_latencies\":" + (StringLen(dec.role_latencies_json) > 0 ? dec.role_latencies_json : "{}") + ",";
+      j += "\"provider_retry_counts\":" + (StringLen(dec.provider_retry_counts_json) > 0 ? dec.provider_retry_counts_json : "{}") + ",";
+      j += "\"provider_usage\":" + (StringLen(dec.provider_usage_json) > 0 ? dec.provider_usage_json : "{}") + ",";
+      j += "\"estimated_context_tokens\":" + (dec.estimated_context_tokens_available ? DoubleToString(dec.estimated_context_tokens, 0) : "null") + ",";
+      j += "\"unsupported_generation_parameters\":" + (StringLen(dec.unsupported_generation_parameters_json) > 0 ? dec.unsupported_generation_parameters_json : "[]") + ",";
+      j += "\"analyst_output\":" + (StringLen(dec.analyst_output_json) > 0 ? dec.analyst_output_json : "{}") + ",";
+      j += "\"critic_output\":" + (StringLen(dec.critic_output_json) > 0 ? dec.critic_output_json : "{}") + ",";
+      j += "\"adjudicator_output\":" + (StringLen(dec.adjudicator_output_json) > 0 ? dec.adjudicator_output_json : "{}") + ",";
       j += JsonKVStr("request_fingerprint", dec.request_fingerprint) + ",";
       j += JsonKVStr("response_fingerprint", dec.response_fingerprint) + ",";
       j += JsonKVStr("full_structured_response_hash", dec.full_structured_response_hash) + ",";
@@ -4534,6 +4729,95 @@ private:
       m_tester_ai_cache_decisions[idx] = dec;
    }
 
+   bool _CacheBindingHashFromJson(const string txt, string &out_hash) const {
+      out_hash = "";
+      string id = "", session_id = "", request_nonce = "", request_identity_hash = "";
+      string decision_schema = "", quality_tier = "";
+      string provider_mode = "", provider_id = "", actual_model_id = "", model_fingerprint = "";
+      string generation_settings_hash = "", decision_state = "", selected_candidate_id = "";
+      string selected_candidate_hash = "", assessed_fingerprint = "", selected_target_identity = "";
+      bool model_raw_allow = false, python_final_allow = false;
+      double selected_target_price = 0.0, llm_quality_score = 0.0, risk_multiplier = 0.0;
+      if(!JsonGetStringStrict(txt, "id", id) ||
+         !JsonGetStringStrict(txt, "session_id", session_id) ||
+         !JsonGetStringStrict(txt, "request_nonce", request_nonce) ||
+         !JsonGetStringStrict(txt, "request_identity_hash", request_identity_hash) ||
+         !JsonGetStringStrict(txt, "decision_schema_version", decision_schema) ||
+         !JsonGetStringStrict(txt, "decision_quality_tier", quality_tier) ||
+         !JsonGetStringStrict(txt, "provider_mode", provider_mode) ||
+         !JsonGetStringStrict(txt, "provider_id", provider_id) ||
+         !JsonGetStringStrict(txt, "actual_model_id", actual_model_id) ||
+         !JsonGetStringStrict(txt, "model_fingerprint", model_fingerprint) ||
+         !JsonGetStringStrict(txt, "generation_settings_hash", generation_settings_hash) ||
+         !JsonGetStringStrict(txt, "decision_state", decision_state) ||
+         !JsonGetBoolStrict(txt, "model_raw_allow", model_raw_allow) ||
+         !JsonGetBoolStrict(txt, "python_final_allow", python_final_allow) ||
+         !JsonGetStringStrict(txt, "selected_candidate_id", selected_candidate_id) ||
+         !JsonGetStringStrict(txt, "selected_candidate_hash", selected_candidate_hash) ||
+         !JsonGetStringStrict(txt, "assessed_execution_fingerprint", assessed_fingerprint) ||
+         !JsonGetStringStrict(txt, "selected_target_identity", selected_target_identity) ||
+         !JsonGetNumberStrict(txt, "selected_target_price", selected_target_price) ||
+         !JsonGetNumberStrict(txt, "llm_quality_score", llm_quality_score) ||
+         !JsonGetNumberStrict(txt, "suggested_risk_multiplier", risk_multiplier)) return false;
+      string material = id + "|" + session_id + "|" + request_nonce + "|"
+                        + request_identity_hash + "|"
+                        + decision_schema + "|" + quality_tier + "|" + provider_mode + "|"
+                        + provider_id + "|" + actual_model_id + "|" + model_fingerprint + "|"
+                        + generation_settings_hash + "|" + decision_state + "|"
+                        + (model_raw_allow ? "1" : "0") + "|" + (python_final_allow ? "1" : "0") + "|"
+                        + selected_candidate_id + "|" + selected_candidate_hash + "|"
+                        + assessed_fingerprint + "|" + selected_target_identity + "|"
+                        + DoubleToString(selected_target_price, 8) + "|"
+                        + DoubleToString(llm_quality_score, 6) + "|"
+                        + DoubleToString(risk_multiplier, 6);
+      out_hash = IntegerToString((int)(_IntegrityFnv1a(material) % 2147483647));
+      return true;
+   }
+
+   bool _ReplaceUniqueJsonStringField(string &txt, const string key, const string replacement) const {
+      string current = "";
+      if(!JsonGetStringStrict(txt, key, current)) return false;
+      string token = "\"" + key + "\":\"" + JsonEscape(current) + "\"";
+      int first = StringFind(txt, token);
+      if(first < 0 || StringFind(txt, token, first + StringLen(token)) >= 0) return false;
+      string next = "\"" + key + "\":\"" + JsonEscape(replacement) + "\"";
+      return (StringReplace(txt, token, next) == 1);
+   }
+
+   bool _RebindTesterCacheResponse(string &txt, const string parse_id, string &reason) const {
+      reason = "";
+      string document_reason = "";
+      if(!JsonValidateDocumentStrict(txt, document_reason)){
+         reason = "cache_json_invalid:" + document_reason;
+         return false;
+      }
+      string stored_hash = JsonGetString(txt, "response_binding_hash", "");
+      string expected_hash = "";
+      if(StringLen(stored_hash) == 0 || !_CacheBindingHashFromJson(txt, expected_hash) || stored_hash != expected_hash){
+         reason = "cache_response_binding_mismatch";
+         return false;
+      }
+      string cached_id = "";
+      if(!JsonGetStringStrict(txt, "id", cached_id) || cached_id != parse_id){
+         reason = "cache_request_identity_mismatch";
+         return false;
+      }
+      if(!_ReplaceUniqueJsonStringField(txt, "session_id", m_ai.SessionId()) ||
+         !_ReplaceUniqueJsonStringField(txt, "request_nonce", m_ai.RequestNonce(parse_id)) ||
+         !_ReplaceUniqueJsonStringField(txt, "workload_mode", m_ai.WorkloadMode()) ||
+         !_ReplaceUniqueJsonStringField(txt, "behavior_contract_hash", m_ai.BehaviorContractHash())){
+         reason = "cache_transient_identity_rebind_failed";
+         return false;
+      }
+      string rebound_hash = "";
+      if(!_CacheBindingHashFromJson(txt, rebound_hash) ||
+         !_ReplaceUniqueJsonStringField(txt, "response_binding_hash", rebound_hash)){
+         reason = "cache_response_binding_rebind_failed";
+         return false;
+      }
+      return true;
+   }
+
    bool _TryLoadTesterAiDecision(const string signature, AiDecision &out) {
       if(!MQLInfoInteger(MQL_TESTER) || !InpTesterAiCache || StringLen(signature) == 0) return false;
       int idx = _FindTesterAiCache(signature);
@@ -4541,6 +4825,13 @@ private:
          out = m_tester_ai_cache_decisions[idx];
          return (out.ok && out.mandatory_fields_complete &&
                  out.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
+                 out.provider_contract_version == AI_PROVIDER_CONTRACT_VERSION &&
+                 out.evidence_envelope_version == AI_EVIDENCE_ENVELOPE_VERSION &&
+                 out.family_profile_version == AI_FAMILY_PROFILE_VERSION &&
+                 out.memory_schema_version == AI_TRADE_MEMORY_SCHEMA_VERSION &&
+                 out.retrieval_policy_version == AI_RETRIEVAL_POLICY_VERSION &&
+                 out.role_contract_version == AI_ROLE_CONTRACT_VERSION &&
+                 out.consensus_resolver_version == AI_CONSENSUS_RESOLVER_VERSION &&
                  (out.decision_quality_tier == "FULL_STRUCTURED" || out.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED"));
       }
 
@@ -4556,11 +4847,25 @@ private:
       string cached_prompt_contract = JsonGetString(txt, "prompt_contract_version", "");
       string cached_prior_schema = JsonGetString(txt, "hierarchical_prior_schema_version", "");
       string cached_repeatability_schema = JsonGetString(txt, "repeatability_schema_version", "");
+      string cached_provider_contract = JsonGetString(txt, "provider_contract_version", "");
+      string cached_evidence_version = JsonGetString(txt, "evidence_envelope_version", "");
+      string cached_family_profile = JsonGetString(txt, "family_profile_version", "");
+      string cached_memory_schema = JsonGetString(txt, "memory_schema_version", "");
+      string cached_retrieval_policy = JsonGetString(txt, "retrieval_policy_version", "");
+      string cached_role_contract = JsonGetString(txt, "role_contract_version", "");
+      string cached_consensus_resolver = JsonGetString(txt, "consensus_resolver_version", "");
       if(cached_decision_schema != AI_DECISION_SCHEMA_VERSION ||
          cached_schema != AI_TARGET_ARBITRATION_SCHEMA_VERSION ||
          cached_prompt_contract != AI_PROMPT_CONTRACT_VERSION ||
          cached_prior_schema != HIERARCHICAL_PRIOR_SCHEMA_VERSION ||
-         cached_repeatability_schema != REPEATABILITY_SCHEMA_VERSION){
+         cached_repeatability_schema != REPEATABILITY_SCHEMA_VERSION ||
+         cached_provider_contract != AI_PROVIDER_CONTRACT_VERSION ||
+         cached_evidence_version != AI_EVIDENCE_ENVELOPE_VERSION ||
+         cached_family_profile != AI_FAMILY_PROFILE_VERSION ||
+         cached_memory_schema != AI_TRADE_MEMORY_SCHEMA_VERSION ||
+         cached_retrieval_policy != AI_RETRIEVAL_POLICY_VERSION ||
+         cached_role_contract != AI_ROLE_CONTRACT_VERSION ||
+         cached_consensus_resolver != AI_CONSENSUS_RESOLVER_VERSION){
          m_funnel_ai_cache_miss_due_to_schema_version++;
          m_total_ai_cache_miss_due_to_schema_version++;
          m_total_ai_cache_misses++;
@@ -4574,17 +4879,38 @@ private:
                   + " cached_prior_schema=" + cached_prior_schema
                   + " required_prior_schema=" + HIERARCHICAL_PRIOR_SCHEMA_VERSION
                   + " cached_repeatability_schema=" + cached_repeatability_schema
-                  + " required_repeatability_schema=" + REPEATABILITY_SCHEMA_VERSION);
+                  + " required_repeatability_schema=" + REPEATABILITY_SCHEMA_VERSION
+                  + " cached_provider_contract=" + cached_provider_contract
+                  + " required_provider_contract=" + AI_PROVIDER_CONTRACT_VERSION
+                  + " cached_evidence_version=" + cached_evidence_version
+                  + " required_evidence_version=" + AI_EVIDENCE_ENVELOPE_VERSION
+                  + " cached_family_profile=" + cached_family_profile
+                  + " required_family_profile=" + AI_FAMILY_PROFILE_VERSION
+                  + " cached_memory_schema=" + cached_memory_schema
+                  + " required_memory_schema=" + AI_TRADE_MEMORY_SCHEMA_VERSION
+                  + " cached_retrieval_policy=" + cached_retrieval_policy
+                  + " required_retrieval_policy=" + AI_RETRIEVAL_POLICY_VERSION
+                  + " cached_role_contract=" + cached_role_contract
+                  + " required_role_contract=" + AI_ROLE_CONTRACT_VERSION
+                  + " cached_consensus_resolver=" + cached_consensus_resolver
+                  + " required_consensus_resolver=" + AI_CONSENSUS_RESOLVER_VERSION);
          return false;
       }
 
       string cached_id = JsonGetString(txt, "id", "");
       if(StringLen(cached_id) == 0) return false;
-      string parse_id = "cacheparse_" + _TesterAiCacheKey(signature) + "_" + IntegerToString((int)MathRand());
-      string id_token = "\"id\":\"" + JsonEscape(cached_id) + "\"";
-      string parse_token = "\"id\":\"" + JsonEscape(parse_id) + "\"";
-      if(StringFind(txt, id_token) < 0) return false;
-      StringReplace(txt, id_token, parse_token);
+      // The request ID is part of the immutable AI request identity and every
+      // candidate assessment echoes it. Rebind only transient bus-session
+      // fields; synthesizing a new ID would detach the assessments.
+      string parse_id = cached_id;
+      string rebind_reason = "";
+      if(!_RebindTesterCacheResponse(txt, parse_id, rebind_reason)){
+         m_total_ai_cache_misses++;
+         _Journal("[ai_cache] hit=false reason=" + rebind_reason
+                  + " cache_signature=" + signature
+                  + " original_id=" + cached_id);
+         return false;
+      }
       string parse_path = m_bus.RespDir() + "\\" + parse_id + ".json";
       if(!m_bus.WriteText(parse_path, txt)) return false;
       if(!m_ai.TryReadDecision(parse_id, out) || !out.ok || !out.mandatory_fields_complete ||
@@ -4602,12 +4928,30 @@ private:
       return true;
    }
 
-   bool _RememberTesterAiDecision(const string signature, const AiDecision &dec, const bool force_store=false) {
-      if(!MQLInfoInteger(MQL_TESTER) || (!InpTesterAiCache && !force_store) || !dec.ok || StringLen(signature) == 0) return false;
+   bool _RememberTesterAiDecision(const string signature, const AiDecision &dec) {
+      if(!MQLInfoInteger(MQL_TESTER) || !InpTesterAiCache || !dec.ok || StringLen(signature) == 0) return false;
+      if(_EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG){
+         _Journal("[ai_cache] stored=false reason=live_wait_debug_not_replay_authoritative");
+         return false;
+      }
       if(!dec.mandatory_fields_complete || dec.decision_schema_version != AI_DECISION_SCHEMA_VERSION ||
          (dec.decision_quality_tier != "FULL_STRUCTURED" && dec.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED") ||
+         dec.provider_contract_version != AI_PROVIDER_CONTRACT_VERSION ||
+         (dec.provider_mode != "REMOTE_API" && dec.provider_mode != "LOCAL_OPENAI_COMPATIBLE") ||
+         StringLen(dec.provider_id) == 0 || StringLen(dec.actual_model_id) == 0 ||
+         StringLen(dec.model_fingerprint) == 0 || StringLen(dec.generation_settings_hash) == 0 ||
+         dec.evidence_envelope_version != AI_EVIDENCE_ENVELOPE_VERSION ||
+         dec.family_profile_version != AI_FAMILY_PROFILE_VERSION ||
+         dec.memory_schema_version != AI_TRADE_MEMORY_SCHEMA_VERSION ||
+         dec.retrieval_policy_version != AI_RETRIEVAL_POLICY_VERSION ||
+         dec.role_contract_version != AI_ROLE_CONTRACT_VERSION ||
+         dec.consensus_resolver_version != AI_CONSENSUS_RESOLVER_VERSION ||
          dec.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION ||
          dec.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
+         dec.request_identity_version != AI_REQUEST_IDENTITY_VERSION ||
+         StringLen(dec.request_identity_hash) == 0 ||
+         dec.request_created_sim_time <= 0 || dec.request_created_wall_time <= 0 ||
+         dec.response_candidate_count <= 0 || StringLen(dec.ordered_candidate_identities_json) <= 2 ||
          StringLen(dec.selected_candidate_hash) == 0 || StringLen(dec.assessed_execution_fingerprint) == 0 ||
          StringLen(dec.request_execution_fingerprint) == 0 ||
          StringLen(dec.decision_field_authority_json) <= 2 ||
@@ -4626,8 +4970,11 @@ private:
 
    bool _QueueTesterCachedDecision(TradePlan &plans[], const string signature, const AiDecision &dec) {
       if(ArraySize(plans) <= 0) return false;
-      string req_id = "cache_" + _TesterAiCacheKey(signature) + "_" + IntegerToString((int)TimeLocal())
-                      + "_" + IntegerToString((int)MathRand());
+      string req_id = dec.response_request_id;
+      if(StringLen(req_id) == 0){
+         _Journal("[ai_cache] hit=false reason=missing_immutable_request_id signature=" + signature);
+         return false;
+      }
       string response_path = m_bus.RespDir() + "\\" + req_id + ".json";
       if(!m_bus.WriteText(response_path, _AiDecisionJson(req_id, signature, dec))) return false;
 
@@ -6984,6 +7331,337 @@ private:
       return true;
    }
 
+   //+---------------------------------------------------------------+
+   //| AssessedTradePlan / ExecutionAdjustmentContract / LiveExecution |
+   //+---------------------------------------------------------------+
+
+   // A synthetic target is defined as a multiple of risk, so it is a function
+   // of the entry and must be recomputed by the approved formula when the entry
+   // moves.  Every other model names a structural price level, which does not
+   // move because our entry did.
+   bool _TargetModelIsSyntheticRr(const string model) const {
+      string token = _NormToken(model);
+      if(StringLen(token) == 0) return false;
+      return (StringFind(token, "synthetic_rr") >= 0);
+   }
+
+   //--- Freeze the approved plan.  Called once, after the AI's approved target
+   //--- has been applied, so the snapshot is of the trade that was actually
+   //--- approved rather than the pre-arbitration request plan.
+   void _LockAssessedPlan(TradePlan &p, const AiDecision &dec) {
+      p.assessed_entry                       = p.entry_est;
+      p.assessed_sl                          = p.sl;
+      p.assessed_tp1                         = p.tp1;
+      p.assessed_tp2                         = p.tp2;
+      p.assessed_stop_distance               = MathAbs(p.entry_est - p.sl);
+      p.assessed_tp_model                    = p.tp_model;
+      p.assessed_target_source               = p.target_source;
+      p.assessed_target_model                = p.target_model;
+      p.assessed_selected_target_identity    = (StringLen(dec.selected_target_identity) > 0
+                                                ? dec.selected_target_identity
+                                                : _EffectiveTargetModel(p));
+      p.assessed_selected_target_price       = p.tp2;
+      p.assessed_obstacle_kind               = p.obstacle_kind;
+      p.assessed_obstacle_tf                 = p.obstacle_tf;
+      p.assessed_obstacle_price              = p.obstacle_price;
+      p.assessed_net_rr                      = (p.assessed_stop_distance > 0.0
+                                                ? _RewardToTarget(p.is_buy, p.entry_est, p.tp2) / p.assessed_stop_distance
+                                                : 0.0);
+      p.assessed_plan_locked                 = true;
+      p.execution_failure_class              = EXEC_FAIL_NONE;
+      p.execution_failure_state_fingerprint  = "";
+      p.execution_precheck_attempts          = 0;
+      p.execution_order_construction_attempts= 0;
+      p.execution_attempts_suppressed        = 0;
+      p.execution_retry_not_before           = 0;
+
+      _Journal("[assessed_plan_identity] symbol=" + p.symbol
+               + " candidate_id=" + p.candidate_id
+               + " candidate_hash=" + p.candidate_hash
+               + " direction=" + (p.is_buy ? "BUY" : "SELL")
+               + " setup_taxonomy_enum=" + p.setup_taxonomy_enum
+               + " entry_model=" + p.entry_branch
+               + " stop_model=" + p.tp_model
+               + " assessed_entry=" + _FmtPrice(p.symbol, p.assessed_entry)
+               + " assessed_sl=" + _FmtPrice(p.symbol, p.assessed_sl)
+               + " assessed_tp1=" + _FmtPrice(p.symbol, p.assessed_tp1)
+               + " assessed_tp2=" + _FmtPrice(p.symbol, p.assessed_tp2)
+               + " target_identity=" + p.assessed_selected_target_identity
+               + " target_source=" + p.assessed_target_source
+               + " target_model=" + p.assessed_target_model
+               + " obstacle_kind=" + p.assessed_obstacle_kind
+               + " obstacle_tf=" + p.assessed_obstacle_tf
+               + " assessed_net_rr=" + DoubleToString(p.assessed_net_rr, 6)
+               + " assessment_fingerprint=" + p.assessed_execution_fingerprint);
+   }
+
+   //--- The deterministic permission derived from the approved plan.
+   void _BuildExecutionAdjustmentContract(const TradePlan &p, ExecutionAdjustmentContract &c) {
+      c.Reset();
+      double tick = _PlanTickSize(p.symbol);
+      double risk = (p.assessed_stop_distance > 0.0
+                     ? p.assessed_stop_distance
+                     : MathAbs(p.assessed_entry - p.assessed_sl));
+
+      c.entry_adjustment_allowed = true;
+      c.max_entry_drift_r        = (_IsMicroFamily(p)
+                                    ? MathMax(InpMaxEntryDriftR, InpMicroMarketEntryToleranceR)
+                                    : InpMaxEntryDriftR);
+      c.max_entry_drift_ticks    = MathMax(2.0, (double)PO3EffectiveMinFvgWidthTicks());
+
+      // The structural stop is derived from the FVG, not from the entry, so it
+      // should not move at all.  A small allowance covers broker minimum-stop
+      // normalisation only.
+      c.sl_adjustment_allowed = true;
+      c.max_sl_drift_r        = 0.10;
+
+      bool synthetic = _TargetModelIsSyntheticRr(p.assessed_target_model);
+      c.target_recalculation   = (synthetic ? TARGET_RECALC_DETERMINISTIC_RR
+                                            : TARGET_RECALC_PRESERVE_FIXED_PRICE);
+      // TP2 may only be recomputed for a synthetic fixed-RR model, and only by
+      // the approved formula.  A structural target keeps its price.
+      c.tp2_adjustment_allowed = synthetic;
+      // TP1 is a derived partial level; it follows tp2 under the same rule.
+      c.tp1_adjustment_allowed = synthetic;
+
+      c.target_identity_preserved      = true;
+      c.target_source_preserved        = true;
+      c.target_model_preserved         = true;
+      c.obstacle_revalidation_required = true;
+
+      c.min_resulting_rr         = MathMax(0.0, InpMinLiveRR2);
+      c.max_target_distance      = _MaxPlanTargetDistance(p, p.entry_est, (risk > 0.0 ? risk : MathAbs(p.entry_est - p.sl)));
+      c.max_cost_deterioration_r = 0.02;
+      c.expiry                   = p.armed_at;
+
+      if(tick > 0.0 && c.max_entry_drift_ticks <= 0.0) c.max_entry_drift_ticks = 2.0;
+   }
+
+   double _ContractMaxEntryDrift(const TradePlan &p, const ExecutionAdjustmentContract &c) const {
+      double risk = (p.assessed_stop_distance > 0.0
+                     ? p.assessed_stop_distance
+                     : MathAbs(p.assessed_entry - p.assessed_sl));
+      double tick = _PlanTickSize(p.symbol);
+      return MathMax(risk * c.max_entry_drift_r, tick * c.max_entry_drift_ticks);
+   }
+
+   //+---------------------------------------------------------------+
+   //| Carry the approved target forward instead of re-deriving it.   |
+   //|                                                                |
+   //| This is the fix for the dominant zero-trade failure.  The live  |
+   //| rebuild still runs the full obstacle/liquidity landscape scan   |
+   //| (it is needed to revalidate the approved target against current |
+   //| structure), but its *choice* no longer overrides the approved   |
+   //| one.  Rejecting the trade remains possible -- and required --   |
+   //| when the approved target is genuinely no longer reachable; what |
+   //| is no longer possible is quietly substituting a different       |
+   //| target and then complaining the plan changed.                   |
+   //+---------------------------------------------------------------+
+   bool _ApplyAssessedTargetUnderContract(TradePlan &p,
+                                          const ExecutionAdjustmentContract &c,
+                                          string &reason,
+                                          string &failure_class) {
+      reason = "ok";
+      failure_class = EXEC_FAIL_NONE;
+
+      double live_risk = MathAbs(p.entry_est - p.sl);
+      if(live_risk <= 0.0){
+         reason = "no_valid_stop";
+         failure_class = EXEC_FAIL_STRUCTURAL_INVALIDATION;
+         return false;
+      }
+
+      // Identity first: the approved source/model/identity are restored before
+      // anything is priced, so no later normalisation can reinterpret them.
+      p.target_source          = p.assessed_target_source;
+      p.target_model           = p.assessed_target_model;
+      p.tp_model               = p.assessed_tp_model;
+      p.ai_chosen_target_model = p.assessed_selected_target_identity;
+
+      if(c.target_recalculation == TARGET_RECALC_DETERMINISTIC_RR){
+         // Synthetic fixed-RR target: same model, same source, price recomputed
+         // from the new entry by the approved R multiple.
+         double approved_rr = p.assessed_net_rr;
+         if(approved_rr <= 0.0){
+            reason = "assessed_rr_invalid_for_synthetic_recalculation";
+            failure_class = EXEC_FAIL_STRUCTURAL_INVALIDATION;
+            return false;
+         }
+         double reward = live_risk * approved_rr;
+         p.tp2 = (p.is_buy ? p.entry_est + reward : p.entry_est - reward);
+         double tp1_ratio = 0.0;
+         double assessed_reward = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp2);
+         if(assessed_reward > 0.0)
+            tp1_ratio = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1) / assessed_reward;
+         if(tp1_ratio <= 0.0 || tp1_ratio >= 1.0) tp1_ratio = 0.70;
+         p.tp1 = (p.is_buy ? p.entry_est + reward * tp1_ratio : p.entry_est - reward * tp1_ratio);
+      } else {
+         // Structural target: the price is a property of the market.
+         p.tp2 = p.assessed_selected_target_price;
+         p.tp1 = p.assessed_tp1;
+      }
+
+      p.ai_chosen_tp1  = p.tp1;
+      p.ai_chosen_tp2  = p.tp2;
+      p.effective_rr2  = _TargetRR(p, p.tp2);
+      p.ai_chosen_rr2  = p.effective_rr2;
+      p.target_arbitration_required = false;
+
+      // Revalidate the *preserved* target against current structure.  This is
+      // where a genuinely dead trade is still killed.
+      TargetFeasibilityResult feasibility;
+      _EvaluateTargetFeasibility(p, p.tp2, p.target_model,
+                                 "live_execution_plan_under_contract", true, feasibility);
+      _LogTargetFeasibilityResult("live_execution_rebuild", feasibility);
+      if(!feasibility.feasible){
+         reason = feasibility.reason;
+         failure_class = (feasibility.reason == "ai_chosen_target_already_reached" ||
+                          feasibility.reason == "ai_chosen_target_exceeds_max_distance" ||
+                          feasibility.reason == "rr_below_live_floor" ||
+                          feasibility.reason == "target_too_close_for_swing_duration")
+                         ? EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE
+                         : EXEC_FAIL_STRUCTURAL_INVALIDATION;
+         return false;
+      }
+
+      _Journal("[live_execution_plan] symbol=" + p.symbol
+               + " live_bid=" + _FmtPrice(p.symbol, SymbolInfoDouble(p.symbol, SYMBOL_BID))
+               + " live_ask=" + _FmtPrice(p.symbol, SymbolInfoDouble(p.symbol, SYMBOL_ASK))
+               + " live_entry=" + _FmtPrice(p.symbol, p.entry_est)
+               + " live_sl=" + _FmtPrice(p.symbol, p.sl)
+               + " live_tp1=" + _FmtPrice(p.symbol, p.tp1)
+               + " live_tp2=" + _FmtPrice(p.symbol, p.tp2)
+               + " target_identity=" + p.assessed_selected_target_identity
+               + " target_source=" + p.target_source
+               + " target_model=" + p.target_model
+               + " target_recalculation=" + c.target_recalculation
+               + " live_rr2=" + DoubleToString(p.effective_rr2, 6)
+               + " spread_r=" + DoubleToString(p.spread_r, 6)
+               + " execution_cost_r=" + DoubleToString(p.execution_cost_r, 6));
+      return true;
+   }
+
+   //+---------------------------------------------------------------+
+   //| Compare a live plan to its assessed plan, in three buckets.    |
+   //+---------------------------------------------------------------+
+   void _EvaluateSemanticPlanMatch(const TradePlan &p,
+                                   const ExecutionAdjustmentContract &c,
+                                   SemanticPlanMatchResult &out) {
+      out.Reset();
+      double tick = _PlanTickSize(p.symbol);
+      double risk = (p.assessed_stop_distance > 0.0
+                     ? p.assessed_stop_distance
+                     : MathAbs(p.assessed_entry - p.assessed_sl));
+      double price_tol   = MathMax(2.0 * tick, 0.05 * risk);
+      double entry_tol   = _ContractMaxEntryDrift(p, c);
+      double sl_tol      = MathMax(2.0 * tick, risk * c.max_sl_drift_r);
+      double cost_tol    = c.max_cost_deterioration_r;
+
+      out.adjustment_bounds = "entry_tol=" + DoubleToString(entry_tol, 8)
+                            + " sl_tol=" + DoubleToString(sl_tol, 8)
+                            + " price_tol=" + DoubleToString(price_tol, 8)
+                            + " cost_tol_r=" + DoubleToString(cost_tol, 6)
+                            + " min_rr=" + DoubleToString(c.min_resulting_rr, 6)
+                            + " max_target_distance=" + DoubleToString(c.max_target_distance, 8);
+
+      //--- immutable semantic identity -------------------------------------
+      if(p.candidate_hash != p.ai_selected_candidate_hash) _AppendChangedComponent(out.immutable_fields_changed, "candidate_hash");
+      if(p.candidate_id != p.ai.selected_candidate_id) _AppendChangedComponent(out.immutable_fields_changed, "candidate_id");
+      if(p.symbol != p.assessed_symbol) _AppendChangedComponent(out.immutable_fields_changed, "symbol");
+      if(p.is_buy != p.assessed_is_buy) _AppendChangedComponent(out.immutable_fields_changed, "direction");
+      if(p.model_code != p.assessed_setup_code) _AppendChangedComponent(out.immutable_fields_changed, "setup_code");
+      if(p.setup_family != p.assessed_setup_family) _AppendChangedComponent(out.immutable_fields_changed, "setup_family");
+      if(p.setup_taxonomy_enum != p.assessed_setup_taxonomy_enum) _AppendChangedComponent(out.immutable_fields_changed, "setup_taxonomy_enum");
+      if(p.setup_taxonomy_version != p.assessed_setup_taxonomy_version) _AppendChangedComponent(out.immutable_fields_changed, "setup_taxonomy_version");
+      if(p.taxonomy_mapping_source != p.assessed_taxonomy_mapping_source) _AppendChangedComponent(out.immutable_fields_changed, "taxonomy_mapping_source");
+      if(p.entry_branch != p.assessed_entry_branch) _AppendChangedComponent(out.immutable_fields_changed, "entry_branch");
+      if(p.source_t_sweep != p.assessed_source_t_sweep) _AppendChangedComponent(out.immutable_fields_changed, "source_t_sweep");
+      if(p.source_t_disp != p.assessed_source_t_disp) _AppendChangedComponent(out.immutable_fields_changed, "source_t_disp");
+      if(p.source_t_bos != p.assessed_source_t_bos) _AppendChangedComponent(out.immutable_fields_changed, "source_t_bos");
+      if(c.target_source_preserved && p.target_source != p.assessed_target_source) _AppendChangedComponent(out.immutable_fields_changed, "target_source");
+      if(c.target_model_preserved && p.target_model != p.assessed_target_model) _AppendChangedComponent(out.immutable_fields_changed, "target_model");
+      if(p.obstacle_kind != p.assessed_obstacle_kind) _AppendChangedComponent(out.immutable_fields_changed, "obstacle_kind");
+      if(p.obstacle_tf != p.assessed_obstacle_tf) _AppendChangedComponent(out.immutable_fields_changed, "obstacle_tf");
+      if(m_ai.DecisionHash() != p.assessed_decision_input_hash) _AppendChangedComponent(out.immutable_fields_changed, "decision_input_hash");
+      if(ENGINE_INPUT_SCHEMA != p.assessed_strategy_schema_version) _AppendChangedComponent(out.immutable_fields_changed, "strategy_schema_version");
+      // A structural target's price is immutable; a synthetic one is not.
+      if(!c.tp2_adjustment_allowed &&
+         MathAbs(p.tp2 - p.assessed_selected_target_price) > price_tol)
+         _AppendChangedComponent(out.immutable_fields_changed, "selected_target_price");
+
+      //--- authorized adjustment, and whether it stayed in bounds -----------
+      double entry_delta = MathAbs(p.entry_est - p.assessed_entry);
+      if(entry_delta > 0.0){
+         _AppendChangedComponent(out.authorized_fields_changed, "entry");
+         if(!c.entry_adjustment_allowed || entry_delta > entry_tol)
+            _AppendChangedComponent(out.unauthorized_fields_changed, "entry_drift_exceeds_contract");
+      }
+      double sl_delta = MathAbs(p.sl - p.assessed_sl);
+      if(sl_delta > 0.0){
+         _AppendChangedComponent(out.authorized_fields_changed, "sl");
+         if(!c.sl_adjustment_allowed || sl_delta > sl_tol)
+            _AppendChangedComponent(out.unauthorized_fields_changed, "sl_drift_exceeds_contract");
+      }
+      if(MathAbs(p.tp1 - p.assessed_tp1) > price_tol){
+         _AppendChangedComponent(out.authorized_fields_changed, "tp1");
+         if(!c.tp1_adjustment_allowed)
+            _AppendChangedComponent(out.unauthorized_fields_changed, "tp1_changed_without_permission");
+      }
+      if(MathAbs(p.tp2 - p.assessed_tp2) > price_tol){
+         _AppendChangedComponent(out.authorized_fields_changed, "tp2");
+         if(!c.tp2_adjustment_allowed)
+            _AppendChangedComponent(out.unauthorized_fields_changed, "tp2_changed_without_permission");
+      }
+      if(MathAbs(p.obstacle_price - p.assessed_obstacle_price) > price_tol)
+         _AppendChangedComponent(out.authorized_fields_changed, "obstacle_price");
+
+      double live_risk = MathAbs(p.entry_est - p.sl);
+      double live_rr   = (live_risk > 0.0 ? _RewardToTarget(p.is_buy, p.entry_est, p.tp2) / live_risk : 0.0);
+      if(c.min_resulting_rr > 0.0 && !_RRMeetsFloor(live_rr, c.min_resulting_rr))
+         _AppendChangedComponent(out.unauthorized_fields_changed, "resulting_rr_below_minimum");
+
+      if(MathAbs(p.spread_r - p.assessed_spread_r) > cost_tol)
+         _AppendChangedComponent(out.unauthorized_fields_changed, "spread_r_deterioration");
+      if(MathAbs(p.slippage_r - p.assessed_slippage_r) > cost_tol)
+         _AppendChangedComponent(out.unauthorized_fields_changed, "slippage_r_deterioration");
+      if(MathAbs(p.execution_cost_r - p.assessed_execution_cost_r) > cost_tol)
+         _AppendChangedComponent(out.unauthorized_fields_changed, "execution_cost_r_deterioration");
+
+      out.semantic_match   = (StringLen(out.immutable_fields_changed) == 0);
+      out.adjustment_valid = (StringLen(out.unauthorized_fields_changed) == 0);
+      if(!out.semantic_match){
+         out.failure_class = EXEC_FAIL_SEMANTIC_PLAN_CHANGED;
+         out.result = "semantic_plan_changed";
+      } else if(!out.adjustment_valid){
+         out.failure_class = EXEC_FAIL_STRUCTURAL_INVALIDATION;
+         out.result = "adjustment_outside_contract";
+      } else {
+         out.failure_class = EXEC_FAIL_NONE;
+         out.result = "pass";
+      }
+   }
+
+   void _LogSemanticPlanMatch(const TradePlan &p,
+                              const ExecutionAdjustmentContract &c,
+                              const SemanticPlanMatchResult &r,
+                              const string stage) {
+      _Journal("[execution_adjustment_contract] stage=" + stage + " symbol=" + p.symbol + " " + c.Describe());
+      _Journal("[semantic_plan_match] stage=" + stage
+               + " symbol=" + p.symbol
+               + " semantic_plan_match=" + (r.semantic_match ? "true" : "false")
+               + " immutable_fields_changed=" + (StringLen(r.immutable_fields_changed) > 0 ? r.immutable_fields_changed : "none")
+               + " authorized_fields_changed=" + (StringLen(r.authorized_fields_changed) > 0 ? r.authorized_fields_changed : "none")
+               + " unauthorized_fields_changed=" + (StringLen(r.unauthorized_fields_changed) > 0 ? r.unauthorized_fields_changed : "none")
+               + " result=" + r.result);
+      _Journal("[execution_adjustment_validation] stage=" + stage
+               + " symbol=" + p.symbol
+               + " execution_adjustment_validation=" + (r.adjustment_valid ? "true" : "false")
+               + " adjustment_bounds=" + r.adjustment_bounds
+               + " failure_class=" + r.failure_class
+               + " action=" + ExecFailureAction(r.failure_class)
+               + " result=" + r.result);
+   }
+
    bool ValidateAiChosenTargetBeforeWatchlist(TradePlan &plan, string &reject_reason, string &reject_detail) {
       reject_reason = "ok";
       reject_detail = "";
@@ -7141,6 +7819,132 @@ private:
 
    bool IsStructuralPlanRebuildFailure(const string reason) const {
       return (StringLen(_StructuralPlanRebuildReason(reason)) > 0);
+   }
+
+   //+---------------------------------------------------------------+
+   //| Execution failure classification and retry suppression.        |
+   //|                                                                |
+   //| One confirmed watchlist item produced 91 execution attempts and |
+   //| 91 identical rejections in the eleventh run because every tick  |
+   //| re-ran a rebuild that could not possibly succeed.  A failure    |
+   //| that cannot change without an input changing must not be        |
+   //| retried until an input actually changes.                        |
+   //+---------------------------------------------------------------+
+   string _ClassifyExecutionFailure(const TradePlan &p, const string reason) const {
+      // A class already decided by the code that detected the failure wins:
+      // it knows more than a string match ever can.
+      if(StringLen(p.execution_failure_class) > 0 && p.execution_failure_class != EXEC_FAIL_NONE)
+         return p.execution_failure_class;
+
+      string r = _NormToken(reason);
+      if(StringLen(r) == 0) return EXEC_FAIL_NONE;
+
+      if(StringFind(r, "execution_fingerprint_mismatch") >= 0 ||
+         StringFind(r, "semantic_plan_changed") >= 0 ||
+         StringFind(r, "candidate_hash_mismatch") >= 0)
+         return EXEC_FAIL_SEMANTIC_PLAN_CHANGED;
+
+      if(StringFind(r, "exceeds_max_distance") >= 0 ||
+         StringFind(r, "target_already_reached") >= 0 ||
+         StringFind(r, "target_no_longer_feasible") >= 0 ||
+         StringFind(r, "no_feasible_target") >= 0 ||
+         StringFind(r, "rr_too_low") >= 0 ||
+         StringFind(r, "rr_below_live_floor") >= 0)
+         return EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE;
+
+      if(StringFind(r, "missing_live_bid") >= 0 || StringFind(r, "quote") >= 0)
+         return EXEC_FAIL_TRANSIENT_QUOTE;
+      if(StringFind(r, "spread") >= 0)
+         return EXEC_FAIL_TRANSIENT_SPREAD;
+
+      if(StringFind(r, "broker_distance_invalid") >= 0 ||
+         StringFind(r, "stop_freeze_distance") >= 0 ||
+         StringFind(r, "broker stop") >= 0 ||
+         StringFind(r, "volume") >= 0 ||
+         StringFind(r, "market_closed") >= 0 ||
+         StringFind(r, "broker_session_gate") >= 0)
+         return EXEC_FAIL_PERMANENT_BROKER;
+
+      if(IsStructuralPlanRebuildFailure(reason))
+         return EXEC_FAIL_STRUCTURAL_INVALIDATION;
+
+      // Portfolio/risk capacity and "another position is open" genuinely can
+      // clear on their own, so they stay retryable but bounded.
+      if(StringFind(r, "capacity") >= 0 ||
+         StringFind(r, "already_open") >= 0 ||
+         StringFind(r, "already has") >= 0 ||
+         StringFind(r, "max_open_positions") >= 0)
+         return EXEC_FAIL_TRANSIENT_BROKER;
+
+      return EXEC_FAIL_STRUCTURAL_INVALIDATION;
+   }
+
+   // The inputs that can change an execution outcome.  If none of them moved,
+   // rebuilding produces byte-identical inputs and therefore an identical
+   // rejection, so there is nothing to learn from repeating it.
+   string _ExecutionStateFingerprint(const TradePlan &p) {
+      double bid = SymbolInfoDouble(p.symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(p.symbol, SYMBOL_ASK);
+      string canonical = p.symbol + "|" + p.candidate_hash + "|"
+                       + _CanonicalPrice(p.symbol, bid) + "|"
+                       + _CanonicalPrice(p.symbol, ask) + "|"
+                       + _CanonicalPrice(p.symbol, p.sl) + "|"
+                       + _CanonicalPrice(p.symbol, p.tp2) + "|"
+                       + p.po3.po3_state + "|"
+                       + IntegerToString((int)_CountOpenPositions()) + "|"
+                       + p.execution_failure_class;
+      return _IntegrityHash(canonical);
+   }
+
+   // Returns true when this attempt must be skipped.
+   bool _SuppressExecutionRetry(TradePlan &p, string &suppress_reason) {
+      suppress_reason = "";
+      if(StringLen(p.execution_failure_class) == 0 || p.execution_failure_class == EXEC_FAIL_NONE)
+         return false;
+
+      string state = _ExecutionStateFingerprint(p);
+      if(ExecFailureIsTransient(p.execution_failure_class)){
+         datetime now = _NowServerOrLocal();
+         if(p.execution_retry_not_before > 0 && now < p.execution_retry_not_before){
+            suppress_reason = "transient_backoff";
+            p.execution_attempts_suppressed++;
+            return true;
+         }
+         return false;
+      }
+
+      if(state == p.execution_failure_state_fingerprint){
+         suppress_reason = "unchanged_state_after_" + p.execution_failure_class;
+         p.execution_attempts_suppressed++;
+         // Log the suppression exactly once, not once per tick.
+         if(p.execution_attempts_suppressed == 1)
+            _Journal("[execution_retry_suppressed] symbol=" + p.symbol
+                     + " failure_class=" + p.execution_failure_class
+                     + " action=" + ExecFailureAction(p.execution_failure_class)
+                     + " state_fingerprint=" + state
+                     + " reason=" + suppress_reason);
+         return true;
+      }
+      return false;
+   }
+
+   void _RecordExecutionFailure(TradePlan &p, const string reason) {
+      p.execution_precheck_attempts++;
+      p.execution_failure_class = _ClassifyExecutionFailure(p, reason);
+      p.execution_failure_state_fingerprint = _ExecutionStateFingerprint(p);
+      if(ExecFailureIsTransient(p.execution_failure_class)){
+         // Bounded backoff: 1 simulated/real second per attempt, capped.
+         int backoff_sec = (int)MathMin(30, MathMax(1, p.execution_precheck_attempts));
+         p.execution_retry_not_before = _NowServerOrLocal() + backoff_sec;
+      }
+      _Journal("[execution_failure_class] symbol=" + p.symbol
+               + " class=" + p.execution_failure_class
+               + " action=" + ExecFailureAction(p.execution_failure_class)
+               + " precheck_attempts=" + IntegerToString(p.execution_precheck_attempts)
+               + " order_construction_attempts=" + IntegerToString(p.execution_order_construction_attempts)
+               + " duplicate_execution_attempts=" + IntegerToString(p.execution_attempts_suppressed)
+               + " state_fingerprint=" + p.execution_failure_state_fingerprint
+               + " reason=" + reason);
    }
 
    bool _ApplyAiTargetArbitration(TradePlan &p, const AiDecision &dec, string &reason) {
@@ -7762,18 +8566,113 @@ private:
       return true;
    }
 
-   bool _TargetPriceFeasibleForTp(TradePlan &p, const double target_price, const bool require_min_rr) {
-      if(target_price <= 0.0 || p.entry_est <= 0.0 || p.sl <= 0.0) return false;
+   double _PlanTickSize(const string symbol) const {
+      double tick = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tick <= 0.0) tick = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      if(tick <= 0.0) tick = 0.00001;
+      return tick;
+   }
+
+   //+---------------------------------------------------------------+
+   //| THE canonical target feasibility evaluation.                   |
+   //|                                                                |
+   //| Every stage that asks "is this target usable?" -- initial plan  |
+   //| construction, AI candidate construction, the sanitizer, the     |
+   //| watchlist precheck, the live execution rebuild, and final       |
+   //| validation -- calls exactly this function and reports exactly   |
+   //| this result.  Previously each recomputed the cap for itself,    |
+   //| which is how one stage logged                                   |
+   //|   "synthetic_rr_capped_to_max_distance feasible=true            |
+   //|    reward=30.01 max_allowed=30.01"                              |
+   //| while another rejected the same plan as                         |
+   //|   "ai_chosen_target_exceeds_max_distance".                      |
+   //|                                                                 |
+   //| The max-distance decision is made in whole ticks so a target    |
+   //| capped exactly to the maximum passes deterministically.         |
+   //+---------------------------------------------------------------+
+   void _EvaluateTargetFeasibility(const TradePlan &p,
+                                   const double target_price,
+                                   const string model,
+                                   const string authority,
+                                   const bool require_min_rr,
+                                   TargetFeasibilityResult &out) {
+      out.Reset();
+      out.authority    = authority;
+      out.model        = (StringLen(model) > 0 ? model : "unknown");
+      out.target_price = target_price;
+
+      if(target_price <= 0.0 || p.entry_est <= 0.0 || p.sl <= 0.0){
+         out.reason = "ai_chosen_target_missing_tp";
+         return;
+      }
       double risk = MathAbs(p.entry_est - p.sl);
-      if(risk <= 0.0) return false;
-      if(!_IsRewardSideLevel(p.is_buy, p.entry_est, target_price)) return false;
-      if(_PriceAlreadyReachedTarget(p, target_price, risk)) return false;
-      double reward = _RewardToTarget(p.is_buy, p.entry_est, target_price);
-      if(reward <= 0.0) return false;
-      double max_dist = _MaxPlanTargetDistance(p, p.entry_est, risk);
-      if(max_dist > 0.0 && reward > max_dist + _RREps()) return false;
-      if(require_min_rr && !_RRMeetsFloor(reward / risk, MathMax(0.0, InpMinLiveRR2))) return false;
-      return true;
+      out.risk = risk;
+      if(risk <= 0.0){
+         out.reason = "no_valid_stop";
+         return;
+      }
+
+      out.direction_valid = _IsRewardSideLevel(p.is_buy, p.entry_est, target_price);
+      if(!out.direction_valid){
+         out.reason = "ai_chosen_target_invalid_direction";
+         return;
+      }
+
+      out.reward = _RewardToTarget(p.is_buy, p.entry_est, target_price);
+      if(out.reward <= 0.0){
+         out.reason = "liquidity_target_too_near";
+         return;
+      }
+      out.rr = out.reward / risk;
+
+      out.target_reached = _PriceAlreadyReachedTarget(p, target_price, risk);
+      if(out.target_reached){
+         out.reason = "ai_chosen_target_already_reached";
+         return;
+      }
+
+      double tick = _PlanTickSize(p.symbol);
+      out.max_allowed_distance  = _MaxPlanTargetDistance(p, p.entry_est, risk);
+      out.min_required_distance = _MinSwingTargetDistance(p, p.entry_est);
+      out.min_required_rr       = (require_min_rr ? MathMax(0.0, InpMinLiveRR2) : 0.0);
+      out.reward_ticks          = PriceDistanceToTicks(out.reward, tick);
+      out.max_allowed_ticks     = PriceDistanceToTicks(out.max_allowed_distance, tick);
+
+      out.max_distance_pass = (out.max_allowed_distance <= 0.0 ||
+                               TicksWithinCap(out.reward_ticks, out.max_allowed_ticks));
+      if(!out.max_distance_pass){
+         out.reason = "ai_chosen_target_exceeds_max_distance";
+         return;
+      }
+
+      out.min_distance_pass = (out.min_required_distance <= 0.0 ||
+                               out.reward_ticks >= PriceDistanceToTicks(out.min_required_distance, tick));
+      if(!out.min_distance_pass){
+         out.reason = "target_too_close_for_swing_duration";
+         return;
+      }
+
+      out.rr_floor_pass = (!require_min_rr || _RRMeetsFloor(out.rr, out.min_required_rr));
+      if(!out.rr_floor_pass){
+         out.reason = "rr_below_live_floor";
+         return;
+      }
+
+      out.feasible = true;
+      out.reason   = "ok";
+   }
+
+   void _LogTargetFeasibilityResult(const string stage, const TargetFeasibilityResult &r) {
+      _Journal("[target_feasibility] stage=" + stage + " " + r.Describe());
+   }
+
+   bool _TargetPriceFeasibleForTp(TradePlan &p, const double target_price, const bool require_min_rr) {
+      // Thin wrapper preserved so the many existing call sites keep working;
+      // the decision itself now has exactly one implementation.
+      TargetFeasibilityResult r;
+      _EvaluateTargetFeasibility(p, target_price, _EffectiveTargetModel(p),
+                                 "canonical_target_feasibility", require_min_rr, r);
+      return r.feasible;
    }
 
    bool _CurrentTargetFeasibleForTp2(TradePlan &p) {
@@ -7813,6 +8712,30 @@ private:
          return true;
 
       string from_model = _EffectiveTargetModel(p);
+
+      if(p.assessed_plan_locked){
+         // Authority rules 3 and 4: an approved next_liquidity_session_range
+         // must not silently become synthetic_rr_fallback, and an approved
+         // ai_selected_liquidity_target must not silently become a synthetic
+         // source.  Substituting here is exactly what produced a materially
+         // different trade that the fingerprint check then had to reject.
+         TargetFeasibilityResult locked;
+         _EvaluateTargetFeasibility(p, p.tp2, p.target_model,
+                                    "target_sanitizer_locked_plan", true, locked);
+         _LogTargetFeasibilityResult("target_sanitizer_locked_plan", locked);
+         reason = (StringLen(locked.reason) > 0 && locked.reason != "ok"
+                   ? locked.reason
+                   : "assessed_target_no_longer_feasible");
+         p.execution_failure_class = EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE;
+         _Journal("[target_sanitizer] substitution_refused=true reason=assessed_plan_locked"
+                  + " approved_model=" + p.assessed_target_model
+                  + " approved_source=" + p.assessed_target_source
+                  + " approved_tp2=" + _FmtPrice(p.symbol, p.assessed_selected_target_price)
+                  + " failure_class=" + EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE
+                  + " action=" + EXEC_ACTION_TERMINAL_INVALIDATE
+                  + " detail=" + locked.Describe());
+         return false;
+      }
 
       if(InpAllowPartialBeforeObstacle &&
          p.capped_before_obstacle_tp > 0.0 &&
@@ -8006,7 +8929,24 @@ private:
          reject_reason = (StringLen(target_reason) > 0 ? target_reason : "target_too_close_for_swing_duration");
          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       }
-      if(_HasStoredTargetArbitration(p)){
+      if(p.assessed_plan_locked){
+         // The AI already chose a target and Python approved it.  The landscape
+         // scan above stays -- it revalidates obstacles against current
+         // structure -- but its *choice* must not override the approved one.
+         // Re-deriving here is what turned an approved 4070.51 liquidity target
+         // into a 4220.90 one, blew the distance cap, let the sanitizer
+         // substitute synthetic_rr_fallback, and then failed the assessment
+         // fingerprint on target_source,target_model,obstacle_kind,tp1,tp2.
+         ExecutionAdjustmentContract contract;
+         _BuildExecutionAdjustmentContract(p, contract);
+         string contract_reason = "";
+         string contract_failure = "";
+         if(!_ApplyAssessedTargetUnderContract(p, contract, contract_reason, contract_failure)){
+            p.execution_failure_class = contract_failure;
+            reject_reason = contract_reason;
+            return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+         }
+      } else if(_HasStoredTargetArbitration(p)){
          string stored_target_reason = "";
          if(!_ApplyStoredTargetArbitrationAfterRebuild(p, stored_target_reason)){
             reject_reason = stored_target_reason;
@@ -8026,7 +8966,22 @@ private:
       double reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
       if(target_cap > 0 && reward > target_cap){
          bool ai_target_applied = (StringLen(p.ai_chosen_target_model) > 0);
-         if(ai_target_applied){
+         if(p.assessed_plan_locked){
+            // An approved target that no longer fits the live cap is a real,
+            // classified reason to stop -- not something to "keep for
+            // validation" and then quietly replace with a different target.
+            // The canonical evaluator decides in whole ticks, so a target
+            // capped exactly to the maximum still passes.
+            TargetFeasibilityResult cap_check;
+            _EvaluateTargetFeasibility(p, p.tp2, p.target_model,
+                                       "plan_rebuild_max_distance", true, cap_check);
+            _LogTargetFeasibilityResult("plan_rebuild_max_distance", cap_check);
+            if(!cap_check.feasible){
+               p.execution_failure_class = EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE;
+               reject_reason = cap_check.reason;
+               return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+            }
+         } else if(ai_target_applied){
             _Journal("[target_validation] ai_chosen_target_exceeds_cap kept_for_validation"
                      + " chosen=" + p.target_model
                      + " reward=" + _FmtPrice(p.symbol, reward)
@@ -8077,6 +9032,7 @@ private:
 
       _ApplyStopAudit(p, initial_sl, p.entry_est);
       _EstimateExecutionCosts(p);
+      _FinalizePlanEconomics(p, "plan_prices_finalized", true);
       p.ote_distance_frac = _OteDistanceFrac(p);
       p.ote_state = _OteState(p);
       _NormalizeTargetLabels(p);
@@ -8162,7 +9118,7 @@ private:
       _EstimateExecutionCosts(p);
       p.heuristic_quality_estimate_gross = _HeuristicQualityEstimateGrossDiagnostic(p);
       p.heuristic_quality_estimate = _HeuristicQualityEstimateDiagnostic(p);
-      p.net_reward_after_cost_r = MathMax(0.0, _ExecutionRR2(p)) - _TotalExecutionCostR(p);
+      _FinalizePlanEconomics(p, "runner_downgrade", false);
       p.gross_expected_r = p.heuristic_quality_estimate_gross;
       p.net_expected_r = p.heuristic_quality_estimate;
       p.expected_value_r = p.heuristic_quality_estimate;
@@ -8283,7 +9239,7 @@ private:
          reason = (_FamilyGroup(p) == "continuation" ? "continuation_cost_too_high" : "execution_cost_too_high");
          return false;
       }
-      p.net_reward_after_cost_r = MathMax(0.0, _ExecutionRR2(p)) - _TotalExecutionCostR(p);
+      _FinalizePlanEconomics(p, "deterministic_execution_gate", false);
       if(p.net_reward_after_cost_r < InpMinNetExpectedR){
          reason = "net_reward_after_cost_r_too_low";
          return false;
@@ -8871,6 +9827,45 @@ private:
       p.invalidation_cause = "";
    }
 
+   //+---------------------------------------------------------------+
+   //| Structural break diagnostics.                                  |
+   //|                                                                |
+   //| The check itself is unchanged and still fails closed.  What is  |
+   //| new is being able to tell WHY it fired.  Two valid AI approvals |
+   //| in the eleventh run were rejected by price_broke_fvg_high after |
+   //| simulated market time advanced 13 minutes while the tester      |
+   //| blocked waiting for the AI.  That is an artefact of live-wait   |
+   //| debug mode, not evidence about the strategy, and counting it as |
+   //| strategy quality is how a healthy setup gets blamed for a       |
+   //| harness limitation.  Deterministic cache replay does not have   |
+   //| this problem, which is why it -- not live-wait -- is the        |
+   //| authoritative historical workflow.                              |
+   //+---------------------------------------------------------------+
+   void _LogStructuralBreak(const TradePlan &p, const string reason, const double px) {
+      datetime now = _NowServerOrLocal();
+      long sim_age_sec = (p.ai_requested_at > 0 ? (long)(now - p.ai_requested_at) : -1);
+      bool live_wait = (MQLInfoInteger(MQL_TESTER) && InpTesterAiMode == TESTER_AI_LIVE_WAIT_DEBUG);
+      // A break that appears only after the simulated clock jumped forward
+      // during a blocking AI wait is attributable to the wait, not the market.
+      bool time_jump_suspect = (live_wait && sim_age_sec > 0);
+      _Journal("[watchlist_structural_break] symbol=" + p.symbol
+               + " reason=" + reason
+               + " request_simulated_time=" + (p.ai_requested_at > 0 ? TimeToString(p.ai_requested_at, TIME_DATE|TIME_MINUTES|TIME_SECONDS) : "unset")
+               + " response_simulated_time=" + TimeToString(now, TIME_DATE|TIME_MINUTES|TIME_SECONDS)
+               + " simulated_age_sec=" + IntegerToString((int)sim_age_sec)
+               + " assessed_entry=" + _FmtPrice(p.symbol, p.assessed_entry)
+               + " live_price=" + _FmtPrice(p.symbol, px)
+               + " fvg_lower=" + _FmtPrice(p.symbol, p.fvg.lower)
+               + " fvg_upper=" + _FmtPrice(p.symbol, p.fvg.upper)
+               + " direction=" + (p.is_buy ? "BUY" : "SELL")
+               + " tester_mode=" + IntegerToString((int)InpTesterAiMode)
+               + " live_wait_debug=" + (live_wait ? "true" : "false")
+               + " invalidation_class=" + (time_jump_suspect
+                                           ? "tester_time_jump_suspect_not_strategy_evidence"
+                                           : "genuine_live_invalidation")
+               + " fail_closed=true");
+   }
+
    bool _WatchlistStillValidEx(const TradePlan &p, string &reason) {
       if(!_SymbolEligible(p.symbol)){
          reason = "symbol_not_eligible";
@@ -8903,27 +9898,33 @@ private:
       if(p.is_buy){
          if(structural_low > 0 && px < (structural_low - eps)){
             reason = "structural_invalidation_low";
+            _LogStructuralBreak(p, reason, px);
             return false;
          }
          if(p.fvg.lower > 0 && px < (p.fvg.lower - eps)){
             reason = "price_broke_fvg_low";
+            _LogStructuralBreak(p, reason, px);
             return false;
          }
          if(target > 0 && px >= (target - eps)){
             reason = "target_already_reached";
+            _LogStructuralBreak(p, reason, px);
             return false;
          }
       } else {
          if(structural_high > 0 && px > (structural_high + eps)){
             reason = "structural_invalidation_high";
+            _LogStructuralBreak(p, reason, px);
             return false;
          }
          if(p.fvg.upper > 0 && px > (p.fvg.upper + eps)){
             reason = "price_broke_fvg_high";
+            _LogStructuralBreak(p, reason, px);
             return false;
          }
          if(target > 0 && px <= (target + eps)){
             reason = "target_already_reached";
+            _LogStructuralBreak(p, reason, px);
             return false;
          }
       }
@@ -9901,6 +10902,38 @@ private:
       row += JsonKVStr("decision_schema_version", meta.ai.decision_schema_version) + ",";
       row += JsonKVStr("decision_quality_tier", meta.ai.decision_quality_tier) + ",";
       row += JsonKVStr("response_quality", meta.ai.response_quality_alias) + ",";
+      row += JsonKVStr("provider_contract_version", meta.ai.provider_contract_version) + ",";
+      row += JsonKVStr("provider_mode", meta.ai.provider_mode) + ",";
+      row += JsonKVStr("provider_id", meta.ai.provider_id) + ",";
+      row += JsonKVStr("endpoint_class", meta.ai.endpoint_class) + ",";
+      row += JsonKVStr("endpoint_identity_hash", meta.ai.endpoint_identity_hash) + ",";
+      row += JsonKVStr("configured_models_hash", meta.ai.configured_models_hash) + ",";
+      row += JsonKVStr("actual_model_id", meta.ai.actual_model_id) + ",";
+      row += JsonKVStr("fallback_model", meta.ai.fallback_model) + ",";
+      row += JsonKVStr("model_fingerprint", meta.ai.model_fingerprint) + ",";
+      row += JsonKVStr("evidence_envelope_version", meta.ai.evidence_envelope_version) + ",";
+      row += JsonKVStr("family_profile_version", meta.ai.family_profile_version) + ",";
+      row += JsonKVStr("memory_schema_version", meta.ai.memory_schema_version) + ",";
+      row += JsonKVStr("retrieval_policy_version", meta.ai.retrieval_policy_version) + ",";
+      row += JsonKVStr("role_contract_version", meta.ai.role_contract_version) + ",";
+      row += JsonKVStr("consensus_resolver_version", meta.ai.consensus_resolver_version) + ",";
+      row += JsonKVStr("generation_settings_hash", meta.ai.generation_settings_hash) + ",";
+      row += JsonKVStr("input_fingerprint", meta.ai.input_fingerprint) + ",";
+      row += "\"retrieved_analogue_ids\":" + (StringLen(meta.ai.retrieved_analogue_ids_json) > 0 ? meta.ai.retrieved_analogue_ids_json : "[]") + ",";
+      row += JsonKVStr("historical_evidence_state", meta.ai.historical_evidence_state) + ",";
+      row += JsonKVStr("analyst_response_fingerprint", meta.ai.analyst_response_fingerprint) + ",";
+      row += JsonKVStr("critic_response_fingerprint", meta.ai.critic_response_fingerprint) + ",";
+      row += JsonKVStr("adjudicator_response_fingerprint", meta.ai.adjudicator_response_fingerprint) + ",";
+      row += JsonKVStr("final_resolver_reason", meta.ai.final_resolver_reason) + ",";
+      row += JsonKVStr("provider_health_state", meta.ai.provider_health_state) + ",";
+      row += "\"role_latencies\":" + (StringLen(meta.ai.role_latencies_json) > 0 ? meta.ai.role_latencies_json : "{}") + ",";
+      row += "\"provider_retry_counts\":" + (StringLen(meta.ai.provider_retry_counts_json) > 0 ? meta.ai.provider_retry_counts_json : "{}") + ",";
+      row += "\"provider_usage\":" + (StringLen(meta.ai.provider_usage_json) > 0 ? meta.ai.provider_usage_json : "{}") + ",";
+      row += "\"estimated_context_tokens\":" + (meta.ai.estimated_context_tokens_available ? DoubleToString(meta.ai.estimated_context_tokens, 0) : "null") + ",";
+      row += "\"unsupported_generation_parameters\":" + (StringLen(meta.ai.unsupported_generation_parameters_json) > 0 ? meta.ai.unsupported_generation_parameters_json : "[]") + ",";
+      row += "\"analyst_output\":" + (StringLen(meta.ai.analyst_output_json) > 0 ? meta.ai.analyst_output_json : "{}") + ",";
+      row += "\"critic_output\":" + (StringLen(meta.ai.critic_output_json) > 0 ? meta.ai.critic_output_json : "{}") + ",";
+      row += "\"adjudicator_output\":" + (StringLen(meta.ai.adjudicator_output_json) > 0 ? meta.ai.adjudicator_output_json : "{}") + ",";
       row += JsonKVStr("decision_state", meta.ai.decision_state) + ",";
       row += JsonKVBool("model_raw_allow", meta.model_raw_allow) + ",";
       row += JsonKVBool("python_final_allow", meta.python_final_allow) + ",";
@@ -10531,6 +11564,27 @@ private:
       j += JsonKVStr("decision_schema_version", meta.ai.decision_schema_version) + ",";
       j += JsonKVStr("decision_quality_tier", meta.ai.decision_quality_tier) + ",";
       j += JsonKVStr("response_quality", meta.ai.response_quality_alias) + ",";
+      j += JsonKVStr("provider_contract_version", meta.ai.provider_contract_version) + ",";
+      j += JsonKVStr("provider_mode", meta.ai.provider_mode) + ",";
+      j += JsonKVStr("provider_id", meta.ai.provider_id) + ",";
+      j += JsonKVStr("endpoint_class", meta.ai.endpoint_class) + ",";
+      j += JsonKVStr("endpoint_identity_hash", meta.ai.endpoint_identity_hash) + ",";
+      j += JsonKVStr("configured_models_hash", meta.ai.configured_models_hash) + ",";
+      j += JsonKVStr("actual_model_id", meta.ai.actual_model_id) + ",";
+      j += JsonKVStr("fallback_model", meta.ai.fallback_model) + ",";
+      j += JsonKVStr("model_fingerprint", meta.ai.model_fingerprint) + ",";
+      j += JsonKVStr("evidence_envelope_version", meta.ai.evidence_envelope_version) + ",";
+      j += JsonKVStr("family_profile_version", meta.ai.family_profile_version) + ",";
+      j += JsonKVStr("memory_schema_version", meta.ai.memory_schema_version) + ",";
+      j += JsonKVStr("retrieval_policy_version", meta.ai.retrieval_policy_version) + ",";
+      j += JsonKVStr("role_contract_version", meta.ai.role_contract_version) + ",";
+      j += JsonKVStr("consensus_resolver_version", meta.ai.consensus_resolver_version) + ",";
+      j += JsonKVStr("generation_settings_hash", meta.ai.generation_settings_hash) + ",";
+      j += JsonKVStr("input_fingerprint", meta.ai.input_fingerprint) + ",";
+      j += JsonKVStr("analyst_response_fingerprint", meta.ai.analyst_response_fingerprint) + ",";
+      j += JsonKVStr("critic_response_fingerprint", meta.ai.critic_response_fingerprint) + ",";
+      j += JsonKVStr("adjudicator_response_fingerprint", meta.ai.adjudicator_response_fingerprint) + ",";
+      j += JsonKVStr("final_resolver_reason", meta.ai.final_resolver_reason) + ",";
       j += JsonKVStr("decision_state", meta.ai.decision_state) + ",";
       j += JsonKVBool("model_raw_allow", meta.model_raw_allow) + ",";
       j += JsonKVBool("python_final_allow", meta.python_final_allow) + ",";
@@ -10930,6 +11984,7 @@ private:
 
 bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, const bool force_market_only=false) {
       m_last_execution_reject_reason = "";
+      m_last_order_construction_attempted = false;
       bool full_structured = (p.ai.decision_quality_tier == "FULL_STRUCTURED" || p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
       if(!full_structured || !p.ai.mandatory_fields_complete || p.ai.decision_state != "APPROVE" ||
          !p.ai.python_final_allow || !p.ai.model_raw_allow)
@@ -11118,6 +12173,7 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
 
          bool ok = false;
          m_funnel_market_entries_attempted++;
+         m_last_order_construction_attempted = true;
          live.broker_submission_attempted = true;
          live.narrative_state = "broker_submission_attempted";
          _SetExecutionAuthority(live, "BROKER_SUBMISSION_ATTEMPTED", false,
@@ -11645,6 +12701,22 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
    }
 
 public:
+#ifdef PO3_TEST_ORDER_ADAPTER
+   // Harness-only surface. Absent from production builds entirely, so there is
+   // no runtime switch a live run could trip into.
+   void HarnessBindOrderAdapter(const int mode){ m_trade.BindHarness(m_bus, mode); }
+   void HarnessForceRetcode(const uint retcode){ m_trade.ForceRetcode(retcode); }
+   void HarnessClearForcedRetcode(){ m_trade.ClearForcedRetcode(); }
+   bool HarnessOrderAttempted() const { return m_trade.OrderAttempted(); }
+   int  HarnessOrderAttempts() const { return m_trade.Attempts(); }
+   int  HarnessOrdersAccepted() const { return m_trade.Accepted(); }
+   int  HarnessOrdersRejected() const { return m_trade.Rejected(); }
+   string HarnessOrderCountersJson() const { return m_trade.CountersJson(); }
+   int  HarnessWatchlistAdded() const { return m_total_watchlist_added; }
+   int  HarnessWatchlistSize() const { return ArraySize(m_watchlist); }
+   int  HarnessPendingAiSize() const { return ArraySize(m_pending_ai); }
+#endif
+
    CTradeEngine(): m_ai(m_bus), m_state(m_bus), m_penalty(m_bus) {
       m_last_positions_tick = 0;
       m_last_penalty_persist = 0;
@@ -11674,6 +12746,12 @@ public:
       MathSrand((int)TimeLocal());
       m_bus = CFileBus(InpBusRoot);
       m_bus.Ensure();
+#ifdef PO3_TEST_ORDER_ADAPTER
+      // Bind here rather than from the EA so the harness EA can reuse the
+      // production EA verbatim instead of maintaining a forked copy of the
+      // scheduling loop that would drift away from it.
+      m_trade.BindHarness(m_bus, InpHarnessOrderAdapterMode);
+#endif
       _LoadDeploymentManifest();
       m_internal_account_position_mode = _ResolveAccountPositionMode();
       m_account_position_mode = _AccountPositionModeLabel(m_internal_account_position_mode);
@@ -12870,6 +13948,22 @@ public:
             AiDecision dec;
             bool has_response = _PathExists(resp_rel);
             if(has_response){
+               int timeout_min = _PendingAiTimeoutMinutes();
+               ulong timeout_ms = (ulong)MathMax(1, timeout_min) * 60 * 1000;
+               if(oldest_wall_request > 0 &&
+                  _WallElapsedMs(oldest_wall_request) >= timeout_ms){
+                  _Journal("[stale_response_rejected] request_id=" + req_ids[r]
+                           + " reason=ai_response_late_wall_deadline"
+                           + " elapsed_wall_ms=" + IntegerToString((long)_WallElapsedMs(oldest_wall_request))
+                           + " configured_timeout_ms=" + IntegerToString((long)timeout_ms));
+                  _LogSetupReject(group_symbol, "ai_wait_timeout", "ai_wait_timeout_real_time",
+                                  "req_id=" + req_ids[r]
+                                  + " response=late_after_deadline");
+                  m_total_tester_ai_wait_timeout++;
+                  _ArchivePendingArtifacts(req_ids[r], "stale");
+                  _RemovePendingGroup(req_ids[r]);
+                  continue;
+               }
                if(!m_ai.TryReadDecision(req_ids[r], dec)){
                   if(oldest_wall_request > 0 && _WallElapsedMs(oldest_wall_request) < 5000){
                      ulong now_ms = _WallClockMs();
@@ -12906,13 +14000,14 @@ public:
                bool tester_live_wait_sim_time_jump = (tester_live_wait_debug_mode &&
                                                       oldest_sim_request > 0 &&
                                                       age_sim_min > max_age);
-               bool tester_live_wait_non_tradeable = (tester_live_wait_debug_trading_disabled ||
-                                                       tester_live_wait_sim_time_jump);
+               // During the explicit blocking tester wait, simulated age is a
+               // diagnostic only. The immutable wall deadline and full request
+               // identity govern freshness. Debug trading still requires its
+               // separate explicit acknowledgement.
+               bool tester_live_wait_non_tradeable = tester_live_wait_debug_trading_disabled;
                string tester_live_wait_non_tradeable_reason = "none";
                if(tester_live_wait_debug_trading_disabled)
                   tester_live_wait_non_tradeable_reason = "live_wait_debug_trading_disabled";
-               else if(tester_live_wait_sim_time_jump)
-                  tester_live_wait_non_tradeable_reason = "not_backtest_safe";
                bool tester_stale_ai = (tester_runtime &&
                                        !tester_blocking_wait &&
                                        InpTesterRejectStaleAiResults &&
@@ -12947,7 +14042,7 @@ public:
                      record_group[si].tester_ai_result_stale = true;
                   }
                   string cache_signature = (record_count > 0 ? _TesterAiCacheSignature(record_group) : group_signature);
-                  bool stored = _RememberTesterAiDecision(cache_signature, dec, true);
+                  bool stored = false;
                   _Journal("[tester_ai_mode] mode=live_wait_debug"
                            + " sim_age_min=" + IntegerToString(age_sim_min)
                            + " wall_age_sec=" + IntegerToString(wall_age_sec)
@@ -13011,16 +14106,6 @@ public:
                      break;
                   }
                }
-               if(MQLInfoInteger(MQL_TESTER) && !request_still_pending && oldest_wall_request > 0 && _WallElapsedMs(oldest_wall_request) > 15000){
-                  _RememberAiCooldown(group_symbol, group_signature, "ai_response_missing_file");
-                  _Journal(group_symbol + " AI request missing req_id=" + req_ids[r] + " -> dropped");
-                  _LogSetupReject(group_symbol, "ai_wait_timeout", "ai_response_missing_file",
-                                  "req_id=" + req_ids[r]
-                                  + " elapsed_wall_sec=" + IntegerToString((int)(_WallElapsedMs(oldest_wall_request) / 1000)));
-                  _ArchivePendingArtifacts(req_ids[r], "timed_out");
-                  _RemovePendingGroup(req_ids[r]);
-                  continue;
-               }
                if(timed_out){
                   string timeout_reason = (MQLInfoInteger(MQL_TESTER) ? "ai_wait_timeout_real_time" : "timeout");
                   bool allow_fallback = (!InpAiStrict && InpAllowRuleOnlyFallback);
@@ -13063,12 +14148,14 @@ public:
          }
          if(ArraySize(decision_group) > 0){
             string decision_cache_signature = _TesterAiCacheSignature(decision_group);
-            bool force_live_wait_cache = (MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
-            bool stored_from_live_wait = _RememberTesterAiDecision(decision_cache_signature, dec, force_live_wait_cache);
-            if(force_live_wait_cache){
-               _Journal("[ai_cache] stored_from_live_wait_debug=" + (stored_from_live_wait ? "true" : "false")
+            bool live_wait_debug_mode = (MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
+            bool stored_from_live_wait = (live_wait_debug_mode ? false :
+                                          _RememberTesterAiDecision(decision_cache_signature, dec));
+            if(live_wait_debug_mode){
+               _Journal("[ai_cache] stored_from_live_wait_debug=false"
                         + " req_id=" + req_ids[r]
-                        + " signature=" + decision_cache_signature);
+                        + " signature=" + decision_cache_signature
+                        + " reason=live_wait_debug_not_replay_authoritative");
                _Journal("[tester_ai_mode] live_wait_debug_response_recorded=true tradable=true");
             }
          }
@@ -13321,6 +14408,10 @@ public:
             selected.assessed_obstacle_price = selected.obstacle_price;
             selected.assessed_decision_input_hash = m_ai.DecisionHash();
             selected.assessed_strategy_schema_version = ENGINE_INPUT_SCHEMA;
+            // Freeze the AssessedTradePlan *after* the approved target has been
+            // applied.  Baselining before arbitration is what made the assessed
+            // fingerprint describe a trade nobody approved.
+            _LockAssessedPlan(selected, dec);
             _PopulateCohortMetadata(selected);
             _WriteShadowDecisionUpdate(selected, dec, "python_approved_target_applied", "", false);
             _Journal(selected.symbol + " deterministic gate approved candidate=" + IntegerToString(selected.candidate_index)
@@ -13565,6 +14656,14 @@ public:
          }
 
          if(ok){
+            string suppress_reason = "";
+            if(_SuppressExecutionRetry(p, suppress_reason)){
+               // Nothing that could change the outcome has changed.  Skipping
+               // is what keeps one impossible plan from producing 91 identical
+               // rejection blocks.
+               m_watchlist[i] = p;
+               continue;
+            }
             if(p.po3.state != PO3_CONFIRMED && p.po3.has_sweep && p.po3.has_displacement && p.po3.has_bos && !p.po3.sweep_running)
                PO3SetState(p.po3, PO3_CONFIRMED, "entry_retrace_confirmed");
             _Journal(p.symbol + " confirmation complete, attempting execution");
@@ -13573,6 +14672,29 @@ public:
                int last = ArraySize(m_watchlist)-1;
                m_watchlist[i]=m_watchlist[last];
                ArrayResize(m_watchlist, last);
+               continue;
+            }
+            if(m_last_order_construction_attempted) p.execution_order_construction_attempts++;
+            _RecordExecutionFailure(p, m_last_execution_reject_reason);
+            if(ExecFailureIsTerminal(p.execution_failure_class)){
+               // A semantic change means the approved trade no longer exists.
+               // Retrying it is meaningless; the setup must be reassessed.
+               p.narrative_state = "invalidated";
+               p.invalidation_cause = p.execution_failure_class;
+               PO3SetState(p.po3, PO3_INVALIDATED, p.execution_failure_class);
+               _WriteTradeMeta(p);
+               _LogSetupReject(p.symbol, "watchlist_execution_rebuild", p.execution_failure_class,
+                               "watchlist_action=" + ExecFailureAction(p.execution_failure_class)
+                               + " duplicate_execution_attempts=" + IntegerToString(p.execution_attempts_suppressed)
+                               + " raw_reason=" + m_last_execution_reject_reason);
+               _Journal("[execution_rebuild] failure_class=" + p.execution_failure_class
+                        + " action=" + ExecFailureAction(p.execution_failure_class)
+                        + " semantic_plan_match=" + (p.semantic_plan_match ? "true" : "false")
+                        + " duplicate_execution_attempts=" + IntegerToString(p.execution_attempts_suppressed)
+                        + " reason=" + m_last_execution_reject_reason);
+               int last_terminal = ArraySize(m_watchlist)-1;
+               m_watchlist[i]=m_watchlist[last_terminal];
+               ArrayResize(m_watchlist, last_terminal);
                continue;
             }
             string structural_reason = _StructuralPlanRebuildReason(m_last_execution_reject_reason);
@@ -13895,6 +15017,24 @@ public:
          if(m_pending_ai[i].setup_snapshot_time <= 0) return false;
       }
       return true;
+   }
+
+   ulong PendingAIOldestWallStartMs() const {
+      ulong oldest = 0;
+      for(int i=0; i<ArraySize(m_pending_ai); i++){
+         ulong started = m_pending_ai[i].ai_requested_wall_ms;
+         if(started == 0) continue;
+         if(oldest == 0 || started < oldest) oldest = started;
+      }
+      return oldest;
+   }
+
+   bool PendingAIResponsePresent() {
+      for(int i=0; i<ArraySize(m_pending_ai); i++){
+         if(StringLen(m_pending_ai[i].req_id) == 0) continue;
+         if(_PathExists(_RespPath(m_pending_ai[i].req_id))) return true;
+      }
+      return false;
    }
 
    void NoteTesterAiWaitStarted() {

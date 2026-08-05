@@ -256,6 +256,39 @@ struct AiDecision {
    string decision_schema_version;
    string decision_quality_tier;
    string response_quality_alias; // read-only migration alias
+   string provider_contract_version;
+   string provider_mode;
+   string provider_id;
+   string endpoint_class;
+   string endpoint_identity_hash;
+   string configured_models_hash;
+   string actual_model_id;
+   string fallback_model;
+   string model_fingerprint;
+   string evidence_envelope_version;
+   string family_profile_version;
+   string memory_schema_version;
+   string retrieval_policy_version;
+   string role_contract_version;
+   string consensus_resolver_version;
+   string generation_settings_hash;
+   string input_fingerprint;
+   string retrieved_analogue_ids_json;
+   string historical_evidence_state;
+   string analyst_response_fingerprint;
+   string critic_response_fingerprint;
+   string adjudicator_response_fingerprint;
+   string final_resolver_reason;
+   string provider_health_state;
+   string role_latencies_json;
+   string provider_retry_counts_json;
+   string provider_usage_json;
+   double estimated_context_tokens;
+   bool   estimated_context_tokens_available;
+   string unsupported_generation_parameters_json;
+   string analyst_output_json;
+   string critic_output_json;
+   string adjudicator_output_json;
    string decision_state;
    bool   mandatory_fields_complete;
    string missing_mandatory_fields_json;
@@ -345,8 +378,16 @@ struct AiDecision {
    string response_fingerprint;
    string full_structured_response_hash;
    string response_binding_hash;
+   string contract_manifest_hash;
+   string response_request_id;
    string response_session_id;
    string response_request_nonce;
+   string request_identity_version;
+   string request_identity_hash;
+   datetime request_created_sim_time;
+   long   request_created_wall_time;
+   int    response_candidate_count;
+   string ordered_candidate_identities_json;
    string workload_mode;
    string behavior_contract_hash;
    string reasoning_configuration;
@@ -693,6 +734,32 @@ struct TradePlan {
    double assessed_obstacle_price;
    string assessed_decision_input_hash;
    string assessed_strategy_schema_version;
+   //--- AssessedTradePlan lock -------------------------------------------
+   // Set once Python approves and MQL applies the approved target.  While it
+   // is set, the live rebuild may not re-derive the target: it must carry the
+   // approved identity and price forward through the execution adjustment
+   // contract.  Without this the rebuild produced a materially different trade
+   // and then rejected it for differing from the approved one.
+   bool   assessed_plan_locked;
+   string assessed_tp_model;
+   string assessed_selected_target_identity;
+   double assessed_selected_target_price;
+   double assessed_stop_distance;
+   //--- Execution adjustment validation (LiveExecutionPlan) --------------
+   bool   semantic_plan_match;
+   bool   execution_adjustment_valid;
+   string semantic_immutable_fields_changed;
+   string semantic_authorized_fields_changed;
+   string semantic_unauthorized_fields_changed;
+   string execution_adjustment_bounds;
+   string execution_adjustment_reason;
+   //--- Execution retry suppression ---------------------------------------
+   string execution_failure_class;
+   string execution_failure_state_fingerprint;
+   int    execution_precheck_attempts;
+   int    execution_order_construction_attempts;
+   int    execution_attempts_suppressed;
+   datetime execution_retry_not_before;
    string ai_decision_id;
    string policy_version;
    string risk_version;

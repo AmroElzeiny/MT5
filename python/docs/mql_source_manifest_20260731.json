@@ -1,0 +1,280 @@
+{
+  "manifest_version": "20260731_mql_source_manifest_v1",
+  "repo_root": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\PO3_Codex\\MT5",
+  "terminal_id": "0148BD5691B65B0F2157627A4231F3DE",
+  "repo_files": [
+    {
+      "tree": "include",
+      "name": "AIGateBridge.mqh",
+      "sha256": "f5b47bbc4830818a0e019364da089d99a4f85b7641ff70ee5a2b1348e316e453",
+      "bytes": 150426,
+      "lines": 2051,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Config.mqh",
+      "sha256": "d3a7e31aed5d36eea33ca2c80995af662c0f04df88e75d314f0d1bee311502ef",
+      "bytes": 27053,
+      "lines": 617,
+      "line_endings": "mixed(crlf=359,lf=258)"
+    },
+    {
+      "tree": "include",
+      "name": "FileBus.mqh",
+      "sha256": "199a98ed256ddb8c0201e203a1bde254f959989fc44ed3158c98a73e178adf5e",
+      "bytes": 8041,
+      "lines": 191,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "FVG.mqh",
+      "sha256": "0f1e0f0d404f59eee0c1797ca4e1e519497023c7ad49f2c3ea5ef018e5fe1c37",
+      "bytes": 46567,
+      "lines": 982,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Indicators.mqh",
+      "sha256": "91006f08f1defeec3aeefb7a0adab2845257a2b6556b88031c2be15ee9831e7b",
+      "bytes": 7237,
+      "lines": 207,
+      "line_endings": "crlf"
+    },
+    {
+      "tree": "include",
+      "name": "JsonLite.mqh",
+      "sha256": "c4a1d3cf191ace2892f58df8ae79f6613ec799a12bd9dcbb114f35b116f8aa71",
+      "bytes": 13876,
+      "lines": 416,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "MarketWatchScanner.mqh",
+      "sha256": "42bdcf40ae47e7778c48dae940680a7bfe892fed764dcc0574487b2cf9330756",
+      "bytes": 4053,
+      "lines": 123,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "PenaltyWatcher.mqh",
+      "sha256": "6e3fdeecc06536a8975fe66575bf3da1cb8968c556d9d838333ea5084e808a12",
+      "bytes": 52863,
+      "lines": 1053,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "PO3.mqh",
+      "sha256": "bc0558554412be24a6825503856a022c115fc1c67cfec7165e6c49ba7d04b4d0",
+      "bytes": 57548,
+      "lines": 1290,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Risk.mqh",
+      "sha256": "e024c321ce5820fd9dd951b2698004b6d8930a4a0a2576ae4dc9edcd66cc84f2",
+      "bytes": 47450,
+      "lines": 1139,
+      "line_endings": "mixed(crlf=100,lf=1039)"
+    },
+    {
+      "tree": "include",
+      "name": "StateStore.mqh",
+      "sha256": "ce8b79e13826635bcef25daba916a8f569102fe24cddc92f9e4b98ffe6458342",
+      "bytes": 142567,
+      "lines": 1871,
+      "line_endings": "mixed(crlf=185,lf=1686)"
+    },
+    {
+      "tree": "include",
+      "name": "TestOrderAdapter.mqh",
+      "sha256": "d9e1ffd5d9743d9d523a6782934c39f3d99f809dd23c75fc8e52647905e40831",
+      "bytes": 18132,
+      "lines": 396,
+      "line_endings": "mixed(crlf=2,lf=394)"
+    },
+    {
+      "tree": "include",
+      "name": "TradeEngine.mqh",
+      "sha256": "d684359698a63facbb250a2492d1ae25c7541d20c2156a383ebc45a25e09f26c",
+      "bytes": 777338,
+      "lines": 14302,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Types.mqh",
+      "sha256": "f3d49abe06503bc34d0068c471e66a84abdce7ba8843b9a241b5efdce5985c19",
+      "bytes": 33921,
+      "lines": 1058,
+      "line_endings": "mixed(crlf=64,lf=994)"
+    },
+    {
+      "tree": "experts",
+      "name": "PO3_AIGate_PositivePath_Harness.mq5",
+      "sha256": "8a7afce2b4859980c66d92b8195749f51a0bb904d9e605ef3d6817111f7a3612",
+      "bytes": 4566,
+      "lines": 78,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "experts",
+      "name": "PO3_AIGate_ScannerEA.mq5",
+      "sha256": "7a8681cb7de3a660e07f40efc2a1319c2b1f8d7c8015dcbb5f99d4b7973158e4",
+      "bytes": 17286,
+      "lines": 368,
+      "line_endings": "lf"
+    }
+  ],
+  "terminal_files": [
+    {
+      "tree": "include",
+      "name": "AIGateBridge.mqh",
+      "sha256": "f5b47bbc4830818a0e019364da089d99a4f85b7641ff70ee5a2b1348e316e453",
+      "bytes": 150426,
+      "lines": 2051,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Config.mqh",
+      "sha256": "d3a7e31aed5d36eea33ca2c80995af662c0f04df88e75d314f0d1bee311502ef",
+      "bytes": 27053,
+      "lines": 617,
+      "line_endings": "mixed(crlf=359,lf=258)"
+    },
+    {
+      "tree": "include",
+      "name": "FileBus.mqh",
+      "sha256": "199a98ed256ddb8c0201e203a1bde254f959989fc44ed3158c98a73e178adf5e",
+      "bytes": 8041,
+      "lines": 191,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "FVG.mqh",
+      "sha256": "0f1e0f0d404f59eee0c1797ca4e1e519497023c7ad49f2c3ea5ef018e5fe1c37",
+      "bytes": 46567,
+      "lines": 982,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Indicators.mqh",
+      "sha256": "91006f08f1defeec3aeefb7a0adab2845257a2b6556b88031c2be15ee9831e7b",
+      "bytes": 7237,
+      "lines": 207,
+      "line_endings": "crlf"
+    },
+    {
+      "tree": "include",
+      "name": "JsonLite.mqh",
+      "sha256": "c4a1d3cf191ace2892f58df8ae79f6613ec799a12bd9dcbb114f35b116f8aa71",
+      "bytes": 13876,
+      "lines": 416,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "MarketWatchScanner.mqh",
+      "sha256": "42bdcf40ae47e7778c48dae940680a7bfe892fed764dcc0574487b2cf9330756",
+      "bytes": 4053,
+      "lines": 123,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "PenaltyWatcher.mqh",
+      "sha256": "6e3fdeecc06536a8975fe66575bf3da1cb8968c556d9d838333ea5084e808a12",
+      "bytes": 52863,
+      "lines": 1053,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "PO3.mqh",
+      "sha256": "bc0558554412be24a6825503856a022c115fc1c67cfec7165e6c49ba7d04b4d0",
+      "bytes": 57548,
+      "lines": 1290,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Risk.mqh",
+      "sha256": "e024c321ce5820fd9dd951b2698004b6d8930a4a0a2576ae4dc9edcd66cc84f2",
+      "bytes": 47450,
+      "lines": 1139,
+      "line_endings": "mixed(crlf=100,lf=1039)"
+    },
+    {
+      "tree": "include",
+      "name": "StateStore.mqh",
+      "sha256": "ce8b79e13826635bcef25daba916a8f569102fe24cddc92f9e4b98ffe6458342",
+      "bytes": 142567,
+      "lines": 1871,
+      "line_endings": "mixed(crlf=185,lf=1686)"
+    },
+    {
+      "tree": "include",
+      "name": "TestOrderAdapter.mqh",
+      "sha256": "77283506d78d79107e39e9e712c3ab0f76f3da2fb119ef8041fc79e596be4374",
+      "bytes": 15858,
+      "lines": 358,
+      "line_endings": "mixed(crlf=1,lf=357)"
+    },
+    {
+      "tree": "include",
+      "name": "TradeEngine.mqh",
+      "sha256": "d684359698a63facbb250a2492d1ae25c7541d20c2156a383ebc45a25e09f26c",
+      "bytes": 777338,
+      "lines": 14302,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "include",
+      "name": "Types.mqh",
+      "sha256": "f3d49abe06503bc34d0068c471e66a84abdce7ba8843b9a241b5efdce5985c19",
+      "bytes": 33921,
+      "lines": 1058,
+      "line_endings": "mixed(crlf=64,lf=994)"
+    },
+    {
+      "tree": "experts",
+      "name": "PO3_AIGate_PositivePath_Harness.mq5",
+      "sha256": "8a7afce2b4859980c66d92b8195749f51a0bb904d9e605ef3d6817111f7a3612",
+      "bytes": 4566,
+      "lines": 78,
+      "line_endings": "lf"
+    },
+    {
+      "tree": "experts",
+      "name": "PO3_AIGate_ScannerEA.mq5",
+      "sha256": "7a8681cb7de3a660e07f40efc2a1319c2b1f8d7c8015dcbb5f99d4b7973158e4",
+      "bytes": 17286,
+      "lines": 368,
+      "line_endings": "lf"
+    }
+  ],
+  "drift": [
+    {
+      "file": "include/TestOrderAdapter.mqh",
+      "state": "repo_differs_from_terminal",
+      "repo_sha256": "d9e1ffd5d9743d9d523a6782934c39f3d99f809dd23c75fc8e52647905e40831",
+      "terminal_sha256": "77283506d78d79107e39e9e712c3ab0f76f3da2fb119ef8041fc79e596be4374",
+      "repo_bytes": 18132,
+      "terminal_bytes": 15858
+    }
+  ],
+  "totals": {
+    "repo_files": 16,
+    "terminal_files": 16,
+    "drift_entries": 1
+  }
+}

@@ -4,16 +4,24 @@
 #ifndef __PO3_AIGATE_CONFIG_MQH__
 #define __PO3_AIGATE_CONFIG_MQH__
 
-const string ENGINE_VERSION = "5.5-version-z-reliability-20260718-v5";
-const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-provider-version-z-20260718-v4";
-const string AI_DECISION_SCHEMA_VERSION = "20260718_ai_decision_authority_v6";
+const string ENGINE_VERSION = "5.5-version-z-canonical-request-20260724-v8";
+const string ENGINE_INPUT_SCHEMA = "po3-fvg-ai-provider-version-z-20260724-v7";
+const string AI_DECISION_SCHEMA_VERSION = "20260724_canonical_frozen_request_v10";
 const string AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260717_target_fingerprint_authority_v6";
-const string AI_PROMPT_CONTRACT_VERSION = "20260718_qualitative_veto_repeatability_v8";
-const string TRADE_LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_execution_path_v7";
+const string AI_PROMPT_CONTRACT_VERSION = "20260724_canonical_frozen_request_v12";
+const string AI_ROLE_CONTRACT_VERSION = "20260724_python_bound_roles_v3";
+const string AI_PROVIDER_CONTRACT_VERSION = "20260723_provider_neutral_transport_v2";
+const string AI_REQUEST_IDENTITY_VERSION = "20260724_ai_request_identity_v3";
+const string AI_EVIDENCE_ENVELOPE_VERSION = "20260718_decision_evidence_v1";
+const string AI_FAMILY_PROFILE_VERSION = "20260718_family_context_v1";
+const string AI_TRADE_MEMORY_SCHEMA_VERSION = "20260718_trade_memory_v1";
+const string AI_RETRIEVAL_POLICY_VERSION = "20260718_hybrid_analogue_retrieval_v1";
+const string AI_CONSENSUS_RESOLVER_VERSION = "20260718_deterministic_consensus_v1";
+const string TRADE_LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_provider_identity_v8";
 const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
 const string FEATURE_LINEAGE_VERSION = "20260718_tick_path_evidence_v3";
 const string RISK_MODEL_VERSION = "20260717_original_initial_risk_v3";
-const string REPEATABILITY_SCHEMA_VERSION = "20260718_repeatability_v2";
+const string REPEATABILITY_SCHEMA_VERSION = "20260718_provider_neutral_repeatability_v3";
 const string HIERARCHICAL_PRIOR_SCHEMA_VERSION = "20260717_hierarchical_prior_v1";
 const string RISK_FACTOR_SCHEMA_VERSION = "20260717_risk_factor_v1";
 const string COMMISSION_MODEL_SCHEMA_VERSION = "20260717_broker_cost_v1";
@@ -23,7 +31,7 @@ const string MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_cou
 const string INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1";
 const string SHADOW_CANDIDATE_SCHEMA_VERSION = "20260717_shadow_candidate_v3";
 const string NORMALIZED_FVG_SCHEMA_VERSION = "20260717_normalized_fvg_v2";
-const string ARCHITECTURE_CONTRACT_VERSION = "20260718_version_z_reliability_v3";
+const string ARCHITECTURE_CONTRACT_VERSION = "20260718_provider_neutral_architecture_v4";
 const string LIVE_FORWARD_CONTRACT_VERSION = "20260717_live_forward_v1";
 const string SEMANTIC_CACHE_SCHEMA_VERSION = "20260717_semantic_cache_v1";
 const string POLICY_MANIFEST_SCHEMA_VERSION = "20260717_policy_manifest_v1";
@@ -32,10 +40,48 @@ const string HIERARCHICAL_OUTCOME_MODEL_VERSION = "20260717_hierarchical_outcome
 const string ENTRY_MODEL_VERSION = "20260717_entry_path_shadow_v2";
 const string MANAGEMENT_MODEL_VERSION = "20260717_management_alpha_shadow_v2";
 const string SHADOW_OUTCOME_SCHEMA_VERSION = "20260717_shadow_outcome_complete_v2";
-const string FILE_BUS_LIFECYCLE_VERSION = "20260717_file_bus_lifecycle_v2";
+const string FILE_BUS_LIFECYCLE_VERSION = "20260724_file_bus_lifecycle_v3";
+const string REQUEST_LIFECYCLE_VERSION = "20260724_exactly_once_request_v1";
+const string CONTRACT_MANIFEST_VERSION = "20260724_contract_compatibility_v1";
 const string CALIBRATION_CONTRACT_VERSION = "20260716_oos_calibration_v1";
 const string DEPLOYMENT_MANIFEST_SCHEMA_VERSION = "20260717_deployment_manifest_v1";
 const double SHADOW_ADVERSE_THRESHOLD_R = 0.50;
+
+uint PO3ContractFnv1a(const string value)
+{
+   uint h = 2166136261;
+   for(int i=0; i<StringLen(value); i++)
+      h = (h ^ (uint)StringGetCharacter(value, i)) * 16777619;
+   return h;
+}
+
+string PO3ContractManifestMaterial()
+{
+   string material = "contract_manifest_version=" + CONTRACT_MANIFEST_VERSION;
+   material += "|engine_version=" + ENGINE_VERSION;
+   material += "|engine_input_schema=" + ENGINE_INPUT_SCHEMA;
+   material += "|decision_schema_version=" + AI_DECISION_SCHEMA_VERSION;
+   material += "|target_arbitration_schema_version=" + AI_TARGET_ARBITRATION_SCHEMA_VERSION;
+   material += "|prompt_contract_version=" + AI_PROMPT_CONTRACT_VERSION;
+   material += "|role_contract_version=" + AI_ROLE_CONTRACT_VERSION;
+   material += "|provider_contract_version=" + AI_PROVIDER_CONTRACT_VERSION;
+   material += "|file_bus_lifecycle_version=" + FILE_BUS_LIFECYCLE_VERSION;
+   material += "|request_lifecycle_version=" + REQUEST_LIFECYCLE_VERSION;
+   material += "|request_identity_version=" + AI_REQUEST_IDENTITY_VERSION;
+   material += "|setup_taxonomy_version=" + SETUP_TAXONOMY_VERSION;
+   material += "|family_profile_version=" + AI_FAMILY_PROFILE_VERSION;
+   material += "|retrieval_policy_version=" + AI_RETRIEVAL_POLICY_VERSION;
+   material += "|consensus_resolver_version=" + AI_CONSENSUS_RESOLVER_VERSION;
+   material += "|evidence_envelope_version=" + AI_EVIDENCE_ENVELOPE_VERSION;
+   material += "|trade_memory_schema_version=" + AI_TRADE_MEMORY_SCHEMA_VERSION;
+   material += "|repeatability_schema_version=" + REPEATABILITY_SCHEMA_VERSION;
+   return material;
+}
+
+string PO3ContractManifestHash()
+{
+   return IntegerToString((int)(PO3ContractFnv1a(PO3ContractManifestMaterial()) % 2147483647));
+}
 
 enum ENUM_PO3_STOP_MODEL
 {
@@ -95,6 +141,7 @@ input int   InpScanIntervalMinutes   = 1;
 input int   InpTimerTickSeconds      = 1;
 input int   InpMaxSymbolsPerTick     = 80;
 input bool  InpScanAllMarketWatch    = true;
+input string InpTesterSymbols        = "";
 input bool  InpPauseScanWhilePendingAI = false;
 input int   InpMaxPendingAiRequests  = 12;
 input int   InpWatchlistMaxBars      = 90;
@@ -110,6 +157,7 @@ input int   InpTesterMaxAiResultAgeSimMinutes = 15;
 input bool  InpTesterFreezeAiExecutionSnapshot = true;
 input TesterAiMode InpTesterAiMode = TESTER_AI_RECORD_ONLY;
 input bool  InpTesterAllowLiveWaitDebugTrading = false;
+input int   InpTesterLiveWaitDebugMaxDurationHours = 6;
 input bool  InpVerboseJournal        = true;
 input bool   InpJournalTesterOnly     = false;
 input bool   InpRolloverProtectionEnable = true;

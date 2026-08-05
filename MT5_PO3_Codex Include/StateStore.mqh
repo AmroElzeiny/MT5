@@ -316,6 +316,39 @@ private:
       j += JsonKVStr("ai_decision_schema_version", p.ai.decision_schema_version) + ",";
       j += JsonKVStr("ai_decision_quality_tier", p.ai.decision_quality_tier) + ",";
       j += JsonKVStr("ai_response_quality", p.ai.response_quality_alias) + ",";
+      j += JsonKVStr("ai_provider_contract_version", p.ai.provider_contract_version) + ",";
+      j += JsonKVStr("ai_provider_mode", p.ai.provider_mode) + ",";
+      j += JsonKVStr("ai_provider_id", p.ai.provider_id) + ",";
+      j += JsonKVStr("ai_endpoint_class", p.ai.endpoint_class) + ",";
+      j += JsonKVStr("ai_endpoint_identity_hash", p.ai.endpoint_identity_hash) + ",";
+      j += JsonKVStr("ai_configured_models_hash", p.ai.configured_models_hash) + ",";
+      j += JsonKVStr("ai_actual_model_id", p.ai.actual_model_id) + ",";
+      j += JsonKVStr("ai_fallback_model", p.ai.fallback_model) + ",";
+      j += JsonKVStr("ai_model_fingerprint", p.ai.model_fingerprint) + ",";
+      j += JsonKVStr("ai_evidence_envelope_version", p.ai.evidence_envelope_version) + ",";
+      j += JsonKVStr("ai_family_profile_version", p.ai.family_profile_version) + ",";
+      j += JsonKVStr("ai_memory_schema_version", p.ai.memory_schema_version) + ",";
+      j += JsonKVStr("ai_retrieval_policy_version", p.ai.retrieval_policy_version) + ",";
+      j += JsonKVStr("ai_role_contract_version", p.ai.role_contract_version) + ",";
+      j += JsonKVStr("ai_consensus_resolver_version", p.ai.consensus_resolver_version) + ",";
+      j += JsonKVStr("ai_generation_settings_hash", p.ai.generation_settings_hash) + ",";
+      j += JsonKVStr("ai_input_fingerprint", p.ai.input_fingerprint) + ",";
+      j += "\"ai_retrieved_analogue_ids\":" + (StringLen(p.ai.retrieved_analogue_ids_json) > 0 ? p.ai.retrieved_analogue_ids_json : "[]") + ",";
+      j += JsonKVStr("ai_historical_evidence_state", p.ai.historical_evidence_state) + ",";
+      j += JsonKVStr("ai_analyst_response_fingerprint", p.ai.analyst_response_fingerprint) + ",";
+      j += JsonKVStr("ai_critic_response_fingerprint", p.ai.critic_response_fingerprint) + ",";
+      j += JsonKVStr("ai_adjudicator_response_fingerprint", p.ai.adjudicator_response_fingerprint) + ",";
+      j += JsonKVStr("ai_final_resolver_reason", p.ai.final_resolver_reason) + ",";
+      j += JsonKVStr("ai_provider_health_state", p.ai.provider_health_state) + ",";
+      j += "\"ai_role_latencies\":" + (StringLen(p.ai.role_latencies_json) > 0 ? p.ai.role_latencies_json : "{}") + ",";
+      j += "\"ai_provider_retry_counts\":" + (StringLen(p.ai.provider_retry_counts_json) > 0 ? p.ai.provider_retry_counts_json : "{}") + ",";
+      j += "\"ai_provider_usage\":" + (StringLen(p.ai.provider_usage_json) > 0 ? p.ai.provider_usage_json : "{}") + ",";
+      j += JsonKVBool("ai_estimated_context_tokens_available", p.ai.estimated_context_tokens_available) + ",";
+      j += "\"ai_estimated_context_tokens\":" + (p.ai.estimated_context_tokens_available ? DoubleToString(p.ai.estimated_context_tokens, 0) : "null") + ",";
+      j += "\"ai_unsupported_generation_parameters\":" + (StringLen(p.ai.unsupported_generation_parameters_json) > 0 ? p.ai.unsupported_generation_parameters_json : "[]") + ",";
+      j += "\"ai_analyst_output\":" + (StringLen(p.ai.analyst_output_json) > 0 ? p.ai.analyst_output_json : "{}") + ",";
+      j += "\"ai_critic_output\":" + (StringLen(p.ai.critic_output_json) > 0 ? p.ai.critic_output_json : "{}") + ",";
+      j += "\"ai_adjudicator_output\":" + (StringLen(p.ai.adjudicator_output_json) > 0 ? p.ai.adjudicator_output_json : "{}") + ",";
       j += JsonKVStr("ai_decision_state", p.ai.decision_state) + ",";
       j += JsonKVBool("ai_mandatory_fields_complete", p.ai.mandatory_fields_complete) + ",";
       j += "\"ai_missing_mandatory_fields\":" + (StringLen(p.ai.missing_mandatory_fields_json) > 0 ? p.ai.missing_mandatory_fields_json : "[]") + ",";
@@ -1111,6 +1144,39 @@ private:
       p.ai.response_quality_alias = JsonGetString(json, "ai_response_quality", p.ai.decision_quality_tier);
       if(p.ai.response_quality_alias != p.ai.decision_quality_tier)
          p.ai.decision_quality_tier = "DEGRADED_NON_TRADING";
+      p.ai.provider_contract_version = JsonGetString(json, "ai_provider_contract_version", "");
+      p.ai.provider_mode = JsonGetString(json, "ai_provider_mode", "");
+      p.ai.provider_id = JsonGetString(json, "ai_provider_id", "");
+      p.ai.endpoint_class = JsonGetString(json, "ai_endpoint_class", "");
+      p.ai.endpoint_identity_hash = JsonGetString(json, "ai_endpoint_identity_hash", "");
+      p.ai.configured_models_hash = JsonGetString(json, "ai_configured_models_hash", "");
+      p.ai.actual_model_id = JsonGetString(json, "ai_actual_model_id", "");
+      p.ai.fallback_model = JsonGetString(json, "ai_fallback_model", "");
+      p.ai.model_fingerprint = JsonGetString(json, "ai_model_fingerprint", "");
+      p.ai.evidence_envelope_version = JsonGetString(json, "ai_evidence_envelope_version", "");
+      p.ai.family_profile_version = JsonGetString(json, "ai_family_profile_version", "");
+      p.ai.memory_schema_version = JsonGetString(json, "ai_memory_schema_version", "");
+      p.ai.retrieval_policy_version = JsonGetString(json, "ai_retrieval_policy_version", "");
+      p.ai.role_contract_version = JsonGetString(json, "ai_role_contract_version", "");
+      p.ai.consensus_resolver_version = JsonGetString(json, "ai_consensus_resolver_version", "");
+      p.ai.generation_settings_hash = JsonGetString(json, "ai_generation_settings_hash", "");
+      p.ai.input_fingerprint = JsonGetString(json, "ai_input_fingerprint", "");
+      p.ai.retrieved_analogue_ids_json = JsonGetArray(json, "ai_retrieved_analogue_ids", "[]");
+      p.ai.historical_evidence_state = JsonGetString(json, "ai_historical_evidence_state", "");
+      p.ai.analyst_response_fingerprint = JsonGetString(json, "ai_analyst_response_fingerprint", "");
+      p.ai.critic_response_fingerprint = JsonGetString(json, "ai_critic_response_fingerprint", "");
+      p.ai.adjudicator_response_fingerprint = JsonGetString(json, "ai_adjudicator_response_fingerprint", "");
+      p.ai.final_resolver_reason = JsonGetString(json, "ai_final_resolver_reason", "");
+      p.ai.provider_health_state = JsonGetString(json, "ai_provider_health_state", "");
+      p.ai.role_latencies_json = JsonGetObject(json, "ai_role_latencies", "{}");
+      p.ai.provider_retry_counts_json = JsonGetObject(json, "ai_provider_retry_counts", "{}");
+      p.ai.provider_usage_json = JsonGetObject(json, "ai_provider_usage", "{}");
+      p.ai.estimated_context_tokens_available = JsonGetBool(json, "ai_estimated_context_tokens_available", false);
+      p.ai.estimated_context_tokens = JsonGetNumber(json, "ai_estimated_context_tokens", 0.0);
+      p.ai.unsupported_generation_parameters_json = JsonGetArray(json, "ai_unsupported_generation_parameters", "[]");
+      p.ai.analyst_output_json = JsonGetObject(json, "ai_analyst_output", "{}");
+      p.ai.critic_output_json = JsonGetObject(json, "ai_critic_output", "{}");
+      p.ai.adjudicator_output_json = JsonGetObject(json, "ai_adjudicator_output", "{}");
       p.ai.decision_state = JsonGetString(json, "ai_decision_state", "REJECT");
       p.ai.mandatory_fields_complete = JsonGetBool(json, "ai_mandatory_fields_complete", false);
       p.ai.missing_mandatory_fields_json = JsonGetArray(json, "ai_missing_mandatory_fields", "[]");
@@ -1225,6 +1291,19 @@ private:
                                 p.ai.final_trade_expectancy_score >= 0.0 && p.ai.final_trade_expectancy_score <= 10.0);
       p.ai.ok = (p.ai.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
                  strict_quality && p.ai.mandatory_fields_complete &&
+                 p.ai.provider_contract_version == AI_PROVIDER_CONTRACT_VERSION &&
+                 (p.ai.provider_mode == "REMOTE_API" || p.ai.provider_mode == "LOCAL_OPENAI_COMPATIBLE") &&
+                 StringLen(p.ai.provider_id) > 0 && StringLen(p.ai.endpoint_class) > 0 &&
+                 StringLen(p.ai.endpoint_identity_hash) > 0 && StringLen(p.ai.configured_models_hash) > 0 &&
+                 StringLen(p.ai.actual_model_id) > 0 && StringLen(p.ai.model_fingerprint) > 0 &&
+                 p.ai.evidence_envelope_version == AI_EVIDENCE_ENVELOPE_VERSION &&
+                 p.ai.family_profile_version == AI_FAMILY_PROFILE_VERSION &&
+                 p.ai.memory_schema_version == AI_TRADE_MEMORY_SCHEMA_VERSION &&
+                 p.ai.retrieval_policy_version == AI_RETRIEVAL_POLICY_VERSION &&
+                 p.ai.role_contract_version == AI_ROLE_CONTRACT_VERSION &&
+                 p.ai.consensus_resolver_version == AI_CONSENSUS_RESOLVER_VERSION &&
+                 StringLen(p.ai.generation_settings_hash) > 0 && StringLen(p.ai.input_fingerprint) > 0 &&
+                 StringLen(p.ai.analyst_response_fingerprint) > 0 && StringLen(p.ai.critic_response_fingerprint) > 0 &&
                  p.ai.decision_state == "APPROVE" && p.ai.allow && p.ai.raw_allow &&
                  !p.ai.veto_enabled && p.ai.veto_fields_present &&
                  p.ai.llm_numeric_diagnostics_authority == "uncalibrated_diagnostic_only_no_direct_trade_authority" &&

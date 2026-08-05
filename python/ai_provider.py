@@ -21,6 +21,12 @@ from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import urljoin, urlparse
 
+from provider_deadline import (
+    DEADLINE_CONTRACT_VERSION,
+    LATE_RESULT_QUARANTINE,
+    STAGE_CONNECT,
+    STAGE_RESPONSE_WAIT,
+)
 from structured_models import (
     StructuredCapabilityProbe,
     StructuredSchemaPreflight,
@@ -116,6 +122,25 @@ class ProviderResult:
     unsupported_generation_parameters: tuple[str, ...] = ()
     schema_fingerprint: str = ""
     repair_attempted: bool = False
+
+
+def _terminal_failure_category(errors: Sequence[str]) -> str:
+    """Name the failure for what it actually was.
+
+    Every per-attempt failure is appended to ``errors`` tagged with its own
+    category; schema-validation failures carry a ``:schema:`` marker.  When the
+    provider answered on every attempt and only the *content* failed strict
+    validation, nothing about the transport went wrong, and reporting
+    ``PROVIDER_TRANSPORT_ERROR`` sent operators to look at the network while the
+    real defect was a schema/vocabulary disagreement.  A run whose attempts were
+    exclusively schema failures is therefore reported as
+    ``STRUCTURED_RESPONSE_INVALID``; any transport failure in the mix keeps the
+    transport category, because the transport genuinely did fail at least once.
+    """
+
+    if errors and all(":schema:" in error for error in errors):
+        return "STRUCTURED_RESPONSE_INVALID"
+    return "PROVIDER_TRANSPORT_ERROR"
 
 
 class ProviderCallError(RuntimeError):
@@ -355,10 +380,25 @@ class _OpenAICompatibleProviderBase:
             except ImportError as exc:
                 raise RuntimeError("missing_dependency_openai") from exc
             factory = OpenAI
-        kwargs: dict[str, Any] = {"api_key": self._api_key, "timeout": self.timeout_sec}
+        # max_retries MUST be explicit.  The OpenAI SDK defaults to
+        # DEFAULT_MAX_RETRIES=2 and gives every internal retry a *fresh* copy of
+        # the full timeout, so a configured 90s timeout silently became a
+        # ~270s+ wall-clock operation that outlived the MT5 terminal deadline.
+        # Retry policy belongs to this class, bounded by the absolute request
+        # deadline, not to the transport library.
+        kwargs: dict[str, Any] = {
+            "api_key": self._api_key,
+            "timeout": self.timeout_sec,
+            "max_retries": 0,
+        }
         if self.base_url:
             kwargs["base_url"] = self.base_url
-        self._client = factory(**kwargs)
+        try:
+            self._client = factory(**kwargs)
+        except TypeError:
+            # Test doubles and older factories may not accept max_retries.
+            kwargs.pop("max_retries", None)
+            self._client = factory(**kwargs)
         return self._client
 
     def model_for_role(self, role: str) -> str:
@@ -752,6 +792,20 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
         self._circuit_check()
         errors: list[str] = []
         started = time.perf_counter()
+        deadline = request_metadata.get("deadline")
+        configured_timeout = float(
+            request_metadata.get("timeout_sec") or self.timeout_sec
+        )
+        request_id = str(request_metadata.get("request_id") or "")
+        if deadline is not None:
+            self._log(
+                "[provider_deadline]"
+                f" request_id={request_id}"
+                + deadline.as_log_fields()
+                + f" configured_provider_timeout_ms={int(configured_timeout * 1000)}"
+                f" deadline_contract_version={DEADLINE_CONTRACT_VERSION}"
+            )
+        attempt = 0
         for model_index, model in enumerate(self._models_for_role(role)):
             preflight, circuit_key = self._prepare_schema(
                 response_schema=response_schema,
@@ -763,6 +817,28 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             schema_retries = 0
             flex_retries = 0
             while True:
+                if deadline is not None and not deadline.can_start_attempt():
+                    # Never begin an attempt that cannot finish inside the
+                    # absolute budget; the caller still needs time to validate
+                    # and atomically write an identity-bound response.
+                    self._log(
+                        "[provider_deadline_exceeded]"
+                        f" request_id={request_id}"
+                        f" stage={STAGE_CONNECT}"
+                        f" attempt={attempt}"
+                        f" remaining_ms={deadline.remaining_ms()}"
+                        f" min_attempt_ms={deadline.policy.min_attempt_ms}"
+                        f" late_result_action={LATE_RESULT_QUARANTINE}"
+                    )
+                    self._record_failure()
+                    raise ProviderCallError(
+                        "PROVIDER_DEADLINE_EXCEEDED",
+                        "insufficient_remaining_budget_for_provider_attempt:"
+                        f"remaining_ms={deadline.remaining_ms()}",
+                        retryable=False,
+                        schema_name=preflight.schema_name,
+                        schema_fingerprint=preflight.schema_fingerprint,
+                    )
                 try:
                     user_content: list[dict[str, Any]] = [
                         {
@@ -802,10 +878,35 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     if service_tier:
                         kwargs["service_tier"] = service_tier
                     call_client = client
-                    effective_timeout = float(request_metadata.get("timeout_sec") or self.timeout_sec)
+                    effective_timeout = configured_timeout
+                    if deadline is not None:
+                        # The SDK receives the *remaining* budget, never a fresh
+                        # relative timer.  A deadline is never reset by a retry,
+                        # a model fallback, or a schema repair.
+                        effective_timeout = deadline.provider_timeout_sec(
+                            configured_timeout
+                        )
                     with_options = getattr(client, "with_options", None)
                     if callable(with_options):
-                        call_client = with_options(timeout=effective_timeout)
+                        try:
+                            call_client = with_options(
+                                timeout=effective_timeout, max_retries=0
+                            )
+                        except TypeError:
+                            call_client = with_options(timeout=effective_timeout)
+                    attempt += 1
+                    self._log(
+                        "[provider_attempt]"
+                        f" request_id={request_id}"
+                        f" attempt={attempt}"
+                        f" model={model}"
+                        f" transport_retry={transport_retries}"
+                        f" schema_repair={schema_retries}"
+                        f" flex_retry={flex_retries}"
+                        f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
+                        f" sdk_timeout={effective_timeout:.3f}"
+                        " sdk_max_retries=0"
+                    )
                     self._log(
                         "[provider_call_started]"
                         f" request_id={request_metadata.get('request_id', '')}"
@@ -862,7 +963,9 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     )
                 except (ValueError, TypeError) as exc:
                     errors.append(f"{model}:schema:{type(exc).__name__}:{exc}")
-                    if schema_retries < 1:
+                    if schema_retries < 1 and (
+                        deadline is None or deadline.can_start_attempt()
+                    ):
                         schema_retries += 1
                         self._log(
                             "[structured_validation]"
@@ -901,22 +1004,44 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                             repair_attempted=schema_retries > 0,
                             repair_result="failed" if schema_retries else "not_attempted",
                         ) from exc
+                    if deadline is not None and not deadline.can_start_attempt():
+                        # The remaining budget cannot safely complete another
+                        # attempt, so retries stop here regardless of how many
+                        # the configuration would still allow.
+                        self._log(
+                            "[provider_deadline_exceeded]"
+                            f" request_id={request_id}"
+                            f" stage={STAGE_RESPONSE_WAIT}"
+                            f" attempt={attempt}"
+                            f" remaining_ms={deadline.remaining_ms()}"
+                            f" error_category={failure.category}"
+                            f" late_result_action={LATE_RESULT_QUARANTINE}"
+                        )
+                        errors.append(f"{model}:{failure.category}:{failure}")
+                        break
                     service_tier = str(request_metadata.get("service_tier") or self.service_tier or "auto").lower()
+                    cooldown_sec = self.flex_unavailable_cooldown_sec
+                    cooldown_affordable = deadline is None or (
+                        deadline.remaining_ms()
+                        >= int(cooldown_sec * 1000) + deadline.policy.min_attempt_ms
+                    )
                     if (
                         service_tier == "flex"
                         and self.flex_unavailable_retry_enable
                         and failure.retryable
                         and flex_retries < self.flex_unavailable_max_retries
+                        and cooldown_affordable
                     ):
                         flex_retries += 1
                         self._log(
                             "[ai_provider] flex_unavailable_retry"
                             f" provider_id={self.provider_id} model={model}"
                             f" attempt={flex_retries}/{self.flex_unavailable_max_retries}"
-                            f" cooldown_sec={self.flex_unavailable_cooldown_sec:.1f}"
+                            f" cooldown_sec={cooldown_sec:.1f}"
+                            f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
                         )
-                        if self.flex_unavailable_cooldown_sec > 0:
-                            time.sleep(self.flex_unavailable_cooldown_sec)
+                        if cooldown_sec > 0:
+                            time.sleep(cooldown_sec)
                         continue
                     errors.append(f"{model}:{failure.category}:{failure}")
                     if failure.retryable and transport_retries < self.max_retries:
@@ -925,10 +1050,11 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     break
         self._record_failure()
         raise ProviderCallError(
-            "PROVIDER_TRANSPORT_ERROR",
+            _terminal_failure_category(errors),
             "remote_provider_models_failed:" + " | ".join(errors),
             retryable=False,
             schema_name=response_schema.__name__,
+            schema_fingerprint=preflight.schema_fingerprint,
             repair_attempted=any(":schema:" in error for error in errors),
             repair_result="failed",
         )
@@ -1317,10 +1443,11 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             break
         self._record_failure()
         raise ProviderCallError(
-            "PROVIDER_TRANSPORT_ERROR",
+            _terminal_failure_category(errors),
             "local_provider_models_failed:" + " | ".join(errors),
             retryable=False,
             schema_name=response_schema.__name__,
+            schema_fingerprint=preflight.schema_fingerprint,
             repair_attempted=any(":schema:" in error for error in errors),
             repair_result="failed",
         )

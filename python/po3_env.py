@@ -12,10 +12,34 @@ def _strip_quotes(value: str) -> str:
     return value
 
 
+def default_dotenv_path() -> Path:
+    """Resolve which env file to load.
+
+    ``load_dotenv`` runs with ``override=True``, so the env file wins over the
+    process environment.  That is the right precedence for production, but it
+    means an integration run cannot be configured with ordinary environment
+    variables -- the only way to point the gate at a local harness endpoint
+    would be to edit the same ``.env`` that holds the production API key.
+    Editing a live secrets file to run a test is not acceptable, so an operator
+    may name an alternate file instead.
+
+    ``PO3_DOTENV_FILE`` is read from the process environment only; an env file
+    cannot redirect the loader to another env file.
+    """
+
+    override = str(os.environ.get("PO3_DOTENV_FILE") or "").strip()
+    if override:
+        candidate = Path(override)
+        if not candidate.is_absolute():
+            candidate = Path(__file__).resolve().parent / candidate
+        return candidate
+    return Path(__file__).resolve().with_name(".env")
+
+
 def peek_dotenv_value(path: str | Path | None, key_name: str) -> str | None:
     """Read one non-secret selector without importing the full environment."""
 
-    env_path = Path(path) if path else Path(__file__).resolve().with_name(".env")
+    env_path = Path(path) if path else default_dotenv_path()
     if not env_path.exists():
         return None
     for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
@@ -34,7 +58,7 @@ def load_dotenv(
     override: bool = False,
     exclude_keys: Iterable[str] = (),
 ) -> Path:
-    env_path = Path(path) if path else Path(__file__).resolve().with_name(".env")
+    env_path = Path(path) if path else default_dotenv_path()
     if not env_path.exists():
         return env_path
     excluded = {str(key).strip() for key in exclude_keys if str(key).strip()}

@@ -336,6 +336,7 @@ def response_binding_material(response: Mapping[str, Any]) -> str:
             str(response.get("session_id") or ""),
             str(response.get("request_nonce") or ""),
             str(response.get("request_identity_hash") or ""),
+            str(response.get("contract_manifest_hash") or ""),
             str(response.get("decision_schema_version") or ""),
             str(response.get("decision_quality_tier") or ""),
             str(response.get("provider_mode") or ""),
@@ -2074,6 +2075,33 @@ def compare_shadow_decision_groups(records: Sequence[Mapping[str, Any]]) -> dict
     return summary
 
 
+# Python starts before any EA request exists, so the live runtime-input contract
+# cannot be proven yet.  This sentinel marks "cannot be evaluated at this stage"
+# and must never be confused with a proven mismatch.
+RUNTIME_AUTHORITY_PENDING = "__EA_RUNTIME_INPUT_HASH_REQUIRED__"
+
+# Honest compatibility outcomes.  Authority is fail-closed for everything except
+# MATCHED, but the *reason* must be accurate: an artifact that was never stamped
+# with a version is not the same as one that carries a conflicting version.
+COMPAT_MATCHED = "matched"
+COMPAT_AWAITING_RUNTIME_AUTHORITY = "awaiting_runtime_authority"
+COMPAT_ARTIFACT_NOT_STAMPED = "artifact_not_stamped"
+COMPAT_INCOMPATIBLE = "incompatible"
+COMPAT_NOT_APPLICABLE = "not_applicable"
+
+
+def _compatibility_state(expected: str, actual: str) -> str:
+    """Classify one compatibility dimension without overstating the failure."""
+
+    if not expected:
+        return COMPAT_NOT_APPLICABLE
+    if expected == RUNTIME_AUTHORITY_PENDING:
+        return COMPAT_AWAITING_RUNTIME_AUTHORITY
+    if not actual:
+        return COMPAT_ARTIFACT_NOT_STAMPED
+    return COMPAT_MATCHED if actual == expected else COMPAT_INCOMPATIBLE
+
+
 @dataclass(frozen=True)
 class PolicySpec:
     policy_type: str
@@ -2166,38 +2194,93 @@ def policy_manifest_entry(
         except ValueError:
             pass
     entry["stale"] = now - generated_epoch > max(1, spec.stale_after_days) * 86400
-    entry["code_compatibility"] = not spec.expected_schema or entry["schema_version"] == spec.expected_schema
-    artifact_runtime = str(payload.get("runtime_input_hash") or "")
-    entry["runtime_input_compatibility"] = not spec.expected_runtime_input_hash or artifact_runtime == spec.expected_runtime_input_hash
-    artifact_decision = str(payload.get("decision_schema_version") or "")
-    entry["decision_schema_compatibility"] = not spec.expected_decision_schema or artifact_decision == spec.expected_decision_schema
-    artifact_taxonomy = str(payload.get("taxonomy_version") or "")
-    entry["taxonomy_compatibility"] = not spec.expected_taxonomy or artifact_taxonomy == spec.expected_taxonomy
+    code_state = _compatibility_state(spec.expected_schema, entry["schema_version"])
+    runtime_state = _compatibility_state(
+        spec.expected_runtime_input_hash, str(payload.get("runtime_input_hash") or "")
+    )
+    decision_state = _compatibility_state(
+        spec.expected_decision_schema, str(payload.get("decision_schema_version") or "")
+    )
+    taxonomy_state = _compatibility_state(
+        spec.expected_taxonomy, str(payload.get("taxonomy_version") or "")
+    )
+    entry["compatibility_states"] = {
+        "code_schema": code_state,
+        "runtime_input": runtime_state,
+        "decision_schema": decision_state,
+        "taxonomy": taxonomy_state,
+    }
+    # A dimension counts as "compatible" only when it matched or does not apply.
+    entry["code_compatibility"] = code_state in {COMPAT_MATCHED, COMPAT_NOT_APPLICABLE}
+    entry["runtime_input_compatibility"] = runtime_state in {
+        COMPAT_MATCHED,
+        COMPAT_NOT_APPLICABLE,
+    }
+    entry["decision_schema_compatibility"] = decision_state in {
+        COMPAT_MATCHED,
+        COMPAT_NOT_APPLICABLE,
+    }
+    entry["taxonomy_compatibility"] = taxonomy_state in {
+        COMPAT_MATCHED,
+        COMPAT_NOT_APPLICABLE,
+    }
+
+    # Blocking reasons are proven failures.  Pending/unstamped dimensions are
+    # reported separately so a not-yet-evaluable artifact is never described as
+    # incompatible.
     reasons: list[str] = []
-    if not entry["code_compatibility"]:
-        reasons.append("code_schema_incompatible")
-    if not entry["runtime_input_compatibility"]:
-        reasons.append("runtime_input_incompatible")
-    if not entry["decision_schema_compatibility"]:
-        reasons.append("decision_schema_incompatible")
-    if not entry["taxonomy_compatibility"]:
-        reasons.append("taxonomy_incompatible")
+    pending: list[str] = []
+    for label, state in (
+        ("code_schema", code_state),
+        ("runtime_input", runtime_state),
+        ("decision_schema", decision_state),
+        ("taxonomy", taxonomy_state),
+    ):
+        if state == COMPAT_INCOMPATIBLE:
+            reasons.append(f"{label}_incompatible")
+        elif state == COMPAT_AWAITING_RUNTIME_AUTHORITY:
+            pending.append(f"{label}_awaiting_runtime_authority")
+        elif state == COMPAT_ARTIFACT_NOT_STAMPED:
+            pending.append(f"{label}_artifact_not_stamped")
     if entry["stale"]:
         reasons.append("policy_stale")
-    clean = ledger_integrity_status.lower() in {"clean", "verified_clean", "reconciled_clean"}
+
+    ledger_token = ledger_integrity_status.strip().lower()
+    clean = ledger_token in {"clean", "verified_clean", "reconciled_clean"}
     if spec.requested_authority == "active" and not clean:
-        reasons.append("ledger_not_clean")
+        if ledger_token in {"", "unknown", "unavailable", "no_history"}:
+            # No completed-trade history exists yet.  That is not a dirty
+            # ledger, and calling it one fabricates a integrity failure.
+            pending.append("ledger_unverified_no_completed_history")
+        else:
+            reasons.append("ledger_not_clean")
+
+    entry["pending_reasons"] = pending
     entry["rejection_reasons"] = reasons
-    entry["status"] = "compatible" if not reasons else "blocked"
+    if reasons:
+        entry["status"] = "incompatible"
+    elif pending:
+        entry["status"] = "awaiting_runtime_authority"
+    else:
+        entry["status"] = "compatible"
+
+    # Authority stays fail-closed: only a fully proven artifact becomes active.
     if not spec.enabled:
         entry["authority"] = "shadow"
         entry["activation_state"] = "disabled"
-    elif spec.requested_authority == "active" and not reasons:
+        entry["status"] = "disabled"
+    elif reasons:
+        entry["authority"] = "blocked"
+        entry["activation_state"] = "blocked"
+    elif pending:
+        entry["authority"] = "shadow"
+        entry["activation_state"] = "awaiting_runtime_authority"
+    elif spec.requested_authority == "active":
         entry["authority"] = "active"
         entry["activation_state"] = "active"
     else:
-        entry["authority"] = "shadow" if not reasons else "blocked"
-        entry["activation_state"] = "shadow" if not reasons else "blocked"
+        entry["authority"] = "shadow"
+        entry["activation_state"] = "shadow"
     return entry
 
 
@@ -2218,6 +2301,11 @@ def build_startup_policy_manifest(
             "active": sum(row["authority"] == "active" for row in rows),
             "shadow": sum(row["authority"] == "shadow" for row in rows),
             "blocked": sum(row["authority"] == "blocked" for row in rows),
+            "awaiting_runtime_authority": sum(
+                row.get("activation_state") == "awaiting_runtime_authority"
+                for row in rows
+            ),
+            "disabled": sum(row.get("activation_state") == "disabled" for row in rows),
         },
     }
     manifest["manifest_hash"] = canonical_hash(manifest)

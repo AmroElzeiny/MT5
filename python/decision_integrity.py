@@ -8,12 +8,24 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping, Sequence
 
 
-AI_DECISION_SCHEMA_VERSION = "20260724_python_owned_identity_v9"
+AI_DECISION_SCHEMA_VERSION = "20260724_canonical_frozen_request_v10"
 AI_TARGET_ARBITRATION_SCHEMA_VERSION = "20260717_target_fingerprint_authority_v6"
-AI_PROMPT_CONTRACT_VERSION = "20260724_python_owned_identity_v11"
+AI_PROMPT_CONTRACT_VERSION = "20260724_canonical_frozen_request_v12"
 AI_ROLE_CONTRACT_VERSION = "20260724_python_bound_roles_v3"
-AI_REQUEST_IDENTITY_VERSION = "20260724_ai_request_identity_v2"
+AI_REQUEST_IDENTITY_VERSION = "20260724_ai_request_identity_v3"
 AI_IDENTITY_CANONICALIZATION_VERSION = "20260724_canonical_json_ticks_v1"
+
+from pipeline_integrity import (
+    CandidateIdentityError,
+    FrozenRequestMutationError,
+    RequestIdentityError,
+)
+from structured_models import (
+    ADJUDICATOR_VERDICTS,
+    CRITIC_VERDICTS,
+    HISTORICAL_EVIDENCE_STATES,
+    QUALITATIVE_VETO_CODES,
+)
 
 DECISION_APPROVE = "APPROVE"
 DECISION_REJECT = "REJECT"
@@ -41,15 +53,13 @@ TRADING_RESPONSE_QUALITIES = TRADING_DECISION_QUALITY_TIERS
 # They are research diagnostics only and have no direct positive or negative
 # trade authority. Only an enumerated, evidence-backed qualitative veto may
 # remove authority.
-LLM_VETO_CODES = {
-    "ai_veto_missing_mandatory_evidence",
-    "ai_veto_structural_contradiction",
-    "ai_veto_sequence_contradiction",
-    "ai_veto_target_arbitration_incoherent",
-    "ai_veto_execution_plan_mismatch",
-    "ai_veto_prior_override_unsupported",
-    "ai_veto_data_integrity_failure",
-}
+#
+# The vocabulary itself now lives in ``structured_models`` so the strict
+# provider schema, the prompts, this validator, the critic/adjudicator
+# validators, the cache, and the deterministic harness all constrain the same
+# set.  Keeping a second literal copy here is what allowed a schema-valid
+# response to fail ``critic_objection_code_unknown`` downstream.
+LLM_VETO_CODES = frozenset(QUALITATIVE_VETO_CODES)
 MANDATORY_ASSESSMENT_FIELDS = (
     "request_id",
     "request_identity_hash",
@@ -326,6 +336,9 @@ def _build_ai_request_identity_from_frozen_candidates(
         "identity_schema_version": AI_REQUEST_IDENTITY_VERSION,
         "canonicalization_version": AI_IDENTITY_CANONICALIZATION_VERSION,
         "request_id": str(payload.get("id") or ""),
+        "session_id": str(payload.get("session_id") or ""),
+        "request_nonce": str(payload.get("request_nonce") or ""),
+        "contract_manifest_hash": str(payload.get("contract_manifest_hash") or ""),
         "request_created_sim_time": int(payload.get("request_created_sim_time") or 0),
         # Persisted for diagnostics, deliberately excluded from the identity
         # hash because retries and offline replay have different wall clocks.
@@ -368,6 +381,9 @@ def _build_ai_request_identity_from_frozen_candidates(
         name
         for name in (
             "request_id",
+            "session_id",
+            "request_nonce",
+            "contract_manifest_hash",
             "request_created_sim_time",
             "request_created_wall_time",
             "symbol",
@@ -419,13 +435,37 @@ class FrozenAIRequest:
     def thaw_payload(self) -> dict[str, Any]:
         return json.loads(self.payload_json)
 
-    def assert_unchanged(self, payload: Mapping[str, Any]) -> None:
+    def assert_unchanged(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        stage: str = "post_freeze_integrity",
+        provider_call_attempted: bool = False,
+        http_request_sent: bool = False,
+    ) -> None:
         candidates = payload.get("candidates")
         if not isinstance(candidates, list):
-            raise AssertionError("frozen_request_candidates_missing")
+            raise CandidateIdentityError(
+                "frozen_request_candidates_missing",
+                stage=stage,
+                provider_call_attempted=provider_call_attempted,
+                http_request_sent=http_request_sent,
+            )
         actual_candidate_json = tuple(_canonical_json(candidate) for candidate in candidates)
         if actual_candidate_json != self.candidate_json:
-            raise AssertionError("frozen_request_candidate_mutation")
+            raise FrozenRequestMutationError(
+                "frozen_request_candidate_mutation",
+                stage=stage,
+                provider_call_attempted=provider_call_attempted,
+                http_request_sent=http_request_sent,
+            )
+        if _canonical_json(dict(payload)) != self.payload_json:
+            raise FrozenRequestMutationError(
+                "frozen_request_payload_mutation",
+                stage=stage,
+                provider_call_attempted=provider_call_attempted,
+                http_request_sent=http_request_sent,
+            )
         rebuilt = _build_ai_request_identity_from_frozen_candidates(
             payload,
             frozen_candidates=candidates,
@@ -435,11 +475,21 @@ class FrozenAIRequest:
             retrieval_policy_version=self.retrieval_policy_version,
         )
         if rebuilt["request_identity_hash"] != self.request_identity_hash:
-            raise AssertionError("frozen_request_identity_mutation")
+            raise RequestIdentityError(
+                "frozen_request_identity_mutation",
+                stage=stage,
+                provider_call_attempted=provider_call_attempted,
+                http_request_sent=http_request_sent,
+            )
         if rebuilt["ordered_candidate_identities"] != list(
             self.ordered_candidate_identities
         ):
-            raise AssertionError("frozen_request_candidate_order_mutation")
+            raise CandidateIdentityError(
+                "frozen_request_candidate_order_mutation",
+                stage=stage,
+                provider_call_attempted=provider_call_attempted,
+                http_request_sent=http_request_sent,
+            )
 
 
 def freeze_ai_request(
@@ -584,12 +634,9 @@ def validate_candidate_assessment(
         invalid.append("evidence_refs")
     if str(assessment.get("confidence_band") or "").upper() not in {"LOW", "MEDIUM", "HIGH"}:
         invalid.append("confidence_band")
-    if str(assessment.get("historical_evidence_state") or "").upper() not in {
-        "SUPPORTIVE",
-        "MIXED",
-        "ADVERSE",
-        "INSUFFICIENT_SAMPLE",
-    }:
+    if str(assessment.get("historical_evidence_state") or "").upper() not in set(
+        HISTORICAL_EVIDENCE_STATES
+    ):
         invalid.append("historical_evidence_state")
     for name in SCORE_FIELDS:
         value = assessment.get(name)
