@@ -5885,7 +5885,11 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
         _inc_counter("hard_pre_gate_rejected")
         _inc_counter("ai_calls_skipped_by_hard_gate")
         if runtime_config.log_skipped_calls:
-            log(f"[ai_gate] hard_pre_gate_rejected reason={payload_reason} skipped_openai={AI_GATE_COUNTERS.get('ai_calls_skipped_by_hard_gate', 0)}")
+            log(
+                "[ai_gate] hard_pre_gate_rejected"
+                f" reason={payload_reason}"
+                f" skipped_provider_calls={AI_GATE_COUNTERS.get('ai_calls_skipped_by_hard_gate', 0)}"
+            )
         return Decision(
             allow=False,
             score=0.0,
@@ -5936,7 +5940,11 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
     _inc_counter("hard_pre_gate_rejected")
     _inc_counter("ai_calls_skipped_by_hard_gate")
     if runtime_config.log_skipped_calls:
-        log(f"[ai_gate] hard_pre_gate_rejected reason={code} skipped_openai={AI_GATE_COUNTERS.get('ai_calls_skipped_by_hard_gate', 0)}")
+        log(
+            "[ai_gate] hard_pre_gate_rejected"
+            f" reason={code}"
+            f" skipped_provider_calls={AI_GATE_COUNTERS.get('ai_calls_skipped_by_hard_gate', 0)}"
+        )
     return Decision(
         allow=False,
         score=0.0,
@@ -5958,11 +5966,34 @@ def hard_pre_gate(payload: Dict[str, Any], runtime_config: AIGateRuntimeConfig =
 
 
 def _hard_pretrade_decision(payload: Dict[str, Any], best_index: int) -> Decision | None:
+    request_id = str((payload or {}).get("id") or "")
     if not AI_CONFIG.hard_pre_gate_before_openai:
+        log(
+            "[hard_pre_gate]"
+            f" request_id={request_id}"
+            " enabled=false passed=skipped"
+        )
         return None
     decision = hard_pre_gate(payload, AI_CONFIG, best_index)
     if decision.allow and decision.decision_source == "hard_pre_gate_pass":
+        # The deterministic gate is what keeps an already-invalid candidate from
+        # consuming a transport slot.  A passing request is the only kind that
+        # is allowed to reach the provider, so the pass has to be as visible in
+        # the log as the reject already is.
+        log(
+            "[hard_pre_gate]"
+            f" request_id={request_id}"
+            f" candidate_index={best_index}"
+            " enabled=true passed=true provider_call_permitted=true"
+        )
         return None
+    log(
+        "[hard_pre_gate]"
+        f" request_id={request_id}"
+        f" candidate_index={best_index}"
+        " enabled=true passed=false provider_call_permitted=false"
+        f" decision_source={decision.decision_source}"
+    )
     return decision
 
 def _po3_state_name(value: Any) -> str:

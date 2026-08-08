@@ -39,6 +39,16 @@ PROVIDER_MODE_REMOTE = "REMOTE_API"
 PROVIDER_MODE_LOCAL = "LOCAL_OPENAI_COMPATIBLE"
 PROVIDER_MODE_UNAVAILABLE = "UNAVAILABLE"
 
+# Reserved, non-trading request id used by the structured-output capability
+# probe.  A local OpenAI-compatible server (including the Local AI Review
+# Bridge) uses it to answer the probe itself instead of consuming a real
+# review slot.  It is never a trading request id.
+PROVIDER_CAPABILITY_PROBE_ID = "provider_capability_probe"
+
+# Upper bound for the local ``/models`` reachability GET.  See
+# ``LocalOpenAICompatibleProvider._health_timeout_sec``.
+LOCAL_HEALTHCHECK_MAX_TIMEOUT_SEC = 30.0
+
 
 def _canonical_hash(value: Any) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
@@ -65,6 +75,36 @@ def _strict_json_object(text: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("structured_response_root_not_object")
     return value
+
+
+def _health_failure_reason(exc: Exception) -> str:
+    """Name why a local model listing failed, precisely.
+
+    ``HTTPError`` alone sent operators looking for a dead server when the real
+    cause was a rejected bearer key or an unroutable port.  Authentication,
+    authorisation, refused connection, and timeout are separate operator
+    actions and must be separate reasons.
+    """
+
+    if isinstance(exc, urllib.error.HTTPError):
+        status = int(getattr(exc, "code", 0) or 0)
+        if status == 401:
+            return f"authentication_failed:http_{status}"
+        if status == 403:
+            return f"permission_denied:http_{status}"
+        if status == 404:
+            return f"healthcheck_path_not_found:http_{status}"
+        return f"http_error:http_{status}"
+    if isinstance(exc, urllib.error.URLError):
+        inner = getattr(exc, "reason", None)
+        if isinstance(inner, TimeoutError):
+            return "unreachable:timeout"
+        if inner is None:
+            return "unreachable"
+        return "unreachable:" + type(inner).__name__
+    if isinstance(exc, TimeoutError):
+        return "unreachable:timeout"
+    return type(exc).__name__
 
 
 def endpoint_class(base_url: str) -> str:
@@ -806,12 +846,14 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                 f" deadline_contract_version={DEADLINE_CONTRACT_VERSION}"
             )
         attempt = 0
+        last_preflight: StructuredSchemaPreflight | None = None
         for model_index, model in enumerate(self._models_for_role(role)):
             preflight, circuit_key = self._prepare_schema(
                 response_schema=response_schema,
                 model=model,
                 request_metadata=request_metadata,
             )
+            last_preflight = preflight
             client = self._client_instance()
             transport_retries = 0
             schema_retries = 0
@@ -1054,7 +1096,9 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             "remote_provider_models_failed:" + " | ".join(errors),
             retryable=False,
             schema_name=response_schema.__name__,
-            schema_fingerprint=preflight.schema_fingerprint,
+            schema_fingerprint=(
+                last_preflight.schema_fingerprint if last_preflight is not None else ""
+            ),
             repair_attempted=any(":schema:" in error for error in errors),
             repair_result="failed",
         )
@@ -1175,14 +1219,27 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
     def _health_url(self) -> str:
         return urljoin(self.base_url.rstrip("/") + "/", self.healthcheck_path.lstrip("/"))
 
+    def _health_timeout_sec(self) -> float:
+        """A model-listing GET is not a generation call.
+
+        ``healthcheck`` is re-run while live requests are in flight, so binding
+        it to the full generation timeout (180s for the browser bridge) let one
+        unresponsive server consume an entire MT5 terminal window before the
+        gate could even decide the provider was unhealthy.  A loopback model
+        listing that cannot answer inside this bound is unhealthy by definition.
+        """
+
+        return max(1.0, min(float(self.timeout_sec), LOCAL_HEALTHCHECK_MAX_TIMEOUT_SEC))
+
     def _fetch_health(self) -> Any:
         headers = {"Accept": "application/json"}
         if self._api_key:
             headers["Authorization"] = "Bearer " + self._api_key
+        timeout_sec = self._health_timeout_sec()
         if self._health_fetcher is not None:
-            return self._health_fetcher(self._health_url(), headers, self.timeout_sec)
+            return self._health_fetcher(self._health_url(), headers, timeout_sec)
         request = urllib.request.Request(self._health_url(), headers=headers, method="GET")
-        with urllib.request.urlopen(request, timeout=self.timeout_sec) as response:
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             return _strict_json_object(response.read().decode("utf-8"))
 
     def healthcheck(self, *, probe_structured: bool = False) -> ProviderHealth:
@@ -1213,18 +1270,31 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                     result = self.generate_structured(
                         role="analyst",
                         system_prompt="Return exactly the requested JSON object. No prose.",
-                        evidence={"probe": "return ok=true"},
+                        # ``request_metadata`` never crosses the wire on the
+                        # chat-completions transport, so a server that has to
+                        # distinguish a non-trading capability probe from a real
+                        # decision request can only see the message bodies.  The
+                        # probe therefore identifies itself *inside* the evidence
+                        # as well, using the same reserved id.  This is probe-only
+                        # evidence; no authoritative request payload is affected.
+                        evidence={
+                            "request_id": PROVIDER_CAPABILITY_PROBE_ID,
+                            "non_trading": True,
+                            "probe": "return ok=true",
+                        },
                         response_schema=StructuredCapabilityProbe,
                         request_metadata={
-                            "request_id": "provider_capability_probe",
-                            "decision_schema_version": "provider_capability_probe",
-                            "prompt_contract_version": "provider_capability_probe",
+                            "request_id": PROVIDER_CAPABILITY_PROBE_ID,
+                            "decision_schema_version": PROVIDER_CAPABILITY_PROBE_ID,
+                            "prompt_contract_version": PROVIDER_CAPABILITY_PROBE_ID,
                             "non_trading": True,
                         },
                     )
                     structured = bool(getattr(result.parsed, "ok", False))
                     if not structured:
                         reason = "local_structured_output_probe_failed"
+                except ProviderCallError as exc:
+                    reason = "local_structured_output_probe_failed:" + exc.category
                 except Exception as exc:
                     reason = "local_structured_output_probe_failed:" + type(exc).__name__
             elif model_available:
@@ -1248,7 +1318,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                 model,
                 False,
                 False,
-                "local_healthcheck_failed:" + type(exc).__name__,
+                "local_healthcheck_failed:" + _health_failure_reason(exc),
             )
         self._last_health = health
         return health
@@ -1273,6 +1343,53 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
         transport_retries = 0
         schema_retries = 0
         unsupported: set[str] = set()
+        last_preflight: StructuredSchemaPreflight | None = None
+        # The absolute request deadline is owned by the caller and is never
+        # restarted here.  Local transports are not exempt from it: a loopback
+        # server that blocks on a human review can outlive the MT5 terminal
+        # window just as easily as a slow remote API, and a result that arrives
+        # after the deadline can never become authoritative.
+        deadline = request_metadata.get("deadline")
+        configured_timeout = float(request_metadata.get("timeout_sec") or self.timeout_sec)
+        request_id = str(request_metadata.get("request_id") or "")
+        if deadline is not None:
+            self._log(
+                "[provider_deadline]"
+                f" request_id={request_id}"
+                + deadline.as_log_fields()
+                + f" configured_provider_timeout_ms={int(configured_timeout * 1000)}"
+                f" deadline_contract_version={DEADLINE_CONTRACT_VERSION}"
+            )
+
+        def _deadline_stop(stage: str, attempt_number: int, extra: str = "") -> ProviderCallError:
+            self._log(
+                "[provider_deadline_exceeded]"
+                f" request_id={request_id}"
+                f" provider={self.provider_id}"
+                f" stage={stage}"
+                f" attempt={attempt_number}"
+                f" remaining_ms={deadline.remaining_ms()}"
+                f" min_attempt_ms={deadline.policy.min_attempt_ms}"
+                + extra
+                + f" late_result_action={LATE_RESULT_QUARANTINE}"
+            )
+            return ProviderCallError(
+                "PROVIDER_DEADLINE_EXCEEDED",
+                "insufficient_remaining_budget_for_provider_attempt:"
+                f"remaining_ms={deadline.remaining_ms()}",
+                retryable=False,
+                schema_name=response_schema.__name__,
+                schema_fingerprint=(
+                    last_preflight.schema_fingerprint if last_preflight is not None else ""
+                ),
+            )
+
+        # Fail before queueing on the single-slot transport semaphore when the
+        # budget is already spent; waiting for a slot we can never use only
+        # delays the fail-closed answer MT5 is waiting for.
+        if deadline is not None and not deadline.can_start_attempt():
+            self._record_failure()
+            raise _deadline_stop(STAGE_CONNECT, 0, " queued=false")
         with self._semaphore:
             for model_index, model in enumerate(self._models_for_role(role)):
                 preflight, circuit_key = self._prepare_schema(
@@ -1280,9 +1397,16 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                     model=model,
                     request_metadata=request_metadata,
                 )
+                last_preflight = preflight
                 client = self._client_instance()
                 for attempt in range(self.max_retries + 1):
                     kwargs: dict[str, Any] = {}
+                    # Serialized transports queue: time spent waiting for the
+                    # semaphore is deadline time already spent.  Re-check here so
+                    # a queued role call cannot start a request it cannot finish.
+                    if deadline is not None and not deadline.can_start_attempt():
+                        self._record_failure()
+                        raise _deadline_stop(STAGE_CONNECT, attempt, " queued=true")
                     try:
                         kwargs = {
                             "model": model,
@@ -1315,6 +1439,22 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                     "schema": preflight.schema,
                                 },
                             }
+                        # The SDK receives the *remaining* budget, never a fresh
+                        # relative timer.  Without this, a configured 180s local
+                        # timeout outlived a 165s Python response deadline and
+                        # left no margin to write an authoritative response.
+                        call_client = client
+                        effective_timeout = configured_timeout
+                        if deadline is not None:
+                            effective_timeout = deadline.provider_timeout_sec(configured_timeout)
+                        with_options = getattr(client, "with_options", None)
+                        if callable(with_options):
+                            try:
+                                call_client = with_options(
+                                    timeout=effective_timeout, max_retries=0
+                                )
+                            except TypeError:
+                                call_client = with_options(timeout=effective_timeout)
                         self._log(
                             "[provider_call_started]"
                             f" request_id={request_metadata.get('request_id', '')}"
@@ -1324,8 +1464,11 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             f" schema_fingerprint={preflight.schema_fingerprint[:16]}"
                             f" transport_retry={attempt}"
                             f" schema_repair={schema_retries}"
+                            f" sdk_timeout={effective_timeout:.3f}"
+                            " sdk_max_retries=0"
+                            f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
                         )
-                        response = client.chat.completions.create(**kwargs)
+                        response = call_client.chat.completions.create(**kwargs)
                         value = _extract_chat_value(response)
                         parsed = _schema_validate(response_schema, value)
                         elapsed = time.perf_counter() - started
@@ -1439,6 +1582,30 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             ) from exc
                         transport_retries += 1
                         errors.append(f"{model}:{failure.category}:{failure}")
+                        if deadline is not None and not deadline.can_start_attempt():
+                            # The remaining budget cannot safely complete another
+                            # attempt, so retries and model fallback stop here
+                            # regardless of what the configuration would allow.
+                            self._log(
+                                "[provider_deadline_exceeded]"
+                                f" request_id={request_id}"
+                                f" provider={self.provider_id}"
+                                f" stage={STAGE_RESPONSE_WAIT}"
+                                f" attempt={attempt}"
+                                f" remaining_ms={deadline.remaining_ms()}"
+                                f" error_category={failure.category}"
+                                f" late_result_action={LATE_RESULT_QUARANTINE}"
+                            )
+                            self._record_failure()
+                            raise ProviderCallError(
+                                "PROVIDER_DEADLINE_EXCEEDED",
+                                "local_provider_deadline_exceeded:" + " | ".join(errors),
+                                retryable=False,
+                                schema_name=preflight.schema_name,
+                                schema_fingerprint=preflight.schema_fingerprint,
+                                repair_attempted=schema_retries > 0,
+                                repair_result="failed" if schema_retries else "not_attempted",
+                            ) from exc
                         if not failure.retryable or attempt >= self.max_retries:
                             break
         self._record_failure()
@@ -1447,7 +1614,13 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
             "local_provider_models_failed:" + " | ".join(errors),
             retryable=False,
             schema_name=response_schema.__name__,
-            schema_fingerprint=preflight.schema_fingerprint,
+            # ``last_preflight`` stays None when no model is configured for the
+            # role.  Reporting an empty fingerprint is a correct fail-closed
+            # answer; an UnboundLocalError here used to mask a configuration
+            # defect as an unrelated Python crash.
+            schema_fingerprint=(
+                last_preflight.schema_fingerprint if last_preflight is not None else ""
+            ),
             repair_attempted=any(":schema:" in error for error in errors),
             repair_result="failed",
         )

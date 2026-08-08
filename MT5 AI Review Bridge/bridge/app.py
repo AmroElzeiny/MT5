@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import threading
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from .config import settings
+from .openai_compat import router as openai_router
+from .webapp import router as web_router
+from .folder_gateway import run as run_folder_gateway
+from .browser import browser_manager
+from .audit import log_event
+
+_stop = threading.Event()
+_folder_thread: threading.Thread | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _folder_thread
+    log_event("bridge_start", base_url=settings.base_url)
+    if settings.auto_open_browser:
+        browser_manager.start()
+    if settings.folder_gateway_enabled:
+        _folder_thread = threading.Thread(target=run_folder_gateway, args=(_stop,), daemon=True, name="folder-gateway")
+        _folder_thread.start()
+    yield
+    _stop.set()
+    log_event("bridge_stop")
+
+
+app = FastAPI(title="Local AI Review Bridge", version="1.0.0", lifespan=lifespan)
+app.include_router(openai_router, prefix="/v1")
+app.include_router(web_router)
+
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "base_url": settings.base_url,
+        "max_pending_jobs": settings.max_pending_jobs,
+        "hard_timeout_sec": settings.hard_timeout_sec,
+        "human_review_required": settings.require_human_review,
+        "browser": browser_manager.status(),
+    }

@@ -1,0 +1,10 @@
+.venv/
+.env
+state/browser_profile/
+state/*.sqlite3
+state/chats.json
+logs/*.jsonl
+folder_bus/requests/*.json
+folder_bus/responses/*.json
+__pycache__/
+*.pyc

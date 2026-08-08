@@ -1,0 +1,19 @@
+{
+  "request_id": "example_unique_id_001",
+  "chat_alias": "po3",
+  "timeout_sec": 180,
+  "system_prompt": "Return a strict JSON decision object.",
+  "input": {
+    "symbol": "EURUSD",
+    "candidate": "example"
+  },
+  "response_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["decision"],
+    "properties": {
+      "decision": {"type": "string", "enum": ["APPROVE", "REJECT", "ABSTAIN"]}
+    }
+  }
+}
