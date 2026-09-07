@@ -298,6 +298,7 @@ class BehaviourWindowScopeTests(unittest.TestCase):
         body = _function_body(self.risk, "_LoadRecentBehaviorTrades")
         self.assertIn("[behavior_window]", body)
         self.assertIn("skipped_other_runs=", body)
+        self.assertIn("behavior_window_log != g_po3_behavior_window_last_log", body)
 
     def test_scope_setter_exists_and_is_the_only_writer(self) -> None:
         setter = _function_body(self.risk, "PO3SetBehaviorRuntimeScope")

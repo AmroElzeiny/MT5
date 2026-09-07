@@ -1,9 +1,7 @@
-# Environment files - may carry live provider API keys.
-# Ignore every .env variant (including backups like .env.bak_*), then
-# re-allow only the two secret-free templates that are intentionally tracked.
+﻿# Environment files - may carry live provider API keys.
+# Ignore every .env variant, including templates (.env.example / .env.harness)
+# and backups (.env.bak_*).
 .env
 .env.*
 *.env
 *.env.*
-!.env.example
-!.env.harness

@@ -1,0 +1,32 @@
+{
+  "terminal": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\PO3_Codex\\MT5\\python\\.codex_validation\\approval_execution_20260907\\terminal",
+  "bus": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_APPROVAL_AUDIT_20260907",
+  "preset": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\0148BD5691B65B0F2157627A4231F3DE\\MQL5\\profiles\\Tester\\PO3_AIGate_ScannerEA.#USNDAQ100.M15.20260803_20260808.100.ini",
+  "symbols": [
+    "#Germany40",
+    "#Japan225",
+    "#US30",
+    "#USNDAQ100",
+    "#USSPX500",
+    "AUDJPY",
+    "AUDUSD",
+    "BITCOIN",
+    "CADCHF",
+    "CADJPY",
+    "CHFJPY",
+    "EURCAD",
+    "EURCHF",
+    "EURGBP",
+    "EURJPY",
+    "EURUSD",
+    "GBPCAD",
+    "GBPCHF",
+    "GBPJPY",
+    "GBPUSD",
+    "GOLD",
+    "SILVER",
+    "USDCAD",
+    "USDCHF",
+    "USDJPY"
+  ]
+}

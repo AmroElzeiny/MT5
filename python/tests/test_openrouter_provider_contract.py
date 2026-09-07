@@ -35,14 +35,18 @@ from ai_provider import (  # noqa: E402
     PROVIDER_MODE_OPENROUTER,
     PROVIDER_MODE_REMOTE,
     PROVIDER_MODES_TRADING,
+    model_response_matches_request,
 )
+
+
+LATEST_MODEL = "~deepseek/deepseek-v4-flash-latest"
 
 
 def _config(**env: str) -> AIGateRuntimeConfig:
     base = {
         "AI_PROVIDER_SELECT": "openrouter",
         "OPENROUTER_API_KEY": "test-key",
-        "OPENROUTER_MODEL": "z-ai/glm-5.3-flash",
+        "OPENROUTER_MODEL": LATEST_MODEL,
     }
     base.update(env)
     return AIGateRuntimeConfig.from_env(base)
@@ -52,9 +56,9 @@ def _provider(**kwargs) -> OpenRouterProvider:
     defaults = dict(
         base_url="https://openrouter.ai/api/v1",
         api_key="test-key",
-        analyst_model="z-ai/glm-5.3-flash",
-        critic_model="z-ai/glm-5.3-flash",
-        adjudicator_model="z-ai/glm-5.3-flash",
+        analyst_model=LATEST_MODEL,
+        critic_model=LATEST_MODEL,
+        adjudicator_model=LATEST_MODEL,
         fallback_models=(),
         healthcheck_path="/models",
         timeout_sec=900.0,
@@ -63,13 +67,13 @@ def _provider(**kwargs) -> OpenRouterProvider:
         temperature=0.15,
         top_p=0.85,
         seed=42,
-        enable_thinking=False,
-        reasoning_effort="low",
+        enable_thinking=True,
+        reasoning_effort="high",
         reasoning_token_reserve=24000,
         require_json_schema=True,
         require_structured_provider=True,
         allowed_providers=(),
-        parallelism=2,
+        parallelism=3,
         context_budget_tokens=131072,
         circuit_failure_threshold=3,
         circuit_cooldown_sec=60.0,
@@ -80,6 +84,18 @@ def _provider(**kwargs) -> OpenRouterProvider:
 
 
 class ProviderSelectionTests(unittest.TestCase):
+    def test_openrouter_defaults_select_the_latest_deepseek_model_with_reasoning(self):
+        cfg = AIGateRuntimeConfig.from_env(
+            {"AI_PROVIDER_SELECT": "openrouter", "OPENROUTER_API_KEY": "test-key"}
+        )
+        self.assertEqual(cfg.openrouter_model, LATEST_MODEL)
+        self.assertEqual(cfg.openrouter_analyst_model, LATEST_MODEL)
+        self.assertEqual(cfg.openrouter_critic_model, LATEST_MODEL)
+        self.assertEqual(cfg.openrouter_adjudicator_model, LATEST_MODEL)
+        self.assertTrue(cfg.openrouter_enable_thinking)
+        self.assertEqual(cfg.openrouter_reasoning_effort, "high")
+        self.assertEqual(cfg.openrouter_parallelism, 3)
+
     def test_legacy_switch_still_selects_the_same_providers(self):
         """Existing private .env files must keep working untouched."""
 
@@ -161,6 +177,119 @@ class OpenRouterWireContractTests(unittest.TestCase):
 
         body = _provider(enable_thinking=False)._wire_extra_body()
         self.assertEqual(body["reasoning"], {"enabled": False})
+
+    def test_latest_alias_accepts_only_its_concrete_dated_release(self):
+        self.assertTrue(model_response_matches_request(LATEST_MODEL, LATEST_MODEL))
+        self.assertTrue(
+            model_response_matches_request(
+                LATEST_MODEL, "deepseek/deepseek-v4-flash-0731"
+            )
+        )
+        self.assertFalse(
+            model_response_matches_request(
+                LATEST_MODEL, "deepseek/deepseek-v4-flash-vision-exp"
+            )
+        )
+        self.assertFalse(
+            model_response_matches_request(LATEST_MODEL, "openai/gpt-5.6-luna")
+        )
+
+    def test_openrouter_provider_enforces_latest_alias_identity(self):
+        provider = _provider()
+        self.assertTrue(
+            provider._response_model_allowed(
+                LATEST_MODEL, "deepseek/deepseek-v4-flash-0731"
+            )
+        )
+        self.assertFalse(
+            provider._response_model_allowed(LATEST_MODEL, "deepseek/deepseek-v4-pro")
+        )
+
+    @staticmethod
+    def _deployed_env_values():
+        values = {}
+        for raw in (ROOT / ".env").read_text(encoding="utf-8-sig").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.strip()
+        return values
+
+    def test_checked_in_runtime_env_pins_every_role_and_three_workers(self):
+        """The deployed OpenRouter block must be whole -- but only while it is
+        the selected transport.
+
+        This used to assert ``AI_PROVIDER_SELECT == "openrouter"`` outright, which
+        made a *deployment* choice into a test failure: selecting openai_remote on
+        2026-09-07 turned this red without anything being wrong.  The invariant the
+        test actually protects is "no half-configured OpenRouter deployment", so it
+        is now conditioned on OpenRouter being the selection.  The openai_remote
+        counterpart below keeps the other selection covered rather than untested.
+        """
+
+        values = self._deployed_env_values()
+        if values.get("AI_PROVIDER_SELECT") != PROVIDER_SELECT_OPENROUTER:
+            self.skipTest(
+                "deployed AI_PROVIDER_SELECT="
+                f"{values.get('AI_PROVIDER_SELECT')!r}; OpenRouter block is inert"
+            )
+        for key in (
+            "OPENROUTER_MODEL",
+            "OPENROUTER_ANALYST_MODEL",
+            "OPENROUTER_CRITIC_MODEL",
+            "OPENROUTER_ADJUDICATOR_MODEL",
+        ):
+            self.assertEqual(values.get(key), LATEST_MODEL)
+        self.assertEqual(values.get("OPENROUTER_ENABLE_THINKING"), "true")
+        self.assertEqual(values.get("OPENROUTER_REASONING_EFFORT"), "high")
+        self.assertGreaterEqual(int(values.get("OPENROUTER_PARALLELISM", "0")), 3)
+
+    def test_checked_in_runtime_env_is_a_usable_selection(self):
+        """Whatever is deployed must resolve to a usable provider selection.
+
+        Selection-agnostic on purpose: it is the assertion that survives every
+        future transport switch, where the two block-specific tests cannot.
+        """
+
+        values = self._deployed_env_values()
+        selection, error = resolve_provider_select(
+            values.get("AI_PROVIDER_SELECT"), values.get("AI_USE_REMOTE_API")
+        )
+        self.assertEqual(error, "")
+        self.assertIn(
+            selection,
+            (PROVIDER_SELECT_OPENAI, PROVIDER_SELECT_LOCAL, PROVIDER_SELECT_OPENROUTER),
+        )
+
+    def test_checked_in_runtime_env_openai_block_is_whole_when_selected(self):
+        """The openai_remote counterpart of the OpenRouter block test.
+
+        The model id is the field that actually breaks on a switch: the OpenRouter
+        ``~vendor/family-latest`` alias is not an api.openai.com model, so leaving it
+        in AI_GATE_MODEL would send an unroutable id to the Responses API.
+        """
+
+        values = self._deployed_env_values()
+        if values.get("AI_PROVIDER_SELECT") != PROVIDER_SELECT_OPENAI:
+            self.skipTest(
+                "deployed AI_PROVIDER_SELECT="
+                f"{values.get('AI_PROVIDER_SELECT')!r}; OpenAI block is inert"
+            )
+        model = values.get("AI_GATE_MODEL") or ""
+        self.assertTrue(model, "AI_GATE_MODEL must be set under openai_remote")
+        self.assertFalse(
+            model.startswith("~"),
+            f"AI_GATE_MODEL={model!r} is an OpenRouter latest-alias, not an OpenAI id",
+        )
+        self.assertNotIn("/", model, f"AI_GATE_MODEL={model!r} carries a routed vendor prefix")
+        self.assertTrue(values.get("OPENAI_API_KEY"), "OPENAI_API_KEY must be set")
+        for name in (values.get("AI_GATE_FALLBACK_MODELS") or "").split(","):
+            name = name.strip()
+            if name:
+                self.assertFalse(
+                    name.startswith("~") or "/" in name,
+                    f"fallback {name!r} is not an OpenAI model id",
+                )
 
     def test_thinking_on_sends_effort_and_widens_the_budget(self):
         provider = _provider(enable_thinking=True, reasoning_effort="high", reasoning_token_reserve=24000)

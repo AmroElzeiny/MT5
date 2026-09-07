@@ -1,0 +1,44 @@
+{
+  "platform"    :"mt5",
+  "program_type":"script",
+  "copyright"   :"Copyright 2014, Dave Hoskins",
+  "link"        :"https:\/\/www.shadertoy.com\/view\/4sjSW1",
+  "version"     :"1.00",
+  "description" :"Binary subdivision finds the surface really well with this fractal",
+  "optimize"    :"1",
+  "fpzerocheck" :"1",
+  "tester_no_cache":"0",
+  "tester_everytick_calculate":"0",
+  "unicode_character_set":"0",
+  "static_libraries":"0",
+
+  "script":
+  {
+    "flags":"0"
+  },
+
+  "files":
+  [
+    {
+      "path":".\\Remnant 3D.mq5",
+      "compile":"true",
+      "relative_to_project":"true"
+    }
+  ],
+
+  "resources":
+  [
+    {
+      "type":"0",
+      "path":".\\Shaders\\pixel.hlsl",
+      "name":"",
+      "relative_to_project":"true"
+    },
+    {
+      "type":"0",
+      "path":".\\Shaders\\vertex.hlsl",
+      "name":"",
+      "relative_to_project":"true"
+    }
+  ]
+}

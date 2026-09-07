@@ -48,6 +48,7 @@ from ai_provider import (
     RemoteAPIProvider,
     UnavailableProvider,
     endpoint_class,
+    model_response_matches_request,
 )
 
 from architecture_contracts import (
@@ -380,6 +381,10 @@ class AIGateRuntimeConfig:
     flex_unavailable_retry_enable: bool
     flex_unavailable_max_retries: int
     flex_unavailable_cooldown_sec: float
+    admission_retry_enable: bool
+    admission_max_retries: int
+    admission_backoff_initial_sec: float
+    admission_backoff_max_sec: float
     panel_shortcircuit_enable: bool
     panel_shortcircuit_margin: float
     require_runtime_inputs_live: bool
@@ -485,8 +490,12 @@ class AIGateRuntimeConfig:
         )
         local_model = _env_lookup(env, ("LOCAL_AI_MODEL",), "qwen3.5-9b") or "qwen3.5-9b"
         openrouter_model = (
-            _env_lookup(env, ("OPENROUTER_MODEL",), "z-ai/glm-5.3-flash")
-            or "z-ai/glm-5.3-flash"
+            _env_lookup(
+                env,
+                ("OPENROUTER_MODEL",),
+                "~deepseek/deepseek-v4-flash-latest",
+            )
+            or "~deepseek/deepseek-v4-flash-latest"
         )
         if is_local:
             selected_model = _env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model
@@ -563,14 +572,14 @@ class AIGateRuntimeConfig:
             or "https://openrouter.ai/api/v1"
         ) if is_openrouter else "https://openrouter.ai/api/v1"
         openrouter_enable_thinking = _env_bool(
-            env, "OPENROUTER_ENABLE_THINKING", False, warnings, safe_default=False
+            env, "OPENROUTER_ENABLE_THINKING", True, warnings, safe_default=True
         )
         openrouter_reasoning_effort = _env_lookup(
-            env, ("OPENROUTER_REASONING_EFFORT",), "low"
+            env, ("OPENROUTER_REASONING_EFFORT",), "high"
         ).strip().lower()
         if openrouter_reasoning_effort not in {"", "minimal", "low", "medium", "high", "xhigh"}:
             warnings.append("OPENROUTER_REASONING_EFFORT=invalid")
-            openrouter_reasoning_effort = "low"
+            openrouter_reasoning_effort = "high"
 
         if use_remote_api is True:
             if not str(env.get("OPENAI_API_KEY") or "").strip():
@@ -611,7 +620,7 @@ class AIGateRuntimeConfig:
         local_parallelism = _env_int(env, "LOCAL_AI_PARALLELISM", 1, warnings, min_value=1, max_value=3)
 
         openrouter_parallelism = _env_int(
-            env, "OPENROUTER_PARALLELISM", 2, warnings, min_value=1, max_value=8
+            env, "OPENROUTER_PARALLELISM", 3, warnings, min_value=1, max_value=8
         )
         openrouter_fallback_models: list[str] = []
         for item in _env_lookup(env, ("OPENROUTER_FALLBACK_MODELS",), "").split(","):
@@ -678,6 +687,16 @@ class AIGateRuntimeConfig:
             # Slept inside the request budget, so a longer cooldown buys the
             # model less time, not more.  Not scaled.
             flex_unavailable_cooldown_sec=_env_float(env, "AI_FLEX_UNAVAILABLE_COOLDOWN_SEC", 30.0, warnings, min_value=0.0, max_value=3600.0),
+            # Retries spent ONLY on provider refusals proven not to have been
+            # admitted (HTTP 429/503 capacity or rate-limit).  On 2026-09-07 nine
+            # of thirty-three live decisions -- 27% -- died on a single 429 while
+            # roughly 44 minutes of the request budget was still unspent, which
+            # the workflow contract classifies as an infrastructure rejection on
+            # healthy infrastructure.  Ambiguous failures keep max_retries=0.
+            admission_retry_enable=_env_bool(env, "AI_ADMISSION_RETRY_ENABLE", True, warnings, safe_default=True),
+            admission_max_retries=_env_int(env, "AI_ADMISSION_MAX_RETRIES", 3, warnings, min_value=0, max_value=10),
+            admission_backoff_initial_sec=_env_float(env, "AI_ADMISSION_BACKOFF_INITIAL_SEC", 2.0, warnings, min_value=0.0, max_value=120.0),
+            admission_backoff_max_sec=_env_float(env, "AI_ADMISSION_BACKOFF_MAX_SEC", 30.0, warnings, min_value=0.0, max_value=600.0),
             # The critic/adjudicator panel only ever demotes, so it cannot
             # rescue an analyst verdict that already cannot approve.  Measured
             # over 1687 live candidates the median score was 5.80 against a 6.80
@@ -844,6 +863,10 @@ class AIGateRuntimeConfig:
             "flex_unavailable_retry_enable": self.flex_unavailable_retry_enable,
             "flex_unavailable_max_retries": self.flex_unavailable_max_retries,
             "flex_unavailable_cooldown_sec": self.flex_unavailable_cooldown_sec,
+            "admission_retry_enable": self.admission_retry_enable,
+            "admission_max_retries": self.admission_max_retries,
+            "admission_backoff_initial_sec": self.admission_backoff_initial_sec,
+            "admission_backoff_max_sec": self.admission_backoff_max_sec,
             "panel_shortcircuit_enable": self.panel_shortcircuit_enable,
             "panel_shortcircuit_margin": self.panel_shortcircuit_margin,
             "require_runtime_inputs_live": self.require_runtime_inputs_live,
@@ -991,6 +1014,7 @@ AI_PROVIDER: AIProvider | None = None
 SHADOW_AI_PROVIDER: AIProvider | None = None
 _PROVIDER_STARTUP_HEALTH: Dict[str, Any] = {}
 _PROVIDER_HEALTH_CHECKED_MONOTONIC = 0.0
+_PROVIDER_HEALTH_LOCK = Lock()
 _TRADE_MEMORY_STORE: TradeMemoryStore | None = None
 _TRADE_MEMORY_LOCK = Lock()
 _SHADOW_PROVIDER_LOCK = Lock()
@@ -1068,6 +1092,10 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
             flex_unavailable_retry_enable=cfg.flex_unavailable_retry_enable,
             flex_unavailable_max_retries=cfg.flex_unavailable_max_retries,
             flex_unavailable_cooldown_sec=cfg.flex_unavailable_cooldown_sec,
+            admission_retry_enable=cfg.admission_retry_enable,
+            admission_max_retries=cfg.admission_max_retries,
+            admission_backoff_initial_sec=cfg.admission_backoff_initial_sec,
+            admission_backoff_max_sec=cfg.admission_backoff_max_sec,
             circuit_failure_threshold=cfg.provider_circuit_failure_threshold,
             circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
             log=log,
@@ -1153,27 +1181,35 @@ def _shadow_provider() -> AIProvider:
 
 def _refresh_provider_health(*, force: bool = False) -> Dict[str, Any]:
     global _PROVIDER_STARTUP_HEALTH, _PROVIDER_HEALTH_CHECKED_MONOTONIC
-    now = time.monotonic()
-    if not force and _PROVIDER_STARTUP_HEALTH and now - _PROVIDER_HEALTH_CHECKED_MONOTONIC < 60.0:
+    with _PROVIDER_HEALTH_LOCK:
+        now = time.monotonic()
+        if (
+            not force
+            and _PROVIDER_STARTUP_HEALTH
+            and now - _PROVIDER_HEALTH_CHECKED_MONOTONIC < 60.0
+        ):
+            return dict(_PROVIDER_STARTUP_HEALTH)
+        provider = _provider()
+        # OpenRouter decides structured-output enforcement per endpoint, not per
+        # model, so a listing GET alone cannot tell whether the strict schema will
+        # actually be honoured.  It is probed for the same reason the local server
+        # is: the answer is not knowable from configuration.  One shared lock is
+        # essential here: when several request workers cross the TTL together,
+        # duplicate probes can reset one another's connections and turn a healthy
+        # provider into a false fail-closed rejection.
+        probe = provider.provider_mode in {PROVIDER_MODE_LOCAL, PROVIDER_MODE_OPENROUTER}
+        health = provider.healthcheck(probe_structured=probe)
+        _PROVIDER_STARTUP_HEALTH = asdict(health)
+        _PROVIDER_HEALTH_CHECKED_MONOTONIC = time.monotonic()
+        log(
+            "[ai_provider_health]"
+            f" healthy={str(health.healthy).lower()} provider_mode={health.provider_mode}"
+            f" provider_id={health.provider_id} endpoint_class={health.endpoint_class}"
+            f" model_id={health.model_id} model_available={str(health.model_available).lower()}"
+            f" structured_output_available={str(health.structured_output_available).lower()}"
+            f" reason={health.reason or 'none'}"
+        )
         return dict(_PROVIDER_STARTUP_HEALTH)
-    provider = _provider()
-    # OpenRouter decides structured-output enforcement per endpoint, not per
-    # model, so a listing GET alone cannot tell whether the strict schema will
-    # actually be honoured.  It is probed for the same reason the local server
-    # is: the answer is not knowable from configuration.
-    probe = provider.provider_mode in {PROVIDER_MODE_LOCAL, PROVIDER_MODE_OPENROUTER}
-    health = provider.healthcheck(probe_structured=probe)
-    _PROVIDER_STARTUP_HEALTH = asdict(health)
-    _PROVIDER_HEALTH_CHECKED_MONOTONIC = now
-    log(
-        "[ai_provider_health]"
-        f" healthy={str(health.healthy).lower()} provider_mode={health.provider_mode}"
-        f" provider_id={health.provider_id} endpoint_class={health.endpoint_class}"
-        f" model_id={health.model_id} model_available={str(health.model_available).lower()}"
-        f" structured_output_available={str(health.structured_output_available).lower()}"
-        f" reason={health.reason or 'none'}"
-    )
-    return dict(_PROVIDER_STARTUP_HEALTH)
 
 
 def _run_structured_schema_preflight() -> Dict[str, Any]:
@@ -1835,6 +1871,26 @@ def _log_ai_runtime_config_once() -> None:
 
 
 def _effective_service_tier(payload: Dict[str, Any] | None) -> tuple[str, bool, str]:
+    # A service tier is an OpenAI Responses-API concept.  It exists only on
+    # RemoteAPIProvider (ai_provider.py:909), only that transport puts it on the
+    # wire, and every other provider mode has no such notion at all.
+    #
+    # Resolved here rather than at each caller because this is the single origin
+    # of the value: seven ledger call sites read it from this one function, and
+    # only two of them re-guarded it by provider mode.  The five that did not
+    # would hand "flex" to openai_usage_logger, where
+    # SERVICE_TIER_MULTIPLIER["flex"] is 0.5 -- so a switch to a non-OpenAI
+    # transport would have HALVED every recorded cost.  That is not a mislabel,
+    # it is the same silent understatement openai_usage_logger was fixed for.
+    #
+    # "" (not "auto") is deliberate: it is mapped to a 1.0 multiplier and to
+    # tier_known=True, and _apply_service_tier_kwargs omits a falsy tier from the
+    # request kwargs instead of sending one.  The empty disabled_reason is also
+    # deliberate -- that field reports flex being *refused* for a live request,
+    # which is an event worth a log line, whereas "this transport has no tiers"
+    # is a constant and would print on every request.
+    if AI_CONFIG.provider_mode != PROVIDER_MODE_REMOTE:
+        return "", False, ""
     requested = "flex" if AI_CONFIG.use_flex else AI_CONFIG.service_tier
     requested = (requested or "auto").lower()
     if _is_live_payload(payload) and requested == "flex":
@@ -1875,10 +1931,34 @@ def _deadline_policy_for_payload(payload: Dict[str, Any] | None) -> DeadlinePoli
 def _start_request_deadline(payload: Dict[str, Any] | None) -> RequestDeadline:
     """One absolute monotonic deadline per request identity."""
 
+    now = time.monotonic()
+    start = now
+    # MQL publishes GetTickCount64() in milliseconds.  On Windows it has the
+    # same boot-relative clock as Python's monotonic timer.  Live requests must
+    # therefore spend their deadline while waiting in the file bus as well as
+    # while a worker is actively processing them.  Starting the clock only
+    # after a worker became free let an old queued request consume a fresh full
+    # provider budget even though MT5 had already stopped waiting for it.
+    # Offline tester records are deliberately excluded because they are
+    # designed to be processed after the tester has finished.
+    if _is_live_payload(payload):
+        try:
+            published_ms = float(
+                (payload or {}).get("request_created_wall_time") or 0.0
+            )
+        except (TypeError, ValueError):
+            published_ms = 0.0
+        published_start = published_ms / 1000.0
+        # A value ahead of this boot's monotonic clock belongs to another clock
+        # domain (or a previous boot), so it cannot safely backdate a deadline.
+        if published_start > 0.0 and published_start <= now + 5.0:
+            start = published_start
+
     return REQUEST_TERMINAL_REGISTRY.register_deadline(
         RequestDeadline.start(
             str((payload or {}).get("id") or ""),
             _deadline_policy_for_payload(payload),
+            now=start,
         )
     )
 
@@ -3669,19 +3749,33 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 resp = provider_result.raw_response
                 out = provider_result.parsed
                 model_name = provider_result.actual_model
-                budget = (
-                    AI_CONFIG.max_output_tokens
-                    if provider_result.provider_mode == PROVIDER_MODE_REMOTE
-                    else AI_CONFIG.local_max_output_tokens
+                if provider_result.provider_mode == PROVIDER_MODE_REMOTE:
+                    budget = AI_CONFIG.max_output_tokens
+                    reasoning_effort = (
+                        (_reasoning_config_for_model(model_name) or {}).get("effort", "")
+                    )
+                elif provider_result.provider_mode == PROVIDER_MODE_OPENROUTER:
+                    budget = AI_CONFIG.openrouter_max_output_tokens
+                    reasoning_effort = (
+                        AI_CONFIG.openrouter_reasoning_effort
+                        if AI_CONFIG.openrouter_enable_thinking
+                        else "none"
+                    )
+                else:
+                    budget = AI_CONFIG.local_max_output_tokens
+                    reasoning_effort = ""
+                reasoning = (
+                    {"effort": reasoning_effort}
+                    if reasoning_effort and reasoning_effort != "none"
+                    else None
                 )
-                reasoning = _reasoning_config_for_model(model_name) if provider_result.provider_mode == PROVIDER_MODE_REMOTE else None
                 log_ai_usage(
                     source="ai_gate",
                     operation="trade_gate.provider_neutral_analyst",
                     model=model_name,
                     response=resp,
                     request_id=request_id,
-                    reasoning_effort=reasoning.get("effort", "") if reasoning else "",
+                    reasoning_effort=reasoning_effort,
                     max_output_tokens=budget,
                     provider_mode=provider_result.provider_mode,
                     provider_id=provider_result.provider_id,
@@ -3702,7 +3796,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     request_id=request_id,
                     decision_source="ai_provider_full_structured",
                     model=model_name,
-                    reasoning_effort=reasoning.get("effort", "") if reasoning else "",
+                    reasoning_effort=reasoning_effort,
                     service_tier=service_tier,
                     prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
                     cache_status="provider_call",
@@ -3836,9 +3930,20 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         )
                     repaired_response = repaired_result.raw_response
                     repaired_model = repaired_result.actual_model
-                    repaired_reasoning = (
-                        _reasoning_config_for_model(repaired_model)
+                    repaired_reasoning_effort = (
+                        (_reasoning_config_for_model(repaired_model) or {}).get("effort", "")
                         if repaired_result.provider_mode == PROVIDER_MODE_REMOTE
+                        else AI_CONFIG.openrouter_reasoning_effort
+                        if repaired_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                        and AI_CONFIG.openrouter_enable_thinking
+                        else "none"
+                        if repaired_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                        else ""
+                    )
+                    repaired_reasoning = (
+                        {"effort": repaired_reasoning_effort}
+                        if repaired_reasoning_effort
+                        and repaired_reasoning_effort != "none"
                         else None
                     )
                     log_ai_usage(
@@ -3847,7 +3952,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         model=repaired_model,
                         response=repaired_response,
                         request_id=request_id,
-                        reasoning_effort=repaired_reasoning.get("effort", "") if repaired_reasoning else "",
+                        reasoning_effort=repaired_reasoning_effort,
                         max_output_tokens=budget,
                         provider_mode=repaired_result.provider_mode,
                         provider_id=repaired_result.provider_id,
@@ -3996,9 +4101,20 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                                 )
                             repaired_response = repaired_result.raw_response
                             repaired_model = repaired_result.actual_model
-                            repaired_reasoning = (
-                                _reasoning_config_for_model(repaired_model)
+                            repaired_reasoning_effort = (
+                                (_reasoning_config_for_model(repaired_model) or {}).get("effort", "")
                                 if repaired_result.provider_mode == PROVIDER_MODE_REMOTE
+                                else AI_CONFIG.openrouter_reasoning_effort
+                                if repaired_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                                and AI_CONFIG.openrouter_enable_thinking
+                                else "none"
+                                if repaired_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                                else ""
+                            )
+                            repaired_reasoning = (
+                                {"effort": repaired_reasoning_effort}
+                                if repaired_reasoning_effort
+                                and repaired_reasoning_effort != "none"
                                 else None
                             )
                             log_ai_usage(
@@ -4007,7 +4123,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                                 model=repaired_model,
                                 response=repaired_response,
                                 request_id=request_id,
-                                reasoning_effort=repaired_reasoning.get("effort", "") if repaired_reasoning else "",
+                                reasoning_effort=repaired_reasoning_effort,
                                 max_output_tokens=budget,
                                 provider_mode=repaired_result.provider_mode,
                                 provider_id=repaired_result.provider_id,
@@ -4615,11 +4731,18 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         reasoning_effort=(
                             AI_CONFIG.reasoning_effort
                             if role_result.provider_mode == PROVIDER_MODE_REMOTE
+                            else AI_CONFIG.openrouter_reasoning_effort
+                            if role_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                            and AI_CONFIG.openrouter_enable_thinking
+                            else "none"
+                            if role_result.provider_mode == PROVIDER_MODE_OPENROUTER
                             else ""
                         ),
                         max_output_tokens=(
                             AI_CONFIG.max_output_tokens
                             if role_result.provider_mode == PROVIDER_MODE_REMOTE
+                            else AI_CONFIG.openrouter_max_output_tokens
+                            if role_result.provider_mode == PROVIDER_MODE_OPENROUTER
                             else AI_CONFIG.local_max_output_tokens
                         ),
                         provider_mode=role_result.provider_mode,
@@ -6229,7 +6352,11 @@ def _cached_decision_schema_miss_reason(
             for value in provider_identity.get("configured_model_ids") or []
             if str(value)
         }
-        if str(dec_raw.get("actual_model_id") or "") not in allowed_models:
+        actual_model_id = str(dec_raw.get("actual_model_id") or "")
+        if not any(
+            model_response_matches_request(requested_model, actual_model_id)
+            for requested_model in allowed_models
+        ):
             return "cache_miss_due_to_provider_identity"
         if str(dec_raw.get("generation_settings_hash") or "") != str(
             current_fields.get("generation_settings_hash") or ""
@@ -9430,6 +9557,18 @@ def effective_worker_count(configured_workers: int, workflow_source: str) -> int
     return workers
 
 
+def available_request_claim_slots(worker_count: int, in_flight_count: int) -> int:
+    """Return how many file-bus requests may be claimed right now.
+
+    ThreadPoolExecutor accepts an unbounded number of queued futures.  Claiming
+    a request before a worker is available removes it from MT5's visible input
+    queue and starts a lock lease even though no work has begun.  Bound claims
+    to the actual worker count so every claimed request is actively serviced.
+    """
+
+    return max(0, max(1, int(worker_count)) - max(0, int(in_flight_count)))
+
+
 def _requires_serial_worker(req_path: Path) -> bool:
     """True when this request must be processed with one effective worker."""
 
@@ -11874,9 +12013,32 @@ def main() -> None:
             request_pool.shutdown(wait=True)
             _log_file_bus_summary()
         return
+    active_request_futures: set[Any] = set()
     while True:
         try:
+            completed_futures = {
+                future for future in active_request_futures if future.done()
+            }
+            for future in completed_futures:
+                active_request_futures.discard(future)
+                # _process_claimed_request contains its own failure boundary;
+                # still observe the result so an unexpected worker exception
+                # can never disappear silently inside ThreadPoolExecutor.
+                try:
+                    future.result()
+                except Exception as exc:
+                    log(
+                        "[worker_failure]"
+                        f" exception_type={type(exc).__name__}"
+                        f" exception_message={_ascii_compact(str(exc))}"
+                    )
+            claim_slots = available_request_claim_slots(
+                worker_count,
+                len(active_request_futures),
+            )
             for req_path in sorted(req_dir.glob("*.json")):
+                if claim_slots <= 0:
+                    break
                 stable, stability_reason = _stable_input_status(req_path)
                 if not stable:
                     _quarantine_unstable_input_if_terminal(
@@ -11908,6 +12070,8 @@ def main() -> None:
                     stale_dir,
                     lock_path,
                 )
+                active_request_futures.add(future)
+                claim_slots -= 1
                 if serialize:
                     # TESTER_AI_LIVE_WAIT_DEBUG runs one effective worker.  The
                     # MT5 terminal blocks on a single request at a time, so any
@@ -11917,6 +12081,7 @@ def main() -> None:
                     # reliable here, so serialization is the safe architecture.
                     # Production and live-forward concurrency are unaffected.
                     future.result()
+                    active_request_futures.discard(future)
             for job_path in sorted(analytics_jobs_dir.glob("*.json")):
                 if job_path.name.endswith(".tmp") or not _is_stable_input_file(job_path):
                     continue

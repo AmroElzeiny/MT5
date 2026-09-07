@@ -47,6 +47,24 @@ PRICE_PER_MILLION: Dict[str, Dict[str, float]] = {
     # the ``openai/`` vendor prefix onto this row, so an aggregator that exposes
     # effort in the model id cannot reopen the unpriced hole.
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "output": 1.20},
+    # The OpenRouter gate model of 2026-09-07.  The gate was returned to
+    # AI_PROVIDER_SELECT=openai_remote later the same day, so this row is not
+    # on the live path today.  Kept priced: the artifacts recorded while it WAS
+    # live are still costed from this table, and the switch back is one line.
+    # Added with the switch rather than after it, because an unpriced model on a
+    # billed transport is the defect the two comments above record twice.
+    #
+    # This id is an always-latest ALIAS: it resolves per call into whichever
+    # DeepSeek V4 Flash model is current, and OpenRouter publishes no endpoints
+    # under the alias itself.  The ledger records the concrete id returned by
+    # OpenRouter, and ``_canonical_model`` folds that dated numeric release back
+    # onto this row.  It must be an upper bound over what the
+    # alias can route to rather than the alias's own published headline rate:
+    # with OPENROUTER_ALLOWED_PROVIDERS empty, any eligible endpoint can serve
+    # the call, and those ranged $0.05-$0.44 in / $0.16-$1.32 out when measured
+    # on 2026-09-07.  Field-wise maximum over all 29 published endpoint rows, so
+    # an unidentified route over-reports rather than under-reports.
+    "~deepseek/deepseek-v4-flash-latest": {"input": 0.44, "cached_input": 0.07, "output": 1.32},
 }
 
 
@@ -100,6 +118,13 @@ VENDOR_MODEL_PREFIXES = ("openai/",)
 # two ids, only one of which had a rate.
 _SNAPSHOT_DATE_SUFFIX = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
+# OpenRouter's latest alias returns a compact numeric release such as ``-0731``
+# in response.model.  Map only this exact vendor/family and only a numeric
+# suffix; a vision or pro sibling must never inherit this model's rates.
+OPENROUTER_LATEST_RELEASE_ALIASES = {
+    "deepseek/deepseek-v4-flash": "~deepseek/deepseek-v4-flash-latest",
+}
+
 
 # Exact per-endpoint rates, keyed ``(model, routed_endpoint_lowercased)``.
 # OpenRouter returns the endpoint that actually served the request as a
@@ -119,6 +144,18 @@ PRICE_PER_MILLION_BY_ENDPOINT: Dict[tuple, Dict[str, float]] = {
     ("z-ai/glm-5.3-flash", "reka"): {"input": 0.150, "cached_input": 0.030, "output": 0.500},
     ("z-ai/glm-5.3-flash", "sail research"): {"input": 0.150, "cached_input": 0.030, "output": 0.500},
     ("z-ai/glm-5.3-flash", "coreweave"): {"input": 0.150, "cached_input": 0.050, "output": 0.500},
+    # ``~deepseek/deepseek-v4-flash-latest`` -- the cheapest endpoints that
+    # advertise structured_outputs, i.e. the ones OpenRouter can actually pick
+    # under provider.require_parameters=true.  Published 2026-09-07 by
+    # /api/v1/models/deepseek/deepseek-v4-flash-0731/endpoints, which is what the
+    # alias resolved to.  The DeepInfra row is additionally confirmed against a
+    # real completion: 12 prompt + 58 completion tokens billed $0.00001116, which
+    # is exactly 12*0.06 + 58*0.18 per million.
+    ("~deepseek/deepseek-v4-flash-latest", "openinference"): {"input": 0.050, "cached_input": 0.0130, "output": 0.160},
+    ("~deepseek/deepseek-v4-flash-latest", "deepinfra"): {"input": 0.060, "cached_input": 0.0150, "output": 0.180},
+    ("~deepseek/deepseek-v4-flash-latest", "sail research"): {"input": 0.065, "cached_input": 0.0200, "output": 0.180},
+    ("~deepseek/deepseek-v4-flash-latest", "makora"): {"input": 0.090, "cached_input": 0.0196, "output": 0.195},
+    ("~deepseek/deepseek-v4-flash-latest", "wafer"): {"input": 0.100, "cached_input": 0.0500, "output": 0.250},
 }
 
 
@@ -309,6 +346,10 @@ def _canonical_model(model: str) -> str:
             break
     if key in PRICE_PER_MILLION:
         return key
+    for family, alias in OPENROUTER_LATEST_RELEASE_ALIASES.items():
+        prefix = family + "-"
+        if key.startswith(prefix) and key[len(prefix) :].isdigit() and alias in PRICE_PER_MILLION:
+            return alias
     stripped = _SNAPSHOT_DATE_SUFFIX.sub("", key)
     if stripped != key and stripped in PRICE_PER_MILLION:
         return stripped

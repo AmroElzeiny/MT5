@@ -142,6 +142,31 @@ class PricingStatusTests(unittest.TestCase):
             usage.PRICING_STATUS_PRICED,
         )
 
+    def test_openrouter_latest_concrete_release_uses_alias_route_price(self) -> None:
+        self.assertEqual(
+            usage._canonical_model("deepseek/deepseek-v4-flash-0731"),
+            "~deepseek/deepseek-v4-flash-latest",
+        )
+        cost, status = usage.price_call(
+            model="deepseek/deepseek-v4-flash-0731",
+            provider_mode=PROVIDER_MODE_OPENROUTER,
+            input_tokens=94,
+            output_tokens=365,
+            routed_endpoint="DeepInfra",
+        )
+        self.assertEqual(status, usage.PRICING_STATUS_PRICED)
+        self.assertAlmostEqual(cost or 0.0, 0.00007134, places=8)
+
+    def test_openrouter_latest_price_fold_rejects_sibling_models(self) -> None:
+        self.assertEqual(
+            usage._canonical_model("deepseek/deepseek-v4-flash-vision-exp"),
+            "deepseek/deepseek-v4-flash-vision-exp",
+        )
+        self.assertEqual(
+            usage._canonical_model("deepseek/deepseek-v4-pro-0731"),
+            "deepseek/deepseek-v4-pro-0731",
+        )
+
     def test_routed_endpoint_gives_an_exact_price(self) -> None:
         for endpoint in ("DeepInfra", "deepinfra", "Parasail"):
             with self.subTest(endpoint=endpoint):

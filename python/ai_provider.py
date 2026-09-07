@@ -348,6 +348,32 @@ def _actual_model(response: Any, fallback: str) -> str:
     return str(value or fallback)
 
 
+def model_response_matches_request(requested_model: str, actual_model: str) -> bool:
+    """Bind a routed response to the exact requested model or its latest release.
+
+    OpenRouter's ``~vendor/family-latest`` smart alias deliberately returns the
+    concrete dated release in ``response.model``.  Treating that as a mismatch
+    breaks cache identity, while accepting any returned model lets a routing
+    defect silently change trading authority.  A latest alias therefore accepts
+    only the same vendor/family followed by a numeric release suffix.
+    """
+
+    requested = str(requested_model or "").strip()
+    actual = str(actual_model or "").strip()
+    if not requested or not actual:
+        return False
+    if actual == requested:
+        return True
+    if not (requested.startswith("~") and requested.endswith("-latest")):
+        return False
+    family = requested[1 : -len("-latest")]
+    prefix = family + "-"
+    if not actual.startswith(prefix):
+        return False
+    release = actual[len(prefix) :]
+    return bool(release) and release.isdigit()
+
+
 def _schema_validate(schema: type, value: Mapping[str, Any]) -> Any:
     if hasattr(schema, "model_validate"):
         return schema.model_validate(value)
@@ -541,6 +567,11 @@ class _OpenAICompatibleProviderBase:
         """Per-transport headers applied to every request on this client."""
 
         return {}
+
+    def _response_model_allowed(self, requested_model: str, actual_model: str) -> bool:
+        """Transport hook for providers which resolve model aliases."""
+
+        return True
 
     def model_for_role(self, role: str) -> str:
         role_key = str(role or "analyst").strip().lower()
@@ -913,6 +944,10 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
         circuit_failure_threshold: int,
         circuit_cooldown_sec: float,
         log: Callable[[str], None],
+        admission_retry_enable: bool = True,
+        admission_max_retries: int = 3,
+        admission_backoff_initial_sec: float = 2.0,
+        admission_backoff_max_sec: float = 30.0,
         client_factory: Callable[..., Any] | None = None,
     ) -> None:
         super().__init__(
@@ -958,6 +993,17 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
         self.flex_unavailable_retry_enable = bool(flex_unavailable_retry_enable)
         self.flex_unavailable_max_retries = max(0, int(flex_unavailable_max_retries))
         self.flex_unavailable_cooldown_sec = max(0.0, float(flex_unavailable_cooldown_sec))
+        # Tier-independent admission retry.  ``max_retries`` stays 0 for every
+        # AMBIGUOUS transport failure -- this budget is separate and is spent
+        # only on failures ``_admission_rejected`` proves were never admitted,
+        # so the "one authoritative provider call per request identity"
+        # invariant is preserved by construction rather than by configuration.
+        self.admission_retry_enable = bool(admission_retry_enable)
+        self.admission_max_retries = max(0, int(admission_max_retries))
+        self.admission_backoff_initial_sec = max(0.0, float(admission_backoff_initial_sec))
+        self.admission_backoff_max_sec = max(
+            self.admission_backoff_initial_sec, float(admission_backoff_max_sec)
+        )
 
     def _generation_settings(self, role: str) -> dict[str, Any]:
         settings = super()._generation_settings(role)
@@ -1049,6 +1095,112 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             )
         )
 
+    # A quota exhaustion is a 429 that no amount of waiting inside this request
+    # can clear -- it is a billing/configuration state, not congestion.  Retrying
+    # it burns the whole deadline to reach the same answer.
+    _ADMISSION_NON_RETRYABLE_MARKERS = (
+        "insufficient_quota",
+        "exceeded your current quota",
+        "billing_hard_limit",
+        "billing hard limit",
+    )
+
+    # Markers that prove the provider refused ADMISSION.  ``rate_limit_exceeded``
+    # and "processing too many requests" are the exact strings the live gate saw
+    # on 2026-09-07; ``_flex_capacity_rejected`` missed them because its only
+    # near match was "rate limit" with a space.
+    _ADMISSION_REJECTED_MARKERS = (
+        "rate_limit_exceeded",
+        "rate limit",
+        "ratelimit",
+        "too many requests",
+        "try again later",
+        "resource_unavailable",
+        "temporarily unavailable",
+        "overloaded",
+        "server_overloaded",
+        "capacity",
+        "slow down",
+    )
+
+    @classmethod
+    def _admission_rejected(cls, exc: Exception) -> bool:
+        """True only when the provider refused to ADMIT the request at all.
+
+        This is the same safety argument as ``_flex_capacity_rejected``, lifted
+        off the flex service tier.  A 429/503 admission refusal means no tokens
+        were produced, nothing is running server-side, and nothing can complete
+        late -- so resubmitting still yields exactly one authoritative provider
+        call per request identity.  Timeouts, connection errors and generic 5xx
+        stay excluded because they are ambiguous: the call may have been
+        admitted and still be running, where a resubmission would produce a
+        second billed call and a late result racing the first.
+
+        Quota exhaustion is excluded separately: it is a 429 that waiting cannot
+        clear.
+        """
+        text = str(exc).lower()
+        error_body = getattr(exc, "body", None)
+        if isinstance(error_body, Mapping):
+            text += " " + json.dumps(error_body, sort_keys=True, default=str).lower()
+        if any(
+            marker in text
+            for marker in ("timeout", "timed out", "connection error", "read error")
+        ):
+            return False
+        if any(marker in text for marker in cls._ADMISSION_NON_RETRYABLE_MARKERS):
+            return False
+        if cls._status_code(exc) not in {429, 503}:
+            return False
+        return any(marker in text for marker in cls._ADMISSION_REJECTED_MARKERS)
+
+    @staticmethod
+    def _retry_after_sec(exc: Exception) -> float | None:
+        """The provider's own ``Retry-After`` instruction, in seconds.
+
+        Honoured verbatim rather than capped: the affordability check against
+        the absolute deadline decides whether we can wait that long, and a
+        shorter wait than the server asked for is what produces a second 429.
+        """
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return None
+        for name in ("retry-after", "Retry-After", "x-ratelimit-reset-requests"):
+            try:
+                raw = headers.get(name)
+            except Exception:
+                continue
+            if raw is None:
+                continue
+            text = str(raw).strip().lower()
+            multiplier = 1.0
+            if text.endswith("ms"):
+                text, multiplier = text[:-2], 0.001
+            elif text.endswith("s"):
+                text, multiplier = text[:-1], 1.0
+            try:
+                value = float(text) * multiplier
+            except (TypeError, ValueError):
+                continue
+            if value >= 0.0:
+                return value
+        return None
+
+    def _admission_backoff_sec(self, attempt: int, request_id: str) -> float:
+        """Exponential backoff with request-derived jitter.
+
+        The jitter is derived from the request id instead of ``random`` so a
+        replay of the same request sleeps the same amount, while concurrent
+        workers that hit the same rate limit spread out instead of retrying in
+        lockstep and re-triggering it.
+        """
+        base = self.admission_backoff_initial_sec * (2.0 ** max(0, attempt - 1))
+        base = min(base, self.admission_backoff_max_sec)
+        digest = sha256(f"{request_id}|{attempt}".encode("utf-8")).digest()
+        jitter_fraction = (digest[0] / 255.0) * 0.25
+        return base * (1.0 + jitter_fraction)
+
     def generate_structured(
         self,
         *,
@@ -1087,6 +1239,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             transport_retries = 0
             schema_retries = 0
             flex_retries = 0
+            admission_retries = 0
             while True:
                 if deadline is not None and not deadline.can_start_attempt():
                     # Never begin an attempt that cannot finish inside the
@@ -1210,6 +1363,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         f" transport_retry={transport_retries}"
                         f" schema_repair={schema_retries}"
                         f" flex_retry={flex_retries}"
+                        f" admission_retry={admission_retries}"
                         f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
                         f" sdk_timeout={effective_timeout:.3f}"
                         " sdk_max_retries=0"
@@ -1353,6 +1507,61 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         if cooldown_sec > 0:
                             time.sleep(cooldown_sec)
                         continue
+                    # An admission refusal that the flex branch above did not
+                    # already own.  Guarded so flex keeps exactly its previous
+                    # budget instead of silently gaining a second one.
+                    flex_owns_failure = (
+                        service_tier == "flex"
+                        and self.flex_unavailable_retry_enable
+                        and self._flex_capacity_rejected(exc)
+                    )
+                    if (
+                        self.admission_retry_enable
+                        and not flex_owns_failure
+                        and admission_retries < self.admission_max_retries
+                        and self._admission_rejected(exc)
+                    ):
+                        wait_sec = self._retry_after_sec(exc)
+                        retry_after_present = wait_sec is not None
+                        if wait_sec is None:
+                            wait_sec = self._admission_backoff_sec(
+                                admission_retries + 1, request_id
+                            )
+                        # The sleep is spent INSIDE the absolute request budget.
+                        # Both the wait and the attempt that follows it must fit,
+                        # or the retry only guarantees a deadline breach.
+                        affordable = deadline is None or (
+                            deadline.remaining_ms()
+                            >= int(wait_sec * 1000) + deadline.policy.min_attempt_ms
+                        )
+                        if affordable:
+                            admission_retries += 1
+                            self._log(
+                                "[provider_admission_retry]"
+                                f" request_id={request_id}"
+                                f" provider={self.provider_id} model={model}"
+                                f" attempt={admission_retries}/{self.admission_max_retries}"
+                                f" http_status={failure.status_code or 0}"
+                                f" error_category={failure.category}"
+                                " admitted=false resubmission_safe=true"
+                                f" retry_after_header={str(retry_after_present).lower()}"
+                                f" wait_sec={wait_sec:.3f}"
+                                f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
+                            )
+                            if wait_sec > 0:
+                                time.sleep(wait_sec)
+                            continue
+                        self._log(
+                            "[provider_admission_retry]"
+                            f" request_id={request_id}"
+                            f" provider={self.provider_id} model={model}"
+                            f" attempt={admission_retries + 1}/{self.admission_max_retries}"
+                            f" http_status={failure.status_code or 0}"
+                            f" wait_sec={wait_sec:.3f}"
+                            f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
+                            f" min_attempt_ms={deadline.policy.min_attempt_ms if deadline is not None else -1}"
+                            " action=skipped_insufficient_budget"
+                        )
                     errors.append(f"{model}:{failure.category}:{failure}")
                     if failure.retryable and transport_retries < self.max_retries:
                         transport_retries += 1
@@ -1805,6 +2014,25 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
                         )
                         response = call_client.chat.completions.create(**kwargs)
+                        actual_model = _actual_model(response, model)
+                        if not self._response_model_allowed(model, actual_model):
+                            self._record_failure()
+                            self._log(
+                                "[provider_model_identity]"
+                                f" request_id={request_id}"
+                                f" provider={self.provider_id}"
+                                f" requested_model={model}"
+                                f" actual_model={actual_model}"
+                                " allowed=false action=fail_closed"
+                            )
+                            raise ProviderCallError(
+                                "PROVIDER_MODEL_IDENTITY_MISMATCH",
+                                f"requested={model};actual={actual_model}",
+                                retryable=False,
+                                configuration_block=True,
+                                schema_name=preflight.schema_name,
+                                schema_fingerprint=preflight.schema_fingerprint,
+                            )
                         value = _extract_chat_value(response)
                         parsed = _schema_validate(response_schema, value)
                         elapsed = time.perf_counter() - started
@@ -1819,7 +2047,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             f" request_id={request_metadata.get('request_id', '')}"
                             f" request_identity_hash={str(request_metadata.get('request_identity_hash') or '')[:16]}"
                             f" provider={self.provider_id}"
-                            f" model={_actual_model(response, model)} role={role}"
+                            f" model={actual_model} role={role}"
                             f" quality_tier=FULL_STRUCTURED latency_sec={elapsed:.3f}"
                             f" transport_retries={transport_retries}"
                             f" schema_repairs={schema_retries}"
@@ -1831,7 +2059,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             self.provider_id,
                             self.endpoint_class,
                             self.model_for_role(role),
-                            _actual_model(response, model),
+                            actual_model,
                             model if model_index > 0 else "",
                             _model_fingerprint(response) or self._known_model_fingerprint,
                             role,
@@ -1876,6 +2104,8 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                         )
                         if attempt >= self.max_retries:
                             break
+                    except ProviderCallError:
+                        raise
                     except Exception as exc:
                         unsupported_parameter = self._unsupported_parameter(exc, kwargs)
                         if unsupported_parameter and unsupported_parameter not in unsupported:
@@ -2075,6 +2305,9 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
         if self.app_title:
             headers["X-Title"] = self.app_title
         return headers
+
+    def _response_model_allowed(self, requested_model: str, actual_model: str) -> bool:
+        return model_response_matches_request(requested_model, actual_model)
 
     def _wire_extra_body(self) -> dict[str, Any]:
         body: dict[str, Any] = {}

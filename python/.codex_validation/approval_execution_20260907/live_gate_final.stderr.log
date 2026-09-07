@@ -1,0 +1,2 @@
+[usage_logger] priced_upper_bound model=deepseek/deepseek-v4-flash-0731@Parasail provider_mode=OPENROUTER_API estimated_cost_usd is the model-level upper bound, not this route's rate; add the route to PRICE_PER_MILLION_BY_ENDPOINT
+[usage_logger] priced_upper_bound model=deepseek/deepseek-v4-flash-0731@Inceptron provider_mode=OPENROUTER_API estimated_cost_usd is the model-level upper bound, not this route's rate; add the route to PRICE_PER_MILLION_BY_ENDPOINT

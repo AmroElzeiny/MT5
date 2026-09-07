@@ -121,6 +121,8 @@ def _live_payload() -> dict[str, Any]:
 def test_live_request_uses_flex_when_triple_confirmed(monkeypatch):
     config = replace(
         ai_gate.AI_CONFIG,
+        provider_select=ai_gate.PROVIDER_SELECT_OPENAI,
+        use_remote_api=True,
         use_flex=True,
         allow_flex_for_live=True,
         flex_live_ack=True,
@@ -139,6 +141,8 @@ def test_live_request_without_use_flex_falls_back_to_standard_tier(monkeypatch):
     """The measured defect: AI_SERVICE_TIER=flex alone bought nothing on live."""
     config = replace(
         ai_gate.AI_CONFIG,
+        provider_select=ai_gate.PROVIDER_SELECT_OPENAI,
+        use_remote_api=True,
         use_flex=False,
         allow_flex_for_live=True,
         flex_live_ack=True,
@@ -158,6 +162,8 @@ def test_live_flex_still_requires_both_acknowledgements(monkeypatch):
     for allow, ack in ((False, True), (True, False), (False, False)):
         config = replace(
             ai_gate.AI_CONFIG,
+            provider_select=ai_gate.PROVIDER_SELECT_OPENAI,
+            use_remote_api=True,
             use_flex=True,
             allow_flex_for_live=allow,
             flex_live_ack=ack,

@@ -1,0 +1,1984 @@
+//+------------------------------------------------------------------+
+//| StateStore.mqh - NDJSON persistence in Common folder              |
+//| Keeps bot context across restarts (watchlist, pending AI, penalty) |
+//+------------------------------------------------------------------+
+#ifndef __PO3_AIGATE_STATESTORE_MQH__
+#define __PO3_AIGATE_STATESTORE_MQH__
+#include "FileBus.mqh"
+#include "Types.mqh"
+#include "Config.mqh"
+#include "JsonLite.mqh"
+
+class CStateStore {
+private:
+   CFileBus *m_bus;
+   string m_scope_key;
+
+   string _RuntimeStateRoot() const {
+      return m_bus.LogDir() + "\\runtime_state";
+   }
+
+   string _RuntimeStateDir() const {
+      return _RuntimeStateRoot() + "\\" + m_scope_key;
+   }
+
+   string _ScopedPath(const string leaf) const {
+      return _RuntimeStateDir() + "\\" + leaf;
+   }
+
+   string _NL() { return "\n"; }
+
+   bool _IsTrimChar(const ushort c) const {
+      return (c == ' ' || c == '\t' || c == '\r' || c == '\n');
+   }
+
+   string _TrimCopy(const string s) {
+      int len = (int)StringLen(s);
+      int start = 0;
+      while(start < len && _IsTrimChar((ushort)StringGetCharacter(s, start))) start++;
+      int end = len - 1;
+      while(end >= start && _IsTrimChar((ushort)StringGetCharacter(s, end))) end--;
+      if(end < start) return "";
+      return StringSubstr(s, start, end-start+1);
+   }
+
+   // NDJSON encoder/decoder for trade plans.
+   string PlanToJson(const TradePlan &p) {
+      string j = "{";
+      // ~1,700 appends build a ~76,000 character document.  Without a reserve every
+      // append can reallocate and copy the whole buffer, so building one trade meta is
+      // quadratic in its own length -- and MaintainPositions() builds two per
+      // simulated second for every open position, before anything decides whether the
+      // result even needs to be written.  Reserving once makes the appends amortized;
+      // the characters produced are identical.
+      StringReserve(j, 131072);
+      j += JsonKVStr("symbol", p.symbol) + ",";
+      j += JsonKVBool("is_buy", p.is_buy) + ",";
+      j += JsonKVInt("htf", (int)p.htf) + ",";
+      j += JsonKVInt("ltf", (int)p.ltf) + ",";
+      j += JsonKVInt("confirm_tf", (int)p.confirm_tf) + ",";
+      j += JsonKVNum("entry", p.entry_est, 8) + ",";
+      j += JsonKVStr("entry_model", p.entry_model) + ",";
+      j += JsonKVStr("entry_branch", p.entry_branch) + ",";
+      j += JsonKVStr("tp_model", p.tp_model) + ",";
+      j += JsonKVStr("target_source", p.target_source) + ",";
+      j += JsonKVNum("sl", p.sl, 8) + ",";
+      j += JsonKVNum("tp1", p.tp1, 8) + ",";
+      // tp1 alone is not enough to restore a plan faithfully: who owns that leg, and
+      // the floor it was judged against, decide whether a rebuild may move it and
+      // whether the AI payload may advertise a partial route.  Losing them on reload
+      // silently reinstates the pre-fix permissive behaviour.
+      j += JsonKVBool("tp1_from_target_model", p.tp1_from_target_model) + ",";
+      j += JsonKVNum("min_tp1_reward", p.min_tp1_reward, 8) + ",";
+      j += JsonKVNum("tp2", p.tp2, 8) + ",";
+      j += JsonKVNum("atr_pct", p.atr_pct, 6) + ",";
+      j += JsonKVNum("trend_strength", p.trend_strength, 6) + ",";
+      j += JsonKVNum("trend_slope_pct", p.trend_slope_pct, 8) + ",";
+      j += JsonKVNum("adx_value", p.adx_value, 4) + ",";
+      j += JsonKVNum("adr_pct", p.adr_pct, 6) + ",";
+      j += JsonKVNum("session_vol_ratio", p.session_vol_ratio, 6) + ",";
+      j += JsonKVNum("vwap_dist_atr", p.vwap_dist_atr, 6) + ",";
+      j += JsonKVNum("compression_score", p.compression_score, 6) + ",";
+      j += JsonKVNum("expansion_score", p.expansion_score, 6) + ",";
+      j += JsonKVNum("news_risk", p.news_risk, 6) + ",";
+      j += JsonKVNum("setup_score", p.setup_score, 6) + ",";
+      j += JsonKVStr("setup_family", p.setup_family) + ",";
+      j += JsonKVStr("setup_class", p.setup_class) + ",";
+      j += JsonKVInt("setup_taxonomy", (int)p.setup_taxonomy) + ",";
+      j += JsonKVStr("setup_taxonomy_version", p.setup_taxonomy_version) + ",";
+      j += JsonKVStr("setup_taxonomy_enum", p.setup_taxonomy_enum) + ",";
+      j += JsonKVStr("taxonomy_mapping_source", p.taxonomy_mapping_source) + ",";
+      j += JsonKVStr("taxonomy_mapping_failure_reason", p.taxonomy_mapping_failure_reason) + ",";
+      j += JsonKVStr("setup_type", p.setup_type) + ",";
+      j += JsonKVStr("setup_subtype", p.setup_subtype) + ",";
+      j += JsonKVStr("setup_story_scope", p.setup_story_scope) + ",";
+      j += JsonKVStr("fvg_execution_class", p.fvg_execution_class) + ",";
+      j += JsonKVStr("model_code", p.model_code) + ",";
+      j += JsonKVStr("session_code", p.session_code) + ",";
+      j += JsonKVStr("killzone_code", p.killzone_code) + ",";
+      j += JsonKVStr("broker_comment", p.broker_comment) + ",";
+      j += JsonKVStr("input_snapshot_hash", p.input_snapshot_hash) + ",";
+      j += JsonKVStr("engine_version", p.engine_version) + ",";
+      j += JsonKVStr("git_commit", p.git_commit) + ",";
+      j += JsonKVStr("dirty_tree_status", p.dirty_tree_status) + ",";
+      j += JsonKVStr("set_file_hash", p.set_file_hash) + ",";
+      j += JsonKVStr("runtime_input_hash", p.runtime_input_hash) + ",";
+      j += JsonKVStr("reasoning_configuration", p.reasoning_configuration) + ",";
+      j += JsonKVStr("policy_hash", p.policy_hash) + ",";
+      j += JsonKVStr("bucket_prior_hash", p.bucket_prior_hash) + ",";
+      j += JsonKVStr("calibration_artifact_id", p.calibration_artifact_id) + ",";
+      j += JsonKVStr("repeatability_artifact_id", p.repeatability_artifact_id) + ",";
+      j += JsonKVStr("feature_version", p.feature_version) + ",";
+      j += JsonKVStr("cohort_id", p.cohort_id) + ",";
+      j += JsonKVBool("cohort_complete", p.cohort_complete) + ",";
+      j += JsonKVStr("request_fingerprint", p.request_fingerprint) + ",";
+      j += JsonKVStr("response_fingerprint", p.response_fingerprint) + ",";
+      j += JsonKVStr("hierarchical_prior_artifact_hash", p.hierarchical_prior_artifact_hash) + ",";
+      j += JsonKVStr("hierarchical_prior_schema_version", p.hierarchical_prior_schema_version) + ",";
+      j += JsonKVStr("repeatability_schema_version", p.ai.repeatability_schema_version) + ",";
+      j += JsonKVStr("repeatability_status", p.repeatability_status) + ",";
+      j += JsonKVBool("repeatability_required_live", p.repeatability_required_live) + ",";
+      j += JsonKVStr("repeatability_artifact_state", p.repeatability_artifact_state) + ",";
+      j += JsonKVStr("repeatability_rejection_code", p.repeatability_rejection_code) + ",";
+      j += JsonKVBool("repeatability_score_threshold_authority", p.repeatability_score_threshold_authority) + ",";
+      j += JsonKVBool("repeatability_trading_eligible", p.repeatability_trading_eligible) + ",";
+      j += JsonKVStr("repeatability_group_key", p.repeatability_group_key) + ",";
+      j += JsonKVStr("repeatability_authority_hash", p.repeatability_authority_hash) + ",";
+      j += JsonKVStr("origin_quality", p.origin_quality) + ",";
+      j += JsonKVBool("exclusive_model_mode", p.exclusive_model_mode) + ",";
+      j += JsonKVStr("exclusive_model_name", p.exclusive_model_name) + ",";
+      j += JsonKVBool("exclusive_model_passed", p.exclusive_model_passed) + ",";
+      j += JsonKVStr("exclusive_fail_reason", p.exclusive_fail_reason) + ",";
+      j += JsonKVStr("management_profile", p.management_profile) + ",";
+      j += JsonKVStr("asset_class", p.asset_class) + ",";
+      j += JsonKVStr("regime_profile", p.regime_profile) + ",";
+      j += JsonKVStr("volatility_profile", p.volatility_profile) + ",";
+      j += JsonKVStr("policy_bucket", p.policy_bucket) + ",";
+      j += JsonKVStr("obstacle_kind", p.obstacle_kind) + ",";
+      j += JsonKVNum("obstacle_price", p.obstacle_price, 8) + ",";
+      j += JsonKVNum("obstacle_r", p.obstacle_r, 6) + ",";
+      j += JsonKVNum("effective_rr2", p.effective_rr2, 6) + ",";
+      j += JsonKVNum("estimated_cost_price", p.estimated_cost_price, 8) + ",";
+      j += JsonKVNum("estimated_slippage_price", p.estimated_slippage_price, 8) + ",";
+      j += JsonKVNum("estimated_commission_money", p.estimated_commission_money, 4) + ",";
+      j += JsonKVStr("estimated_cost_source", p.estimated_cost_source) + ",";
+      j += JsonKVInt("estimated_cost_sample_size", p.estimated_cost_sample_size) + ",";
+      j += JsonKVNum("estimated_cost_stressed_per_lot", p.estimated_cost_stressed_per_lot, 8) + ",";
+      j += JsonKVNum("actual_realized_cost", p.actual_realized_cost, 4) + ",";
+      j += JsonKVNum("cost_prediction_error", p.cost_prediction_error, 4) + ",";
+      j += JsonKVStr("commission_model_version", p.commission_model_version) + ",";
+      j += JsonKVNum("spread_r", p.spread_r, 6) + ",";
+      j += JsonKVNum("execution_cost_r", p.execution_cost_r, 6) + ",";
+      j += JsonKVNum("slippage_r", p.slippage_r, 6) + ",";
+      j += JsonKVNum("commission_r", p.commission_r, 6) + ",";
+      j += JsonKVBool("execution_cost_risk_reduced", p.execution_cost_risk_reduced) + ",";
+      j += JsonKVNum("execution_cost_risk_multiplier", p.execution_cost_risk_multiplier, 6) + ",";
+      j += JsonKVNum("gross_expected_r", p.gross_expected_r, 6) + ",";
+      j += JsonKVNum("net_expected_r", p.net_expected_r, 6) + ",";
+      j += JsonKVNum("liquidity_rr", p.liquidity_rr, 6) + ",";
+      j += JsonKVNum("sequence_quality", p.sequence_quality, 6) + ",";
+      j += JsonKVNum("htf_alignment_score", p.htf_alignment_score, 6) + ",";
+      j += JsonKVNum("adverse_context_score", p.adverse_context_score, 6) + ",";
+      j += JsonKVNum("expected_value_r", p.expected_value_r, 6) + ",";
+      j += JsonKVNum("heuristic_quality_estimate", p.heuristic_quality_estimate, 6) + ",";
+      j += JsonKVNum("heuristic_quality_estimate_gross", p.heuristic_quality_estimate_gross, 6) + ",";
+      j += JsonKVNum("net_reward_after_cost_r", p.net_reward_after_cost_r, 6) + ",";
+      j += JsonKVBool("runner_trade", p.runner_trade) + ",";
+      j += JsonKVBool("runner_downgraded", p.runner_downgraded) + ",";
+      j += JsonKVStr("runner_downgrade_reason", p.runner_downgrade_reason) + ",";
+      j += JsonKVNum("original_runner_target", p.original_runner_target, 8) + ",";
+      j += JsonKVNum("standard_target_after_downgrade", p.standard_target_after_downgrade, 8) + ",";
+      j += JsonKVStr("target_model", p.target_model) + ",";
+      j += JsonKVBool("target_arbitration_required", p.target_arbitration_required) + ",";
+      j += JsonKVNum("liquidity_target_preserved", p.liquidity_target_preserved, 8) + ",";
+      j += JsonKVStr("liquidity_target_model", p.liquidity_target_model) + ",";
+      j += JsonKVBool("liquidity_target_valid_structurally", p.liquidity_target_valid_structurally) + ",";
+      j += JsonKVBool("liquidity_target_blocked_by_obstacle", p.liquidity_target_blocked_by_obstacle) + ",";
+      j += JsonKVNum("obstacle_distance_r", p.obstacle_distance_r, 6) + ",";
+      j += JsonKVStr("obstacle_tf", p.obstacle_tf) + ",";
+      j += JsonKVNum("obstacle_severity", p.obstacle_severity, 4) + ",";
+      j += JsonKVStr("obstacle_strength_features", p.obstacle_strength_features) + ",";
+      j += JsonKVNum("fallback_tp", p.fallback_tp, 8) + ",";
+      j += JsonKVNum("fallback_rr", p.fallback_rr, 6) + ",";
+      j += JsonKVStr("fallback_source", p.fallback_source) + ",";
+      j += JsonKVNum("capped_before_obstacle_tp", p.capped_before_obstacle_tp, 8) + ",";
+      j += JsonKVNum("capped_before_obstacle_rr", p.capped_before_obstacle_rr, 6) + ",";
+      j += JsonKVStr("capped_before_obstacle_source", p.capped_before_obstacle_source) + ",";
+      j += JsonKVNum("original_planned_tp_before_ai", p.original_planned_tp_before_ai, 8) + ",";
+      j += JsonKVNum("original_planned_rr_before_ai", p.original_planned_rr_before_ai, 6) + ",";
+      j += JsonKVStr("ai_chosen_target_model", p.ai_chosen_target_model) + ",";
+      j += JsonKVNum("ai_chosen_tp1", p.ai_chosen_tp1, 8) + ",";
+      j += JsonKVNum("ai_chosen_tp2", p.ai_chosen_tp2, 8) + ",";
+      j += JsonKVNum("ai_chosen_rr2", p.ai_chosen_rr2, 6) + ",";
+      j += JsonKVStr("ai_rejected_target_models", p.ai_rejected_target_models) + ",";
+      j += JsonKVNum("ai_blocker_severity", p.ai_blocker_severity, 6) + ",";
+      j += JsonKVStr("ai_blocker_class", p.ai_blocker_class) + ",";
+      j += JsonKVBool("ai_blocker_is_trade_killer", p.ai_blocker_is_trade_killer) + ",";
+      j += JsonKVStr("target_decision_reason", p.target_decision_reason) + ",";
+      j += JsonKVBool("target_arbitration_normalized_valid", p.target_arbitration_normalized_valid) + ",";
+      j += JsonKVStr("target_arbitration_schema_version", p.target_arbitration_schema_version) + ",";
+      j += JsonKVStr("prompt_contract_version", p.prompt_contract_version) + ",";
+      j += JsonKVStr("why_not_liquidity_target", p.why_not_liquidity_target) + ",";
+      j += JsonKVStr("why_not_partial_before_obstacle", p.why_not_partial_before_obstacle) + ",";
+      j += JsonKVStr("why_not_capped_before_obstacle", p.why_not_capped_before_obstacle) + ",";
+      j += JsonKVStr("why_not_synthetic_fallback", p.why_not_synthetic_fallback) + ",";
+      j += JsonKVStr("target_comparison_json", p.target_comparison_json) + ",";
+      j += JsonKVStr("original_target_candidates_json", p.original_target_candidates_json) + ",";
+      j += JsonKVStr("analytics_key", p.analytics_key) + ",";
+      j += JsonKVStr("bucket_policy_action", p.bucket_policy_action) + ",";
+      j += JsonKVStr("bucket_policy_reason", p.bucket_policy_reason) + ",";
+      j += JsonKVStr("bucket_policy_key", p.bucket_policy_key) + ",";
+      j += JsonKVNum("bucket_policy_risk_multiplier", p.bucket_policy_risk_multiplier, 6) + ",";
+      j += JsonKVStr("symbol_policy_action", p.symbol_policy_action) + ",";
+      j += JsonKVStr("symbol_policy_reason", p.symbol_policy_reason) + ",";
+      j += JsonKVStr("family_policy_action", p.family_policy_action) + ",";
+      j += JsonKVStr("family_policy_reason", p.family_policy_reason) + ",";
+      j += JsonKVStr("entry_miss_classification", p.entry_miss_classification) + ",";
+      j += JsonKVNum("portfolio_score", p.portfolio_score, 6) + ",";
+      j += JsonKVInt("portfolio_rank", p.portfolio_rank) + ",";
+      j += JsonKVStr("portfolio_cluster", p.portfolio_cluster) + ",";
+      j += JsonKVStr("usd_exposure_key", p.usd_exposure_key) + ",";
+      j += JsonKVStr("scheduler_action", p.scheduler_action) + ",";
+      j += JsonKVStr("scheduler_reason", p.scheduler_reason) + ",";
+      j += JsonKVNum("portfolio_risk_weight", p.portfolio_risk_weight, 6) + ",";
+      j += JsonKVStr("risk_factor_schema_version", p.risk_factor_schema_version) + ",";
+      j += "\"risk_factor_contributions\":" + (StringLen(p.risk_factor_contributions_json) > 0 ? p.risk_factor_contributions_json : "{}") + ",";
+      j += JsonKVNum("original_initial_risk_money", p.original_initial_risk_money, 4) + ",";
+      j += JsonKVNum("original_initial_risk_money_per_lot", p.original_initial_risk_money_per_lot, 8) + ",";
+      j += JsonKVNum("original_entry_for_risk", p.original_entry_for_risk, 8) + ",";
+      j += JsonKVNum("original_sl_for_risk", p.original_sl_for_risk, 8) + ",";
+      j += JsonKVNum("session_concentration", p.session_concentration, 6) + ",";
+      j += JsonKVNum("usd_concentration", p.usd_concentration, 6) + ",";
+      j += JsonKVNum("cluster_concentration", p.cluster_concentration, 6) + ",";
+      j += JsonKVNum("diversity_bonus", p.diversity_bonus, 6) + ",";
+      j += JsonKVStr("stop_floor_reason", p.stop_floor_reason) + ",";
+      j += JsonKVNum("stop_floor_distance", p.stop_floor_distance, 8) + ",";
+      j += JsonKVNum("stop_noise_band", p.stop_noise_band, 8) + ",";
+      j += JsonKVNum("broker_min_stop_distance", p.broker_min_stop_distance, 8) + ",";
+      j += JsonKVBool("stop_microstructure_distortion", p.stop_microstructure_distortion) + ",";
+      j += JsonKVNum("stop_quality_score", p.stop_quality_score, 6) + ",";
+      j += JsonKVNum("realized_stop_quality", p.realized_stop_quality, 6) + ",";
+      j += JsonKVNum("realized_stop_buffer_r", p.realized_stop_buffer_r, 6) + ",";
+      j += JsonKVNum("ote_distance_frac", p.ote_distance_frac, 6) + ",";
+      j += JsonKVNum("ote_softness_frac", p.ote_softness_frac, 6) + ",";
+      j += JsonKVStr("ote_state", p.ote_state) + ",";
+      j += JsonKVStr("subtype_policy_action", p.subtype_policy_action) + ",";
+      j += JsonKVNum("subtype_policy_penalty", p.subtype_policy_penalty, 6) + ",";
+      j += JsonKVNum("subtype_shrunk_win_rate", p.subtype_shrunk_win_rate, 6) + ",";
+      j += JsonKVNum("subtype_avg_r", p.subtype_avg_r, 6) + ",";
+      j += JsonKVNum("subtype_risk_multiplier", p.subtype_risk_multiplier, 6) + ",";
+      j += JsonKVNum("active_policy_risk_multiplier", p.active_policy_risk_multiplier, 6) + ",";
+      j += JsonKVBool("risk_multipliers_initialized", p.risk_multipliers_initialized) + ",";
+      j += JsonKVNum("setup_floor_score", p.setup_floor_score, 6) + ",";
+      j += JsonKVNum("setup_floor_penalty", p.setup_floor_penalty, 6) + ",";
+      j += JsonKVStr("setup_floor_action", p.setup_floor_action) + ",";
+      j += JsonKVStr("session_weekday_policy_action", p.session_weekday_policy_action) + ",";
+      j += JsonKVNum("session_weekday_risk_multiplier", p.session_weekday_risk_multiplier, 6) + ",";
+      j += JsonKVNum("session_weekday_rr_delta", p.session_weekday_rr_delta, 6) + ",";
+      j += JsonKVNum("session_weekday_score_bias", p.session_weekday_score_bias, 6) + ",";
+      j += JsonKVStr("policy_snapshot_id", p.policy_snapshot_id) + ",";
+      j += JsonKVStr("policy_version", p.policy_version) + ",";
+      j += JsonKVStr("risk_version", p.risk_version) + ",";
+      j += JsonKVStr("reject_code", p.reject_code) + ",";
+      j += JsonKVInt("source_t_sweep", (int)p.source_t_sweep) + ",";
+      j += JsonKVInt("source_t_disp", (int)p.source_t_disp) + ",";
+      j += JsonKVInt("source_t_bos", (int)p.source_t_bos) + ",";
+      j += JsonKVStr("source_context_tier", p.source_context_tier) + ",";
+      j += JsonKVStr("source_sweep_side", p.source_sweep_side) + ",";
+      j += JsonKVNum("source_manip_low", p.source_manip_low, 8) + ",";
+      j += JsonKVNum("source_manip_high", p.source_manip_high, 8) + ",";
+      j += JsonKVNum("source_dr_high", p.source_dr_high, 8) + ",";
+      j += JsonKVNum("source_dr_low", p.source_dr_low, 8) + ",";
+      j += JsonKVNum("source_liquidity_target", p.source_liquidity_target, 8) + ",";
+      j += JsonKVStr("source_liquidity_kind", p.source_liquidity_kind) + ",";
+      j += JsonKVInt("candidate_index", p.candidate_index) + ",";
+      j += JsonKVInt("candidate_count", p.candidate_count) + ",";
+      j += JsonKVStr("trade_key", p.trade_key) + ",";
+      j += JsonKVStr("setup_id", p.setup_id) + ",";
+      j += JsonKVStr("fvg_id", p.fvg_id) + ",";
+      j += JsonKVStr("candidate_id", p.candidate_id) + ",";
+      j += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
+      j += JsonKVStr("ai_selected_candidate_hash", p.ai_selected_candidate_hash) + ",";
+      j += JsonKVStr("executed_candidate_hash", p.executed_candidate_hash) + ",";
+      j += JsonKVBool("candidate_hash_match", p.candidate_hash_match) + ",";
+      j += JsonKVStr("request_execution_fingerprint", p.request_execution_fingerprint) + ",";
+      j += JsonKVStr("assessed_execution_fingerprint", p.assessed_execution_fingerprint) + ",";
+      j += JsonKVStr("final_execution_fingerprint", p.final_execution_fingerprint) + ",";
+      j += JsonKVBool("execution_fingerprint_match", p.execution_fingerprint_match) + ",";
+      j += JsonKVStr("execution_fingerprint_changed_components", p.execution_fingerprint_changed_components) + ",";
+      j += JsonKVNum("assessed_entry", p.assessed_entry, 8) + ",";
+      j += JsonKVNum("assessed_sl", p.assessed_sl, 8) + ",";
+      j += JsonKVNum("assessed_tp1", p.assessed_tp1, 8) + ",";
+      j += JsonKVNum("assessed_tp2", p.assessed_tp2, 8) + ",";
+      j += JsonKVNum("assessed_net_rr", p.assessed_net_rr, 6) + ",";
+      j += JsonKVNum("assessed_spread_r", p.assessed_spread_r, 6) + ",";
+      j += JsonKVNum("assessed_slippage_r", p.assessed_slippage_r, 6) + ",";
+      j += JsonKVNum("assessed_execution_cost_r", p.assessed_execution_cost_r, 6) + ",";
+      j += JsonKVStr("assessed_symbol", p.assessed_symbol) + ",";
+      j += JsonKVBool("assessed_is_buy", p.assessed_is_buy) + ",";
+      j += JsonKVStr("assessed_setup_code", p.assessed_setup_code) + ",";
+      j += JsonKVStr("assessed_setup_family", p.assessed_setup_family) + ",";
+      j += JsonKVStr("assessed_setup_taxonomy_enum", p.assessed_setup_taxonomy_enum) + ",";
+      j += JsonKVStr("assessed_setup_taxonomy_version", p.assessed_setup_taxonomy_version) + ",";
+      j += JsonKVStr("assessed_taxonomy_mapping_source", p.assessed_taxonomy_mapping_source) + ",";
+      j += JsonKVStr("assessed_entry_branch", p.assessed_entry_branch) + ",";
+      j += JsonKVInt("assessed_source_t_sweep", (int)p.assessed_source_t_sweep) + ",";
+      j += JsonKVInt("assessed_source_t_disp", (int)p.assessed_source_t_disp) + ",";
+      j += JsonKVInt("assessed_source_t_bos", (int)p.assessed_source_t_bos) + ",";
+      j += JsonKVStr("assessed_target_source", p.assessed_target_source) + ",";
+      j += JsonKVStr("assessed_target_model", p.assessed_target_model) + ",";
+      j += JsonKVStr("assessed_obstacle_kind", p.assessed_obstacle_kind) + ",";
+      j += JsonKVStr("assessed_obstacle_tf", p.assessed_obstacle_tf) + ",";
+      j += JsonKVNum("assessed_obstacle_price", p.assessed_obstacle_price, 8) + ",";
+      // Without these the obstacle contract silently reverts to permissive (assessed
+      // severity 0) or vacuous (no live observation) on a restored watchlist plan.
+      j += JsonKVNum("assessed_obstacle_severity", p.assessed_obstacle_severity, 4) + ",";
+      j += JsonKVStr("live_obstacle_kind", p.live_obstacle_kind) + ",";
+      j += JsonKVNum("live_obstacle_price", p.live_obstacle_price, 8) + ",";
+      j += JsonKVNum("live_obstacle_severity", p.live_obstacle_severity, 4) + ",";
+      j += JsonKVStr("assessed_decision_input_hash", p.assessed_decision_input_hash) + ",";
+      j += JsonKVStr("assessed_strategy_schema_version", p.assessed_strategy_schema_version) + ",";
+      // The lock itself and the four values the execution adjustment contract is
+      // built from.  Without them a reloaded approved plan came back UNLOCKED:
+      // _ExecutionFingerprintWithinTolerance fell through to the legacy branch,
+      // _ApplyAssessedTargetUnderContract never ran, and the live rebuild was free
+      // to re-derive the target -- precisely the substitution the contract exists to
+      // make unrepresentable.  assessed_stop_distance additionally anchors the TP1
+      // floor, so losing it reverted that to the drifted stop.
+      j += JsonKVBool("assessed_plan_locked", p.assessed_plan_locked) + ",";
+      j += JsonKVStr("assessed_tp_model", p.assessed_tp_model) + ",";
+      j += JsonKVStr("assessed_selected_target_identity", p.assessed_selected_target_identity) + ",";
+      j += JsonKVNum("assessed_selected_target_price", p.assessed_selected_target_price, 8) + ",";
+      j += JsonKVNum("assessed_stop_distance", p.assessed_stop_distance, 8) + ",";
+      j += JsonKVStr("ai_decision_id", p.ai_decision_id) + ",";
+      j += JsonKVStr("lineage_root_id", p.lineage_root_id) + ",";
+      j += JsonKVStr("parent_setup_id", p.parent_setup_id) + ",";
+      j += JsonKVInt("lineage_version", p.lineage_version) + ",";
+      j += JsonKVInt("attempt_number_for_sweep", p.attempt_number_for_sweep) + ",";
+      j += JsonKVStr("narrative_state", p.narrative_state) + ",";
+      j += JsonKVStr("superseded_by", p.superseded_by) + ",";
+      j += JsonKVStr("invalidation_cause", p.invalidation_cause) + ",";
+      j += JsonKVStr("snapshot_htf_path", p.snapshot_htf_path) + ",";
+      j += JsonKVStr("snapshot_ltf_path", p.snapshot_ltf_path) + ",";
+      j += JsonKVInt("created_at", (int)p.created_at) + ",";
+      j += JsonKVInt("setup_snapshot_time", (int)p.setup_snapshot_time) + ",";
+      j += JsonKVInt("ai_request_time", (int)p.ai_request_time) + ",";
+      j += JsonKVInt("ai_advisory_time", (int)p.ai_advisory_time) + ",";
+      j += JsonKVInt("ai_result_age_sim_minutes", p.ai_result_age_sim_minutes) + ",";
+      j += JsonKVBool("tester_ai_result_stale", p.tester_ai_result_stale) + ",";
+      j += JsonKVInt("ai_requested_at", (int)p.ai_requested_at) + ",";
+      j += JsonKVInt("last_score_refresh", (int)p.last_score_refresh) + ",";
+      j += JsonKVStr("ai_decision_source", p.ai_decision_source) + ",";
+      j += JsonKVBool("ai_allow", p.ai.allow) + ",";
+      j += JsonKVBool("ai_raw_allow", p.ai.raw_allow) + ",";
+      j += JsonKVBool("model_raw_allow", p.model_raw_allow) + ",";
+      j += JsonKVBool("python_final_allow", p.python_final_allow) + ",";
+      j += JsonKVBool("mql_final_allow", p.mql_final_allow) + ",";
+      j += "\"decision_field_authority\":" + (StringLen(p.decision_field_authority_json) > 0 ? p.decision_field_authority_json : "{}") + ",";
+      j += JsonKVStr("python_decision_reasons", p.python_decision_reasons) + ",";
+      j += JsonKVStr("mql_decision_reasons", p.mql_decision_reasons) + ",";
+      j += JsonKVInt("ai_chosen_index", p.ai.chosen_index) + ",";
+      j += JsonKVStr("ai_decision_schema_version", p.ai.decision_schema_version) + ",";
+      j += JsonKVStr("ai_decision_quality_tier", p.ai.decision_quality_tier) + ",";
+      j += JsonKVStr("ai_response_quality", p.ai.response_quality_alias) + ",";
+      j += JsonKVStr("ai_provider_contract_version", p.ai.provider_contract_version) + ",";
+      j += JsonKVStr("ai_provider_mode", p.ai.provider_mode) + ",";
+      j += JsonKVStr("ai_workload_mode", p.ai.workload_mode) + ",";
+      j += JsonKVStr("ai_provider_id", p.ai.provider_id) + ",";
+      j += JsonKVStr("ai_endpoint_class", p.ai.endpoint_class) + ",";
+      j += JsonKVStr("ai_endpoint_identity_hash", p.ai.endpoint_identity_hash) + ",";
+      j += JsonKVStr("ai_configured_models_hash", p.ai.configured_models_hash) + ",";
+      j += JsonKVStr("ai_actual_model_id", p.ai.actual_model_id) + ",";
+      j += JsonKVStr("ai_fallback_model", p.ai.fallback_model) + ",";
+      j += JsonKVStr("ai_model_fingerprint", p.ai.model_fingerprint) + ",";
+      j += JsonKVStr("ai_evidence_envelope_version", p.ai.evidence_envelope_version) + ",";
+      j += JsonKVStr("ai_family_profile_version", p.ai.family_profile_version) + ",";
+      j += JsonKVStr("ai_memory_schema_version", p.ai.memory_schema_version) + ",";
+      j += JsonKVStr("ai_retrieval_policy_version", p.ai.retrieval_policy_version) + ",";
+      j += JsonKVStr("ai_role_contract_version", p.ai.role_contract_version) + ",";
+      j += JsonKVStr("ai_consensus_resolver_version", p.ai.consensus_resolver_version) + ",";
+      j += JsonKVStr("ai_generation_settings_hash", p.ai.generation_settings_hash) + ",";
+      j += JsonKVStr("ai_input_fingerprint", p.ai.input_fingerprint) + ",";
+      j += "\"ai_retrieved_analogue_ids\":" + (StringLen(p.ai.retrieved_analogue_ids_json) > 0 ? p.ai.retrieved_analogue_ids_json : "[]") + ",";
+      j += JsonKVStr("ai_historical_evidence_state", p.ai.historical_evidence_state) + ",";
+      j += JsonKVStr("ai_analyst_response_fingerprint", p.ai.analyst_response_fingerprint) + ",";
+      j += JsonKVStr("ai_critic_response_fingerprint", p.ai.critic_response_fingerprint) + ",";
+      j += JsonKVStr("ai_adjudicator_response_fingerprint", p.ai.adjudicator_response_fingerprint) + ",";
+      j += JsonKVStr("ai_final_resolver_reason", p.ai.final_resolver_reason) + ",";
+      j += JsonKVStr("ai_provider_health_state", p.ai.provider_health_state) + ",";
+      j += "\"ai_role_latencies\":" + (StringLen(p.ai.role_latencies_json) > 0 ? p.ai.role_latencies_json : "{}") + ",";
+      j += "\"ai_provider_retry_counts\":" + (StringLen(p.ai.provider_retry_counts_json) > 0 ? p.ai.provider_retry_counts_json : "{}") + ",";
+      j += "\"ai_provider_usage\":" + (StringLen(p.ai.provider_usage_json) > 0 ? p.ai.provider_usage_json : "{}") + ",";
+      j += JsonKVBool("ai_estimated_context_tokens_available", p.ai.estimated_context_tokens_available) + ",";
+      j += "\"ai_estimated_context_tokens\":" + (p.ai.estimated_context_tokens_available ? DoubleToString(p.ai.estimated_context_tokens, 0) : "null") + ",";
+      j += "\"ai_unsupported_generation_parameters\":" + (StringLen(p.ai.unsupported_generation_parameters_json) > 0 ? p.ai.unsupported_generation_parameters_json : "[]") + ",";
+      j += "\"ai_analyst_output\":" + (StringLen(p.ai.analyst_output_json) > 0 ? p.ai.analyst_output_json : "{}") + ",";
+      j += "\"ai_critic_output\":" + (StringLen(p.ai.critic_output_json) > 0 ? p.ai.critic_output_json : "{}") + ",";
+      j += "\"ai_adjudicator_output\":" + (StringLen(p.ai.adjudicator_output_json) > 0 ? p.ai.adjudicator_output_json : "{}") + ",";
+      j += JsonKVStr("ai_decision_state", p.ai.decision_state) + ",";
+      j += JsonKVBool("ai_mandatory_fields_complete", p.ai.mandatory_fields_complete) + ",";
+      j += "\"ai_missing_mandatory_fields\":" + (StringLen(p.ai.missing_mandatory_fields_json) > 0 ? p.ai.missing_mandatory_fields_json : "[]") + ",";
+      j += "\"ai_invalid_mandatory_fields\":" + (StringLen(p.ai.invalid_mandatory_fields_json) > 0 ? p.ai.invalid_mandatory_fields_json : "[]") + ",";
+      j += JsonKVStr("ai_selected_candidate_id", p.ai.selected_candidate_id) + ",";
+      j += JsonKVStr("ai_selected_candidate_hash_value", p.ai.selected_candidate_hash) + ",";
+      j += JsonKVStr("ai_request_execution_fingerprint", p.ai.request_execution_fingerprint) + ",";
+      j += JsonKVStr("ai_assessed_execution_fingerprint", p.ai.assessed_execution_fingerprint) + ",";
+      j += JsonKVStr("ai_selected_target_identity", p.ai.selected_target_identity) + ",";
+      j += JsonKVNum("ai_selected_target_price", p.ai.selected_target_price, 8) + ",";
+      j += JsonKVNum("ai_assessed_entry", p.ai.assessed_entry, 8) + ",";
+      j += JsonKVNum("ai_assessed_sl", p.ai.assessed_sl, 8) + ",";
+      j += JsonKVNum("ai_assessed_tp1", p.ai.assessed_tp1, 8) + ",";
+      j += JsonKVNum("ai_assessed_tp2", p.ai.assessed_tp2, 8) + ",";
+      j += "\"ai_candidate_assessments\":" + (StringLen(p.ai.candidate_assessments_json) > 0 ? p.ai.candidate_assessments_json : "[]") + ",";
+      j += JsonKVNum("ai_rule_score", p.ai.rule_score, 6) + ",";
+      j += JsonKVNum("ai_llm_quality_score", p.ai.llm_quality_score, 6) + ",";
+      j += JsonKVNum("ai_blended_legacy_score_diagnostic", p.ai.blended_legacy_score, 6) + ",";
+      j += JsonKVNum("ai_legacy_agreement_confidence_diagnostic", p.ai.legacy_agreement_confidence, 6) + ",";
+      j += JsonKVNum("ai_llm_self_reported_confidence", p.ai.llm_self_reported_confidence, 6) + ",";
+      j += JsonKVBool("ai_calibration_available", p.ai.calibration_available) + ",";
+      j += "\"ai_calibrated_win_probability\":" + (p.ai.calibration_available ? DoubleToString(p.ai.calibrated_win_probability, 8) : "null") + ",";
+      j += "\"ai_expected_net_r\":" + (p.ai.calibration_available ? DoubleToString(p.ai.expected_net_r, 8) : "null") + ",";
+      j += "\"ai_oos_predicted_probability\":" + (p.ai.calibration_available ? DoubleToString(p.ai.oos_predicted_probability, 8) : "null") + ",";
+      j += JsonKVStr("ai_calibration_bucket", p.ai.calibration_bucket) + ",";
+      j += JsonKVInt("ai_calibration_sample_size", p.ai.calibration_sample_size) + ",";
+      j += "\"ai_calibration_lower_bound\":" + (p.ai.calibration_available ? DoubleToString(p.ai.calibration_lower_bound, 8) : "null") + ",";
+      j += "\"ai_calibration_upper_bound\":" + (p.ai.calibration_available ? DoubleToString(p.ai.calibration_upper_bound, 8) : "null") + ",";
+      j += JsonKVStr("ai_calibration_model_version", p.ai.calibration_model_version) + ",";
+      j += JsonKVStr("ai_calibration_data_window_start", p.ai.calibration_data_window_start) + ",";
+      j += JsonKVStr("ai_calibration_data_window_end", p.ai.calibration_data_window_end) + ",";
+      j += JsonKVStr("ai_reasons_json", p.ai.reasons_json) + ",";
+      j += JsonKVStr("ai_response_source", p.ai.decision_source) + ",";
+      j += JsonKVStr("ai_decision_id_value", p.ai.decision_id) + ",";
+      j += JsonKVStr("ai_rejection_codes_json", p.ai.rejection_codes_json) + ",";
+      j += JsonKVStr("ai_narrative_state", p.ai.narrative_state) + ",";
+      j += JsonKVStr("ai_invalidation_risks_json", p.ai.invalidation_risks_json) + ",";
+      j += JsonKVStr("ai_missing_confirmations_json", p.ai.missing_confirmations_json) + ",";
+      j += JsonKVNum("ai_suggested_risk_multiplier", p.ai.suggested_risk_multiplier, 6) + ",";
+      j += JsonKVStr("ai_model_version", p.ai.model_version) + ",";
+      j += JsonKVStr("ai_reasoning_configuration", p.ai.reasoning_configuration) + ",";
+      j += JsonKVStr("ai_bucket_prior_hash", p.ai.bucket_prior_hash) + ",";
+      j += JsonKVStr("ai_calibration_artifact_id", p.ai.calibration_artifact_id) + ",";
+      j += JsonKVStr("ai_repeatability_authority_hash", p.ai.repeatability_authority_hash) + ",";
+      j += JsonKVNum("llm_quality_score_threshold", p.ai.llm_quality_score_threshold, 4) + ",";
+      j += JsonKVStr("llm_quality_threshold_source", p.ai.llm_quality_threshold_source) + ",";
+      j += JsonKVBool("llm_quality_threshold_passed", p.ai.llm_quality_threshold_passed) + ",";
+      j += JsonKVStr("llm_quality_reject_reason", p.ai.llm_quality_reject_reason) + ",";
+      j += JsonKVBool("global_llm_quality_as_hard_floor", p.ai.global_llm_quality_as_hard_floor) + ",";
+      j += JsonKVNum("ai_structure_quality_score", p.ai.structure_quality_score, 6) + ",";
+      j += JsonKVNum("ai_entry_timing_score", p.ai.entry_timing_score, 6) + ",";
+      j += JsonKVNum("ai_follow_through_probability", p.ai.follow_through_probability, 6) + ",";
+      j += JsonKVNum("ai_invalidation_risk", p.ai.invalidation_risk, 6) + ",";
+      j += JsonKVNum("ai_chop_risk", p.ai.chop_risk, 6) + ",";
+      j += JsonKVNum("ai_cost_risk", p.ai.cost_risk, 6) + ",";
+      j += JsonKVNum("ai_symbol_bucket_risk", p.ai.symbol_bucket_risk, 6) + ",";
+      j += JsonKVNum("ai_session_bucket_risk", p.ai.session_bucket_risk, 6) + ",";
+      j += JsonKVNum("ai_post_entry_failure_risk", p.ai.post_entry_failure_risk, 6) + ",";
+      j += JsonKVNum("ai_final_trade_expectancy_score", p.ai.final_trade_expectancy_score, 6) + ",";
+      j += JsonKVStr("ai_llm_numeric_diagnostics_authority", p.ai.llm_numeric_diagnostics_authority) + ",";
+      j += JsonKVBool("ai_veto_enabled", p.ai.veto_enabled) + ",";
+      j += JsonKVStr("ai_veto_code", p.ai.veto_code) + ",";
+      j += "\"ai_veto_evidence_fields\":" + (StringLen(p.ai.veto_evidence_fields_json) > 0 ? p.ai.veto_evidence_fields_json : "[]") + ",";
+      j += JsonKVStr("ai_veto_reason", p.ai.veto_reason) + ",";
+      j += JsonKVBool("ai_veto_fields_present", p.ai.veto_fields_present) + ",";
+      j += JsonKVStr("ai_bucket_prior_override_justification", p.ai.bucket_prior_override_justification) + ",";
+      j += JsonKVStr("ai_chosen_target_model_value", p.ai.chosen_target_model) + ",";
+      j += JsonKVBool("ai_target_arbitration_required", p.ai.target_arbitration_required) + ",";
+      j += JsonKVNum("ai_chosen_tp1_value", p.ai.chosen_tp1, 8) + ",";
+      j += JsonKVNum("ai_chosen_tp2_value", p.ai.chosen_tp2, 8) + ",";
+      j += JsonKVNum("ai_chosen_rr1_value", p.ai.chosen_rr1, 6) + ",";
+      j += JsonKVNum("ai_chosen_rr2_value", p.ai.chosen_rr2, 6) + ",";
+      j += JsonKVStr("ai_rejected_target_models_json", p.ai.rejected_target_models_json) + ",";
+      j += JsonKVStr("ai_target_blocker_kind", p.ai.target_blocker_kind) + ",";
+      j += JsonKVNum("ai_target_blocker_severity", p.ai.target_blocker_severity, 6) + ",";
+      j += JsonKVStr("ai_target_blocker_class", p.ai.target_blocker_class) + ",";
+      j += JsonKVBool("ai_target_blocker_is_trade_killer", p.ai.target_blocker_is_trade_killer) + ",";
+      j += JsonKVStr("ai_target_decision_reason", p.ai.target_decision_reason) + ",";
+      j += JsonKVStr("ai_why_not_liquidity_target", p.ai.why_not_liquidity_target) + ",";
+      j += JsonKVStr("ai_why_not_partial_before_obstacle", p.ai.why_not_partial_before_obstacle) + ",";
+      j += JsonKVStr("ai_why_not_capped_before_obstacle", p.ai.why_not_capped_before_obstacle) + ",";
+      j += JsonKVStr("ai_why_not_synthetic_fallback", p.ai.why_not_synthetic_fallback) + ",";
+      j += JsonKVStr("ai_target_arbitration_schema_version", p.ai.target_arbitration_schema_version) + ",";
+      j += JsonKVStr("ai_prompt_contract_version", p.ai.prompt_contract_version) + ",";
+      j += JsonKVStr("ai_target_comparison_json", p.ai.target_comparison_json) + ",";
+      j += JsonKVBool("armed", p.armed) + ",";
+      j += JsonKVBool("mid_touched", p.mid_touched) + ",";
+      j += JsonKVBool("b50_touched", p.b50_touched) + ",";
+      j += JsonKVInt("bars_waited", p.bars_waited) + ",";
+      j += JsonKVInt("arm_max_bars", p.arm_max_bars) + ",";
+      j += JsonKVInt("max_watch_minutes", p.max_watch_minutes) + ",";
+      j += JsonKVInt("last_confirm_bar_time", (int)p.last_confirm_bar_time) + ",";
+      j += JsonKVInt("armed_at", (int)p.armed_at) + ",";
+      j += JsonKVNum("tp1_r_multiple", p.tp1_r_multiple, 4) + ",";
+      j += JsonKVNum("tp1_partial_pct", p.tp1_partial_pct, 4) + ",";
+      j += JsonKVStr("be_rule", p.be_rule) + ",";
+      j += JsonKVNum("be_trigger_r", p.be_trigger_r, 4) + ",";
+      j += JsonKVNum("be_offset_points", p.be_offset_points, 4) + ",";
+      j += JsonKVNum("stop_buffer_points", p.stop_buffer_points, 4) + ",";
+      j += JsonKVNum("penalty_mae_trigger_r", p.penalty_mae_trigger_r, 4) + ",";
+      j += JsonKVNum("penalty_giveback_trigger_r", p.penalty_giveback_trigger_r, 4) + ",";
+      j += JsonKVNum("penalty_giveback_floor_r", p.penalty_giveback_floor_r, 4) + ",";
+      j += JsonKVInt("penalty_stuck_minutes", p.penalty_stuck_minutes) + ",";
+      j += JsonKVNum("penalty_stuck_min_mfe_r", p.penalty_stuck_min_mfe_r, 4) + ",";
+      j += JsonKVNum("penalty_dr_invalid_cut_pct", p.penalty_dr_invalid_cut_pct, 4) + ",";
+      j += JsonKVNum("penalty_fvg_invalid_cut_pct", p.penalty_fvg_invalid_cut_pct, 4) + ",";
+      j += JsonKVInt("penalty_close_strikes", p.penalty_close_strikes) + ",";
+      j += JsonKVBool("tp1_done", p.tp1_done) + ",";
+      j += JsonKVNum("planned_entry", p.planned_entry, 8) + ",";
+      j += JsonKVNum("planned_sl", p.planned_sl, 8) + ",";
+      j += JsonKVNum("planned_tp1", p.planned_tp1, 8) + ",";
+      j += JsonKVNum("planned_tp2", p.planned_tp2, 8) + ",";
+      j += JsonKVInt("planned_at", (int)p.planned_at) + ",";
+      j += JsonKVNum("filled_entry", p.filled_entry, 8) + ",";
+      j += JsonKVInt("filled_at", (int)p.filled_at) + ",";
+      j += JsonKVNum("fill_slippage", p.fill_slippage, 8) + ",";
+      j += JsonKVNum("fill_slippage_r", p.fill_slippage_r, 6) + ",";
+      j += JsonKVNum("initial_volume", p.initial_volume, 4) + ",";
+      j += JsonKVNum("position_id", (double)p.position_id, 0) + ",";
+      j += JsonKVNum("result_order_ticket", (double)p.result_order_ticket, 0) + ",";
+      j += JsonKVNum("result_deal_ticket", (double)p.result_deal_ticket, 0) + ",";
+      j += JsonKVNum("broker_position_ticket", (double)p.broker_position_ticket, 0) + ",";
+      j += JsonKVNum("broker_position_identifier", (double)p.broker_position_identifier, 0) + ",";
+      j += JsonKVStr("intended_order_type", p.intended_order_type) + ",";
+      j += JsonKVStr("execution_authority_state", p.execution_authority_state) + ",";
+      j += JsonKVBool("broker_submission_attempted", p.broker_submission_attempted) + ",";
+      j += JsonKVBool("broker_request_accepted", p.broker_request_accepted) + ",";
+      j += JsonKVNum("broker_retcode", (double)p.broker_retcode, 0) + ",";
+      j += JsonKVStr("broker_retcode_description", p.broker_retcode_description) + ",";
+      j += JsonKVBool("broker_partial_fill", p.broker_partial_fill) + ",";
+      j += JsonKVBool("final_execution_success", p.final_execution_success) + ",";
+      j += JsonKVBool("execution_identity_verified", p.execution_identity_verified) + ",";
+      j += JsonKVBool("execution_identity_quarantined", p.execution_identity_quarantined) + ",";
+      j += JsonKVStr("execution_identity_reason", p.execution_identity_reason) + ",";
+      j += JsonKVStr("account_position_mode", p.account_position_mode) + ",";
+      j += JsonKVStr("attribution_status", p.attribution_status) + ",";
+      j += JsonKVStr("attribution_error", p.attribution_error) + ",";
+      j += JsonKVBool("learning_eligible", p.learning_eligible) + ",";
+      j += JsonKVBool("optimization_eligible", p.optimization_eligible) + ",";
+      j += JsonKVBool("suppression_eligible", p.suppression_eligible) + ",";
+      j += JsonKVStr("ledger_integrity_status", p.ledger_integrity_status) + ",";
+      j += "\"ledger_integrity_reasons\":" + (StringLen(p.ledger_integrity_reasons) > 0 ? p.ledger_integrity_reasons : "[]") + ",";
+      j += JsonKVStr("ledger_schema_version", p.ledger_schema_version) + ",";
+      j += JsonKVNum("account_equity_at_entry", p.account_equity_at_entry, 2) + ",";
+      j += JsonKVNum("account_balance_at_entry", p.account_balance_at_entry, 2) + ",";
+      j += JsonKVNum("initial_risk_money", p.initial_risk_money, 2) + ",";
+      j += JsonKVNum("initial_risk_pct_equity", p.initial_risk_pct_equity, 6) + ",";
+      j += JsonKVNum("gross_price_pnl", p.gross_price_pnl, 2) + ",";
+      j += JsonKVNum("total_commission", p.total_commission, 2) + ",";
+      j += JsonKVNum("total_swap", p.total_swap, 2) + ",";
+      j += JsonKVNum("total_fees", p.total_fees, 2) + ",";
+      j += JsonKVNum("broker_net_pnl", p.broker_net_pnl, 2) + ",";
+      j += JsonKVNum("internal_net_pnl", p.internal_net_pnl, 2) + ",";
+      j += JsonKVNum("pnl_reconciliation_difference", p.pnl_reconciliation_difference, 6) + ",";
+      j += JsonKVNum("result_pct_fixed_initial_balance", p.result_pct_fixed_initial_balance, 6) + ",";
+      j += JsonKVNum("result_pct_equity_at_entry", p.result_pct_equity_at_entry, 6) + ",";
+      j += JsonKVNum("result_r_initial_risk", p.result_r_initial_risk, 6) + ",";
+      j += JsonKVStr("outcome_direction_broker", p.outcome_direction_broker) + ",";
+      j += JsonKVStr("outcome_direction_r", p.outcome_direction_r) + ",";
+      j += JsonKVStr("outcome_direction_equity_pct", p.outcome_direction_equity_pct) + ",";
+      j += JsonKVBool("outcome_direction_match", p.outcome_direction_match) + ",";
+      j += JsonKVStr("outcome_reconciliation_status", p.outcome_reconciliation_status) + ",";
+      j += JsonKVStr("management_version", p.management_version) + ",";
+      j += JsonKVStr("management_state", p.management_state) + ",";
+      j += JsonKVStr("management_previous_state", p.management_previous_state) + ",";
+      j += JsonKVInt("management_transition_time", (int)p.management_transition_time) + ",";
+      j += JsonKVStr("management_transition_reason", p.management_transition_reason) + ",";
+      j += "\"management_evidence_snapshot\":" + (StringLen(p.management_evidence_snapshot_json) > 0 ? p.management_evidence_snapshot_json : "{}") + ",";
+      j += JsonKVStr("management_action_executed", p.management_action_executed) + ",";
+      j += JsonKVStr("management_action_id", p.management_action_id) + ",";
+      j += JsonKVStr("management_action_lifecycle_state", p.management_action_lifecycle_state) + ",";
+      j += JsonKVStr("management_requested_action", p.management_requested_action) + ",";
+      j += JsonKVNum("management_requested_volume", p.management_requested_volume, 8) + ",";
+      j += JsonKVNum("management_normalized_volume", p.management_normalized_volume, 8) + ",";
+      j += JsonKVNum("management_position_volume_before", p.management_position_volume_before, 8) + ",";
+      j += JsonKVNum("management_requested_cut_fraction", p.management_requested_cut_fraction, 8) + ",";
+      j += JsonKVInt("management_action_retry_count", p.management_action_retry_count) + ",";
+      j += JsonKVInt("management_next_retry_at", (int)p.management_next_retry_at) + ",";
+      j += JsonKVNum("management_last_retcode", (double)p.management_last_retcode, 0) + ",";
+      j += JsonKVStr("management_last_retcode_description", p.management_last_retcode_description) + ",";
+      j += JsonKVStr("management_action_terminal_reason", p.management_action_terminal_reason) + ",";
+      j += JsonKVStr("management_policy", p.management_policy) + ",";
+      j += JsonKVInt("management_decision_at", (int)p.management_decision_at) + ",";
+      j += JsonKVBool("management_features_time_safe", p.management_features_time_safe) + ",";
+      j += JsonKVStr("management_snapshot_action", p.management_snapshot_action) + ",";
+      j += JsonKVNum("management_snapshot_mfe_r", p.management_snapshot_mfe_r, 6) + ",";
+      j += JsonKVNum("management_snapshot_mae_r", p.management_snapshot_mae_r, 6) + ",";
+      j += JsonKVInt("management_snapshot_minutes_open", p.management_snapshot_minutes_open) + ",";
+      j += JsonKVNum("management_snapshot_distance_to_sl_r", p.management_snapshot_distance_to_sl_r, 6) + ",";
+      j += JsonKVNum("management_snapshot_distance_to_tp_r", p.management_snapshot_distance_to_tp_r, 6) + ",";
+      j += JsonKVNum("management_snapshot_spread_r", p.management_snapshot_spread_r, 6) + ",";
+      j += JsonKVNum("management_snapshot_execution_cost_r", p.management_snapshot_execution_cost_r, 6) + ",";
+      j += JsonKVBool("management_snapshot_structure_valid", p.management_snapshot_structure_valid) + ",";
+      j += JsonKVStr("invalidation_confirmation_mode", p.invalidation_confirmation_mode) + ",";
+      j += JsonKVInt("invalidation_reference_timeframe", p.invalidation_reference_timeframe) + ",";
+      j += JsonKVNum("invalidation_trigger_level", p.invalidation_trigger_level, 8) + ",";
+      j += JsonKVNum("invalidation_spread", p.invalidation_spread, 8) + ",";
+      j += JsonKVNum("invalidation_buffer", p.invalidation_buffer, 8) + ",";
+      j += JsonKVInt("invalidation_first_breach_time", (int)p.invalidation_first_breach_time) + ",";
+      j += JsonKVInt("invalidation_confirmed_time", (int)p.invalidation_confirmed_time) + ",";
+      j += JsonKVInt("invalidation_confirming_bar", (int)p.invalidation_confirming_bar) + ",";
+      j += JsonKVNum("actual_managed_result", p.actual_managed_result, 4) + ",";
+      j += JsonKVNum("actual_managed_result_r", p.actual_managed_result_r, 6) + ",";
+      j += JsonKVNum("counterfactual_original_sl_tp_result", p.counterfactual_original_sl_tp_result, 4) + ",";
+      j += JsonKVNum("counterfactual_original_sl_tp_result_r", p.counterfactual_original_sl_tp_result_r, 6) + ",";
+      j += JsonKVBool("counterfactual_target_before_stop_available", p.counterfactual_target_before_stop_available) + ",";
+      j += JsonKVBool("counterfactual_target_before_stop", p.counterfactual_target_before_stop) + ",";
+      j += JsonKVNum("management_alpha", p.management_alpha, 6) + ",";
+      j += JsonKVBool("counterfactual_ambiguous", p.counterfactual_ambiguous) + ",";
+      j += JsonKVBool("counterfactual_pending", p.counterfactual_pending) + ",";
+      j += JsonKVStr("counterfactual_status", p.counterfactual_status) + ",";
+      j += JsonKVStr("counterfactual_resolution_reason", p.counterfactual_resolution_reason) + ",";
+      j += JsonKVInt("counterfactual_horizon_at", (int)p.counterfactual_horizon_at) + ",";
+      j += JsonKVInt("counterfactual_evaluated_at", (int)p.counterfactual_evaluated_at) + ",";
+      j += JsonKVBool("management_policy_selection_eligible", p.management_policy_selection_eligible) + ",";
+      j += "\"broker_session_schedule\":" + (StringLen(p.broker_session_schedule_json) > 0 ? p.broker_session_schedule_json : "{}") + ",";
+      j += JsonKVStr("broker_session_source", p.broker_session_source) + ",";
+      j += JsonKVInt("broker_session_open", (int)p.broker_session_open) + ",";
+      j += JsonKVInt("broker_session_close", (int)p.broker_session_close) + ",";
+      j += JsonKVInt("broker_no_entry_from", (int)p.broker_no_entry_from) + ",";
+      j += JsonKVInt("broker_flatten_from", (int)p.broker_flatten_from) + ",";
+      j += JsonKVInt("broker_next_tradable_session", (int)p.broker_next_tradable_session) + ",";
+      j += JsonKVInt("broker_flatten_attempts", p.broker_flatten_attempts) + ",";
+      j += JsonKVInt("broker_flatten_failures", p.broker_flatten_failures) + ",";
+      j += JsonKVNum("broker_flatten_last_retcode", (double)p.broker_flatten_last_retcode, 0) + ",";
+      j += JsonKVInt("broker_flatten_next_retry", (int)p.broker_flatten_next_retry) + ",";
+      j += JsonKVStr("shadow_candidate_record_hash", p.shadow_candidate_record_hash) + ",";
+      j += JsonKVStr("shadow_candidate_schema_version", p.shadow_candidate_schema_version) + ",";
+      j += JsonKVStr("shadow_decision_stage", p.shadow_decision_stage) + ",";
+      j += JsonKVStr("shadow_rejection_reason", p.shadow_rejection_reason) + ",";
+      j += JsonKVInt("shadow_observed_at", (int)p.shadow_observed_at) + ",";
+      j += JsonKVInt("shadow_horizon_at", (int)p.shadow_horizon_at) + ",";
+      j += JsonKVInt("shadow_evaluated_at", (int)p.shadow_evaluated_at) + ",";
+      j += JsonKVStr("shadow_outcome_status", p.shadow_outcome_status) + ",";
+      j += JsonKVStr("shadow_outcome_reason", p.shadow_outcome_reason) + ",";
+      j += JsonKVNum("shadow_outcome_r", p.shadow_outcome_r, 6) + ",";
+      j += JsonKVNum("shadow_mfe_r", p.shadow_mfe_r, 6) + ",";
+      j += JsonKVNum("shadow_mae_r", p.shadow_mae_r, 6) + ",";
+      j += JsonKVInt("shadow_time_to_event_sec", p.shadow_time_to_event_sec) + ",";
+      j += JsonKVInt("shadow_time_to_025r_sec", p.shadow_time_to_025r_sec) + ",";
+      j += JsonKVInt("shadow_time_to_050r_sec", p.shadow_time_to_050r_sec) + ",";
+      j += JsonKVInt("shadow_time_to_stop_sec", p.shadow_time_to_stop_sec) + ",";
+      j += JsonKVInt("shadow_time_to_target_sec", p.shadow_time_to_target_sec) + ",";
+      j += JsonKVBool("shadow_reached_025r", p.shadow_reached_025r) + ",";
+      j += JsonKVBool("shadow_reached_050r", p.shadow_reached_050r) + ",";
+      j += JsonKVBool("shadow_reached_025r_before_adverse", p.shadow_reached_025r_before_adverse) + ",";
+      j += JsonKVBool("shadow_reached_050r_before_adverse", p.shadow_reached_050r_before_adverse) + ",";
+      j += JsonKVInt("shadow_time_to_adverse_threshold_sec", p.shadow_time_to_adverse_threshold_sec) + ",";
+      j += JsonKVBool("shadow_025_order_ambiguous", p.shadow_025_order_ambiguous) + ",";
+      j += JsonKVBool("shadow_050_order_ambiguous", p.shadow_050_order_ambiguous) + ",";
+      j += JsonKVBool("shadow_target_before_stop", p.shadow_target_before_stop) + ",";
+      j += JsonKVBool("shadow_stop_before_target", p.shadow_stop_before_target) + ",";
+      j += JsonKVBool("shadow_mfe_before_adverse", p.shadow_mfe_before_adverse) + ",";
+      j += JsonKVStr("shadow_horizon_result", p.shadow_horizon_result) + ",";
+      j += JsonKVStr("shadow_censoring_status", p.shadow_censoring_status) + ",";
+      j += JsonKVStr("shadow_ambiguity_reason", p.shadow_ambiguity_reason) + ",";
+      j += JsonKVBool("shadow_threshold_order_ambiguous", p.shadow_threshold_order_ambiguous) + ",";
+      j += JsonKVBool("shadow_outcome_ambiguous", p.shadow_outcome_ambiguous) + ",";
+      j += JsonKVNum("mfe_price", p.mfe_price, 8) + ",";
+      j += JsonKVNum("mae_price", p.mae_price, 8) + ",";
+      j += JsonKVNum("mfe_r", p.mfe_r, 6) + ",";
+      j += JsonKVNum("mae_r", p.mae_r, 6) + ",";
+      j += JsonKVInt("minutes_to_0_25r_mfe", p.minutes_to_0_25r_mfe) + ",";
+      j += JsonKVInt("minutes_to_0_50r_mfe", p.minutes_to_0_50r_mfe) + ",";
+      j += JsonKVInt("first_0_25r_time", (int)p.first_0_25r_time) + ",";
+      j += JsonKVInt("first_0_50r_time", (int)p.first_0_50r_time) + ",";
+      j += JsonKVInt("first_adverse_threshold_time", (int)p.first_adverse_threshold_time) + ",";
+      j += JsonKVInt("latest_observed_tick_time", (int)p.latest_observed_tick_time) + ",";
+      j += JsonKVNum("latest_observed_tick_msc", (double)p.latest_observed_tick_msc, 0) + ",";
+      j += JsonKVStr("path_completeness_status", p.path_completeness_status) + ",";
+      j += JsonKVStr("path_observation_source", p.path_observation_source) + ",";
+      j += JsonKVBool("path_data_gap", p.path_data_gap) + ",";
+      j += JsonKVBool("path_order_ambiguous", p.path_order_ambiguous) + ",";
+      j += JsonKVBool("stuck_no_mfe_triggered", p.stuck_no_mfe_triggered) + ",";
+      j += JsonKVBool("dr_and_structural_invalid_triggered", p.dr_and_structural_invalid_triggered) + ",";
+      j += JsonKVInt("penalty_reductions_count", p.penalty_reductions_count) + ",";
+      j += JsonKVInt("closed_at", (int)p.closed_at) + ",";
+      j += JsonKVNum("realized_pnl", p.realized_pnl, 2) + ",";
+      j += JsonKVNum("realized_r", p.realized_r, 6) + ",";
+      j += JsonKVStr("exit_path", p.exit_path) + ",";
+      j += JsonKVBool("analytics_logged", p.analytics_logged) + ",";
+      j += JsonKVInt("tp1_hit_at", (int)p.tp1_hit_at) + ",";
+      j += JsonKVInt("tp2_hit_at", (int)p.tp2_hit_at) + ",";
+      j += JsonKVInt("sl_hit_at", (int)p.sl_hit_at) + ",";
+      j += JsonKVBool("tp2_realistic_before_reversal", p.tp2_realistic_before_reversal) + ",";
+      j += JsonKVBool("be_move_helped", p.be_move_helped) + ",";
+      j += JsonKVBool("trailing_stop_improved", p.trailing_stop_improved) + ",";
+      j += JsonKVNum("target_efficiency", p.target_efficiency, 6) + ",";
+      j += JsonKVStr("req_id", p.req_id) + ",";
+      // FVG
+      j += "\"fvg\":{";
+      j += JsonKVBool("bullish", p.fvg.bullish) + ",";
+      j += JsonKVInt("t_form", (int)p.fvg.t_form) + ",";
+      j += JsonKVNum("lower", p.fvg.lower, 8) + ",";
+      j += JsonKVNum("upper", p.fvg.upper, 8) + ",";
+      j += JsonKVNum("mid", p.fvg.mid, 8) + ",";
+      j += JsonKVBool("touched", p.fvg.touched) + ",";
+      j += JsonKVBool("mid_mitigated", p.fvg.mid_mitigated) + ",";
+      j += JsonKVBool("fully_filled", p.fvg.fully_filled) + ",";
+      j += JsonKVBool("invalidated", p.fvg.invalidated) + ",";
+      j += JsonKVBool("entry_invalid", p.fvg.entry_invalid) + ",";
+      j += JsonKVBool("structure_invalidated", p.fvg.structure_invalidated) + ",";
+      j += JsonKVStr("mitigation_state", p.fvg.mitigation_state) + ",";
+      j += JsonKVStr("invalidation_reason", p.fvg.invalidation_reason) + ",";
+      j += JsonKVBool("continuation", p.fvg.continuation) + ",";
+      j += JsonKVBool("reversal", p.fvg.reversal) + ",";
+      j += JsonKVStr("context_type", p.fvg.context_type) + ",";
+      j += JsonKVNum("origin_score", p.fvg.origin_score, 4) + ",";
+      j += JsonKVNum("cleanliness_score", p.fvg.cleanliness_score, 4) + ",";
+      j += JsonKVNum("age_score", p.fvg.age_score, 4) + ",";
+      j += JsonKVNum("nesting_score", p.fvg.nesting_score, 4) + ",";
+      j += JsonKVNum("htf_overlap_score", p.fvg.htf_overlap_score, 4) + ",";
+      j += JsonKVNum("retest_score", p.fvg.retest_score, 4) + ",";
+      j += JsonKVNum("continuation_score", p.fvg.continuation_score, 4) + ",";
+      j += JsonKVNum("reversal_score", p.fvg.reversal_score, 4) + ",";
+      j += JsonKVNum("score", p.fvg.score, 4) + ",";
+      j += JsonKVStr("execution_class", p.fvg.execution_class) + ",";
+      j += JsonKVNum("mitigation_depth_frac", p.fvg.mitigation_depth_frac, 4) + ",";
+      j += JsonKVInt("age_bars", p.fvg.age_bars) + ",";
+      j += JsonKVNum("displacement_candle_score", p.fvg.displacement_candle_score, 4) + ",";
+      j += JsonKVNum("middle_candle_body_score", p.fvg.middle_candle_body_score, 4) + ",";
+      j += JsonKVNum("volume_impulse_score", p.fvg.volume_impulse_score, 4) + ",";
+      j += JsonKVNum("gap_width_atr_score", p.fvg.gap_width_atr_score, 4) + ",";
+      j += JsonKVNum("manipulation_distance_score", p.fvg.manipulation_distance_score, 4) + ",";
+      j += JsonKVNum("premium_discount_score", p.fvg.premium_discount_score, 4) + ",";
+      j += JsonKVNum("htf_nesting_score", p.fvg.htf_nesting_score, 4) + ",";
+      j += JsonKVNum("freshness_score", p.fvg.freshness_score, 4) + ",";
+      j += JsonKVNum("retest_quality_score", p.fvg.retest_quality_score, 4) + ",";
+      j += JsonKVNum("opposing_obstruction_score", p.fvg.opposing_obstruction_score, 4) + ",";
+      j += JsonKVNum("raw_width_price", p.fvg.raw_width_price, 8) + ",";
+      j += JsonKVNum("raw_width_ticks", p.fvg.raw_width_ticks, 6) + ",";
+      j += JsonKVNum("normalized_min_ticks_price", p.fvg.normalized_min_ticks_price, 8) + ",";
+      j += JsonKVNum("normalized_min_spread_price", p.fvg.normalized_min_spread_price, 8) + ",";
+      j += JsonKVNum("normalized_min_atr_price", p.fvg.normalized_min_atr_price, 8) + ",";
+      j += JsonKVNum("normalized_min_session_noise_price", p.fvg.normalized_min_session_noise_price, 8) + ",";
+      j += JsonKVNum("normalized_minimum_price", p.fvg.normalized_minimum_price, 8) + ",";
+      j += JsonKVNum("normalized_minimum_ticks", p.fvg.normalized_minimum_ticks, 6) + ",";
+      j += JsonKVBool("normalized_minimum_shadow_pass", p.fvg.normalized_minimum_shadow_pass) + ",";
+      j += JsonKVBool("normalized_minimum_enforced_pass", p.fvg.normalized_minimum_enforced_pass) + ",";
+      j += JsonKVStr("normalized_fvg_mode", p.fvg.normalized_fvg_mode) + ",";
+      j += JsonKVStr("normalized_fvg_asset_class", p.fvg.normalized_fvg_asset_class) + ",";
+      j += JsonKVStr("normalized_fvg_policy_version", p.fvg.normalized_fvg_policy_version) + ",";
+      j += JsonKVStr("normalized_fvg_policy_source", p.fvg.normalized_fvg_policy_source) + ",";
+      j += JsonKVInt("normalized_fvg_sample_size", p.fvg.normalized_fvg_sample_size) + ",";
+      j += JsonKVBool("normalized_fvg_asset_class_evidence_sufficient", p.fvg.normalized_fvg_asset_class_evidence_sufficient);
+      j += "},";
+      // PO3
+      j += "\"po3\":{";
+      j += JsonKVStr("po3_state", p.po3.po3_state) + ",";
+      j += JsonKVInt("po3_state_id", (int)p.po3.state) + ",";
+      j += JsonKVStr("po3_state_reason", p.po3.po3_state_reason) + ",";
+      j += JsonKVStr("sweep_side", p.po3.sweep_side) + ",";
+      j += JsonKVStr("structure_type", p.po3.structure_type) + ",";
+      j += JsonKVStr("htf_structure_type", p.po3.htf_structure_type) + ",";
+      j += JsonKVStr("ltf_structure_type", p.po3.ltf_structure_type) + ",";
+      j += JsonKVStr("final_setup_class", p.po3.final_setup_class) + ",";
+      j += JsonKVStr("po3_scope", p.po3.po3_scope) + ",";
+      j += JsonKVBool("bias_long", p.po3.bias_long) + ",";
+      j += JsonKVBool("bias_short", p.po3.bias_short) + ",";
+      j += JsonKVNum("context_score", p.po3.context_score, 6) + ",";
+      j += JsonKVBool("has_sweep", p.po3.has_sweep) + ",";
+      j += JsonKVBool("has_displacement", p.po3.has_displacement) + ",";
+      j += JsonKVBool("has_bos", p.po3.has_bos) + ",";
+      j += JsonKVBool("has_follow_through", p.po3.has_follow_through) + ",";
+      j += JsonKVStr("context_tier", p.po3.context_tier) + ",";
+      j += JsonKVBool("developing_bos", p.po3.developing_bos) + ",";
+      j += JsonKVInt("context_age_bars", p.po3.context_age_bars) + ",";
+      j += JsonKVBool("htf_bos", p.po3.htf_bos) + ",";
+      j += JsonKVBool("htf_internal_bos", p.po3.htf_internal_bos) + ",";
+      j += JsonKVBool("htf_swing_bos", p.po3.htf_swing_bos) + ",";
+      j += JsonKVInt("htf_pretrend_dir", p.po3.htf_pretrend_dir) + ",";
+      j += JsonKVNum("dr_high", p.po3.dr_high, 8) + ",";
+      j += JsonKVNum("dr_low", p.po3.dr_low, 8) + ",";
+      j += JsonKVNum("dr_mid", p.po3.dr_mid, 8) + ",";
+      j += JsonKVNum("manip_low", p.po3.manip_low, 8) + ",";
+      j += JsonKVNum("manip_high", p.po3.manip_high, 8) + ",";
+      j += JsonKVNum("swing_low", p.po3.swing_low, 8) + ",";
+      j += JsonKVNum("swing_high", p.po3.swing_high, 8) + ",";
+      j += JsonKVInt("t_sweep", (int)p.po3.t_sweep) + ",";
+      j += JsonKVInt("t_disp", (int)p.po3.t_disp) + ",";
+      j += JsonKVInt("t_bos", (int)p.po3.t_bos) + ",";
+      j += JsonKVInt("t_follow", (int)p.po3.t_follow) + ",";
+      j += JsonKVNum("bos_level", p.po3.bos_level, 8) + ",";
+      j += JsonKVNum("sweep_strength", p.po3.sweep_strength, 6) + ",";
+      j += JsonKVNum("displacement_score", p.po3.displacement_score, 4) + ",";
+      j += JsonKVNum("displacement_body_frac", p.po3.displacement_body_frac, 4) + ",";
+      j += JsonKVNum("displacement_range_atr", p.po3.displacement_range_atr, 4) + ",";
+      j += JsonKVNum("displacement_volume_ratio", p.po3.displacement_volume_ratio, 4) + ",";
+      j += JsonKVNum("displacement_speed_score", p.po3.displacement_speed_score, 4) + ",";
+      j += JsonKVNum("displacement_follow_score", p.po3.displacement_follow_score, 4) + ",";
+      j += JsonKVStr("session_name", p.po3.session_name) + ",";
+      j += JsonKVStr("session_code", p.po3.session_code) + ",";
+      j += JsonKVStr("killzone_name", p.po3.killzone_name) + ",";
+      j += JsonKVBool("in_killzone", p.po3.in_killzone) + ",";
+      j += JsonKVInt("session_start", (int)p.po3.session_start) + ",";
+      j += JsonKVInt("session_end", (int)p.po3.session_end) + ",";
+      j += JsonKVNum("session_high", p.po3.session_high, 8) + ",";
+      j += JsonKVNum("session_low", p.po3.session_low, 8) + ",";
+      j += JsonKVNum("asia_high", p.po3.asia_high, 8) + ",";
+      j += JsonKVNum("asia_low", p.po3.asia_low, 8) + ",";
+      j += JsonKVNum("london_high", p.po3.london_high, 8) + ",";
+      j += JsonKVNum("london_low", p.po3.london_low, 8) + ",";
+      j += JsonKVNum("newyork_high", p.po3.newyork_high, 8) + ",";
+      j += JsonKVNum("newyork_low", p.po3.newyork_low, 8) + ",";
+      j += JsonKVNum("prev_day_high", p.po3.prev_day_high, 8) + ",";
+      j += JsonKVNum("prev_day_low", p.po3.prev_day_low, 8) + ",";
+      j += JsonKVNum("prev_week_high", p.po3.prev_week_high, 8) + ",";
+      j += JsonKVNum("prev_week_low", p.po3.prev_week_low, 8) + ",";
+      j += JsonKVInt("daily_bias_dir", p.po3.daily_bias_dir) + ",";
+      j += JsonKVInt("h4_bias_dir", p.po3.h4_bias_dir) + ",";
+      j += JsonKVInt("h1_bias_dir", p.po3.h1_bias_dir) + ",";
+      j += JsonKVNum("liquidity_target", p.po3.liquidity_target, 8) + ",";
+      j += JsonKVBool("liquidity_target_high", p.po3.liquidity_target_high) + ",";
+      j += JsonKVStr("liquidity_kind", p.po3.liquidity_kind) + ",";
+      j += JsonKVInt("liquidity_cluster_count", p.po3.liquidity_cluster_count) + ",";
+      j += JsonKVBool("htf_mss", p.po3.htf_mss) + ",";
+      j += JsonKVBool("htf_choch", p.po3.htf_choch) + ",";
+      j += JsonKVBool("ltf_bos", p.po3.ltf_bos) + ",";
+      j += JsonKVBool("ltf_internal_bos", p.po3.ltf_internal_bos) + ",";
+      j += JsonKVBool("ltf_swing_bos", p.po3.ltf_swing_bos) + ",";
+      j += JsonKVInt("ltf_pretrend_dir", p.po3.ltf_pretrend_dir) + ",";
+      j += JsonKVBool("ltf_mss", p.po3.ltf_mss) + ",";
+      j += JsonKVBool("ltf_choch", p.po3.ltf_choch) + ",";
+      j += JsonKVInt("ltf_structure_time", (int)p.po3.ltf_structure_time) + ",";
+      j += JsonKVNum("ltf_structure_level", p.po3.ltf_structure_level, 8);
+      j += "}";
+      j += "}";
+      return j;
+   }
+
+   string AiCacheToJson(const AiCacheEntry &entry) {
+      string j = "{";
+      j += JsonKVStr("signature", entry.signature) + ",";
+      j += JsonKVStr("symbol", entry.symbol) + ",";
+      j += JsonKVStr("decision_schema_version", entry.decision_schema_version) + ",";
+      j += JsonKVStr("decision_quality_tier", entry.decision_quality_tier) + ",";
+      j += JsonKVStr("response_quality", entry.response_quality_alias) + ",";
+      j += JsonKVStr("selected_candidate_hash", entry.selected_candidate_hash) + ",";
+      j += JsonKVStr("assessed_execution_fingerprint", entry.assessed_execution_fingerprint) + ",";
+      j += JsonKVBool("allow", entry.allow) + ",";
+      j += JsonKVNum("score", entry.score, 4) + ",";
+      j += JsonKVInt("chosen_index", entry.chosen_index) + ",";
+      j += JsonKVNum("confidence", entry.confidence, 4) + ",";
+      j += JsonKVStr("reasons_json", entry.reasons_json) + ",";
+      j += JsonKVInt("created_at", (int)entry.created_at);
+      j += "}";
+      return j;
+   }
+
+   string PenaltyToJson(const PenaltyState &st) {
+      string j = "{";
+      j += JsonKVStr("symbol", st.symbol) + ",";
+      j += JsonKVNum("position_identifier", (double)st.position_identifier, 0) + ",";
+      j += JsonKVNum("position_ticket", (double)st.position_ticket, 0) + ",";
+      j += JsonKVInt("opened_at", (int)st.opened_at) + ",";
+      j += JsonKVNum("entry", st.entry, 8) + ",";
+      j += JsonKVNum("sl", st.sl, 8) + ",";
+      j += JsonKVNum("risk_dist", st.risk_dist, 8) + ",";
+      j += JsonKVBool("is_buy", st.is_buy) + ",";
+      j += JsonKVNum("mfe_price", st.mfe_price, 8) + ",";
+      j += JsonKVNum("mae_price", st.mae_price, 8) + ",";
+      j += JsonKVNum("mfe_r", st.mfe_r, 6) + ",";
+      j += JsonKVNum("mae_r", st.mae_r, 6) + ",";
+      j += JsonKVInt("first_0_25r_time", (int)st.first_0_25r_time) + ",";
+      j += JsonKVInt("first_0_50r_time", (int)st.first_0_50r_time) + ",";
+      j += JsonKVInt("first_adverse_threshold_time", (int)st.first_adverse_threshold_time) + ",";
+      j += JsonKVInt("latest_observed_tick_time", (int)st.latest_observed_tick_time) + ",";
+      j += JsonKVNum("latest_observed_tick_msc", (double)st.latest_observed_tick_msc, 0) + ",";
+      j += JsonKVStr("path_completeness_status", st.path_completeness_status) + ",";
+      j += JsonKVStr("path_observation_source", st.path_observation_source) + ",";
+      j += JsonKVBool("path_data_gap", st.path_data_gap) + ",";
+      j += JsonKVBool("path_order_ambiguous", st.path_order_ambiguous) + ",";
+      j += JsonKVInt("position_closed_observed_at", (int)st.position_closed_observed_at) + ",";
+      j += JsonKVInt("strikes", st.strikes) + ",";
+      j += JsonKVInt("last_reduction_at", (int)st.last_reduction_at) + ",";
+      j += JsonKVStr("current_state", st.current_state) + ",";
+      j += JsonKVStr("previous_state", st.previous_state) + ",";
+      j += JsonKVInt("transition_time", (int)st.transition_time) + ",";
+      j += JsonKVStr("transition_reason", st.transition_reason) + ",";
+      j += "\"evidence_snapshot\":" + (StringLen(st.evidence_snapshot_json) > 0 ? st.evidence_snapshot_json : "{}") + ",";
+      j += JsonKVStr("action_executed", st.action_executed) + ",";
+      j += JsonKVStr("action_id", st.action_id) + ",";
+      j += JsonKVStr("action_lifecycle_state", st.action_lifecycle_state) + ",";
+      j += JsonKVStr("requested_action", st.requested_action) + ",";
+      j += JsonKVNum("requested_volume", st.requested_volume, 8) + ",";
+      j += JsonKVNum("normalized_volume", st.normalized_volume, 8) + ",";
+      j += JsonKVNum("action_position_volume_before", st.action_position_volume_before, 8) + ",";
+      j += JsonKVNum("requested_cut_fraction", st.requested_cut_fraction, 8) + ",";
+      j += JsonKVInt("action_retry_count", st.action_retry_count) + ",";
+      j += JsonKVInt("next_eligible_retry_time", (int)st.next_eligible_retry_time) + ",";
+      j += JsonKVInt("action_last_attempt_at", (int)st.action_last_attempt_at) + ",";
+      j += JsonKVNum("action_last_retcode", (double)st.action_last_retcode, 0) + ",";
+      j += JsonKVStr("action_last_retcode_description", st.action_last_retcode_description) + ",";
+      j += JsonKVStr("action_terminal_reason", st.action_terminal_reason) + ",";
+      j += JsonKVStr("management_version", st.management_version) + ",";
+      j += JsonKVStr("executed_action_ids", st.executed_action_ids) + ",";
+      j += JsonKVStr("confirmation_mode", st.confirmation_mode) + ",";
+      j += JsonKVInt("confirmation_timeframe", st.confirmation_timeframe) + ",";
+      j += JsonKVNum("confirmation_trigger_level", st.confirmation_trigger_level, 8) + ",";
+      j += JsonKVNum("confirmation_spread", st.confirmation_spread, 8) + ",";
+      j += JsonKVNum("confirmation_buffer", st.confirmation_buffer, 8) + ",";
+      j += JsonKVInt("first_breach_time", (int)st.first_breach_time) + ",";
+      j += JsonKVInt("confirmed_time", (int)st.confirmed_time) + ",";
+      j += JsonKVInt("confirming_bar", (int)st.confirming_bar);
+      j += "}";
+      return j;
+   }
+
+   bool PlanFromJson(const string json, TradePlan &p) {
+      p.symbol = JsonGetString(json, "symbol", "");
+      if(StringLen(p.symbol)==0) return false;
+      p.is_buy = JsonGetBool(json, "is_buy", true);
+      p.htf = (ENUM_TIMEFRAMES)(int)JsonGetNumber(json, "htf", (double)PO3EffectiveHTF());
+      p.ltf = (ENUM_TIMEFRAMES)(int)JsonGetNumber(json, "ltf", (double)PO3EffectiveEntryTF());
+      p.confirm_tf = (ENUM_TIMEFRAMES)(int)JsonGetNumber(json, "confirm_tf", (double)PO3EffectiveConfirmTF());
+      p.entry_est = JsonGetNumber(json, "entry", 0);
+      p.entry_model = JsonGetString(json, "entry_model", "");
+      p.entry_branch = JsonGetString(json, "entry_branch", p.entry_model);
+      p.tp_model = JsonGetString(json, "tp_model", "");
+      p.target_source = JsonGetString(json, "target_source", "");
+      p.sl = JsonGetNumber(json, "sl", 0);
+      p.tp1 = JsonGetNumber(json, "tp1", 0);
+      p.tp1_from_target_model = JsonGetBool(json, "tp1_from_target_model", false);
+      p.min_tp1_reward = JsonGetNumber(json, "min_tp1_reward", 0);
+      p.tp2 = JsonGetNumber(json, "tp2", 0);
+      p.atr_pct = JsonGetNumber(json, "atr_pct", 0);
+      p.trend_strength = JsonGetNumber(json, "trend_strength", 0);
+      p.trend_slope_pct = JsonGetNumber(json, "trend_slope_pct", 0);
+      p.adx_value = JsonGetNumber(json, "adx_value", 0);
+      p.adr_pct = JsonGetNumber(json, "adr_pct", 0);
+      p.session_vol_ratio = JsonGetNumber(json, "session_vol_ratio", 0);
+      p.vwap_dist_atr = JsonGetNumber(json, "vwap_dist_atr", 0);
+      p.compression_score = JsonGetNumber(json, "compression_score", 0);
+      p.expansion_score = JsonGetNumber(json, "expansion_score", 0);
+      p.news_risk = JsonGetNumber(json, "news_risk", 0);
+      p.setup_score = JsonGetNumber(json, "setup_score", 0);
+      p.setup_family = JsonGetString(json, "setup_family", "");
+      p.setup_class = JsonGetString(json, "setup_class", "");
+      p.setup_taxonomy = (ENUM_SETUP_TAXONOMY)(int)JsonGetNumber(json, "setup_taxonomy", 0);
+      p.setup_taxonomy_version = JsonGetString(json, "setup_taxonomy_version", "");
+      p.setup_taxonomy_enum = JsonGetString(json, "setup_taxonomy_enum", "UNKNOWN_UNCLASSIFIED");
+      p.taxonomy_mapping_source = JsonGetString(json, "taxonomy_mapping_source", "");
+      p.taxonomy_mapping_failure_reason = JsonGetString(json, "taxonomy_mapping_failure_reason", "");
+      p.setup_type = JsonGetString(json, "setup_type", "");
+      p.setup_subtype = JsonGetString(json, "setup_subtype", "");
+      p.setup_story_scope = JsonGetString(json, "setup_story_scope", "");
+      p.fvg_execution_class = JsonGetString(json, "fvg_execution_class", "");
+      p.model_code = JsonGetString(json, "model_code", "");
+      p.session_code = JsonGetString(json, "session_code", "");
+      p.killzone_code = JsonGetString(json, "killzone_code", "");
+      p.broker_comment = JsonGetString(json, "broker_comment", "");
+      p.input_snapshot_hash = JsonGetString(json, "input_snapshot_hash", "");
+      p.engine_version = JsonGetString(json, "engine_version", "");
+      p.git_commit = JsonGetString(json, "git_commit", "");
+      p.dirty_tree_status = JsonGetString(json, "dirty_tree_status", "");
+      p.set_file_hash = JsonGetString(json, "set_file_hash", "");
+      p.runtime_input_hash = JsonGetString(json, "runtime_input_hash", "");
+      p.reasoning_configuration = JsonGetString(json, "reasoning_configuration", "");
+      p.policy_hash = JsonGetString(json, "policy_hash", "");
+      p.bucket_prior_hash = JsonGetString(json, "bucket_prior_hash", "");
+      p.calibration_artifact_id = JsonGetString(json, "calibration_artifact_id", "");
+      p.repeatability_artifact_id = JsonGetString(json, "repeatability_artifact_id", "");
+      p.feature_version = JsonGetString(json, "feature_version", "");
+      p.cohort_id = JsonGetString(json, "cohort_id", "");
+      p.cohort_complete = JsonGetBool(json, "cohort_complete", false);
+      p.request_fingerprint = JsonGetString(json, "request_fingerprint", "");
+      p.response_fingerprint = JsonGetString(json, "response_fingerprint", "");
+      p.hierarchical_prior_artifact_hash = JsonGetString(json, "hierarchical_prior_artifact_hash", "");
+      p.hierarchical_prior_schema_version = JsonGetString(json, "hierarchical_prior_schema_version", "");
+      p.repeatability_status = JsonGetString(json, "repeatability_status", "UNAVAILABLE");
+      p.repeatability_required_live = JsonGetBool(json, "repeatability_required_live", false);
+      p.repeatability_artifact_state = JsonGetString(json, "repeatability_artifact_state", "legacy_or_missing");
+      p.repeatability_rejection_code = JsonGetString(json, "repeatability_rejection_code", "");
+      p.repeatability_score_threshold_authority = JsonGetBool(json, "repeatability_score_threshold_authority", false);
+      p.repeatability_trading_eligible = JsonGetBool(json, "repeatability_trading_eligible", false);
+      p.repeatability_group_key = JsonGetString(json, "repeatability_group_key", "");
+      p.repeatability_authority_hash = JsonGetString(json, "repeatability_authority_hash", "");
+      p.origin_quality = JsonGetString(json, "origin_quality", "");
+      p.exclusive_model_mode = JsonGetBool(json, "exclusive_model_mode", false);
+      p.exclusive_model_name = JsonGetString(json, "exclusive_model_name", "");
+      p.exclusive_model_passed = JsonGetBool(json, "exclusive_model_passed", false);
+      p.exclusive_fail_reason = JsonGetString(json, "exclusive_fail_reason", "");
+      p.management_profile = JsonGetString(json, "management_profile", "");
+      p.asset_class = JsonGetString(json, "asset_class", "");
+      p.regime_profile = JsonGetString(json, "regime_profile", "");
+      p.volatility_profile = JsonGetString(json, "volatility_profile", "");
+      p.policy_bucket = JsonGetString(json, "policy_bucket", "");
+      p.obstacle_kind = JsonGetString(json, "obstacle_kind", "");
+      p.obstacle_price = JsonGetNumber(json, "obstacle_price", 0);
+      p.obstacle_r = JsonGetNumber(json, "obstacle_r", 0);
+      p.effective_rr2 = JsonGetNumber(json, "effective_rr2", 0);
+      p.estimated_cost_price = JsonGetNumber(json, "estimated_cost_price", 0);
+      p.estimated_slippage_price = JsonGetNumber(json, "estimated_slippage_price", 0);
+      p.estimated_commission_money = JsonGetNumber(json, "estimated_commission_money", 0);
+      p.estimated_cost_source = JsonGetString(json, "estimated_cost_source", "");
+      p.estimated_cost_sample_size = (int)JsonGetNumber(json, "estimated_cost_sample_size", 0);
+      p.estimated_cost_stressed_per_lot = JsonGetNumber(json, "estimated_cost_stressed_per_lot", 0);
+      p.actual_realized_cost = JsonGetNumber(json, "actual_realized_cost", 0);
+      p.cost_prediction_error = JsonGetNumber(json, "cost_prediction_error", 0);
+      p.commission_model_version = JsonGetString(json, "commission_model_version", "");
+      p.spread_r = JsonGetNumber(json, "spread_r", 0);
+      p.execution_cost_r = JsonGetNumber(json, "execution_cost_r", 0);
+      p.slippage_r = JsonGetNumber(json, "slippage_r", 0);
+      p.commission_r = JsonGetNumber(json, "commission_r", 0);
+      p.execution_cost_risk_reduced = JsonGetBool(json, "execution_cost_risk_reduced", false);
+      p.execution_cost_risk_multiplier = JsonGetNumber(json, "execution_cost_risk_multiplier", 0);
+      p.gross_expected_r = JsonGetNumber(json, "gross_expected_r", 0);
+      p.net_expected_r = JsonGetNumber(json, "net_expected_r", 0);
+      p.liquidity_rr = JsonGetNumber(json, "liquidity_rr", 0);
+      p.sequence_quality = JsonGetNumber(json, "sequence_quality", 0);
+      p.htf_alignment_score = JsonGetNumber(json, "htf_alignment_score", 0);
+      p.adverse_context_score = JsonGetNumber(json, "adverse_context_score", 0);
+      p.expected_value_r = JsonGetNumber(json, "expected_value_r", 0);
+      p.heuristic_quality_estimate = JsonGetNumber(json, "heuristic_quality_estimate", p.expected_value_r);
+      p.heuristic_quality_estimate_gross = JsonGetNumber(json, "heuristic_quality_estimate_gross", p.gross_expected_r);
+      p.net_reward_after_cost_r = JsonGetNumber(json, "net_reward_after_cost_r", 0);
+      p.runner_trade = JsonGetBool(json, "runner_trade", false);
+      p.runner_downgraded = JsonGetBool(json, "runner_downgraded", false);
+      p.runner_downgrade_reason = JsonGetString(json, "runner_downgrade_reason", "");
+      p.original_runner_target = JsonGetNumber(json, "original_runner_target", 0);
+      p.standard_target_after_downgrade = JsonGetNumber(json, "standard_target_after_downgrade", 0);
+      p.target_model = JsonGetString(json, "target_model", "");
+      p.target_arbitration_required = JsonGetBool(json, "target_arbitration_required", false);
+      p.liquidity_target_preserved = JsonGetNumber(json, "liquidity_target_preserved", 0);
+      p.liquidity_target_model = JsonGetString(json, "liquidity_target_model", "");
+      p.liquidity_target_valid_structurally = JsonGetBool(json, "liquidity_target_valid_structurally", false);
+      p.liquidity_target_blocked_by_obstacle = JsonGetBool(json, "liquidity_target_blocked_by_obstacle", false);
+      p.obstacle_distance_r = JsonGetNumber(json, "obstacle_distance_r", 0);
+      p.obstacle_tf = JsonGetString(json, "obstacle_tf", "");
+      p.obstacle_severity = JsonGetNumber(json, "obstacle_severity", 0.0);
+      p.obstacle_strength_features = JsonGetString(json, "obstacle_strength_features", "");
+      p.fallback_tp = JsonGetNumber(json, "fallback_tp", 0);
+      p.fallback_rr = JsonGetNumber(json, "fallback_rr", 0);
+      p.fallback_source = JsonGetString(json, "fallback_source", "");
+      p.capped_before_obstacle_tp = JsonGetNumber(json, "capped_before_obstacle_tp", 0);
+      p.capped_before_obstacle_rr = JsonGetNumber(json, "capped_before_obstacle_rr", 0);
+      p.capped_before_obstacle_source = JsonGetString(json, "capped_before_obstacle_source", "");
+      p.original_planned_tp_before_ai = JsonGetNumber(json, "original_planned_tp_before_ai", 0);
+      p.original_planned_rr_before_ai = JsonGetNumber(json, "original_planned_rr_before_ai", 0);
+      p.ai_chosen_target_model = JsonGetString(json, "ai_chosen_target_model", "");
+      p.ai_chosen_tp1 = JsonGetNumber(json, "ai_chosen_tp1", 0);
+      p.ai_chosen_tp2 = JsonGetNumber(json, "ai_chosen_tp2", 0);
+      p.ai_chosen_rr2 = JsonGetNumber(json, "ai_chosen_rr2", 0);
+      p.ai_rejected_target_models = JsonGetString(json, "ai_rejected_target_models", "");
+      p.ai_blocker_severity = JsonGetNumber(json, "ai_blocker_severity", 0);
+      p.ai_blocker_class = JsonGetString(json, "ai_blocker_class", "");
+      p.ai_blocker_is_trade_killer = JsonGetBool(json, "ai_blocker_is_trade_killer", false);
+      p.target_decision_reason = JsonGetString(json, "target_decision_reason", "");
+      p.target_arbitration_normalized_valid = JsonGetBool(json, "target_arbitration_normalized_valid", false);
+      p.target_arbitration_schema_version = JsonGetString(json, "target_arbitration_schema_version", "");
+      p.prompt_contract_version = JsonGetString(json, "prompt_contract_version", "");
+      p.why_not_liquidity_target = JsonGetString(json, "why_not_liquidity_target", "");
+      p.why_not_partial_before_obstacle = JsonGetString(json, "why_not_partial_before_obstacle", "");
+      p.why_not_capped_before_obstacle = JsonGetString(json, "why_not_capped_before_obstacle", "");
+      p.why_not_synthetic_fallback = JsonGetString(json, "why_not_synthetic_fallback", "");
+      p.target_comparison_json = JsonGetString(json, "target_comparison_json", "");
+      p.original_target_candidates_json = JsonGetString(json, "original_target_candidates_json", "");
+      p.analytics_key = JsonGetString(json, "analytics_key", "");
+      p.bucket_policy_action = JsonGetString(json, "bucket_policy_action", "");
+      p.bucket_policy_reason = JsonGetString(json, "bucket_policy_reason", "");
+      p.bucket_policy_key = JsonGetString(json, "bucket_policy_key", "");
+      p.bucket_policy_risk_multiplier = JsonGetNumber(json, "bucket_policy_risk_multiplier", -1.0);
+      p.symbol_policy_action = JsonGetString(json, "symbol_policy_action", "");
+      p.symbol_policy_reason = JsonGetString(json, "symbol_policy_reason", "");
+      p.family_policy_action = JsonGetString(json, "family_policy_action", "");
+      p.family_policy_reason = JsonGetString(json, "family_policy_reason", "");
+      p.entry_miss_classification = JsonGetString(json, "entry_miss_classification", "");
+      p.portfolio_score = JsonGetNumber(json, "portfolio_score", 0);
+      p.portfolio_rank = (int)JsonGetNumber(json, "portfolio_rank", 0);
+      p.portfolio_cluster = JsonGetString(json, "portfolio_cluster", "");
+      p.usd_exposure_key = JsonGetString(json, "usd_exposure_key", "");
+      p.scheduler_action = JsonGetString(json, "scheduler_action", "");
+      p.scheduler_reason = JsonGetString(json, "scheduler_reason", "");
+      p.portfolio_risk_weight = JsonGetNumber(json, "portfolio_risk_weight", 0);
+      p.risk_factor_schema_version = JsonGetString(json, "risk_factor_schema_version", "");
+      p.risk_factor_contributions_json = JsonGetObject(json, "risk_factor_contributions", "{}");
+      p.original_initial_risk_money = JsonGetNumber(json, "original_initial_risk_money", 0);
+      p.original_initial_risk_money_per_lot = JsonGetNumber(json, "original_initial_risk_money_per_lot", 0);
+      p.original_entry_for_risk = JsonGetNumber(json, "original_entry_for_risk", 0);
+      p.original_sl_for_risk = JsonGetNumber(json, "original_sl_for_risk", 0);
+      p.session_concentration = JsonGetNumber(json, "session_concentration", 0);
+      p.usd_concentration = JsonGetNumber(json, "usd_concentration", 0);
+      p.cluster_concentration = JsonGetNumber(json, "cluster_concentration", 0);
+      p.diversity_bonus = JsonGetNumber(json, "diversity_bonus", 0);
+      p.stop_floor_reason = JsonGetString(json, "stop_floor_reason", "");
+      p.stop_floor_distance = JsonGetNumber(json, "stop_floor_distance", 0);
+      p.stop_noise_band = JsonGetNumber(json, "stop_noise_band", 0);
+      p.broker_min_stop_distance = JsonGetNumber(json, "broker_min_stop_distance", 0);
+      p.stop_microstructure_distortion = JsonGetBool(json, "stop_microstructure_distortion", false);
+      p.stop_quality_score = JsonGetNumber(json, "stop_quality_score", 0);
+      p.realized_stop_quality = JsonGetNumber(json, "realized_stop_quality", 0);
+      p.realized_stop_buffer_r = JsonGetNumber(json, "realized_stop_buffer_r", 0);
+      p.ote_distance_frac = JsonGetNumber(json, "ote_distance_frac", 0);
+      p.ote_softness_frac = JsonGetNumber(json, "ote_softness_frac", 0);
+      p.ote_state = JsonGetString(json, "ote_state", "");
+      p.subtype_policy_action = JsonGetString(json, "subtype_policy_action", "");
+      p.subtype_policy_penalty = JsonGetNumber(json, "subtype_policy_penalty", 0);
+      p.subtype_shrunk_win_rate = JsonGetNumber(json, "subtype_shrunk_win_rate", 0);
+      p.subtype_avg_r = JsonGetNumber(json, "subtype_avg_r", 0);
+      p.subtype_risk_multiplier = JsonGetNumber(json, "subtype_risk_multiplier", 0);
+      p.active_policy_risk_multiplier = JsonGetNumber(json, "active_policy_risk_multiplier", 0);
+      p.risk_multipliers_initialized = JsonGetBool(json, "risk_multipliers_initialized", false);
+      p.setup_floor_score = JsonGetNumber(json, "setup_floor_score", 0);
+      p.setup_floor_penalty = JsonGetNumber(json, "setup_floor_penalty", 0);
+      p.setup_floor_action = JsonGetString(json, "setup_floor_action", "");
+      p.session_weekday_policy_action = JsonGetString(json, "session_weekday_policy_action", "");
+      p.session_weekday_risk_multiplier = JsonGetNumber(json, "session_weekday_risk_multiplier", 0);
+      p.session_weekday_rr_delta = JsonGetNumber(json, "session_weekday_rr_delta", 0);
+      p.session_weekday_score_bias = JsonGetNumber(json, "session_weekday_score_bias", 0);
+      p.policy_snapshot_id = JsonGetString(json, "policy_snapshot_id", "");
+      p.policy_version = JsonGetString(json, "policy_version", "");
+      p.risk_version = JsonGetString(json, "risk_version", "");
+      p.reject_code = JsonGetString(json, "reject_code", "");
+      p.source_t_sweep = (datetime)(int)JsonGetNumber(json, "source_t_sweep", 0);
+      p.source_t_disp = (datetime)(int)JsonGetNumber(json, "source_t_disp", 0);
+      p.source_t_bos = (datetime)(int)JsonGetNumber(json, "source_t_bos", 0);
+      p.source_context_tier = JsonGetString(json, "source_context_tier", "");
+      p.source_sweep_side = JsonGetString(json, "source_sweep_side", "");
+      p.source_manip_low = JsonGetNumber(json, "source_manip_low", 0);
+      p.source_manip_high = JsonGetNumber(json, "source_manip_high", 0);
+      p.source_dr_high = JsonGetNumber(json, "source_dr_high", 0);
+      p.source_dr_low = JsonGetNumber(json, "source_dr_low", 0);
+      p.source_liquidity_target = JsonGetNumber(json, "source_liquidity_target", 0);
+      p.source_liquidity_kind = JsonGetString(json, "source_liquidity_kind", "");
+      p.candidate_index = (int)JsonGetNumber(json, "candidate_index", 0);
+      p.candidate_count = (int)JsonGetNumber(json, "candidate_count", 1);
+      p.trade_key = JsonGetString(json, "trade_key", "");
+      p.setup_id = JsonGetString(json, "setup_id", "");
+      p.fvg_id = JsonGetString(json, "fvg_id", "");
+      p.candidate_id = JsonGetString(json, "candidate_id", "");
+      p.candidate_hash = JsonGetString(json, "candidate_hash", "");
+      p.ai_selected_candidate_hash = JsonGetString(json, "ai_selected_candidate_hash", "");
+      p.executed_candidate_hash = JsonGetString(json, "executed_candidate_hash", "");
+      p.candidate_hash_match = JsonGetBool(json, "candidate_hash_match", false);
+      p.request_execution_fingerprint = JsonGetString(json, "request_execution_fingerprint", "");
+      p.assessed_execution_fingerprint = JsonGetString(json, "assessed_execution_fingerprint", "");
+      p.final_execution_fingerprint = JsonGetString(json, "final_execution_fingerprint", "");
+      p.execution_fingerprint_match = JsonGetBool(json, "execution_fingerprint_match", false);
+      p.execution_fingerprint_changed_components = JsonGetString(json, "execution_fingerprint_changed_components", "");
+      p.assessed_entry = JsonGetNumber(json, "assessed_entry", 0.0);
+      p.assessed_sl = JsonGetNumber(json, "assessed_sl", 0.0);
+      p.assessed_tp1 = JsonGetNumber(json, "assessed_tp1", 0.0);
+      p.assessed_tp2 = JsonGetNumber(json, "assessed_tp2", 0.0);
+      p.assessed_net_rr = JsonGetNumber(json, "assessed_net_rr", 0.0);
+      p.assessed_spread_r = JsonGetNumber(json, "assessed_spread_r", 0.0);
+      p.assessed_slippage_r = JsonGetNumber(json, "assessed_slippage_r", 0.0);
+      p.assessed_execution_cost_r = JsonGetNumber(json, "assessed_execution_cost_r", 0.0);
+      p.assessed_symbol = JsonGetString(json, "assessed_symbol", "");
+      p.assessed_is_buy = JsonGetBool(json, "assessed_is_buy", false);
+      p.assessed_setup_code = JsonGetString(json, "assessed_setup_code", "");
+      p.assessed_setup_family = JsonGetString(json, "assessed_setup_family", "");
+      p.assessed_setup_taxonomy_enum = JsonGetString(json, "assessed_setup_taxonomy_enum", "");
+      p.assessed_setup_taxonomy_version = JsonGetString(json, "assessed_setup_taxonomy_version", "");
+      p.assessed_taxonomy_mapping_source = JsonGetString(json, "assessed_taxonomy_mapping_source", "");
+      p.assessed_entry_branch = JsonGetString(json, "assessed_entry_branch", "");
+      p.assessed_source_t_sweep = (datetime)JsonGetNumber(json, "assessed_source_t_sweep", 0);
+      p.assessed_source_t_disp = (datetime)JsonGetNumber(json, "assessed_source_t_disp", 0);
+      p.assessed_source_t_bos = (datetime)JsonGetNumber(json, "assessed_source_t_bos", 0);
+      p.assessed_target_source = JsonGetString(json, "assessed_target_source", "");
+      p.assessed_target_model = JsonGetString(json, "assessed_target_model", "");
+      p.assessed_obstacle_kind = JsonGetString(json, "assessed_obstacle_kind", "");
+      p.assessed_obstacle_tf = JsonGetString(json, "assessed_obstacle_tf", "");
+      p.assessed_obstacle_price = JsonGetNumber(json, "assessed_obstacle_price", 0.0);
+      p.assessed_obstacle_severity = JsonGetNumber(json, "assessed_obstacle_severity", 0.0);
+      p.live_obstacle_kind = JsonGetString(json, "live_obstacle_kind", "");
+      p.live_obstacle_price = JsonGetNumber(json, "live_obstacle_price", 0.0);
+      p.live_obstacle_severity = JsonGetNumber(json, "live_obstacle_severity", 0.0);
+      p.assessed_decision_input_hash = JsonGetString(json, "assessed_decision_input_hash", "");
+      p.assessed_strategy_schema_version = JsonGetString(json, "assessed_strategy_schema_version", "");
+      p.assessed_plan_locked = JsonGetBool(json, "assessed_plan_locked", false);
+      p.assessed_tp_model = JsonGetString(json, "assessed_tp_model", "");
+      p.assessed_selected_target_identity = JsonGetString(json, "assessed_selected_target_identity", "");
+      p.assessed_selected_target_price = JsonGetNumber(json, "assessed_selected_target_price", 0.0);
+      p.assessed_stop_distance = JsonGetNumber(json, "assessed_stop_distance", 0.0);
+      // A record written before this field existed carries no stop distance; derive
+      // it from the assessed prices rather than leaving the TP1 floor unanchored.
+      if(p.assessed_plan_locked && p.assessed_stop_distance <= 0.0 &&
+         p.assessed_entry > 0.0 && p.assessed_sl > 0.0)
+         p.assessed_stop_distance = MathAbs(p.assessed_entry - p.assessed_sl);
+      p.ai_decision_id = JsonGetString(json, "ai_decision_id", "");
+      p.lineage_root_id = JsonGetString(json, "lineage_root_id", "");
+      p.parent_setup_id = JsonGetString(json, "parent_setup_id", "");
+      p.lineage_version = (int)JsonGetNumber(json, "lineage_version", 0);
+      p.attempt_number_for_sweep = (int)JsonGetNumber(json, "attempt_number_for_sweep", 0);
+      p.narrative_state = JsonGetString(json, "narrative_state", "");
+      p.superseded_by = JsonGetString(json, "superseded_by", "");
+      p.invalidation_cause = JsonGetString(json, "invalidation_cause", "");
+      p.snapshot_htf_path = JsonGetString(json, "snapshot_htf_path", "");
+      p.snapshot_ltf_path = JsonGetString(json, "snapshot_ltf_path", "");
+      p.created_at = (datetime)(int)JsonGetNumber(json, "created_at", 0);
+      p.setup_snapshot_time = (datetime)(int)JsonGetNumber(json, "setup_snapshot_time", 0);
+      p.ai_request_time = (datetime)(int)JsonGetNumber(json, "ai_request_time", 0);
+      p.ai_advisory_time = (datetime)(int)JsonGetNumber(json, "ai_advisory_time", 0);
+      p.ai_result_age_sim_minutes = (int)JsonGetNumber(json, "ai_result_age_sim_minutes", 0);
+      p.tester_ai_result_stale = JsonGetBool(json, "tester_ai_result_stale", false);
+      p.ai_requested_at = (datetime)(int)JsonGetNumber(json, "ai_requested_at", 0);
+      p.last_score_refresh = (datetime)(int)JsonGetNumber(json, "last_score_refresh", 0);
+      p.ai_decision_source = JsonGetString(json, "ai_decision_source", "");
+      p.ai.allow = JsonGetBool(json, "ai_allow", false);
+      p.ai.raw_allow = JsonGetBool(json, "ai_raw_allow", false);
+      p.model_raw_allow = JsonGetBool(json, "model_raw_allow", false);
+      p.python_final_allow = JsonGetBool(json, "python_final_allow", false);
+      p.mql_final_allow = JsonGetBool(json, "mql_final_allow", false);
+      p.decision_field_authority_json = JsonGetObject(json, "decision_field_authority", "{}");
+      p.python_decision_reasons = JsonGetString(json, "python_decision_reasons", "");
+      p.mql_decision_reasons = JsonGetString(json, "mql_decision_reasons", "");
+      p.ai.model_raw_allow = p.model_raw_allow;
+      p.ai.python_final_allow = p.python_final_allow;
+      p.ai.mql_final_allow = p.mql_final_allow;
+      p.ai.decision_field_authority_json = p.decision_field_authority_json;
+      p.ai.chosen_index = (int)JsonGetNumber(json, "ai_chosen_index", 0);
+      p.ai.decision_schema_version = JsonGetString(json, "ai_decision_schema_version", "");
+      p.ai.decision_quality_tier = JsonGetString(json, "ai_decision_quality_tier", "DEGRADED_NON_TRADING");
+      p.ai.response_quality_alias = JsonGetString(json, "ai_response_quality", p.ai.decision_quality_tier);
+      if(p.ai.response_quality_alias != p.ai.decision_quality_tier)
+         p.ai.decision_quality_tier = "DEGRADED_NON_TRADING";
+      p.ai.provider_contract_version = JsonGetString(json, "ai_provider_contract_version", "");
+      p.ai.provider_mode = JsonGetString(json, "ai_provider_mode", "");
+      p.ai.workload_mode = JsonGetString(json, "ai_workload_mode", "");
+      p.ai.provider_id = JsonGetString(json, "ai_provider_id", "");
+      p.ai.endpoint_class = JsonGetString(json, "ai_endpoint_class", "");
+      p.ai.endpoint_identity_hash = JsonGetString(json, "ai_endpoint_identity_hash", "");
+      p.ai.configured_models_hash = JsonGetString(json, "ai_configured_models_hash", "");
+      p.ai.actual_model_id = JsonGetString(json, "ai_actual_model_id", "");
+      p.ai.fallback_model = JsonGetString(json, "ai_fallback_model", "");
+      p.ai.model_fingerprint = JsonGetString(json, "ai_model_fingerprint", "");
+      p.ai.evidence_envelope_version = JsonGetString(json, "ai_evidence_envelope_version", "");
+      p.ai.family_profile_version = JsonGetString(json, "ai_family_profile_version", "");
+      p.ai.memory_schema_version = JsonGetString(json, "ai_memory_schema_version", "");
+      p.ai.retrieval_policy_version = JsonGetString(json, "ai_retrieval_policy_version", "");
+      p.ai.role_contract_version = JsonGetString(json, "ai_role_contract_version", "");
+      p.ai.consensus_resolver_version = JsonGetString(json, "ai_consensus_resolver_version", "");
+      p.ai.generation_settings_hash = JsonGetString(json, "ai_generation_settings_hash", "");
+      p.ai.input_fingerprint = JsonGetString(json, "ai_input_fingerprint", "");
+      p.ai.retrieved_analogue_ids_json = JsonGetArray(json, "ai_retrieved_analogue_ids", "[]");
+      p.ai.historical_evidence_state = JsonGetString(json, "ai_historical_evidence_state", "");
+      p.ai.analyst_response_fingerprint = JsonGetString(json, "ai_analyst_response_fingerprint", "");
+      p.ai.critic_response_fingerprint = JsonGetString(json, "ai_critic_response_fingerprint", "");
+      p.ai.adjudicator_response_fingerprint = JsonGetString(json, "ai_adjudicator_response_fingerprint", "");
+      p.ai.final_resolver_reason = JsonGetString(json, "ai_final_resolver_reason", "");
+      p.ai.provider_health_state = JsonGetString(json, "ai_provider_health_state", "");
+      p.ai.role_latencies_json = JsonGetObject(json, "ai_role_latencies", "{}");
+      p.ai.provider_retry_counts_json = JsonGetObject(json, "ai_provider_retry_counts", "{}");
+      p.ai.provider_usage_json = JsonGetObject(json, "ai_provider_usage", "{}");
+      p.ai.estimated_context_tokens_available = JsonGetBool(json, "ai_estimated_context_tokens_available", false);
+      p.ai.estimated_context_tokens = JsonGetNumber(json, "ai_estimated_context_tokens", 0.0);
+      p.ai.unsupported_generation_parameters_json = JsonGetArray(json, "ai_unsupported_generation_parameters", "[]");
+      p.ai.analyst_output_json = JsonGetObject(json, "ai_analyst_output", "{}");
+      p.ai.critic_output_json = JsonGetObject(json, "ai_critic_output", "{}");
+      p.ai.adjudicator_output_json = JsonGetObject(json, "ai_adjudicator_output", "{}");
+      p.ai.decision_state = JsonGetString(json, "ai_decision_state", "REJECT");
+      p.ai.mandatory_fields_complete = JsonGetBool(json, "ai_mandatory_fields_complete", false);
+      p.ai.missing_mandatory_fields_json = JsonGetArray(json, "ai_missing_mandatory_fields", "[]");
+      p.ai.invalid_mandatory_fields_json = JsonGetArray(json, "ai_invalid_mandatory_fields", "[]");
+      p.ai.selected_candidate_id = JsonGetString(json, "ai_selected_candidate_id", "");
+      p.ai.selected_candidate_hash = JsonGetString(json, "ai_selected_candidate_hash_value", "");
+      p.ai.request_execution_fingerprint = JsonGetString(json, "ai_request_execution_fingerprint", "");
+      p.ai.assessed_execution_fingerprint = JsonGetString(json, "ai_assessed_execution_fingerprint", "");
+      p.ai.selected_target_identity = JsonGetString(json, "ai_selected_target_identity", "");
+      p.ai.selected_target_price = JsonGetNumber(json, "ai_selected_target_price", 0.0);
+      p.ai.assessed_entry = JsonGetNumber(json, "ai_assessed_entry", 0.0);
+      p.ai.assessed_sl = JsonGetNumber(json, "ai_assessed_sl", 0.0);
+      p.ai.assessed_tp1 = JsonGetNumber(json, "ai_assessed_tp1", 0.0);
+      p.ai.assessed_tp2 = JsonGetNumber(json, "ai_assessed_tp2", 0.0);
+      p.ai.candidate_assessments_json = JsonGetArray(json, "ai_candidate_assessments", "[]");
+      p.ai.rule_score = JsonGetNumber(json, "ai_rule_score", -1.0);
+      p.ai.llm_quality_score = JsonGetNumber(json, "ai_llm_quality_score", JsonGetNumber(json, "ai_score", -1.0));
+      p.ai.blended_legacy_score = JsonGetNumber(json, "ai_blended_legacy_score_diagnostic", -1.0);
+      p.ai.legacy_agreement_confidence = JsonGetNumber(json, "ai_legacy_agreement_confidence_diagnostic", -1.0);
+      p.ai.llm_self_reported_confidence = JsonGetNumber(json, "ai_llm_self_reported_confidence", JsonGetNumber(json, "ai_confidence", -1.0));
+      p.ai.score = p.ai.llm_quality_score;
+      p.ai.confidence = p.ai.llm_self_reported_confidence;
+      p.ai.calibration_available = JsonGetBool(json, "ai_calibration_available", false);
+      p.ai.calibrated_win_probability = JsonGetNumber(json, "ai_calibrated_win_probability", -1.0);
+      p.ai.expected_net_r = JsonGetNumber(json, "ai_expected_net_r", -999999.0);
+      p.ai.oos_predicted_probability = JsonGetNumber(json, "ai_oos_predicted_probability", -1.0);
+      p.ai.calibration_bucket = JsonGetString(json, "ai_calibration_bucket", "");
+      p.ai.calibration_sample_size = (int)JsonGetNumber(json, "ai_calibration_sample_size", 0);
+      p.ai.calibration_lower_bound = JsonGetNumber(json, "ai_calibration_lower_bound", -1.0);
+      p.ai.calibration_upper_bound = JsonGetNumber(json, "ai_calibration_upper_bound", -1.0);
+      p.ai.calibration_model_version = JsonGetString(json, "ai_calibration_model_version", "");
+      p.ai.calibration_data_window_start = JsonGetString(json, "ai_calibration_data_window_start", "");
+      p.ai.calibration_data_window_end = JsonGetString(json, "ai_calibration_data_window_end", "");
+      p.ai.reasons_json = JsonGetString(json, "ai_reasons_json", "");
+      p.ai.decision_source = JsonGetString(json, "ai_response_source", "");
+      p.ai.decision_id = JsonGetString(json, "ai_decision_id_value", p.ai_decision_id);
+      p.ai.rejection_codes_json = JsonGetString(json, "ai_rejection_codes_json", "[]");
+      p.ai.narrative_state = JsonGetString(json, "ai_narrative_state", "");
+      p.ai.invalidation_risks_json = JsonGetString(json, "ai_invalidation_risks_json", "[]");
+      p.ai.missing_confirmations_json = JsonGetString(json, "ai_missing_confirmations_json", "[]");
+      p.ai.suggested_risk_multiplier = JsonGetNumber(json, "ai_suggested_risk_multiplier", -1.0);
+      p.ai.model_version = JsonGetString(json, "ai_model_version", "");
+      p.ai.reasoning_configuration = JsonGetString(json, "ai_reasoning_configuration", "");
+      p.ai.bucket_prior_hash = JsonGetString(json, "ai_bucket_prior_hash", "");
+      p.ai.calibration_artifact_id = JsonGetString(json, "ai_calibration_artifact_id", "");
+      p.ai.repeatability_authority_hash = JsonGetString(json, "ai_repeatability_authority_hash", "");
+      p.ai.llm_quality_score_threshold = JsonGetNumber(json, "llm_quality_score_threshold", 0.0);
+      p.ai.llm_quality_threshold_source = JsonGetString(json, "llm_quality_threshold_source", "");
+      p.ai.llm_quality_threshold_passed = JsonGetBool(json, "llm_quality_threshold_passed", false);
+      p.ai.llm_quality_reject_reason = JsonGetString(json, "llm_quality_reject_reason", "");
+      p.ai.global_llm_quality_as_hard_floor = JsonGetBool(json, "global_llm_quality_as_hard_floor", false);
+      p.ai.structure_quality_score = JsonGetNumber(json, "ai_structure_quality_score", 0.0);
+      p.ai.entry_timing_score = JsonGetNumber(json, "ai_entry_timing_score", 0.0);
+      p.ai.follow_through_probability = JsonGetNumber(json, "ai_follow_through_probability", -1.0);
+      p.ai.invalidation_risk = JsonGetNumber(json, "ai_invalidation_risk", -1.0);
+      p.ai.chop_risk = JsonGetNumber(json, "ai_chop_risk", -1.0);
+      p.ai.cost_risk = JsonGetNumber(json, "ai_cost_risk", -1.0);
+      p.ai.symbol_bucket_risk = JsonGetNumber(json, "ai_symbol_bucket_risk", -1.0);
+      p.ai.session_bucket_risk = JsonGetNumber(json, "ai_session_bucket_risk", -1.0);
+      p.ai.post_entry_failure_risk = JsonGetNumber(json, "ai_post_entry_failure_risk", -1.0);
+      p.ai.final_trade_expectancy_score = JsonGetNumber(json, "ai_final_trade_expectancy_score", -1.0);
+      p.ai.llm_numeric_diagnostics_authority = JsonGetString(json, "ai_llm_numeric_diagnostics_authority", "");
+      p.ai.veto_enabled = JsonGetBool(json, "ai_veto_enabled", false);
+      p.ai.veto_code = JsonGetString(json, "ai_veto_code", "");
+      p.ai.veto_evidence_fields_json = JsonGetArray(json, "ai_veto_evidence_fields", "[]");
+      p.ai.veto_reason = JsonGetString(json, "ai_veto_reason", "");
+      p.ai.veto_fields_present = JsonGetBool(json, "ai_veto_fields_present", false);
+      p.ai.bucket_prior_override_justification = JsonGetString(json, "ai_bucket_prior_override_justification", "");
+      p.ai.chosen_target_model = JsonGetString(json, "ai_chosen_target_model_value", p.ai_chosen_target_model);
+      p.ai.target_arbitration_required = JsonGetBool(json, "ai_target_arbitration_required", false);
+      p.ai.chosen_tp1 = JsonGetNumber(json, "ai_chosen_tp1_value", p.ai_chosen_tp1);
+      p.ai.chosen_tp2 = JsonGetNumber(json, "ai_chosen_tp2_value", p.ai_chosen_tp2);
+      p.ai.chosen_rr1 = JsonGetNumber(json, "ai_chosen_rr1_value", 0);
+      p.ai.chosen_rr2 = JsonGetNumber(json, "ai_chosen_rr2_value", p.ai_chosen_rr2);
+      p.ai.rejected_target_models_json = JsonGetString(json, "ai_rejected_target_models_json", p.ai_rejected_target_models);
+      p.ai.target_blocker_kind = JsonGetString(json, "ai_target_blocker_kind", p.obstacle_kind);
+      p.ai.target_blocker_severity = JsonGetNumber(json, "ai_target_blocker_severity", p.ai_blocker_severity);
+      p.ai.target_blocker_class = JsonGetString(json, "ai_target_blocker_class", p.ai_blocker_class);
+      p.ai.target_blocker_is_trade_killer = JsonGetBool(json, "ai_target_blocker_is_trade_killer", p.ai_blocker_is_trade_killer);
+      p.ai.target_decision_reason = JsonGetString(json, "ai_target_decision_reason", p.target_decision_reason);
+      p.ai.why_not_liquidity_target = JsonGetString(json, "ai_why_not_liquidity_target", p.why_not_liquidity_target);
+      p.ai.why_not_partial_before_obstacle = JsonGetString(json, "ai_why_not_partial_before_obstacle", p.why_not_partial_before_obstacle);
+      p.ai.why_not_capped_before_obstacle = JsonGetString(json, "ai_why_not_capped_before_obstacle", p.why_not_capped_before_obstacle);
+      p.ai.why_not_synthetic_fallback = JsonGetString(json, "ai_why_not_synthetic_fallback", p.why_not_synthetic_fallback);
+      p.ai.target_arbitration_schema_version = JsonGetString(json, "ai_target_arbitration_schema_version", p.target_arbitration_schema_version);
+      p.ai.prompt_contract_version = JsonGetString(json, "ai_prompt_contract_version", p.prompt_contract_version);
+      p.ai.target_comparison_json = JsonGetString(json, "ai_target_comparison_json", p.target_comparison_json);
+      p.ai.request_fingerprint = p.request_fingerprint;
+      p.ai.response_fingerprint = p.response_fingerprint;
+      p.ai.hierarchical_prior_artifact_hash = p.hierarchical_prior_artifact_hash;
+      p.ai.hierarchical_prior_schema_version = p.hierarchical_prior_schema_version;
+      p.ai.repeatability_schema_version = JsonGetString(json, "repeatability_schema_version", "");
+      p.ai.repeatability_status = p.repeatability_status;
+      p.ai.repeatability_required_live = p.repeatability_required_live;
+      p.ai.repeatability_artifact_state = p.repeatability_artifact_state;
+      p.ai.repeatability_rejection_code = p.repeatability_rejection_code;
+      p.ai.repeatability_score_threshold_authority = p.repeatability_score_threshold_authority;
+      p.ai.repeatability_trading_eligible = p.repeatability_trading_eligible;
+      p.ai.repeatability_group_key = p.repeatability_group_key;
+      if(StringLen(p.ai.repeatability_authority_hash) == 0)
+         p.ai.repeatability_authority_hash = p.repeatability_authority_hash;
+      bool strict_quality = (p.ai.decision_quality_tier == "FULL_STRUCTURED" ||
+                             p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+      bool calibration_unavailable = (!p.ai.calibration_available &&
+                                      p.ai.calibration_sample_size == 0 &&
+                                      StringLen(p.ai.calibration_bucket) == 0 &&
+                                      StringLen(p.ai.calibration_model_version) == 0 &&
+                                      StringLen(p.ai.calibration_data_window_start) == 0 &&
+                                      StringLen(p.ai.calibration_data_window_end) == 0);
+      bool veto_values_valid = (p.ai.follow_through_probability >= 0.0 && p.ai.follow_through_probability <= 1.0 &&
+                                p.ai.invalidation_risk >= 0.0 && p.ai.invalidation_risk <= 1.0 &&
+                                p.ai.chop_risk >= 0.0 && p.ai.chop_risk <= 1.0 &&
+                                p.ai.cost_risk >= 0.0 && p.ai.cost_risk <= 1.0 &&
+                                p.ai.symbol_bucket_risk >= 0.0 && p.ai.symbol_bucket_risk <= 1.0 &&
+                                p.ai.session_bucket_risk >= 0.0 && p.ai.session_bucket_risk <= 1.0 &&
+                                p.ai.post_entry_failure_risk >= 0.0 && p.ai.post_entry_failure_risk <= 1.0 &&
+                                p.ai.final_trade_expectancy_score >= 0.0 && p.ai.final_trade_expectancy_score <= 10.0);
+      bool tester_bootstrap_quality = ((bool)MQLInfoInteger(MQL_TESTER) &&
+                                       InpTesterAiMode == TESTER_AI_BOOTSTRAP_RULE_ONLY &&
+                                       !InpUseAI &&
+                                       p.ai.decision_quality_tier == "BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.response_quality_alias == "BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.decision_state == "APPROVE" &&
+                                       p.ai.decision_source == "bootstrap_rule_only" &&
+                                       p.ai.provider_mode == "TESTER_BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.provider_id == "mql_deterministic_engine" &&
+                                       p.ai.workload_mode == "TESTER_AI_BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.mandatory_fields_complete &&
+                                       !p.ai.allow && !p.ai.raw_allow &&
+                                       !p.model_raw_allow && !p.python_final_allow &&
+                                       p.ai.suggested_risk_multiplier > 0.0 &&
+                                       p.ai.suggested_risk_multiplier <= 1.0 &&
+                                       p.candidate_id == p.ai.selected_candidate_id &&
+                                       p.candidate_hash == p.ai.selected_candidate_hash &&
+                                       p.request_execution_fingerprint == p.ai.request_execution_fingerprint &&
+                                       p.assessed_execution_fingerprint == p.ai.assessed_execution_fingerprint);
+      bool structured_ai_quality = (p.ai.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
+                 strict_quality && p.ai.mandatory_fields_complete &&
+                 p.ai.provider_contract_version == AI_PROVIDER_CONTRACT_VERSION &&
+                 AiProviderModeIsTradeable(p.ai.provider_mode) &&
+                 StringLen(p.ai.provider_id) > 0 && StringLen(p.ai.endpoint_class) > 0 &&
+                 StringLen(p.ai.endpoint_identity_hash) > 0 && StringLen(p.ai.configured_models_hash) > 0 &&
+                 StringLen(p.ai.actual_model_id) > 0 && StringLen(p.ai.model_fingerprint) > 0 &&
+                 p.ai.evidence_envelope_version == AI_EVIDENCE_ENVELOPE_VERSION &&
+                 p.ai.family_profile_version == AI_FAMILY_PROFILE_VERSION &&
+                 p.ai.memory_schema_version == AI_TRADE_MEMORY_SCHEMA_VERSION &&
+                 p.ai.retrieval_policy_version == AI_RETRIEVAL_POLICY_VERSION &&
+                 p.ai.role_contract_version == AI_ROLE_CONTRACT_VERSION &&
+                 p.ai.consensus_resolver_version == AI_CONSENSUS_RESOLVER_VERSION &&
+                 StringLen(p.ai.generation_settings_hash) > 0 && StringLen(p.ai.input_fingerprint) > 0 &&
+                 StringLen(p.ai.analyst_response_fingerprint) > 0 && StringLen(p.ai.critic_response_fingerprint) > 0 &&
+                 p.ai.decision_state == "APPROVE" && p.ai.allow && p.ai.raw_allow &&
+                 !p.ai.veto_enabled && p.ai.veto_fields_present &&
+                 p.ai.llm_numeric_diagnostics_authority == "uncalibrated_diagnostic_only_no_direct_trade_authority" &&
+                 StringLen(p.ai.veto_code) == 0 && p.ai.veto_evidence_fields_json == "[]" &&
+                 p.ai.suggested_risk_multiplier > 0.0 && p.ai.suggested_risk_multiplier <= 1.0 &&
+                 calibration_unavailable && veto_values_valid &&
+                 StringLen(p.ai.selected_candidate_id) > 0 &&
+                 StringLen(p.ai.selected_candidate_hash) > 0 &&
+                 StringLen(p.ai.request_execution_fingerprint) > 0 &&
+                 StringLen(p.ai.assessed_execution_fingerprint) > 0 &&
+                 StringLen(p.ai.candidate_assessments_json) > 2 &&
+                 p.ai.target_arbitration_schema_version == AI_TARGET_ARBITRATION_SCHEMA_VERSION &&
+                 p.ai.prompt_contract_version == AI_PROMPT_CONTRACT_VERSION &&
+                 p.ai.hierarchical_prior_schema_version == HIERARCHICAL_PRIOR_SCHEMA_VERSION &&
+                 p.ai.repeatability_schema_version == REPEATABILITY_SCHEMA_VERSION &&
+                 (!p.ai.repeatability_required_live ||
+                  (p.ai.repeatability_status == "REPEATABLE" && p.ai.repeatability_trading_eligible)) &&
+                 StringLen(p.ai.request_fingerprint) > 0 && StringLen(p.ai.response_fingerprint) > 0 &&
+                 p.candidate_id == p.ai.selected_candidate_id &&
+                 p.candidate_hash == p.ai.selected_candidate_hash &&
+                 p.request_execution_fingerprint == p.ai.request_execution_fingerprint);
+      p.ai.ok = (tester_bootstrap_quality || structured_ai_quality);
+      if(!p.ai.ok){
+         p.ai.allow = false;
+         p.ai.raw_allow = false;
+         p.ai.decision_state = "REJECT";
+         p.ai.decision_quality_tier = "DEGRADED_NON_TRADING";
+         p.ai.response_quality_alias = "DEGRADED_NON_TRADING";
+      }
+      p.armed = JsonGetBool(json, "armed", false);
+      p.mid_touched = JsonGetBool(json, "mid_touched", false);
+      p.b50_touched = JsonGetBool(json, "b50_touched", false);
+      p.bars_waited = (int)JsonGetNumber(json, "bars_waited", 0);
+      p.arm_max_bars = (int)JsonGetNumber(json, "arm_max_bars", 0);
+      p.max_watch_minutes = (int)JsonGetNumber(json, "max_watch_minutes", 0);
+      p.last_confirm_bar_time = (datetime)(int)JsonGetNumber(json, "last_confirm_bar_time", 0);
+      p.armed_at = (datetime)(int)JsonGetNumber(json, "armed_at", 0);
+      p.tp1_r_multiple = JsonGetNumber(json, "tp1_r_multiple", 0);
+      p.tp1_partial_pct = JsonGetNumber(json, "tp1_partial_pct", 0);
+      p.be_rule = JsonGetString(json, "be_rule", "");
+      p.be_trigger_r = JsonGetNumber(json, "be_trigger_r", 0);
+      p.be_offset_points = JsonGetNumber(json, "be_offset_points", 0);
+      p.stop_buffer_points = JsonGetNumber(json, "stop_buffer_points", 0);
+      p.penalty_mae_trigger_r = JsonGetNumber(json, "penalty_mae_trigger_r", 0);
+      p.penalty_giveback_trigger_r = JsonGetNumber(json, "penalty_giveback_trigger_r", 0);
+      p.penalty_giveback_floor_r = JsonGetNumber(json, "penalty_giveback_floor_r", 0);
+      p.penalty_stuck_minutes = (int)JsonGetNumber(json, "penalty_stuck_minutes", 0);
+      p.penalty_stuck_min_mfe_r = JsonGetNumber(json, "penalty_stuck_min_mfe_r", 0);
+      p.penalty_dr_invalid_cut_pct = JsonGetNumber(json, "penalty_dr_invalid_cut_pct", 0);
+      p.penalty_fvg_invalid_cut_pct = JsonGetNumber(json, "penalty_fvg_invalid_cut_pct", 0);
+      p.penalty_close_strikes = (int)JsonGetNumber(json, "penalty_close_strikes", 0);
+      p.tp1_done = JsonGetBool(json, "tp1_done", false);
+      p.planned_entry = JsonGetNumber(json, "planned_entry", 0);
+      p.planned_sl = JsonGetNumber(json, "planned_sl", 0);
+      p.planned_tp1 = JsonGetNumber(json, "planned_tp1", 0);
+      p.planned_tp2 = JsonGetNumber(json, "planned_tp2", 0);
+      p.planned_at = (datetime)(int)JsonGetNumber(json, "planned_at", 0);
+      p.filled_entry = JsonGetNumber(json, "filled_entry", 0);
+      p.filled_at = (datetime)(int)JsonGetNumber(json, "filled_at", 0);
+      p.fill_slippage = JsonGetNumber(json, "fill_slippage", 0);
+      p.fill_slippage_r = JsonGetNumber(json, "fill_slippage_r", 0);
+      p.initial_volume = JsonGetNumber(json, "initial_volume", 0);
+      p.position_id = (long)JsonGetNumber(json, "position_id", 0);
+      p.result_order_ticket = (ulong)JsonGetNumber(json, "result_order_ticket", 0);
+      p.result_deal_ticket = (ulong)JsonGetNumber(json, "result_deal_ticket", 0);
+      p.broker_position_ticket = (ulong)JsonGetNumber(json, "broker_position_ticket", 0);
+      p.broker_position_identifier = (long)JsonGetNumber(json, "broker_position_identifier", 0);
+      p.intended_order_type = JsonGetString(json, "intended_order_type", "");
+      p.execution_authority_state = JsonGetString(json, "execution_authority_state", "UNAVAILABLE");
+      p.broker_submission_attempted = JsonGetBool(json, "broker_submission_attempted", false);
+      p.broker_request_accepted = JsonGetBool(json, "broker_request_accepted", false);
+      p.broker_retcode = (long)JsonGetNumber(json, "broker_retcode", 0);
+      p.broker_retcode_description = JsonGetString(json, "broker_retcode_description", "");
+      p.broker_partial_fill = JsonGetBool(json, "broker_partial_fill", false);
+      p.final_execution_success = JsonGetBool(json, "final_execution_success", false);
+      p.execution_identity_verified = JsonGetBool(json, "execution_identity_verified", false);
+      p.execution_identity_quarantined = JsonGetBool(json, "execution_identity_quarantined", false);
+      p.execution_identity_reason = JsonGetString(json, "execution_identity_reason", "");
+      p.account_position_mode = JsonGetString(json, "account_position_mode", "unknown");
+      p.attribution_status = JsonGetString(json, "attribution_status", "UNATTRIBUTED");
+      p.attribution_error = JsonGetString(json, "attribution_error", "");
+      p.learning_eligible = JsonGetBool(json, "learning_eligible", false);
+      p.optimization_eligible = JsonGetBool(json, "optimization_eligible", false);
+      p.suppression_eligible = JsonGetBool(json, "suppression_eligible", false);
+      p.ledger_integrity_status = JsonGetString(json, "ledger_integrity_status", "UNATTRIBUTED");
+      p.ledger_integrity_reasons = JsonGetArray(json, "ledger_integrity_reasons", "[\"legacy_state_missing_integrity_contract\"]");
+      p.ledger_schema_version = JsonGetString(json, "ledger_schema_version", "");
+      p.account_equity_at_entry = JsonGetNumber(json, "account_equity_at_entry", 0);
+      p.account_balance_at_entry = JsonGetNumber(json, "account_balance_at_entry", 0);
+      p.initial_risk_money = JsonGetNumber(json, "initial_risk_money", 0);
+      p.initial_risk_pct_equity = JsonGetNumber(json, "initial_risk_pct_equity", 0);
+      p.gross_price_pnl = JsonGetNumber(json, "gross_price_pnl", 0);
+      p.total_commission = JsonGetNumber(json, "total_commission", 0);
+      p.total_swap = JsonGetNumber(json, "total_swap", 0);
+      p.total_fees = JsonGetNumber(json, "total_fees", 0);
+      p.broker_net_pnl = JsonGetNumber(json, "broker_net_pnl", 0);
+      p.internal_net_pnl = JsonGetNumber(json, "internal_net_pnl", 0);
+      p.pnl_reconciliation_difference = JsonGetNumber(json, "pnl_reconciliation_difference", 0);
+      p.result_pct_fixed_initial_balance = JsonGetNumber(json, "result_pct_fixed_initial_balance", 0);
+      p.result_pct_equity_at_entry = JsonGetNumber(json, "result_pct_equity_at_entry", 0);
+      p.result_r_initial_risk = JsonGetNumber(json, "result_r_initial_risk", 0);
+      p.outcome_direction_broker = JsonGetString(json, "outcome_direction_broker",
+                                                  JsonGetString(json, "outcome_direction_money", ""));
+      p.outcome_direction_r = JsonGetString(json, "outcome_direction_r", "");
+      p.outcome_direction_equity_pct = JsonGetString(json, "outcome_direction_equity_pct", "");
+      p.outcome_direction_match = JsonGetBool(json, "outcome_direction_match", false);
+      p.outcome_reconciliation_status = JsonGetString(json, "outcome_reconciliation_status", "legacy_unverified");
+      p.management_version = JsonGetString(json, "management_version", "");
+      p.management_state = JsonGetString(json, "management_state", "");
+      p.management_previous_state = JsonGetString(json, "management_previous_state", "");
+      p.management_transition_time = (datetime)JsonGetNumber(json, "management_transition_time", 0);
+      p.management_transition_reason = JsonGetString(json, "management_transition_reason", "");
+      p.management_evidence_snapshot_json = JsonGetObject(json, "management_evidence_snapshot", "{}");
+      p.management_action_executed = JsonGetString(json, "management_action_executed", "");
+      p.management_action_id = JsonGetString(json, "management_action_id", "");
+      p.management_action_lifecycle_state = JsonGetString(json, "management_action_lifecycle_state", "");
+      p.management_requested_action = JsonGetString(json, "management_requested_action", "");
+      p.management_requested_volume = JsonGetNumber(json, "management_requested_volume", 0);
+      p.management_normalized_volume = JsonGetNumber(json, "management_normalized_volume", 0);
+      p.management_position_volume_before = JsonGetNumber(json, "management_position_volume_before", 0);
+      p.management_requested_cut_fraction = JsonGetNumber(json, "management_requested_cut_fraction", 0);
+      p.management_action_retry_count = (int)JsonGetNumber(json, "management_action_retry_count", 0);
+      p.management_next_retry_at = (datetime)JsonGetNumber(json, "management_next_retry_at", 0);
+      p.management_last_retcode = (long)JsonGetNumber(json, "management_last_retcode", 0);
+      p.management_last_retcode_description = JsonGetString(json, "management_last_retcode_description", "");
+      p.management_action_terminal_reason = JsonGetString(json, "management_action_terminal_reason", "");
+      p.management_policy = JsonGetString(json, "management_policy", "");
+      p.management_decision_at = (datetime)JsonGetNumber(json, "management_decision_at", 0);
+      p.management_features_time_safe = JsonGetBool(json, "management_features_time_safe", false);
+      p.management_snapshot_action = JsonGetString(json, "management_snapshot_action", "");
+      p.management_snapshot_mfe_r = JsonGetNumber(json, "management_snapshot_mfe_r", 0);
+      p.management_snapshot_mae_r = JsonGetNumber(json, "management_snapshot_mae_r", 0);
+      p.management_snapshot_minutes_open = (int)JsonGetNumber(json, "management_snapshot_minutes_open", 0);
+      p.management_snapshot_distance_to_sl_r = JsonGetNumber(json, "management_snapshot_distance_to_sl_r", 0);
+      p.management_snapshot_distance_to_tp_r = JsonGetNumber(json, "management_snapshot_distance_to_tp_r", 0);
+      p.management_snapshot_spread_r = JsonGetNumber(json, "management_snapshot_spread_r", 0);
+      p.management_snapshot_execution_cost_r = JsonGetNumber(json, "management_snapshot_execution_cost_r", 0);
+      p.management_snapshot_structure_valid = JsonGetBool(json, "management_snapshot_structure_valid", false);
+      p.invalidation_confirmation_mode = JsonGetString(json, "invalidation_confirmation_mode", "");
+      p.invalidation_reference_timeframe = (int)JsonGetNumber(json, "invalidation_reference_timeframe", 0);
+      p.invalidation_trigger_level = JsonGetNumber(json, "invalidation_trigger_level", 0);
+      p.invalidation_spread = JsonGetNumber(json, "invalidation_spread", 0);
+      p.invalidation_buffer = JsonGetNumber(json, "invalidation_buffer", 0);
+      p.invalidation_first_breach_time = (datetime)JsonGetNumber(json, "invalidation_first_breach_time", 0);
+      p.invalidation_confirmed_time = (datetime)JsonGetNumber(json, "invalidation_confirmed_time", 0);
+      p.invalidation_confirming_bar = (datetime)JsonGetNumber(json, "invalidation_confirming_bar", 0);
+      p.actual_managed_result = JsonGetNumber(json, "actual_managed_result", 0);
+      p.actual_managed_result_r = JsonGetNumber(json, "actual_managed_result_r", 0);
+      p.counterfactual_original_sl_tp_result = JsonGetNumber(json, "counterfactual_original_sl_tp_result", 0);
+      p.counterfactual_original_sl_tp_result_r = JsonGetNumber(json, "counterfactual_original_sl_tp_result_r", 0);
+      p.counterfactual_target_before_stop_available = JsonGetBool(json, "counterfactual_target_before_stop_available", false);
+      p.counterfactual_target_before_stop = JsonGetBool(json, "counterfactual_target_before_stop", false);
+      p.management_alpha = JsonGetNumber(json, "management_alpha", 0);
+      p.counterfactual_ambiguous = JsonGetBool(json, "counterfactual_ambiguous", false);
+      p.counterfactual_pending = JsonGetBool(json, "counterfactual_pending", false);
+      p.counterfactual_status = JsonGetString(json, "counterfactual_status", "");
+      p.counterfactual_resolution_reason = JsonGetString(json, "counterfactual_resolution_reason", "");
+      p.counterfactual_horizon_at = (datetime)JsonGetNumber(json, "counterfactual_horizon_at", 0);
+      p.counterfactual_evaluated_at = (datetime)JsonGetNumber(json, "counterfactual_evaluated_at", 0);
+      p.management_policy_selection_eligible = JsonGetBool(json, "management_policy_selection_eligible", false);
+      p.broker_session_schedule_json = JsonGetObject(json, "broker_session_schedule", "{}");
+      p.broker_session_source = JsonGetString(json, "broker_session_source", "");
+      p.broker_session_open = (datetime)JsonGetNumber(json, "broker_session_open", 0);
+      p.broker_session_close = (datetime)JsonGetNumber(json, "broker_session_close", 0);
+      p.broker_no_entry_from = (datetime)JsonGetNumber(json, "broker_no_entry_from", 0);
+      p.broker_flatten_from = (datetime)JsonGetNumber(json, "broker_flatten_from", 0);
+      p.broker_next_tradable_session = (datetime)JsonGetNumber(json, "broker_next_tradable_session", 0);
+      p.broker_flatten_attempts = (int)JsonGetNumber(json, "broker_flatten_attempts", 0);
+      p.broker_flatten_failures = (int)JsonGetNumber(json, "broker_flatten_failures", 0);
+      p.broker_flatten_last_retcode = (long)JsonGetNumber(json, "broker_flatten_last_retcode", 0);
+      p.broker_flatten_next_retry = (datetime)JsonGetNumber(json, "broker_flatten_next_retry", 0);
+      p.shadow_candidate_record_hash = JsonGetString(json, "shadow_candidate_record_hash", "");
+      p.shadow_candidate_schema_version = JsonGetString(json, "shadow_candidate_schema_version", "");
+      p.shadow_decision_stage = JsonGetString(json, "shadow_decision_stage", "");
+      p.shadow_rejection_reason = JsonGetString(json, "shadow_rejection_reason", "");
+      p.shadow_observed_at = (datetime)JsonGetNumber(json, "shadow_observed_at", 0);
+      p.shadow_horizon_at = (datetime)JsonGetNumber(json, "shadow_horizon_at", 0);
+      p.shadow_evaluated_at = (datetime)JsonGetNumber(json, "shadow_evaluated_at", 0);
+      p.shadow_outcome_status = JsonGetString(json, "shadow_outcome_status", "");
+      p.shadow_outcome_reason = JsonGetString(json, "shadow_outcome_reason", "");
+      p.shadow_outcome_r = JsonGetNumber(json, "shadow_outcome_r", 0);
+      p.shadow_mfe_r = JsonGetNumber(json, "shadow_mfe_r", 0);
+      p.shadow_mae_r = JsonGetNumber(json, "shadow_mae_r", 0);
+      p.shadow_time_to_event_sec = (int)JsonGetNumber(json, "shadow_time_to_event_sec", 0);
+      p.shadow_time_to_025r_sec = (int)JsonGetNumber(json, "shadow_time_to_025r_sec", -1);
+      p.shadow_time_to_050r_sec = (int)JsonGetNumber(json, "shadow_time_to_050r_sec", -1);
+      p.shadow_time_to_stop_sec = (int)JsonGetNumber(json, "shadow_time_to_stop_sec", -1);
+      p.shadow_time_to_target_sec = (int)JsonGetNumber(json, "shadow_time_to_target_sec", -1);
+      p.shadow_reached_025r = JsonGetBool(json, "shadow_reached_025r", false);
+      p.shadow_reached_050r = JsonGetBool(json, "shadow_reached_050r", false);
+      p.shadow_reached_025r_before_adverse = JsonGetBool(json, "shadow_reached_025r_before_adverse", false);
+      p.shadow_reached_050r_before_adverse = JsonGetBool(json, "shadow_reached_050r_before_adverse", false);
+      p.shadow_time_to_adverse_threshold_sec = (int)JsonGetNumber(json, "shadow_time_to_adverse_threshold_sec", -1);
+      p.shadow_025_order_ambiguous = JsonGetBool(json, "shadow_025_order_ambiguous", false);
+      p.shadow_050_order_ambiguous = JsonGetBool(json, "shadow_050_order_ambiguous", false);
+      p.shadow_target_before_stop = JsonGetBool(json, "shadow_target_before_stop", false);
+      p.shadow_stop_before_target = JsonGetBool(json, "shadow_stop_before_target", false);
+      p.shadow_mfe_before_adverse = JsonGetBool(json, "shadow_mfe_before_adverse", false);
+      p.shadow_horizon_result = JsonGetString(json, "shadow_horizon_result", "");
+      p.shadow_censoring_status = JsonGetString(json, "shadow_censoring_status", "");
+      p.shadow_ambiguity_reason = JsonGetString(json, "shadow_ambiguity_reason", "");
+      p.shadow_threshold_order_ambiguous = JsonGetBool(json, "shadow_threshold_order_ambiguous", false);
+      p.shadow_outcome_ambiguous = JsonGetBool(json, "shadow_outcome_ambiguous", false);
+      p.mfe_price = JsonGetNumber(json, "mfe_price", 0);
+      p.mae_price = JsonGetNumber(json, "mae_price", 0);
+      p.mfe_r = JsonGetNumber(json, "mfe_r", 0);
+      p.mae_r = JsonGetNumber(json, "mae_r", 0);
+      p.minutes_to_0_25r_mfe = (int)JsonGetNumber(json, "minutes_to_0_25r_mfe", 0);
+      p.minutes_to_0_50r_mfe = (int)JsonGetNumber(json, "minutes_to_0_50r_mfe", 0);
+      p.first_0_25r_time = (datetime)JsonGetNumber(json, "first_0_25r_time", 0);
+      p.first_0_50r_time = (datetime)JsonGetNumber(json, "first_0_50r_time", 0);
+      p.first_adverse_threshold_time = (datetime)JsonGetNumber(json, "first_adverse_threshold_time", 0);
+      p.latest_observed_tick_time = (datetime)JsonGetNumber(json, "latest_observed_tick_time", 0);
+      p.latest_observed_tick_msc = (long)JsonGetNumber(json, "latest_observed_tick_msc", 0);
+      p.path_completeness_status = JsonGetString(json, "path_completeness_status", "UNKNOWN");
+      p.path_observation_source = JsonGetString(json, "path_observation_source", "UNKNOWN");
+      p.path_data_gap = JsonGetBool(json, "path_data_gap", true);
+      p.path_order_ambiguous = JsonGetBool(json, "path_order_ambiguous", false);
+      p.stuck_no_mfe_triggered = JsonGetBool(json, "stuck_no_mfe_triggered", false);
+      p.dr_and_structural_invalid_triggered = JsonGetBool(json, "dr_and_structural_invalid_triggered", false);
+      p.penalty_reductions_count = (int)JsonGetNumber(json, "penalty_reductions_count", 0);
+      p.closed_at = (datetime)(int)JsonGetNumber(json, "closed_at", 0);
+      p.realized_pnl = JsonGetNumber(json, "realized_pnl", 0);
+      p.realized_r = JsonGetNumber(json, "realized_r", 0);
+      p.exit_path = JsonGetString(json, "exit_path", "");
+      p.analytics_logged = JsonGetBool(json, "analytics_logged", false);
+      p.tp1_hit_at = (datetime)(int)JsonGetNumber(json, "tp1_hit_at", 0);
+      p.tp2_hit_at = (datetime)(int)JsonGetNumber(json, "tp2_hit_at", 0);
+      p.sl_hit_at = (datetime)(int)JsonGetNumber(json, "sl_hit_at", 0);
+      p.tp2_realistic_before_reversal = JsonGetBool(json, "tp2_realistic_before_reversal", false);
+      p.be_move_helped = JsonGetBool(json, "be_move_helped", false);
+      p.trailing_stop_improved = JsonGetBool(json, "trailing_stop_improved", false);
+      p.target_efficiency = JsonGetNumber(json, "target_efficiency", 0);
+      p.req_id = JsonGetString(json, "req_id", "");
+
+      string fvg_json = JsonGetObject(json, "fvg", "");
+      if(StringLen(fvg_json) == 0) fvg_json = json;
+      p.fvg.bullish = JsonGetBool(fvg_json, "bullish", p.is_buy);
+      p.fvg.t_form = (datetime)(int)JsonGetNumber(fvg_json, "t_form", 0);
+      p.fvg.lower = JsonGetNumber(fvg_json, "lower", 0);
+      p.fvg.upper = JsonGetNumber(fvg_json, "upper", 0);
+      p.fvg.mid   = JsonGetNumber(fvg_json, "mid", 0);
+      p.fvg.touched = JsonGetBool(fvg_json, "touched", false);
+      p.fvg.mid_mitigated = JsonGetBool(fvg_json, "mid_mitigated", false);
+      p.fvg.fully_filled = JsonGetBool(fvg_json, "fully_filled", false);
+      p.fvg.invalidated = JsonGetBool(fvg_json, "invalidated", false);
+      p.fvg.entry_invalid = JsonGetBool(fvg_json, "entry_invalid", false);
+      p.fvg.structure_invalidated = JsonGetBool(fvg_json, "structure_invalidated", false);
+      p.fvg.mitigation_state = JsonGetString(fvg_json, "mitigation_state", "");
+      p.fvg.invalidation_reason = JsonGetString(fvg_json, "invalidation_reason", "");
+      p.fvg.continuation = JsonGetBool(fvg_json, "continuation", false);
+      p.fvg.reversal = JsonGetBool(fvg_json, "reversal", false);
+      p.fvg.context_type = JsonGetString(fvg_json, "context_type", "");
+      p.fvg.mitigated = p.fvg.mid_mitigated;
+      p.fvg.origin_score = JsonGetNumber(fvg_json, "origin_score", 0);
+      p.fvg.cleanliness_score = JsonGetNumber(fvg_json, "cleanliness_score", 0);
+      p.fvg.age_score = JsonGetNumber(fvg_json, "age_score", 0);
+      p.fvg.nesting_score = JsonGetNumber(fvg_json, "nesting_score", 0);
+      p.fvg.htf_overlap_score = JsonGetNumber(fvg_json, "htf_overlap_score", 0);
+      p.fvg.retest_score = JsonGetNumber(fvg_json, "retest_score", 0);
+      p.fvg.continuation_score = JsonGetNumber(fvg_json, "continuation_score", 0);
+      p.fvg.reversal_score = JsonGetNumber(fvg_json, "reversal_score", 0);
+      p.fvg.score = JsonGetNumber(fvg_json, "score", JsonGetNumber(fvg_json, "fvg_score", 0));
+      p.fvg.execution_class = JsonGetString(fvg_json, "execution_class", "");
+      p.fvg.mitigation_depth_frac = JsonGetNumber(fvg_json, "mitigation_depth_frac", 0);
+      p.fvg.age_bars = (int)JsonGetNumber(fvg_json, "age_bars", 0);
+      p.fvg.displacement_candle_score = JsonGetNumber(fvg_json, "displacement_candle_score", 0);
+      p.fvg.middle_candle_body_score = JsonGetNumber(fvg_json, "middle_candle_body_score", 0);
+      p.fvg.volume_impulse_score = JsonGetNumber(fvg_json, "volume_impulse_score", 0);
+      p.fvg.gap_width_atr_score = JsonGetNumber(fvg_json, "gap_width_atr_score", 0);
+      p.fvg.manipulation_distance_score = JsonGetNumber(fvg_json, "manipulation_distance_score", 0);
+      p.fvg.premium_discount_score = JsonGetNumber(fvg_json, "premium_discount_score", 0);
+      p.fvg.htf_nesting_score = JsonGetNumber(fvg_json, "htf_nesting_score", 0);
+      p.fvg.freshness_score = JsonGetNumber(fvg_json, "freshness_score", 0);
+      p.fvg.retest_quality_score = JsonGetNumber(fvg_json, "retest_quality_score", 0);
+      p.fvg.opposing_obstruction_score = JsonGetNumber(fvg_json, "opposing_obstruction_score", 0);
+      p.fvg.raw_width_price = JsonGetNumber(fvg_json, "raw_width_price", 0);
+      p.fvg.raw_width_ticks = JsonGetNumber(fvg_json, "raw_width_ticks", 0);
+      p.fvg.normalized_min_ticks_price = JsonGetNumber(fvg_json, "normalized_min_ticks_price", 0);
+      p.fvg.normalized_min_spread_price = JsonGetNumber(fvg_json, "normalized_min_spread_price", 0);
+      p.fvg.normalized_min_atr_price = JsonGetNumber(fvg_json, "normalized_min_atr_price", 0);
+      p.fvg.normalized_min_session_noise_price = JsonGetNumber(fvg_json, "normalized_min_session_noise_price", 0);
+      p.fvg.normalized_minimum_price = JsonGetNumber(fvg_json, "normalized_minimum_price", 0);
+      p.fvg.normalized_minimum_ticks = JsonGetNumber(fvg_json, "normalized_minimum_ticks", 0);
+      p.fvg.normalized_minimum_shadow_pass = JsonGetBool(fvg_json, "normalized_minimum_shadow_pass", false);
+      p.fvg.normalized_minimum_enforced_pass = JsonGetBool(fvg_json, "normalized_minimum_enforced_pass", false);
+      p.fvg.normalized_fvg_mode = JsonGetString(fvg_json, "normalized_fvg_mode", "");
+      p.fvg.normalized_fvg_asset_class = JsonGetString(fvg_json, "normalized_fvg_asset_class", "");
+      p.fvg.normalized_fvg_policy_version = JsonGetString(fvg_json, "normalized_fvg_policy_version", "");
+      p.fvg.normalized_fvg_policy_source = JsonGetString(fvg_json, "normalized_fvg_policy_source", "");
+      p.fvg.normalized_fvg_sample_size = (int)JsonGetNumber(fvg_json, "normalized_fvg_sample_size", 0);
+      p.fvg.normalized_fvg_asset_class_evidence_sufficient = JsonGetBool(fvg_json, "normalized_fvg_asset_class_evidence_sufficient", false);
+
+      string po3_json = JsonGetObject(json, "po3", "");
+      if(StringLen(po3_json) == 0) po3_json = json;
+      p.po3.po3_state = JsonGetString(po3_json, "po3_state", "");
+      p.po3.state = (PO3State)(int)JsonGetNumber(po3_json, "po3_state_id", (double)(int)PO3StateFromString(p.po3.po3_state));
+      p.po3.po3_state = PO3StateToString(p.po3.state);
+      p.po3.po3_state_reason = JsonGetString(po3_json, "po3_state_reason", "");
+      p.po3.sweep_side = JsonGetString(po3_json, "sweep_side", "");
+      p.po3.structure_type = JsonGetString(po3_json, "structure_type", "");
+      p.po3.htf_structure_type = JsonGetString(po3_json, "htf_structure_type", "");
+      p.po3.ltf_structure_type = JsonGetString(po3_json, "ltf_structure_type", "");
+      p.po3.final_setup_class = JsonGetString(po3_json, "final_setup_class", "");
+      p.po3.po3_scope = JsonGetString(po3_json, "po3_scope", "");
+      p.po3.bias_long  = JsonGetBool(po3_json, "bias_long", p.is_buy);
+      p.po3.bias_short = JsonGetBool(po3_json, "bias_short", !p.is_buy);
+      p.po3.context_score = JsonGetNumber(po3_json, "context_score", 0);
+      p.po3.has_sweep = JsonGetBool(po3_json, "has_sweep", false);
+      p.po3.has_displacement = JsonGetBool(po3_json, "has_displacement", false);
+      p.po3.has_bos = JsonGetBool(po3_json, "has_bos", false);
+      p.po3.has_follow_through = JsonGetBool(po3_json, "has_follow_through", false);
+      p.po3.context_tier = JsonGetString(po3_json, "context_tier", "");
+      p.po3.developing_bos = JsonGetBool(po3_json, "developing_bos", false);
+      p.po3.context_age_bars = (int)JsonGetNumber(po3_json, "context_age_bars", 0);
+      p.po3.htf_bos = JsonGetBool(po3_json, "htf_bos", p.po3.has_bos);
+      p.po3.htf_internal_bos = JsonGetBool(po3_json, "htf_internal_bos", false);
+      p.po3.htf_swing_bos = JsonGetBool(po3_json, "htf_swing_bos", p.po3.has_bos);
+      p.po3.htf_pretrend_dir = (int)JsonGetNumber(po3_json, "htf_pretrend_dir", 0);
+      p.po3.dr_high = JsonGetNumber(po3_json, "dr_high", 0);
+      p.po3.dr_low  = JsonGetNumber(po3_json, "dr_low", 0);
+      p.po3.dr_mid = JsonGetNumber(po3_json, "dr_mid", 0);
+      p.po3.manip_low = JsonGetNumber(po3_json, "manip_low", 0);
+      p.po3.manip_high = JsonGetNumber(po3_json, "manip_high", 0);
+      p.po3.swing_low = JsonGetNumber(po3_json, "swing_low", 0);
+      p.po3.swing_high = JsonGetNumber(po3_json, "swing_high", 0);
+      p.po3.t_sweep = (datetime)(int)JsonGetNumber(po3_json, "t_sweep", 0);
+      p.po3.t_disp = (datetime)(int)JsonGetNumber(po3_json, "t_disp", 0);
+      p.po3.t_bos = (datetime)(int)JsonGetNumber(po3_json, "t_bos", 0);
+      p.po3.t_follow = (datetime)(int)JsonGetNumber(po3_json, "t_follow", 0);
+      p.po3.bos_level = JsonGetNumber(po3_json, "bos_level", 0);
+      p.po3.sweep_strength = JsonGetNumber(po3_json, "sweep_strength", 0);
+      p.po3.displacement_score = JsonGetNumber(po3_json, "displacement_score", 0);
+      p.po3.displacement_body_frac = JsonGetNumber(po3_json, "displacement_body_frac", 0);
+      p.po3.displacement_range_atr = JsonGetNumber(po3_json, "displacement_range_atr", 0);
+      p.po3.displacement_volume_ratio = JsonGetNumber(po3_json, "displacement_volume_ratio", 0);
+      p.po3.displacement_speed_score = JsonGetNumber(po3_json, "displacement_speed_score", 0);
+      p.po3.displacement_follow_score = JsonGetNumber(po3_json, "displacement_follow_score", 0);
+      p.po3.session_name = JsonGetString(po3_json, "session_name", "");
+      p.po3.session_code = JsonGetString(po3_json, "session_code", "");
+      p.po3.killzone_name = JsonGetString(po3_json, "killzone_name", "");
+      p.po3.in_killzone = JsonGetBool(po3_json, "in_killzone", false);
+      p.po3.session_start = (datetime)(int)JsonGetNumber(po3_json, "session_start", 0);
+      p.po3.session_end = (datetime)(int)JsonGetNumber(po3_json, "session_end", 0);
+      p.po3.session_high = JsonGetNumber(po3_json, "session_high", 0);
+      p.po3.session_low = JsonGetNumber(po3_json, "session_low", 0);
+      p.po3.asia_high = JsonGetNumber(po3_json, "asia_high", 0);
+      p.po3.asia_low = JsonGetNumber(po3_json, "asia_low", 0);
+      p.po3.london_high = JsonGetNumber(po3_json, "london_high", 0);
+      p.po3.london_low = JsonGetNumber(po3_json, "london_low", 0);
+      p.po3.newyork_high = JsonGetNumber(po3_json, "newyork_high", 0);
+      p.po3.newyork_low = JsonGetNumber(po3_json, "newyork_low", 0);
+      p.po3.prev_day_high = JsonGetNumber(po3_json, "prev_day_high", 0);
+      p.po3.prev_day_low = JsonGetNumber(po3_json, "prev_day_low", 0);
+      p.po3.prev_week_high = JsonGetNumber(po3_json, "prev_week_high", 0);
+      p.po3.prev_week_low = JsonGetNumber(po3_json, "prev_week_low", 0);
+      p.po3.daily_bias_dir = (int)JsonGetNumber(po3_json, "daily_bias_dir", 0);
+      p.po3.h4_bias_dir = (int)JsonGetNumber(po3_json, "h4_bias_dir", 0);
+      p.po3.h1_bias_dir = (int)JsonGetNumber(po3_json, "h1_bias_dir", 0);
+      p.po3.liquidity_target = JsonGetNumber(po3_json, "liquidity_target", 0);
+      p.po3.liquidity_target_high = JsonGetBool(po3_json, "liquidity_target_high", p.is_buy);
+      p.po3.liquidity_kind = JsonGetString(po3_json, "liquidity_kind", "");
+      p.po3.liquidity_cluster_count = (int)JsonGetNumber(po3_json, "liquidity_cluster_count", 0);
+      p.po3.htf_mss = JsonGetBool(po3_json, "htf_mss", false);
+      p.po3.htf_choch = JsonGetBool(po3_json, "htf_choch", false);
+      p.po3.ltf_bos = JsonGetBool(po3_json, "ltf_bos", false);
+      p.po3.ltf_internal_bos = JsonGetBool(po3_json, "ltf_internal_bos", false);
+      p.po3.ltf_swing_bos = JsonGetBool(po3_json, "ltf_swing_bos", p.po3.ltf_bos);
+      p.po3.ltf_pretrend_dir = (int)JsonGetNumber(po3_json, "ltf_pretrend_dir", 0);
+      p.po3.ltf_mss = JsonGetBool(po3_json, "ltf_mss", false);
+      p.po3.ltf_choch = JsonGetBool(po3_json, "ltf_choch", false);
+      p.po3.ltf_structure_time = (datetime)(int)JsonGetNumber(po3_json, "ltf_structure_time", 0);
+      p.po3.ltf_structure_level = JsonGetNumber(po3_json, "ltf_structure_level", 0);
+
+      return true;
+   }
+
+   bool AiCacheFromJson(const string json, AiCacheEntry &entry) {
+      entry.signature = JsonGetString(json, "signature", "");
+      if(StringLen(entry.signature) == 0) return false;
+      entry.symbol = JsonGetString(json, "symbol", "");
+      entry.decision_schema_version = JsonGetString(json, "decision_schema_version", "");
+      entry.decision_quality_tier = JsonGetString(json, "decision_quality_tier", "DEGRADED_NON_TRADING");
+      entry.response_quality_alias = JsonGetString(json, "response_quality", entry.decision_quality_tier);
+      entry.selected_candidate_hash = JsonGetString(json, "selected_candidate_hash", "");
+      entry.assessed_execution_fingerprint = JsonGetString(json, "assessed_execution_fingerprint", "");
+      entry.allow = JsonGetBool(json, "allow", false);
+      entry.score = JsonGetNumber(json, "score", 0);
+      entry.chosen_index = (int)JsonGetNumber(json, "chosen_index", 0);
+      entry.confidence = JsonGetNumber(json, "confidence", 0);
+      entry.reasons_json = JsonGetString(json, "reasons_json", "");
+      entry.created_at = (datetime)(int)JsonGetNumber(json, "created_at", 0);
+      bool trading_tier = (entry.decision_quality_tier == "FULL_STRUCTURED" ||
+                           entry.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+      return (entry.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
+              entry.response_quality_alias == entry.decision_quality_tier &&
+              trading_tier && StringLen(entry.selected_candidate_hash) > 0 &&
+              StringLen(entry.assessed_execution_fingerprint) > 0);
+   }
+
+   bool PenaltyFromJson(const string json, PenaltyState &st) {
+      st.symbol = JsonGetString(json, "symbol", "");
+      if(StringLen(st.symbol) == 0) return false;
+      st.position_identifier = (long)JsonGetNumber(json, "position_identifier", 0);
+      st.position_ticket = (ulong)JsonGetNumber(json, "position_ticket", 0);
+      st.opened_at = (datetime)(int)JsonGetNumber(json, "opened_at", 0);
+      st.entry = JsonGetNumber(json, "entry", 0);
+      st.sl = JsonGetNumber(json, "sl", 0);
+      st.risk_dist = JsonGetNumber(json, "risk_dist", 0);
+      st.is_buy = JsonGetBool(json, "is_buy", true);
+      st.mfe_price = JsonGetNumber(json, "mfe_price", st.entry);
+      st.mae_price = JsonGetNumber(json, "mae_price", st.entry);
+      st.mfe_r = JsonGetNumber(json, "mfe_r", 0);
+      st.mae_r = JsonGetNumber(json, "mae_r", 0);
+      st.first_0_25r_time = (datetime)JsonGetNumber(json, "first_0_25r_time", 0);
+      st.first_0_50r_time = (datetime)JsonGetNumber(json, "first_0_50r_time", 0);
+      st.first_adverse_threshold_time = (datetime)JsonGetNumber(json, "first_adverse_threshold_time", 0);
+      st.latest_observed_tick_time = (datetime)JsonGetNumber(json, "latest_observed_tick_time", 0);
+      st.latest_observed_tick_msc = (long)JsonGetNumber(json, "latest_observed_tick_msc", 0);
+      st.path_completeness_status = JsonGetString(json, "path_completeness_status", "UNKNOWN");
+      st.path_observation_source = JsonGetString(json, "path_observation_source", "UNKNOWN");
+      st.path_data_gap = JsonGetBool(json, "path_data_gap", true);
+      st.path_order_ambiguous = JsonGetBool(json, "path_order_ambiguous", false);
+      st.position_closed_observed_at = (datetime)JsonGetNumber(json, "position_closed_observed_at", 0);
+      st.strikes = (int)JsonGetNumber(json, "strikes", 0);
+      st.last_reduction_at = (datetime)(int)JsonGetNumber(json, "last_reduction_at", 0);
+      st.current_state = JsonGetString(json, "current_state", "");
+      st.previous_state = JsonGetString(json, "previous_state", "");
+      st.transition_time = (datetime)JsonGetNumber(json, "transition_time", 0);
+      st.transition_reason = JsonGetString(json, "transition_reason", "");
+      st.evidence_snapshot_json = JsonGetObject(json, "evidence_snapshot", "{}");
+      st.action_executed = JsonGetString(json, "action_executed", "");
+      st.action_id = JsonGetString(json, "action_id", "");
+      st.action_lifecycle_state = JsonGetString(json, "action_lifecycle_state", "");
+      st.requested_action = JsonGetString(json, "requested_action", "");
+      st.requested_volume = JsonGetNumber(json, "requested_volume", 0);
+      st.normalized_volume = JsonGetNumber(json, "normalized_volume", 0);
+      st.action_position_volume_before = JsonGetNumber(json, "action_position_volume_before", 0);
+      st.requested_cut_fraction = JsonGetNumber(json, "requested_cut_fraction", 0);
+      st.action_retry_count = (int)JsonGetNumber(json, "action_retry_count", 0);
+      st.next_eligible_retry_time = (datetime)JsonGetNumber(json, "next_eligible_retry_time", 0);
+      st.action_last_attempt_at = (datetime)JsonGetNumber(json, "action_last_attempt_at", 0);
+      st.action_last_retcode = (long)JsonGetNumber(json, "action_last_retcode", 0);
+      st.action_last_retcode_description = JsonGetString(json, "action_last_retcode_description", "");
+      st.action_terminal_reason = JsonGetString(json, "action_terminal_reason", "");
+      st.management_version = JsonGetString(json, "management_version", "");
+      st.executed_action_ids = JsonGetString(json, "executed_action_ids", "");
+      st.confirmation_mode = JsonGetString(json, "confirmation_mode", "");
+      st.confirmation_timeframe = (int)JsonGetNumber(json, "confirmation_timeframe", 0);
+      st.confirmation_trigger_level = JsonGetNumber(json, "confirmation_trigger_level", 0);
+      st.confirmation_spread = JsonGetNumber(json, "confirmation_spread", 0);
+      st.confirmation_buffer = JsonGetNumber(json, "confirmation_buffer", 0);
+      st.first_breach_time = (datetime)JsonGetNumber(json, "first_breach_time", 0);
+      st.confirmed_time = (datetime)JsonGetNumber(json, "confirmed_time", 0);
+      st.confirming_bar = (datetime)JsonGetNumber(json, "confirming_bar", 0);
+      return (st.position_identifier > 0 && st.management_version == MANAGEMENT_SCHEMA_VERSION &&
+              StringLen(st.current_state) > 0);
+   }
+
+public:
+   CStateStore(CFileBus &bus) {
+      m_bus = &bus;
+      m_scope_key = "uninitialized";
+   }
+
+   bool SetRuntimeScope(const string scope_key) {
+      // Runtime queues are mutable recovery state, not global analytics.  A
+      // tester position identifier can be reused in a later run, and tester
+      // state must never be restored by live trading.  The engine supplies a
+      // per-run tester scope or a stable live account+magic scope before the
+      // first load/save.
+      if(StringLen(scope_key) == 0) return false;
+      m_scope_key = scope_key;
+      // FolderCreate is intentionally idempotent here.  Some terminal builds
+      // report false when a directory already exists; that is not a startup
+      // failure and subsequent atomic file writes remain authoritative.
+      FolderCreate(_RuntimeStateRoot(), FILE_COMMON);
+      FolderCreate(_RuntimeStateDir(), FILE_COMMON);
+      return true;
+   }
+
+   string RuntimeScope() const { return m_scope_key; }
+   string WatchlistPath() const { return _ScopedPath("watchlist.ndjson"); }
+   string PendingAiPath() const { return _ScopedPath("pending_ai.ndjson"); }
+   string PenaltyPath() const { return _ScopedPath("penalty.ndjson"); }
+   string CounterfactualPendingPath() const { return _ScopedPath("counterfactual_pending.ndjson"); }
+   string ShadowPendingPath() const { return _ScopedPath("shadow_candidate_pending.ndjson"); }
+   string AiCachePath() const { return m_bus.LogDir() + "\\ai_cache.ndjson"; }
+   string TradePlanToJson(const TradePlan &p) { return PlanToJson(p); }
+   bool ParseTradePlanJson(const string json, TradePlan &p) { return PlanFromJson(json, p); }
+
+   bool LoadPlans(const string rel_path, TradePlan &out_arr[]) {
+      ArrayResize(out_arr, 0);
+      string txt;
+      if(!m_bus.ReadText(rel_path, txt)) return false;
+      int len = (int)StringLen(txt);
+      int start = 0;
+       for(int i=0; i<=len; i++){
+          if(i==len || StringGetCharacter(txt, i)=='\n'){
+             string line = _TrimCopy(StringSubstr(txt, start, i-start));
+             start = i+1;
+             if(StringLen(line)==0) continue;
+            TradePlan p;
+            ZeroMemory(p);
+            if(PlanFromJson(line, p)){
+               int n = ArraySize(out_arr);
+               ArrayResize(out_arr, n+1);
+               out_arr[n] = p;
+            }
+         }
+      }
+      return true;
+   }
+
+   bool SavePlans(const string rel_path, const TradePlan &arr[]) {
+      string out="";
+      for(int i=0; i<ArraySize(arr); i++){
+         out += PlanToJson(arr[i]) + "\n";
+      }
+      return m_bus.WriteText(rel_path, out);
+   }
+
+   bool LoadPenaltyStates(const string rel_path, PenaltyState &out_arr[]) {
+      ArrayResize(out_arr, 0);
+      string txt;
+      if(!m_bus.ReadText(rel_path, txt)) return false;
+      int len = (int)StringLen(txt);
+      int start = 0;
+      for(int i=0; i<=len; i++){
+         if(i==len || StringGetCharacter(txt, i)=='\n'){
+            string line = _TrimCopy(StringSubstr(txt, start, i-start));
+            start = i+1;
+            if(StringLen(line)==0) continue;
+            PenaltyState st;
+            ZeroMemory(st);
+            if(PenaltyFromJson(line, st)){
+               int n = ArraySize(out_arr);
+               ArrayResize(out_arr, n+1);
+               out_arr[n] = st;
+            }
+         }
+      }
+      return true;
+   }
+
+   bool SavePenaltyStates(const string rel_path, const PenaltyState &arr[]) {
+      string out="";
+      for(int i=0; i<ArraySize(arr); i++){
+         out += PenaltyToJson(arr[i]) + "\n";
+      }
+      return m_bus.WriteText(rel_path, out);
+   }
+
+   bool LoadAiCacheEntries(const string rel_path, AiCacheEntry &out_arr[]) {
+      ArrayResize(out_arr, 0);
+      string txt;
+      if(!m_bus.ReadText(rel_path, txt)) return false;
+      int len = (int)StringLen(txt);
+      int start = 0;
+      for(int i=0; i<=len; i++){
+         if(i==len || StringGetCharacter(txt, i)=='\n'){
+            string line = _TrimCopy(StringSubstr(txt, start, i-start));
+            start = i+1;
+            if(StringLen(line)==0) continue;
+            AiCacheEntry entry;
+            ZeroMemory(entry);
+            if(AiCacheFromJson(line, entry)){
+               int n = ArraySize(out_arr);
+               ArrayResize(out_arr, n+1);
+               out_arr[n] = entry;
+            }
+         }
+      }
+      return true;
+   }
+
+   bool SaveAiCacheEntries(const string rel_path, const AiCacheEntry &arr[]) {
+      string out = "";
+      for(int i=0; i<ArraySize(arr); i++){
+         out += AiCacheToJson(arr[i]) + "\n";
+      }
+      return m_bus.WriteText(rel_path, out);
+   }
+};
+
+#endif

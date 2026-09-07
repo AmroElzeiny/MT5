@@ -19,11 +19,14 @@ from __future__ import annotations
 import copy
 import json
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
 import ai_gate
+from ai_provider import ProviderHealth
 from decision_evidence import build_decision_evidence_envelope
 from evidence_catalog import build_evidence_catalog
 from architecture_contracts import (
@@ -1046,6 +1049,72 @@ class WorkerModeTests(unittest.TestCase):
     def test_configured_workers_are_clamped(self) -> None:
         self.assertEqual(ai_gate.effective_worker_count(0, "tester"), 1)
         self.assertEqual(ai_gate.effective_worker_count(99, "tester"), 16)
+
+    def test_file_bus_claims_never_exceed_available_workers(self) -> None:
+        self.assertEqual(ai_gate.available_request_claim_slots(3, 0), 3)
+        self.assertEqual(ai_gate.available_request_claim_slots(3, 2), 1)
+        self.assertEqual(ai_gate.available_request_claim_slots(3, 3), 0)
+        self.assertEqual(ai_gate.available_request_claim_slots(3, 30), 0)
+
+    def test_concurrent_workers_share_one_provider_health_probe(self) -> None:
+        class SlowHealthyProvider:
+            provider_mode = ai_gate.PROVIDER_MODE_OPENROUTER
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def healthcheck(self, *, probe_structured: bool = False) -> ProviderHealth:
+                self.calls += 1
+                time.sleep(0.05)
+                return ProviderHealth(
+                    healthy=True,
+                    provider_mode=self.provider_mode,
+                    provider_id="openrouter_api",
+                    endpoint_class="non_loopback",
+                    model_id="~deepseek/deepseek-v4-flash-latest",
+                    model_available=True,
+                    structured_output_available=probe_structured,
+                )
+
+        provider = SlowHealthyProvider()
+        with patch.object(ai_gate, "_provider", return_value=provider), patch.object(
+            ai_gate, "_PROVIDER_STARTUP_HEALTH", {}
+        ), patch.object(ai_gate, "_PROVIDER_HEALTH_CHECKED_MONOTONIC", 0.0):
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                results = list(pool.map(lambda _: ai_gate._refresh_provider_health(), range(6)))
+        self.assertEqual(provider.calls, 1)
+        self.assertTrue(all(result["healthy"] for result in results))
+
+    def test_live_deadline_includes_time_waiting_in_file_bus(self) -> None:
+        payload = {
+            "id": "live-queued",
+            "request_created_wall_time": 1_000_000,
+            "workload_mode": "LIVE_FORWARD",
+            "runtime": {"tester": False, "workload_mode": "LIVE_FORWARD"},
+            "runtime_inputs": {"ai_wait_timeout_ms": 1_800_000},
+        }
+        registry = RequestTerminalRegistry()
+        with patch.object(ai_gate, "REQUEST_TERMINAL_REGISTRY", registry), patch.object(
+            ai_gate.time, "monotonic", return_value=1_600.0
+        ):
+            deadline = ai_gate._start_request_deadline(payload)
+        self.assertEqual(deadline.wall_start_monotonic, 1_000.0)
+        self.assertEqual(deadline.elapsed_ms(now=1_600.0), 600_000)
+
+    def test_offline_record_deadline_starts_when_worker_claims_it(self) -> None:
+        payload = {
+            "id": "offline-record",
+            "request_created_wall_time": 1_000_000,
+            "workload_mode": "TESTER_AI_RECORD_ONLY",
+            "runtime": {"tester": True, "workload_mode": "RECORD_ONLY"},
+            "runtime_inputs": {"ai_wait_timeout_ms": 1_800_000},
+        }
+        registry = RequestTerminalRegistry()
+        with patch.object(ai_gate, "REQUEST_TERMINAL_REGISTRY", registry), patch.object(
+            ai_gate.time, "monotonic", return_value=1_600.0
+        ):
+            deadline = ai_gate._start_request_deadline(payload)
+        self.assertEqual(deadline.wall_start_monotonic, 1_600.0)
 
     def test_interrupted_processing_request_is_archived_to_shutdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

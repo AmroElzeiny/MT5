@@ -656,6 +656,43 @@ class GovernanceContractTests(unittest.TestCase):
         self.assertIn("partial_exit_not_final=true", body)
         self.assertGreaterEqual(body.count("_TradeResultPath(key)"), 3)
 
+    def test_mql_partial_exit_deferral_is_journaled_once_per_position(self) -> None:
+        """A stable state must not be journaled once per MaintainPositions tick.
+
+        _FinalizeClosedTrades rescans the immutable deal history on every tick,
+        so a partial exit that legitimately cannot finalize its position used to
+        reprint the same line for the whole life of the trade -- 6,874 identical
+        lines in two hours in the live run of 2026-09-07, burying every other
+        journal event.  The deferral itself is unchanged; only its reporting is.
+        """
+
+        source = (MQL_STAGE / "TradeEngine.mqh").read_text(encoding="utf-8")
+        start = source.index("bool _WriteClosedTradeOutcome")
+        end = source.index("void _FinalizeClosedTrades", start)
+        body = source[start:end]
+
+        # The line is emitted only on the transition into the deferred state.
+        self.assertIn("if(!_CompletionDeferralJournaled(position_id))", body)
+        self.assertIn("_MarkCompletionDeferralJournaled(position_id)", body)
+        self.assertEqual(body.count("[trade_completion_deferred]"), 1)
+
+        # ...and the state is re-armed when the position actually closes, so a
+        # later deferral for a different reason is still visible.
+        self.assertIn("_ClearCompletionDeferralJournaled(position_id)", body)
+        self.assertIn("[trade_completion_resumed]", body)
+
+        # Fail-closed behaviour is untouched: the deferral still returns false
+        # and still refuses to finalize while the identifier is open.
+        deferral = body[body.index("_FindPositionTicketByIdentifier(position_id) > 0"):]
+        self.assertIn("return false;", deferral[: deferral.index("[trade_completion_resumed]")])
+
+        # The suppression set must be per-position, never a single global flag,
+        # or a second managed position would silence the first one's report.
+        self.assertIn("long m_completion_deferred_position_ids[];", source)
+        clear_body = _function_body(source, "_ClearCompletionDeferralJournaled")
+        self.assertIn("m_completion_deferred_position_ids[i] != position_id", clear_body)
+        self.assertIn("return true;", clear_body)
+
     def test_mql_mutable_runtime_state_is_isolated_from_tester_and_other_live_strategies(self) -> None:
         engine = (MQL_STAGE / "TradeEngine.mqh").read_text(encoding="utf-8")
         state = (MQL_STAGE / "StateStore.mqh").read_text(encoding="utf-8")

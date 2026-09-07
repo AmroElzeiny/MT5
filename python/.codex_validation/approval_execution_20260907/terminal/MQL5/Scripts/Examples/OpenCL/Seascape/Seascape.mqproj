@@ -1,0 +1,60 @@
+{
+  "platform"    :"mt5",
+  "program_type":"script",
+  "copyright"   :"Copyright 2000-2026, MetaQuotes Ltd.",
+  "link"        :"https:\/\/www.mql5.com",
+  "version"     :"1.00",
+  "optimize"    :"1",
+  "fpzerocheck" :"1",
+  "tester_no_cache":"0",
+  "tester_everytick_calculate":"0",
+
+  "script":
+  {
+    "flags":"0"
+  },
+
+  "files":
+  [
+    {
+      "path":".\\Seascape.mq5",
+      "compile":"true",
+      "relative_to_project":"true"
+    },
+    {
+      "path":"MQL5\\Include\\OpenCL.mqh",
+      "compile":"false",
+      "relative_to_project":"false"
+    },
+    {
+      "path":"MQL5\\Include\\Object.mqh",
+      "compile":"false",
+      "relative_to_project":"false"
+    },
+    {
+      "path":"MQL5\\Include\\StdLibErr.mqh",
+      "compile":"false",
+      "relative_to_project":"false"
+    },
+    {
+      "path":"MQL5\\Include\\Arrays\\ArrayObj.mqh",
+      "compile":"false",
+      "relative_to_project":"false"
+    },
+    {
+      "path":"MQL5\\Include\\Arrays\\Array.mqh",
+      "compile":"false",
+      "relative_to_project":"false"
+    }
+  ],
+
+  "resources":
+  [
+    {
+      "type":"0",
+      "path":".\\seascape.cl",
+      "name":"",
+      "relative_to_project":"true"
+    }
+  ]
+}
