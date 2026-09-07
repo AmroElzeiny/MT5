@@ -17,6 +17,31 @@ from typing import Any, Mapping, Sequence
 TRADE_MEMORY_SCHEMA_VERSION = "20260718_trade_memory_v1"
 RETRIEVAL_POLICY_VERSION = "20260718_hybrid_analogue_retrieval_v1"
 
+_BOOTSTRAP_PRE_ENTRY_FIELDS = (
+    "candidate_id",
+    "candidate_hash",
+    "symbol",
+    "direction",
+    "setup_code",
+    "setup_family",
+    "setup_class",
+    "setup_taxonomy_enum",
+    "setup_taxonomy_version",
+    "entry_branch",
+    "session",
+    "killzone",
+    "asset_class",
+    "regime_profile",
+    "entry_price",
+    "sl",
+    "tp1",
+    "tp2",
+    "rr2",
+    "target_source",
+    "target_model",
+    "assessed_execution_fingerprint",
+)
+
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -54,6 +79,60 @@ def _quality_clean(row: Mapping[str, Any]) -> tuple[bool, str]:
     if not _text(row.get("trade_key")):
         return False, "trade_key_missing"
     return True, "clean"
+
+
+def _is_tester_bootstrap(row: Mapping[str, Any]) -> bool:
+    return (
+        _text(row.get("decision_quality_tier")) == "BOOTSTRAP_RULE_ONLY"
+        and _text(row.get("decision_source")) == "bootstrap_rule_only"
+        and _text(row.get("provider_mode")) == "TESTER_BOOTSTRAP_RULE_ONLY"
+        and _text(row.get("workload_mode")) == "TESTER_AI_BOOTSTRAP_RULE_ONLY"
+    )
+
+
+def _read_completed_ledger_text(source: Path) -> str:
+    """Decode ledgers written by either Python or MetaTrader FILE_TXT.
+
+    MT5 writes Unicode text as UTF-16 with a BOM unless FILE_ANSI is selected,
+    while Python-produced fixtures and migrated ledgers are UTF-8.  Detect the
+    BOM instead of treating a valid terminal ledger as corrupt input.
+    """
+
+    payload = source.read_bytes()
+    if payload.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return payload.decode("utf-16", errors="strict")
+    return payload.decode("utf-8-sig", errors="strict")
+
+
+def _bootstrap_pending_snapshot(completed: Mapping[str, Any]) -> dict[str, Any]:
+    candidate = {
+        key: completed.get(key)
+        for key in _BOOTSTRAP_PRE_ENTRY_FIELDS
+        if completed.get(key) is not None
+    }
+    candidate["bootstrap_authority"] = "mql_tester_deterministic_only"
+    candidate["historical_outcome_fields_excluded"] = True
+    candidate_hash = _text(completed.get("candidate_hash"))
+    return {
+        "memory_schema_version": TRADE_MEMORY_SCHEMA_VERSION,
+        "request_id": "bootstrap:" + candidate_hash,
+        "lineage_id": "bootstrap:" + candidate_hash,
+        "candidate_hash": candidate_hash,
+        "immutable_pre_entry_evidence": {"candidate": candidate},
+        "provider_observability": {
+            "provider_mode": "TESTER_BOOTSTRAP_RULE_ONLY",
+            "provider_id": "mql_deterministic_engine",
+        },
+        "analyst_output": {},
+        "critic_output": {},
+        "adjudicator_output": {},
+        "python_final_decision": {
+            "decision_source": "bootstrap_rule_only",
+            "python_authority": False,
+            "mql_tester_authority": True,
+        },
+        "recorded_at": int(time.time()),
+    }
 
 
 @dataclass(frozen=True)
@@ -198,7 +277,7 @@ class TradeMemoryStore:
             if state == (stat.st_size, stat.st_mtime_ns):
                 return summary
 
-        for line_number, raw_line in enumerate(source.read_text(encoding="utf-8-sig", errors="strict").splitlines(), start=1):
+        for line_number, raw_line in enumerate(_read_completed_ledger_text(source).splitlines(), start=1):
             if not raw_line.strip():
                 continue
             summary["seen"] += 1
@@ -227,17 +306,22 @@ class TradeMemoryStore:
                     (candidate_hash,),
                 ).fetchone()
             if pending_row is None:
-                summary["quarantined"] += 1
-                self._quarantine(trade_key, "immutable_pre_entry_snapshot_missing", completed)
-                continue
-            pending = json.loads(pending_row[0])
+                if not _is_tester_bootstrap(completed):
+                    summary["quarantined"] += 1
+                    self._quarantine(trade_key, "immutable_pre_entry_snapshot_missing", completed)
+                    continue
+                pending = _bootstrap_pending_snapshot(completed)
+                pending_lineage_id = _text(pending.get("lineage_id"))
+            else:
+                pending = json.loads(pending_row[0])
+                pending_lineage_id = pending_row[1]
             memory = {
                 "memory_schema_version": TRADE_MEMORY_SCHEMA_VERSION,
                 "memory_id": _hash({"trade_key": trade_key, "candidate_hash": candidate_hash}),
                 "request_id": _text(pending.get("request_id")),
                 "trade_key": trade_key,
                 "candidate_hash": candidate_hash,
-                "lineage_id": pending_row[1],
+                "lineage_id": pending_lineage_id,
                 "immutable_pre_entry_evidence": pending.get("immutable_pre_entry_evidence") or {},
                 "provider_observability": pending.get("provider_observability") or {},
                 "analyst_output": pending.get("analyst_output") or {},

@@ -12,6 +12,19 @@
 class CStateStore {
 private:
    CFileBus *m_bus;
+   string m_scope_key;
+
+   string _RuntimeStateRoot() const {
+      return m_bus.LogDir() + "\\runtime_state";
+   }
+
+   string _RuntimeStateDir() const {
+      return _RuntimeStateRoot() + "\\" + m_scope_key;
+   }
+
+   string _ScopedPath(const string leaf) const {
+      return _RuntimeStateDir() + "\\" + leaf;
+   }
 
    string _NL() { return "\n"; }
 
@@ -32,6 +45,13 @@ private:
    // NDJSON encoder/decoder for trade plans.
    string PlanToJson(const TradePlan &p) {
       string j = "{";
+      // ~1,700 appends build a ~76,000 character document.  Without a reserve every
+      // append can reallocate and copy the whole buffer, so building one trade meta is
+      // quadratic in its own length -- and MaintainPositions() builds two per
+      // simulated second for every open position, before anything decides whether the
+      // result even needs to be written.  Reserving once makes the appends amortized;
+      // the characters produced are identical.
+      StringReserve(j, 131072);
       j += JsonKVStr("symbol", p.symbol) + ",";
       j += JsonKVBool("is_buy", p.is_buy) + ",";
       j += JsonKVInt("htf", (int)p.htf) + ",";
@@ -44,6 +64,12 @@ private:
       j += JsonKVStr("target_source", p.target_source) + ",";
       j += JsonKVNum("sl", p.sl, 8) + ",";
       j += JsonKVNum("tp1", p.tp1, 8) + ",";
+      // tp1 alone is not enough to restore a plan faithfully: who owns that leg, and
+      // the floor it was judged against, decide whether a rebuild may move it and
+      // whether the AI payload may advertise a partial route.  Losing them on reload
+      // silently reinstates the pre-fix permissive behaviour.
+      j += JsonKVBool("tp1_from_target_model", p.tp1_from_target_model) + ",";
+      j += JsonKVNum("min_tp1_reward", p.min_tp1_reward, 8) + ",";
       j += JsonKVNum("tp2", p.tp2, 8) + ",";
       j += JsonKVNum("atr_pct", p.atr_pct, 6) + ",";
       j += JsonKVNum("trend_strength", p.trend_strength, 6) + ",";
@@ -150,6 +176,7 @@ private:
       j += JsonKVBool("liquidity_target_blocked_by_obstacle", p.liquidity_target_blocked_by_obstacle) + ",";
       j += JsonKVNum("obstacle_distance_r", p.obstacle_distance_r, 6) + ",";
       j += JsonKVStr("obstacle_tf", p.obstacle_tf) + ",";
+      j += JsonKVNum("obstacle_severity", p.obstacle_severity, 4) + ",";
       j += JsonKVStr("obstacle_strength_features", p.obstacle_strength_features) + ",";
       j += JsonKVNum("fallback_tp", p.fallback_tp, 8) + ",";
       j += JsonKVNum("fallback_rr", p.fallback_rr, 6) + ",";
@@ -283,8 +310,26 @@ private:
       j += JsonKVStr("assessed_obstacle_kind", p.assessed_obstacle_kind) + ",";
       j += JsonKVStr("assessed_obstacle_tf", p.assessed_obstacle_tf) + ",";
       j += JsonKVNum("assessed_obstacle_price", p.assessed_obstacle_price, 8) + ",";
+      // Without these the obstacle contract silently reverts to permissive (assessed
+      // severity 0) or vacuous (no live observation) on a restored watchlist plan.
+      j += JsonKVNum("assessed_obstacle_severity", p.assessed_obstacle_severity, 4) + ",";
+      j += JsonKVStr("live_obstacle_kind", p.live_obstacle_kind) + ",";
+      j += JsonKVNum("live_obstacle_price", p.live_obstacle_price, 8) + ",";
+      j += JsonKVNum("live_obstacle_severity", p.live_obstacle_severity, 4) + ",";
       j += JsonKVStr("assessed_decision_input_hash", p.assessed_decision_input_hash) + ",";
       j += JsonKVStr("assessed_strategy_schema_version", p.assessed_strategy_schema_version) + ",";
+      // The lock itself and the four values the execution adjustment contract is
+      // built from.  Without them a reloaded approved plan came back UNLOCKED:
+      // _ExecutionFingerprintWithinTolerance fell through to the legacy branch,
+      // _ApplyAssessedTargetUnderContract never ran, and the live rebuild was free
+      // to re-derive the target -- precisely the substitution the contract exists to
+      // make unrepresentable.  assessed_stop_distance additionally anchors the TP1
+      // floor, so losing it reverted that to the drifted stop.
+      j += JsonKVBool("assessed_plan_locked", p.assessed_plan_locked) + ",";
+      j += JsonKVStr("assessed_tp_model", p.assessed_tp_model) + ",";
+      j += JsonKVStr("assessed_selected_target_identity", p.assessed_selected_target_identity) + ",";
+      j += JsonKVNum("assessed_selected_target_price", p.assessed_selected_target_price, 8) + ",";
+      j += JsonKVNum("assessed_stop_distance", p.assessed_stop_distance, 8) + ",";
       j += JsonKVStr("ai_decision_id", p.ai_decision_id) + ",";
       j += JsonKVStr("lineage_root_id", p.lineage_root_id) + ",";
       j += JsonKVStr("parent_setup_id", p.parent_setup_id) + ",";
@@ -318,6 +363,7 @@ private:
       j += JsonKVStr("ai_response_quality", p.ai.response_quality_alias) + ",";
       j += JsonKVStr("ai_provider_contract_version", p.ai.provider_contract_version) + ",";
       j += JsonKVStr("ai_provider_mode", p.ai.provider_mode) + ",";
+      j += JsonKVStr("ai_workload_mode", p.ai.workload_mode) + ",";
       j += JsonKVStr("ai_provider_id", p.ai.provider_id) + ",";
       j += JsonKVStr("ai_endpoint_class", p.ai.endpoint_class) + ",";
       j += JsonKVStr("ai_endpoint_identity_hash", p.ai.endpoint_identity_hash) + ",";
@@ -389,6 +435,10 @@ private:
       j += JsonKVStr("ai_missing_confirmations_json", p.ai.missing_confirmations_json) + ",";
       j += JsonKVNum("ai_suggested_risk_multiplier", p.ai.suggested_risk_multiplier, 6) + ",";
       j += JsonKVStr("ai_model_version", p.ai.model_version) + ",";
+      j += JsonKVStr("ai_reasoning_configuration", p.ai.reasoning_configuration) + ",";
+      j += JsonKVStr("ai_bucket_prior_hash", p.ai.bucket_prior_hash) + ",";
+      j += JsonKVStr("ai_calibration_artifact_id", p.ai.calibration_artifact_id) + ",";
+      j += JsonKVStr("ai_repeatability_authority_hash", p.ai.repeatability_authority_hash) + ",";
       j += JsonKVNum("llm_quality_score_threshold", p.ai.llm_quality_score_threshold, 4) + ",";
       j += JsonKVStr("llm_quality_threshold_source", p.ai.llm_quality_threshold_source) + ",";
       j += JsonKVBool("llm_quality_threshold_passed", p.ai.llm_quality_threshold_passed) + ",";
@@ -867,6 +917,8 @@ private:
       p.target_source = JsonGetString(json, "target_source", "");
       p.sl = JsonGetNumber(json, "sl", 0);
       p.tp1 = JsonGetNumber(json, "tp1", 0);
+      p.tp1_from_target_model = JsonGetBool(json, "tp1_from_target_model", false);
+      p.min_tp1_reward = JsonGetNumber(json, "min_tp1_reward", 0);
       p.tp2 = JsonGetNumber(json, "tp2", 0);
       p.atr_pct = JsonGetNumber(json, "atr_pct", 0);
       p.trend_strength = JsonGetNumber(json, "trend_strength", 0);
@@ -972,6 +1024,7 @@ private:
       p.liquidity_target_blocked_by_obstacle = JsonGetBool(json, "liquidity_target_blocked_by_obstacle", false);
       p.obstacle_distance_r = JsonGetNumber(json, "obstacle_distance_r", 0);
       p.obstacle_tf = JsonGetString(json, "obstacle_tf", "");
+      p.obstacle_severity = JsonGetNumber(json, "obstacle_severity", 0.0);
       p.obstacle_strength_features = JsonGetString(json, "obstacle_strength_features", "");
       p.fallback_tp = JsonGetNumber(json, "fallback_tp", 0);
       p.fallback_rr = JsonGetNumber(json, "fallback_rr", 0);
@@ -1105,8 +1158,22 @@ private:
       p.assessed_obstacle_kind = JsonGetString(json, "assessed_obstacle_kind", "");
       p.assessed_obstacle_tf = JsonGetString(json, "assessed_obstacle_tf", "");
       p.assessed_obstacle_price = JsonGetNumber(json, "assessed_obstacle_price", 0.0);
+      p.assessed_obstacle_severity = JsonGetNumber(json, "assessed_obstacle_severity", 0.0);
+      p.live_obstacle_kind = JsonGetString(json, "live_obstacle_kind", "");
+      p.live_obstacle_price = JsonGetNumber(json, "live_obstacle_price", 0.0);
+      p.live_obstacle_severity = JsonGetNumber(json, "live_obstacle_severity", 0.0);
       p.assessed_decision_input_hash = JsonGetString(json, "assessed_decision_input_hash", "");
       p.assessed_strategy_schema_version = JsonGetString(json, "assessed_strategy_schema_version", "");
+      p.assessed_plan_locked = JsonGetBool(json, "assessed_plan_locked", false);
+      p.assessed_tp_model = JsonGetString(json, "assessed_tp_model", "");
+      p.assessed_selected_target_identity = JsonGetString(json, "assessed_selected_target_identity", "");
+      p.assessed_selected_target_price = JsonGetNumber(json, "assessed_selected_target_price", 0.0);
+      p.assessed_stop_distance = JsonGetNumber(json, "assessed_stop_distance", 0.0);
+      // A record written before this field existed carries no stop distance; derive
+      // it from the assessed prices rather than leaving the TP1 floor unanchored.
+      if(p.assessed_plan_locked && p.assessed_stop_distance <= 0.0 &&
+         p.assessed_entry > 0.0 && p.assessed_sl > 0.0)
+         p.assessed_stop_distance = MathAbs(p.assessed_entry - p.assessed_sl);
       p.ai_decision_id = JsonGetString(json, "ai_decision_id", "");
       p.lineage_root_id = JsonGetString(json, "lineage_root_id", "");
       p.parent_setup_id = JsonGetString(json, "parent_setup_id", "");
@@ -1146,6 +1213,7 @@ private:
          p.ai.decision_quality_tier = "DEGRADED_NON_TRADING";
       p.ai.provider_contract_version = JsonGetString(json, "ai_provider_contract_version", "");
       p.ai.provider_mode = JsonGetString(json, "ai_provider_mode", "");
+      p.ai.workload_mode = JsonGetString(json, "ai_workload_mode", "");
       p.ai.provider_id = JsonGetString(json, "ai_provider_id", "");
       p.ai.endpoint_class = JsonGetString(json, "ai_endpoint_class", "");
       p.ai.endpoint_identity_hash = JsonGetString(json, "ai_endpoint_identity_hash", "");
@@ -1219,6 +1287,10 @@ private:
       p.ai.missing_confirmations_json = JsonGetString(json, "ai_missing_confirmations_json", "[]");
       p.ai.suggested_risk_multiplier = JsonGetNumber(json, "ai_suggested_risk_multiplier", -1.0);
       p.ai.model_version = JsonGetString(json, "ai_model_version", "");
+      p.ai.reasoning_configuration = JsonGetString(json, "ai_reasoning_configuration", "");
+      p.ai.bucket_prior_hash = JsonGetString(json, "ai_bucket_prior_hash", "");
+      p.ai.calibration_artifact_id = JsonGetString(json, "ai_calibration_artifact_id", "");
+      p.ai.repeatability_authority_hash = JsonGetString(json, "ai_repeatability_authority_hash", "");
       p.ai.llm_quality_score_threshold = JsonGetNumber(json, "llm_quality_score_threshold", 0.0);
       p.ai.llm_quality_threshold_source = JsonGetString(json, "llm_quality_threshold_source", "");
       p.ai.llm_quality_threshold_passed = JsonGetBool(json, "llm_quality_threshold_passed", false);
@@ -1272,7 +1344,8 @@ private:
       p.ai.repeatability_score_threshold_authority = p.repeatability_score_threshold_authority;
       p.ai.repeatability_trading_eligible = p.repeatability_trading_eligible;
       p.ai.repeatability_group_key = p.repeatability_group_key;
-      p.ai.repeatability_authority_hash = p.repeatability_authority_hash;
+      if(StringLen(p.ai.repeatability_authority_hash) == 0)
+         p.ai.repeatability_authority_hash = p.repeatability_authority_hash;
       bool strict_quality = (p.ai.decision_quality_tier == "FULL_STRUCTURED" ||
                              p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
       bool calibration_unavailable = (!p.ai.calibration_available &&
@@ -1289,10 +1362,29 @@ private:
                                 p.ai.session_bucket_risk >= 0.0 && p.ai.session_bucket_risk <= 1.0 &&
                                 p.ai.post_entry_failure_risk >= 0.0 && p.ai.post_entry_failure_risk <= 1.0 &&
                                 p.ai.final_trade_expectancy_score >= 0.0 && p.ai.final_trade_expectancy_score <= 10.0);
-      p.ai.ok = (p.ai.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
+      bool tester_bootstrap_quality = ((bool)MQLInfoInteger(MQL_TESTER) &&
+                                       InpTesterAiMode == TESTER_AI_BOOTSTRAP_RULE_ONLY &&
+                                       !InpUseAI &&
+                                       p.ai.decision_quality_tier == "BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.response_quality_alias == "BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.decision_state == "APPROVE" &&
+                                       p.ai.decision_source == "bootstrap_rule_only" &&
+                                       p.ai.provider_mode == "TESTER_BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.provider_id == "mql_deterministic_engine" &&
+                                       p.ai.workload_mode == "TESTER_AI_BOOTSTRAP_RULE_ONLY" &&
+                                       p.ai.mandatory_fields_complete &&
+                                       !p.ai.allow && !p.ai.raw_allow &&
+                                       !p.model_raw_allow && !p.python_final_allow &&
+                                       p.ai.suggested_risk_multiplier > 0.0 &&
+                                       p.ai.suggested_risk_multiplier <= 1.0 &&
+                                       p.candidate_id == p.ai.selected_candidate_id &&
+                                       p.candidate_hash == p.ai.selected_candidate_hash &&
+                                       p.request_execution_fingerprint == p.ai.request_execution_fingerprint &&
+                                       p.assessed_execution_fingerprint == p.ai.assessed_execution_fingerprint);
+      bool structured_ai_quality = (p.ai.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
                  strict_quality && p.ai.mandatory_fields_complete &&
                  p.ai.provider_contract_version == AI_PROVIDER_CONTRACT_VERSION &&
-                 (p.ai.provider_mode == "REMOTE_API" || p.ai.provider_mode == "LOCAL_OPENAI_COMPATIBLE") &&
+                 AiProviderModeIsTradeable(p.ai.provider_mode) &&
                  StringLen(p.ai.provider_id) > 0 && StringLen(p.ai.endpoint_class) > 0 &&
                  StringLen(p.ai.endpoint_identity_hash) > 0 && StringLen(p.ai.configured_models_hash) > 0 &&
                  StringLen(p.ai.actual_model_id) > 0 && StringLen(p.ai.model_fingerprint) > 0 &&
@@ -1325,6 +1417,7 @@ private:
                  p.candidate_id == p.ai.selected_candidate_id &&
                  p.candidate_hash == p.ai.selected_candidate_hash &&
                  p.request_execution_fingerprint == p.ai.request_execution_fingerprint);
+      p.ai.ok = (tester_bootstrap_quality || structured_ai_quality);
       if(!p.ai.ok){
          p.ai.allow = false;
          p.ai.raw_allow = false;
@@ -1763,13 +1856,33 @@ private:
    }
 
 public:
-   CStateStore(CFileBus &bus) { m_bus = &bus; }
+   CStateStore(CFileBus &bus) {
+      m_bus = &bus;
+      m_scope_key = "uninitialized";
+   }
 
-   string WatchlistPath() const { return m_bus.LogDir() + "\\watchlist.ndjson"; }
-   string PendingAiPath() const { return m_bus.LogDir() + "\\pending_ai.ndjson"; }
-   string PenaltyPath() const { return m_bus.LogDir() + "\\penalty.ndjson"; }
-   string CounterfactualPendingPath() const { return m_bus.LogDir() + "\\counterfactual_pending.ndjson"; }
-   string ShadowPendingPath() const { return m_bus.LogDir() + "\\shadow_candidate_pending.ndjson"; }
+   bool SetRuntimeScope(const string scope_key) {
+      // Runtime queues are mutable recovery state, not global analytics.  A
+      // tester position identifier can be reused in a later run, and tester
+      // state must never be restored by live trading.  The engine supplies a
+      // per-run tester scope or a stable live account+magic scope before the
+      // first load/save.
+      if(StringLen(scope_key) == 0) return false;
+      m_scope_key = scope_key;
+      // FolderCreate is intentionally idempotent here.  Some terminal builds
+      // report false when a directory already exists; that is not a startup
+      // failure and subsequent atomic file writes remain authoritative.
+      FolderCreate(_RuntimeStateRoot(), FILE_COMMON);
+      FolderCreate(_RuntimeStateDir(), FILE_COMMON);
+      return true;
+   }
+
+   string RuntimeScope() const { return m_scope_key; }
+   string WatchlistPath() const { return _ScopedPath("watchlist.ndjson"); }
+   string PendingAiPath() const { return _ScopedPath("pending_ai.ndjson"); }
+   string PenaltyPath() const { return _ScopedPath("penalty.ndjson"); }
+   string CounterfactualPendingPath() const { return _ScopedPath("counterfactual_pending.ndjson"); }
+   string ShadowPendingPath() const { return _ScopedPath("shadow_candidate_pending.ndjson"); }
    string AiCachePath() const { return m_bus.LogDir() + "\\ai_cache.ndjson"; }
    string TradePlanToJson(const TradePlan &p) { return PlanToJson(p); }
    bool ParseTradePlanJson(const string json, TradePlan &p) { return PlanFromJson(json, p); }

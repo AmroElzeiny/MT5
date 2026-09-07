@@ -12,6 +12,36 @@ void _RiskLog(const string msg) {
    Print("[PO3_AIGate] ", msg);
 }
 
+//+------------------------------------------------------------------+
+//| Which run's closed trades the behaviour window may look at.        |
+//|                                                                    |
+//| <bus>\logs\trade_results is a FLAT directory shared by every run    |
+//| against the same bus, so the behavioural circuit-breaker was        |
+//| reading the PREVIOUS Strategy Tester run's closed trades.  On       |
+//| 2026-09-07 that suppressed an entire 5-day replay before its first  |
+//| scan: at simulated 00:00:01, balance still 100000 and not one deal  |
+//| of its own, the EA reported                                         |
+//|    global stop triggered behavioral=true                            |
+//|                         behavioral_reason=consecutive_losses=2      |
+//| and the run ended with scans_total=0 and an empty report that reads |
+//| exactly like a strategy which simply found nothing.                 |
+//|                                                                    |
+//| _CompletedPositionMarkerPath already scopes by runtime scope for    |
+//| precisely this reason ("position identifiers are reused when        |
+//| Strategy Tester starts a new run"); the behaviour window did not.   |
+//|                                                                    |
+//| The engine publishes its scope here at Init.  Live keeps a stable   |
+//| account+magic scope, so live behaviour is unchanged.  Records       |
+//| written before this field existed carry no scope and are excluded,  |
+//| which can only stop the breaker firing on another run's data --     |
+//| it can never make it fire where it did not before.                  |
+//+------------------------------------------------------------------+
+string g_po3_behavior_runtime_scope = "";
+
+void PO3SetBehaviorRuntimeScope(const string scope_key) {
+   g_po3_behavior_runtime_scope = scope_key;
+}
+
 struct VolumeNormalizationResult {
    double requested_volume;
    double normalized_volume;
@@ -242,16 +272,28 @@ void _LoadRecentBehaviorTrades(const int limit, datetime &times[], double &rs[],
    long handle = FileFindFirst(InpBusRoot + "\\logs\\trade_results\\trade_result_*.json", file_name, FILE_COMMON);
    if(handle == INVALID_HANDLE) return;
 
+   int skipped_foreign_scope = 0;
    do {
       string txt;
       string rel = InpBusRoot + "\\logs\\trade_results\\" + file_name;
       if(!_ReadCommonText(rel, txt)) continue;
+      // Only this run's own trades may drive this run's circuit-breaker.
+      // See PO3SetBehaviorRuntimeScope.
+      if(StringLen(g_po3_behavior_runtime_scope) > 0 &&
+         JsonGetString(txt, "runtime_scope", "") != g_po3_behavior_runtime_scope){
+         skipped_foreign_scope++;
+         continue;
+      }
       datetime closed_at = (datetime)(int)JsonGetNumber(txt, "closed_at", 0);
       double realized_r = JsonGetNumber(txt, "realized_r", 0.0);
       double fill_slippage_r = JsonGetNumber(txt, "fill_slippage_r", 0.0);
       _InsertRecentBehaviorTrade(closed_at, realized_r, fill_slippage_r, limit, times, rs, slips);
    } while(FileFindNext(handle, file_name));
    FileFindClose(handle);
+   if(skipped_foreign_scope > 0)
+      _RiskLog("[behavior_window] runtime_scope=" + g_po3_behavior_runtime_scope
+               + " in_scope=" + IntegerToString(ArraySize(times))
+               + " skipped_other_runs=" + IntegerToString(skipped_foreign_scope));
 }
 
 bool _BehaviorStopTriggered(string &reason) {
@@ -774,12 +816,57 @@ void _SortDoubleAscending(double &values[]) {
    }
 }
 
-double BrokerCostEstimatePerLot(const string symbol,
-                                string &source,
-                                int &sample_size,
-                                double &median_cost,
-                                datetime &window_start,
-                                datetime &window_end) {
+//--- Broker-cost memo -----------------------------------------------------------
+// _BrokerCostEstimatePerLotUncached() is the original computation and is unchanged.
+// It is expensive by construction: HistorySelect() over InpBrokerCostHistoryDays,
+// then a walk of every deal in the selection with an O(n^2) position-id lookup.
+// Its caller, _EstimateExecutionCosts(), runs once per plan build -- roughly six
+// times per accepted plan -- so a scan cycle called it 2,215 times and spent 99.6%
+// of the run's wall clock inside it (see InpBrokerCostCacheSeconds in Config.mqh for
+// the measurement).  Journal writing was NOT the cost: 6,748 consecutive
+// [target_rank] transitions in the same log totalled 0.0 s.
+//
+// The result is a pure function of (symbol, the deals in history, the trailing
+// window), so it is memoized per symbol and recomputed only when one of those can
+// have changed:
+//   * a deal was added   -> BrokerCostHistoryInvalidate() bumps the epoch
+//   * the window slid    -> InpBrokerCostCacheSeconds of server time elapsed
+// The memo is therefore never stale with respect to a trade this EA made, and never
+// older than one interval with respect to deals ageing out of the window edge.
+string   _bce_symbol[];
+double   _bce_value[];
+string   _bce_source[];
+int      _bce_samples[];
+double   _bce_median[];
+datetime _bce_window_start[];
+datetime _bce_window_end[];
+datetime _bce_computed_at[];
+long     _bce_epoch[];
+long     _bce_current_epoch = 0;
+long     _bce_hits          = 0;
+long     _bce_misses        = 0;
+// Wall time actually spent inside the uncached computation.  The 99.6% attribution
+// above was derived from gaps between journal lines, which cannot separate this
+// function from whatever else ran before the line was printed.  This counter measures
+// it directly, so the next run states the cost as a fact instead of an inference --
+// and keeps stating it, so a future regression in HistorySelect() cost is visible.
+long     _bce_compute_us    = 0;
+
+void BrokerCostHistoryInvalidate() { _bce_current_epoch++; }
+
+void BrokerCostCacheStats(long &hits, long &misses, long &epoch, long &compute_us) {
+   hits       = _bce_hits;
+   misses     = _bce_misses;
+   epoch      = _bce_current_epoch;
+   compute_us = _bce_compute_us;
+}
+
+double _BrokerCostEstimatePerLotUncached(const string symbol,
+                                         string &source,
+                                         int &sample_size,
+                                         double &median_cost,
+                                         datetime &window_start,
+                                         datetime &window_end) {
    source = "configured_fallback";
    sample_size = 0;
    median_cost = 0.0;
@@ -856,6 +943,74 @@ double BrokerCostEstimatePerLot(const string symbol,
    stressed_index = MathMax(0, MathMin(sample_size - 1, stressed_index));
    source = "broker_history_stressed_percentile";
    return MathMax(0.00000001, per_lot[stressed_index]);
+}
+
+// The memoized entry point every caller uses.  Defined after the computation so the
+// expensive function is impossible to read without first reading what guards it.
+double BrokerCostEstimatePerLot(const string symbol,
+                                string &source,
+                                int &sample_size,
+                                double &median_cost,
+                                datetime &window_start,
+                                datetime &window_end) {
+   if(InpBrokerCostCacheSeconds <= 0){
+      _bce_misses++;
+      ulong t0 = GetMicrosecondCount();
+      double uncached = _BrokerCostEstimatePerLotUncached(symbol, source, sample_size,
+                                                          median_cost, window_start, window_end);
+      _bce_compute_us += (long)(GetMicrosecondCount() - t0);
+      return uncached;
+   }
+
+   datetime now = TimeTradeServer();
+   if(now <= 0) now = TimeCurrent();
+
+   int idx = -1;
+   for(int i=0; i<ArraySize(_bce_symbol); i++)
+      if(_bce_symbol[i] == symbol){ idx = i; break; }
+
+   if(idx >= 0 &&
+      _bce_epoch[idx] == _bce_current_epoch &&
+      _bce_computed_at[idx] > 0 &&
+      now >= _bce_computed_at[idx] &&
+      (now - _bce_computed_at[idx]) < (datetime)InpBrokerCostCacheSeconds){
+      source       = _bce_source[idx];
+      sample_size  = _bce_samples[idx];
+      median_cost  = _bce_median[idx];
+      window_start = _bce_window_start[idx];
+      window_end   = _bce_window_end[idx];
+      _bce_hits++;
+      return _bce_value[idx];
+   }
+
+   ulong t0 = GetMicrosecondCount();
+   double value = _BrokerCostEstimatePerLotUncached(symbol, source, sample_size,
+                                                    median_cost, window_start, window_end);
+   _bce_compute_us += (long)(GetMicrosecondCount() - t0);
+   _bce_misses++;
+
+   if(idx < 0){
+      idx = ArraySize(_bce_symbol);
+      ArrayResize(_bce_symbol, idx+1);
+      ArrayResize(_bce_value, idx+1);
+      ArrayResize(_bce_source, idx+1);
+      ArrayResize(_bce_samples, idx+1);
+      ArrayResize(_bce_median, idx+1);
+      ArrayResize(_bce_window_start, idx+1);
+      ArrayResize(_bce_window_end, idx+1);
+      ArrayResize(_bce_computed_at, idx+1);
+      ArrayResize(_bce_epoch, idx+1);
+      _bce_symbol[idx] = symbol;
+   }
+   _bce_value[idx]        = value;
+   _bce_source[idx]       = source;
+   _bce_samples[idx]      = sample_size;
+   _bce_median[idx]       = median_cost;
+   _bce_window_start[idx] = window_start;
+   _bce_window_end[idx]   = window_end;
+   _bce_computed_at[idx]  = now;
+   _bce_epoch[idx]        = _bce_current_epoch;
+   return value;
 }
 
 string _RiskCommentSession(const string comment) {

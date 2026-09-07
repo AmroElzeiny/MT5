@@ -1,0 +1,13 @@
+.venv/
+.env
+state/browser_profile/
+state/gemini_browser_profile/
+state/downloads/
+state/uploads/
+state/*.sqlite3
+state/chats.json
+logs/*.jsonl
+folder_bus/requests/*.json
+folder_bus/responses/*.json
+__pycache__/
+*.pyc

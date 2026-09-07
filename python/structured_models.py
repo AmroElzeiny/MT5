@@ -173,18 +173,22 @@ class ModelTargetArbitrationDecision(StrictStructuredModel):
     chosen_target_model: str = Field(max_length=64)
     chosen_tp1: float
     chosen_tp2: float
-    chosen_rr1: float
-    chosen_rr2: float
+    # Reward/risk is an unsigned magnitude.  A negative value is never a
+    # legitimate sell-side representation; direction belongs to the price
+    # geometry, not to RR.  Constrain it at the provider schema boundary so a
+    # bad sign is repaired by the provider before Python considers authority.
+    chosen_rr1: float = Field(ge=0.0)
+    chosen_rr2: float = Field(ge=0.0)
     rejected_target_models: list[str] = Field(max_length=6)
     blocker_kind: str = Field(max_length=64)
     blocker_severity: float = Field(ge=-1.0, le=10.0)
-    blocker_class: str = Field(max_length=24)
+    blocker_class: str = Field(min_length=1, max_length=24)
     blocker_is_trade_killer: bool
     why_not_liquidity_target: str = Field(max_length=160)
     why_not_partial_before_obstacle: str = Field(max_length=160)
     why_not_capped_before_obstacle: str = Field(max_length=160)
     why_not_synthetic_fallback: str = Field(max_length=160)
-    target_decision_reason: str = Field(max_length=160)
+    target_decision_reason: str = Field(min_length=1, max_length=160)
     target_comparison: TargetComparison
 
 
@@ -423,7 +427,11 @@ class ModelAdjudicatorDecision(StrictStructuredModel):
     verdict: AdjudicatorVerdict
     resolved_objection_codes: list[QualitativeVetoCode] = Field(max_length=12)
     unresolved_objection_codes: list[QualitativeVetoCode] = Field(max_length=12)
-    evidence_ref_ids: list[int] = Field(max_length=16)
+    # The authoritative adjudicator validator requires at least one resolved
+    # catalog citation.  Keep that requirement in the provider-facing schema
+    # too, so Structured Outputs cannot legally return an empty list and only
+    # fail later in the local consensus pipeline.
+    evidence_ref_ids: list[int] = Field(min_length=1, max_length=16)
     resolution_reason: str = Field(min_length=1, max_length=240)
 
 

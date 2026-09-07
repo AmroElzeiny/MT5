@@ -382,12 +382,15 @@ PRIOR_LEVELS = (
 )
 
 
-def _uncertainty_interval(values: Sequence[float]) -> tuple[float, float, float]:
+def _uncertainty_interval(values: Sequence[float]) -> tuple[float, float, float | None]:
     if not values:
-        return 0.0, 0.0, float("inf")
+        return 0.0, 0.0, None
     mean_value = statistics.fmean(values)
     if len(values) <= 1:
-        return mean_value, mean_value, float("inf")
+        # JSON has no representation for infinity.  Null preserves the fact
+        # that uncertainty is not estimable while keeping the prior artifact
+        # valid for strict parsers.  _shrink_prior treats it as unbounded.
+        return mean_value, mean_value, None
     standard_error = statistics.stdev(values) / math.sqrt(len(values))
     return mean_value - 1.96 * standard_error, mean_value + 1.96 * standard_error, standard_error
 

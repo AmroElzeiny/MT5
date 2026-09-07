@@ -1,0 +1,213 @@
+{
+  "files": [
+    {
+      "bytes": 427,
+      "path": "README_FIRST.txt",
+      "sha256": "a037b5f70ef936f65332f461bfb4aeb6c58821e21bffbf7532ce2e3b5cf269de"
+    },
+    {
+      "bytes": 1999,
+      "path": "python/rnd_factory/.env.example",
+      "sha256": "9e886d601f952d0b480a0c2b60cb953f0473e4dca350b700cfbdba8971baf5e3"
+    },
+    {
+      "bytes": 303,
+      "path": "python/rnd_factory/.gitignore",
+      "sha256": "f8ae5744400a4f8f42ab54a8db75c819d432da6143410206e7221dd0960de1a1"
+    },
+    {
+      "bytes": 341,
+      "path": "python/rnd_factory/ARCHITECTURE.md",
+      "sha256": "48f0a1f8a95cc0d76e94cf176c60a37ecc8c68b2416752e1ff356f4938292595"
+    },
+    {
+      "bytes": 1198,
+      "path": "python/rnd_factory/LOCAL_BRIDGE_CONTRACT.md",
+      "sha256": "eb72660f19e337ef74ad88b33acdf8fd66265bf33ba70eedeca016c495b31bfc"
+    },
+    {
+      "bytes": 11388,
+      "path": "python/rnd_factory/README.md",
+      "sha256": "428af80d7ff8eb3c624831709a85d7f55f785afed3c70df3b567f0865b1fd255"
+    },
+    {
+      "bytes": 1523,
+      "path": "python/rnd_factory/REPO_INTEGRATION_NOTES.md",
+      "sha256": "d4a48714b97a1de92c55301c2239bdad037aae7c544979bbc57d06a9483059bc"
+    },
+    {
+      "bytes": 551,
+      "path": "python/rnd_factory/TEST_RESULTS.txt",
+      "sha256": "63b080323d9c346f232edd9a428722a81d5d45ba0f4edf56c34eccfe63bf9a55"
+    },
+    {
+      "bytes": 240,
+      "path": "python/rnd_factory/__init__.py",
+      "sha256": "4a540c3282fd993ddb43383f4368075dcd1840650e5197f27a150e2371c0b85b"
+    },
+    {
+      "bytes": 47,
+      "path": "python/rnd_factory/__main__.py",
+      "sha256": "79ee6f134c5c5193377cf9b189cbdcc3e2095e49ba9cec310114441c15a917c4"
+    },
+    {
+      "bytes": 70,
+      "path": "python/rnd_factory/ai/__init__.py",
+      "sha256": "2ef3ceec8650561abf1f2d5ea849261b3f1943186fd07f483d798d209a55c960"
+    },
+    {
+      "bytes": 1797,
+      "path": "python/rnd_factory/ai/budget.py",
+      "sha256": "af7ea909d1b8d0832458cd4e7e3557179b2ba079785ab2203b7a22bf1859201a"
+    },
+    {
+      "bytes": 5873,
+      "path": "python/rnd_factory/ai/local_bridge.py",
+      "sha256": "c0c9f929a5f9142926a98048f60e800daeea49cc5047b77a51b554ed5bb0a331"
+    },
+    {
+      "bytes": 4558,
+      "path": "python/rnd_factory/ai/orchestrator.py",
+      "sha256": "eeef30424fcce96d0d014ce2cdb82cbf524fad8be2b2789d7373e7e2a668daba"
+    },
+    {
+      "bytes": 5253,
+      "path": "python/rnd_factory/ai/remote.py",
+      "sha256": "e4fe6d4feb5a7c0525104e88b1ef6e1c1a7040c55667f48f4d0802a18c73cf79"
+    },
+    {
+      "bytes": 10724,
+      "path": "python/rnd_factory/analysis.py",
+      "sha256": "38101f56ed8902c1fe94d9443dcf7c5cc6c9eece800af7546d9ab2a15fa8bbe0"
+    },
+    {
+      "bytes": 6031,
+      "path": "python/rnd_factory/cli.py",
+      "sha256": "8c8956e98ffa6bb68dd58cd167f95ef6c82494816ac8f0a0ea27c2c825a2872f"
+    },
+    {
+      "bytes": 5101,
+      "path": "python/rnd_factory/code_discovery.py",
+      "sha256": "c304ca1582aee6fca72264be4f48107ecfdf1ab2a6abb28f5757bf7c6bb4524c"
+    },
+    {
+      "bytes": 11642,
+      "path": "python/rnd_factory/config.py",
+      "sha256": "e5e01ce8b336480732397f477e2e29a52a01e024fb208b51ed0af68ce5385030"
+    },
+    {
+      "bytes": 954,
+      "path": "python/rnd_factory/constants.py",
+      "sha256": "157e8eefbb5ed56ae85bb6974b65c44808223675590783498273af48135ae00a"
+    },
+    {
+      "bytes": 11779,
+      "path": "python/rnd_factory/database.py",
+      "sha256": "d7f0f906e917033787f85d2fa6d54a48de96b77b0dd63a6d38cbdf97e9f93272"
+    },
+    {
+      "bytes": 4250,
+      "path": "python/rnd_factory/evidence.py",
+      "sha256": "68458de972f63ec9f774b98ac98f88fc2b16a8ddbd590a0b8036bf8c3f7a5edb"
+    },
+    {
+      "bytes": 4254,
+      "path": "python/rnd_factory/experiments.py",
+      "sha256": "25508461a9726a7637898ed5849bee20d25ae611c245bf4335d21de284ba6c53"
+    },
+    {
+      "bytes": 7362,
+      "path": "python/rnd_factory/factory.py",
+      "sha256": "4437d690fbd10b336e41d8070ee08c90c0b319b498de7898b0ddccd70222869c"
+    },
+    {
+      "bytes": 7360,
+      "path": "python/rnd_factory/models.py",
+      "sha256": "092e8497ef74dec32868851c974da87d416af2be6e107914546e7cce70400682"
+    },
+    {
+      "bytes": 989,
+      "path": "python/rnd_factory/redaction.py",
+      "sha256": "340d48ff7be2cb0b5de31eda2da5df6a3a836d4e8ffdcdeef50d2e614c026b58"
+    },
+    {
+      "bytes": 4232,
+      "path": "python/rnd_factory/reports.py",
+      "sha256": "0bcd7d783f987df98d8a9209b04acb5c2e8a168f49377b7599beb36ee174ddc2"
+    },
+    {
+      "bytes": 6632,
+      "path": "python/rnd_factory/repository.py",
+      "sha256": "481d3178217a270415f26d6eb4210582036c3e787c452cee85112da6177a2add"
+    },
+    {
+      "bytes": 160,
+      "path": "python/rnd_factory/requirements.txt",
+      "sha256": "ded206e94974a6c0e07e61d5ed00f71634e616f581c39135c619b2f49c5df09c"
+    },
+    {
+      "bytes": 57,
+      "path": "python/rnd_factory/scripts/init_rnd_factory.bat",
+      "sha256": "398a3d4684bd93357949226da6ee3e7cf7501c2566fe00061e5288846f2ed85b"
+    },
+    {
+      "bytes": 95,
+      "path": "python/rnd_factory/scripts/run_no_ai_100.bat",
+      "sha256": "7d7dda42440957a75a777673711b23474dc7dde40055385e49025667f8a24b8f"
+    },
+    {
+      "bytes": 82,
+      "path": "python/rnd_factory/scripts/run_tests.bat",
+      "sha256": "324c626af8c8f14c9c12bd3007b72efa91ec2832651fdb7cad27eb058cdf851c"
+    },
+    {
+      "bytes": 68,
+      "path": "python/rnd_factory/scripts/validate_config.bat",
+      "sha256": "2590540d6a8dadb7fa33a60fb3e1bc07ad238e00c1e3c531181dba24db0799b2"
+    },
+    {
+      "bytes": 0,
+      "path": "python/rnd_factory/tests/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 2454,
+      "path": "python/rnd_factory/tests/helpers.py",
+      "sha256": "7305c5c86c11d8b57f0a27ffd3ef1b1f74ebe0942777d777e8078fe32e746cfe"
+    },
+    {
+      "bytes": 4839,
+      "path": "python/rnd_factory/tests/test_bridge_and_budget.py",
+      "sha256": "406608bae3c44713b3ecc475edea8f7efde76fe4e57fed1813cefae80c1c33a3"
+    },
+    {
+      "bytes": 2127,
+      "path": "python/rnd_factory/tests/test_config_models_reports.py",
+      "sha256": "275326c98e99692394c86ddc934f850e63834b91506c6a8f9b842ab723da585c"
+    },
+    {
+      "bytes": 4387,
+      "path": "python/rnd_factory/tests/test_core.py",
+      "sha256": "f531d2c77cde27bce1c91f1c8791680cde0395be84c7c216b703fbf474d7bf0c"
+    },
+    {
+      "bytes": 2011,
+      "path": "python/rnd_factory/tests/test_factory_ai_modes.py",
+      "sha256": "4945bcd51f4ef649d32f69b58142bf43b323f0f6fb2addd1ce92231640e360ce"
+    },
+    {
+      "bytes": 2298,
+      "path": "python/rnd_factory/tests/test_remote.py",
+      "sha256": "5295e3f10f193696fd35fca237875cf1379173d42af22cead8e792fbe522cb61"
+    },
+    {
+      "bytes": 4700,
+      "path": "python/rnd_factory/utils.py",
+      "sha256": "fcce7e8b6a967b8e7731ff9e534f364cd38e082d032806ffc8c3afb9055669c9"
+    }
+  ],
+  "install_path": "python/rnd_factory",
+  "package": "Autonomous Quant R&D Factory",
+  "target_repo": "AmroElzeiny/MT5",
+  "version": "1.0.0"
+}

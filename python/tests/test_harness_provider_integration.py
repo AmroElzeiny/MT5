@@ -898,6 +898,23 @@ class CanonicalRoleVocabularyTests(unittest.TestCase):
                 }
             )
 
+    def test_adjudicator_requires_at_least_one_evidence_catalog_id(self) -> None:
+        import pydantic
+
+        from structured_models import ModelAdjudicatorDecision
+
+        with self.assertRaises(pydantic.ValidationError):
+            ModelAdjudicatorDecision.model_validate(
+                {
+                    "candidate_index": 0,
+                    "verdict": "ABSTAIN",
+                    "resolved_objection_codes": [],
+                    "unresolved_objection_codes": [],
+                    "evidence_ref_ids": [],
+                    "resolution_reason": "The evidence remains inconclusive.",
+                }
+            )
+
     def test_prompt_quotes_the_enforced_vocabulary(self) -> None:
         """A prompt that lists codes the schema forbids re-creates the drift."""
         from structured_models import (
@@ -941,5 +958,4 @@ class SchemaFailureCategoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

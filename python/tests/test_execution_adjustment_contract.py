@@ -28,15 +28,32 @@ Every test below states one rule of the repaired authority model.
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+
+def _resolve_mql_include_root() -> Path:
+    """Staged or active terminal includes, without binding tests to one layout."""
+
+    override = os.environ.get("PO3_MQL_INCLUDE_ROOT", "").strip()
+    if override:
+        return Path(override)
+    return REPO_ROOT.parent / "MT5_PO3_Codex Include"
+
+
+MQL_INCLUDE_ROOT = _resolve_mql_include_root()
+
 from execution_adjustment_contract import (  # noqa: E402
+    OBSTACLE_CROSSING_PREFIX,
+    base_obstacle_kind,
+    obstacle_is_crossed,
     ADJUSTABLE_FIELDS,
     EXEC_ACTION_RETRY_BOUNDED,
     EXEC_ACTION_TERMINAL_INVALIDATE,
@@ -193,7 +210,13 @@ class AssessedPlanImmutabilityTests(unittest.TestCase):
         self.assertFalse(result.semantic_match)
         self.assertIn("target_model", result.immutable_fields_changed)
 
-    def test_unauthorized_obstacle_change_is_rejected(self) -> None:
+    def test_a_different_obstacle_is_still_a_semantic_change(self) -> None:
+        """The obstacle's identity stays immutable.
+
+        The incident plan carried obstacle_kind="NONE"; a rebuild that names a real
+        opposing imbalance is a different obstacle and must still fail closed.
+        """
+
         result = evaluate_semantic_plan_match(
             INCIDENT_PLAN,
             {"obstacle_kind": "crossed_opposing_imbalance"},
@@ -202,6 +225,62 @@ class AssessedPlanImmutabilityTests(unittest.TestCase):
         )
         self.assertFalse(result.semantic_match)
         self.assertIn("obstacle_kind", result.immutable_fields_changed)
+
+    def test_obstacle_base_identity_is_compared_not_the_crossing_prefix(self) -> None:
+        """Regression: 2026-09-05 lost USDCAD, USDCAD and GBPCHF to this.
+
+        "crossed_" records where live price sits relative to the obstacle, and MQL
+        re-derives it on every rebuild.  It flips exactly when price travels into
+        the entry zone, which is the movement the watchlist is armed to wait for --
+        so treating it as identity rejected the plan for doing what it was armed to
+        do.  obstacle_price, the primitive it is derived from, has always been
+        compared with a tolerance and classified as authorized.
+        """
+
+        plan = replace(INCIDENT_PLAN, obstacle_kind="opposing_imbalance", obstacle_tf="entry_tf")
+        result = evaluate_semantic_plan_match(
+            plan,
+            {"obstacle_kind": "crossed_opposing_imbalance", "obstacle_tf": "entry_tf"},
+            _contract(),
+            tick_size=TICK,
+        )
+        self.assertTrue(result.semantic_match, result.immutable_fields_changed)
+        self.assertNotIn("obstacle_kind", result.immutable_fields_changed)
+        self.assertIn("obstacle_crossing_state", result.authorized_fields_changed)
+        self.assertEqual(result.failure_class, EXEC_FAIL_NONE)
+
+    def test_uncrossing_an_obstacle_is_also_only_a_crossing_change(self) -> None:
+        plan = replace(INCIDENT_PLAN, obstacle_kind="crossed_session_high", obstacle_tf="entry_tf")
+        result = evaluate_semantic_plan_match(
+            plan, {"obstacle_kind": "session_high"}, _contract(), tick_size=TICK
+        )
+        self.assertTrue(result.semantic_match)
+        self.assertIn("obstacle_crossing_state", result.authorized_fields_changed)
+
+    def test_a_different_base_kind_under_the_same_prefix_is_immutable(self) -> None:
+        """USDCAD cycled three obstacle kinds inside one hour; only the base matters."""
+
+        plan = replace(INCIDENT_PLAN, obstacle_kind="crossed_opposing_imbalance")
+        result = evaluate_semantic_plan_match(
+            plan, {"obstacle_kind": "crossed_session_high"}, _contract(), tick_size=TICK
+        )
+        self.assertFalse(result.semantic_match)
+        self.assertIn("obstacle_kind", result.immutable_fields_changed)
+        self.assertEqual(result.failure_class, EXEC_FAIL_SEMANTIC_PLAN_CHANGED)
+
+    def test_obstacle_tf_alone_is_an_authorized_derivation_difference(self) -> None:
+        """GBPCHF died on obstacle_kind,obstacle_tf after a two-point entry move."""
+
+        plan = replace(INCIDENT_PLAN, obstacle_kind="htf_opposing_imbalance", obstacle_tf="")
+        result = evaluate_semantic_plan_match(
+            plan,
+            {"obstacle_kind": "crossed_htf_opposing_imbalance", "obstacle_tf": "htf"},
+            _contract(),
+            tick_size=TICK,
+        )
+        self.assertTrue(result.semantic_match)
+        self.assertIn("obstacle_tf", result.authorized_fields_changed)
+        self.assertIn("obstacle_crossing_state", result.authorized_fields_changed)
 
     def test_taxonomy_and_direction_are_immutable(self) -> None:
         for name, value in (
@@ -222,6 +301,26 @@ class AssessedPlanImmutabilityTests(unittest.TestCase):
             self.assertIn(name, IMMUTABLE_SEMANTIC_FIELDS)
         for name in ("entry", "sl", "tp1", "tp2"):
             self.assertIn(name, ADJUSTABLE_FIELDS)
+
+    def test_the_live_obstacle_views_are_adjustable_not_immutable(self) -> None:
+        for name in ("obstacle_crossing_state", "obstacle_tf", "obstacle_price"):
+            self.assertIn(name, ADJUSTABLE_FIELDS)
+            self.assertNotIn(name, IMMUTABLE_SEMANTIC_FIELDS)
+
+    def test_base_obstacle_kind_matches_the_mql_helper(self) -> None:
+        source = (MQL_INCLUDE_ROOT / "TradeEngine.mqh").read_text(encoding="utf-8")
+        self.assertIn("string _BaseObstacleKind(const string obstacle_kind) const {", source)
+        # Both sides must strip exactly the same prefix, of exactly the same length.
+        self.assertIn('StringFind(obstacle_kind, "crossed_") == 0', source)
+        self.assertIn("StringSubstr(obstacle_kind, 8)", source)
+        self.assertEqual(len(OBSTACLE_CROSSING_PREFIX), 8)
+        for value, expected in (
+            ("crossed_opposing_imbalance", "opposing_imbalance"),
+            ("opposing_imbalance", "opposing_imbalance"),
+            ("", ""),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(base_obstacle_kind(value), expected)
 
 
 class AuthorizedAdjustmentTests(unittest.TestCase):
@@ -455,6 +554,171 @@ class CanonicalTargetDistanceBoundaryTests(unittest.TestCase):
         self.assertTrue(ticks_within_cap(3001, 3001))
         self.assertFalse(ticks_within_cap(3002, 3001))
         self.assertTrue(ticks_within_cap(999999, 0))  # no cap configured
+
+
+class Tp1FloorUnderAuthorizedDriftTests(unittest.TestCase):
+    """The TP1 floor must not re-litigate a drift the contract already authorised.
+
+    The floor has two halves.  ``0.65 * stop_distance`` asks whether the first leg is
+    a meaningful fraction of the risk -- a property of the approved plan.
+    ``spread * InpMinTP1SpreadMult`` asks whether the broker can place the leg -- a
+    live question.  Measuring BOTH against the rebuilt plan made the floor rise with
+    the widened stop while the frozen leg's reward fell with the drifted entry, so a
+    plan had to carry ``tp1_reward >= 0.65R + 1.65d`` (TP1 at 1.31R for the permitted
+    d = 0.4R) to survive its own execution.  Three of the eleven approvals in the
+    2026-09-05 cache replay died here.
+
+    The numbers below are the measured ones from that run's journal.
+    """
+
+    GEOMETRY_COEFFICIENT = 0.65
+    SPREAD_MULT = 4.0
+
+    @staticmethod
+    def _old_rule(live_stop: float, live_leg: float, spread: float) -> bool:
+        floor = max(live_stop * 0.65, spread * 4.0)
+        return live_leg >= floor
+
+    @staticmethod
+    def _new_rule(
+        assessed_stop: float, assessed_leg: float, live_leg: float, spread: float
+    ) -> bool:
+        geometry_ok = assessed_leg >= assessed_stop * 0.65
+        spread_ok = live_leg >= spread * 4.0
+        return geometry_ok and spread_ok
+
+    def test_audusd_leg_survives_the_rebuilt_stop(self) -> None:
+        # [tp1_authority] tp1=0.69936 tp1_reward=0.00171 min_tp1_reward=0.00190
+        # SL rebuilt 0.70340 -> 0.70400; live_rr2 1.05 still cleared min_rr 0.90.
+        assessed_stop, live_stop = 0.00233, 0.00293
+        leg, spread = 0.00171, 0.00002
+        self.assertAlmostEqual(live_stop * 0.65, 0.00190, places=5)
+        self.assertFalse(self._old_rule(live_stop, leg, spread))
+        self.assertTrue(self._new_rule(assessed_stop, leg, leg, spread))
+
+    def test_gbpjpy_leg_survives_the_drifted_entry(self) -> None:
+        # Plan floor 0.115 -> execution floor 0.138; leg 0.106 after the entry moved
+        # 212.693 -> 212.657.  RR2 would have been 3.35.
+        assessed_stop, live_stop = 0.177, 0.213
+        assessed_leg, live_leg = 0.142, 0.106
+        spread = 0.008
+        self.assertAlmostEqual(live_stop * 0.65, 0.138, places=3)
+        self.assertAlmostEqual(assessed_stop * 0.65, 0.115, places=3)
+        # Anchoring the STOP alone is not enough -- the drifted entry still fails it.
+        self.assertLess(live_leg, assessed_stop * 0.65)
+        self.assertFalse(self._old_rule(live_stop, live_leg, spread))
+        self.assertTrue(self._new_rule(assessed_stop, assessed_leg, live_leg, spread))
+
+    def test_a_leg_that_never_cleared_the_floor_at_approval_still_fails(self) -> None:
+        """The approval-time check is unchanged, so a bad plan is still refused."""
+
+        assessed_stop, leg, spread = 0.00233, 0.00090, 0.00002
+        self.assertLess(leg, assessed_stop * self.GEOMETRY_COEFFICIENT)
+        self.assertFalse(self._new_rule(assessed_stop, leg, leg, spread))
+
+    def test_the_spread_half_is_still_measured_live(self) -> None:
+        """A leg the broker cannot place is refused however good its geometry."""
+
+        assessed_stop, leg = 0.00233, 0.00171
+        blown_spread = 0.00060  # 4 x 0.00060 = 0.00240 > 0.00171
+        self.assertGreaterEqual(leg, assessed_stop * self.GEOMETRY_COEFFICIENT)
+        self.assertFalse(self._new_rule(assessed_stop, leg, leg, blown_spread))
+
+    def test_the_arithmetic_contradiction_is_stated_exactly(self) -> None:
+        """Under the old rule the requirement was tp1 >= 0.65R + 1.65d."""
+
+        risk = 1.0
+        for drift in (0.0, 0.1, 0.2, 0.4):
+            with self.subTest(drift=drift):
+                # Adverse entry drift d widens the stop by d and shrinks the leg by d.
+                required_at_plan_time = 0.65 * (risk + drift) + drift
+                self.assertAlmostEqual(required_at_plan_time, 0.65 * risk + 1.65 * drift, places=9)
+        # At the contract's permitted drift the demand is TP1 at 1.31R.
+        self.assertAlmostEqual(0.65 + 1.65 * 0.4, 1.31, places=9)
+
+
+class SpreadGuardCalibrationTests(unittest.TestCase):
+    """A raw point count cannot guard a universe whose point size spans 1e-5..1e-2."""
+
+    MAX_SPREAD_TICKS = 100
+    MAX_SPREAD_PRICE_FRAC = 0.0025
+    MAX_SPREAD_RISK_FRAC = 0.22
+
+    def _abs_cap(self, point: float, price: float) -> float:
+        return max(self.MAX_SPREAD_TICKS * point, price * self.MAX_SPREAD_PRICE_FRAC)
+
+    def test_japan225_was_rejected_by_a_cap_it_could_never_reach(self) -> None:
+        # entry=62679.50 sl=63253.25 -> stop 573.75; spread 800 points at point=0.01.
+        point, price, stop = 0.01, 62679.50, 573.75
+        spread = 800 * point
+        self.assertAlmostEqual(spread, 8.00, places=6)
+        # The old raw cap: 100 points = 1.00 index point, an eighth of the real spread.
+        self.assertAlmostEqual(self.MAX_SPREAD_TICKS * point, 1.00, places=6)
+        self.assertGreater(spread, self.MAX_SPREAD_TICKS * point)
+        # It was never economically wide: 1.4% of risk against a 22% allowance.
+        self.assertLess(spread / stop, self.MAX_SPREAD_RISK_FRAC)
+        self.assertAlmostEqual(spread / stop, 0.0139, places=4)
+        # Repaired: the price-fraction floor makes the ceiling reachable.
+        self.assertLessEqual(spread, self._abs_cap(point, price))
+
+    def test_the_risk_guard_stays_the_binding_one_on_fx(self) -> None:
+        """Raising the absolute ceiling on FX changes nothing that matters."""
+
+        point, price, stop = 0.00001, 1.10, 0.000649   # GBPCHF-like
+        abs_cap = self._abs_cap(point, price)
+        risk_cap = stop * self.MAX_SPREAD_RISK_FRAC
+        self.assertLess(risk_cap, abs_cap, "the risk guard must bind first on FX")
+        self.assertAlmostEqual(risk_cap / point, 14.3, places=1)
+
+    def test_a_genuinely_blown_quote_is_still_rejected(self) -> None:
+        """On a normal FX plan the risk guard is what catches it -- and it does.
+
+        The absolute ceiling is deliberately not the binding one here: 100 pips on a
+        23-pip stop is 43% of the risk against a 22% allowance, so it is refused on
+        the metric that actually describes the harm.
+        """
+
+        point, price, stop = 0.00001, 1.15, 0.00233    # AUDUSD-like
+        blown = 0.0010                                  # 100 pips
+        self.assertGreater(blown, stop * self.MAX_SPREAD_RISK_FRAC)
+        self.assertLess(blown, self._abs_cap(point, price))
+
+    def test_the_absolute_ceiling_catches_what_the_risk_guard_cannot(self) -> None:
+        """A very wide stop makes the risk guard loose; the price cap still binds.
+
+        This is why the absolute ceiling is kept rather than deleted: on a 2%-of-price
+        stop, 22% of risk is 440 pips, so an absurd 400-pip quote clears the risk
+        guard and is refused only by the price-fraction ceiling.
+        """
+
+        point, price, stop = 0.00001, 1.15, 0.0200
+        absurd = 0.0040                                 # 400 pips
+        self.assertLess(absurd, stop * self.MAX_SPREAD_RISK_FRAC)
+        self.assertGreater(absurd, self._abs_cap(point, price))
+
+    def test_the_default_clears_every_measured_healthy_spread(self) -> None:
+        """Measured medians from the 2026-09-05 replay, spread as a % of price."""
+
+        measured = {
+            "#USSPX500": 0.05921,
+            "SILVER": 0.01672,
+            "AUDUSD": 0.01368,
+            "GBPCAD": 0.00932,
+            "CADCHF": 0.00897,
+            "GBPCHF": 0.00707,
+            "GBPJPY": 0.00610,
+            "EURCHF": 0.00564,
+            "CADJPY": 0.00530,
+            "EURCAD": 0.00511,
+            "GBPUSD": 0.00178,
+            "USDJPY": 0.00177,
+            "GOLD": 0.00170,
+            "#Japan225": 0.01276,
+        }
+        cap_pct = self.MAX_SPREAD_PRICE_FRAC * 100.0
+        worst = max(measured.values())
+        self.assertLess(worst, cap_pct)
+        self.assertGreater(cap_pct / worst, 4.0, "the default must keep real headroom")
 
 
 class ExecutionFailureClassificationTests(unittest.TestCase):

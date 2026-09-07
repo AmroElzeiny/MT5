@@ -142,8 +142,15 @@ IMMUTABLE_SEMANTIC_FIELDS: tuple[str, ...] = (
     "source_t_bos",
     "target_source",
     "target_model",
+    # The obstacle's IDENTITY, i.e. its kind with the live "crossed_" prefix
+    # removed.  The prefix is not part of what the obstacle is: it records where
+    # price currently sits relative to it, and MQL's _PublishObstacleEvidence
+    # re-derives it on every plan rebuild.  It therefore flips exactly when price
+    # travels into the entry zone -- the movement the watchlist is armed to wait
+    # for -- so comparing the prefixed string as identity rejected plans for doing
+    # what they were armed to do.  Three of the eleven 2026-09-05 approvals died
+    # this way.  See OBSTACLE_CROSSING_PREFIX and base_obstacle_kind below.
     "obstacle_kind",
-    "obstacle_tf",
     "decision_input_hash",
     "strategy_schema_version",
     "selected_target_price",
@@ -156,10 +163,30 @@ ADJUSTABLE_FIELDS: tuple[str, ...] = (
     "tp1",
     "tp2",
     "obstacle_price",
+    # Live-derived views of the same obstacle: where price sits relative to it,
+    # and the timeframe label derived from its kind string.
+    "obstacle_crossing_state",
+    "obstacle_tf",
     "spread_r",
     "slippage_r",
     "execution_cost_r",
 )
+
+OBSTACLE_CROSSING_PREFIX = "crossed_"
+
+
+def base_obstacle_kind(obstacle_kind: str) -> str:
+    """The obstacle's identity, with the live crossing state removed."""
+
+    if not obstacle_kind:
+        return ""
+    if obstacle_kind.startswith(OBSTACLE_CROSSING_PREFIX):
+        return obstacle_kind[len(OBSTACLE_CROSSING_PREFIX) :]
+    return obstacle_kind
+
+
+def obstacle_is_crossed(obstacle_kind: str) -> bool:
+    return bool(obstacle_kind) and obstacle_kind.startswith(OBSTACLE_CROSSING_PREFIX)
 
 
 @dataclass(frozen=True)
@@ -315,12 +342,23 @@ def evaluate_semantic_plan_match(
         "entry_branch": plan.entry_model,
         "target_source": plan.selected_target_source,
         "target_model": plan.selected_target_model,
-        "obstacle_kind": plan.obstacle_kind,
-        "obstacle_tf": plan.obstacle_tf,
     }
     for name, expected in assessed.items():
         if name in live and live[name] != expected:
             out.immutable_fields_changed.append(name)
+
+    # The obstacle: base identity immutable, live crossing state authorized.
+    if "obstacle_kind" in live:
+        live_kind = str(live["obstacle_kind"])
+        if base_obstacle_kind(live_kind) != base_obstacle_kind(plan.obstacle_kind):
+            out.immutable_fields_changed.append("obstacle_kind")
+        elif obstacle_is_crossed(live_kind) != obstacle_is_crossed(plan.obstacle_kind):
+            out.authorized_fields_changed.append("obstacle_crossing_state")
+    if "obstacle_tf" in live and str(live["obstacle_tf"]) != plan.obstacle_tf:
+        # Derived from the same kind string, so with the base identity preserved a
+        # difference is a derivation gap, not a different obstacle.
+        if "obstacle_kind" not in out.immutable_fields_changed:
+            out.authorized_fields_changed.append("obstacle_tf")
 
     # A structural target's price is immutable; a synthetic one is not.
     if not contract.tp2_adjustment_allowed and "tp2" in live:

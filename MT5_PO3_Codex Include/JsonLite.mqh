@@ -118,6 +118,27 @@ bool _JsonReadString(const string json, const int quote_pos, string &out, int &e
    if(quote_pos < 0 || quote_pos >= len) return false;
    if((ushort)StringGetCharacter(json, quote_pos) != '\"') return false;
 
+   // Fast path.  The decoder below appends ONE character at a time, and every append
+   // of a one-character StringSubstr allocates; the key scan walks past every quoted
+   // token in the document, so reading a ~76,000 character trade meta cost tens of
+   // millions of those allocations.  A token containing no backslash decodes to
+   // exactly its own characters, so it is one substring.  Escaped tokens fall through
+   // to the original decoder unchanged -- this adds a shortcut, it does not add a
+   // second definition of what an escape means.
+   bool has_escape = false;
+   for(int scan=quote_pos+1; scan<len; ){
+      ushort ch = (ushort)StringGetCharacter(json, scan);
+      if(ch == '\\'){ has_escape = true; scan += 2; continue; }
+      if(ch == '\"'){
+         if(has_escape) break;
+         out = (scan > quote_pos + 1 ? StringSubstr(json, quote_pos + 1, scan - quote_pos - 1) : "");
+         end_pos = scan;
+         return true;
+      }
+      scan++;
+   }
+   if(!has_escape) return false;   // unterminated, and no escape to re-decode
+
    out = "";
    bool esc = false;
    for(int i=quote_pos+1; i<len; i++){
@@ -150,7 +171,10 @@ bool _JsonReadString(const string json, const int quote_pos, string &out, int &e
    return false;
 }
 
-bool _JsonLocateKeyValue(const string json, const string key, int &value_pos) {
+// The original locator: one full scan from position 0 per key.  Kept as the only
+// implementation for small documents and as the definition the index below must
+// reproduce.
+bool _JsonScanLocateKeyValue(const string json, const string key, int &value_pos) {
    int len = (int)StringLen(json);
    value_pos = -1;
    for(int i=0; i<len; i++){
@@ -166,6 +190,106 @@ bool _JsonLocateKeyValue(const string json, const string key, int &value_pos) {
       i = end_pos;
    }
    return false;
+}
+
+//--- One-pass key index for large documents ---------------------------------
+// _JsonScanLocateKeyValue() rescans the whole document for every key.  A trade meta
+// is ~76,000 characters holding ~800 keys and StateStore reads all of them from the
+// same string, so one document cost ~800 full scans.  Measured at 505 ms per
+// document, and the position-maintenance loop reads two of them per simulated
+// second -- which is why replay throughput collapsed the moment a position opened
+// and never recovered.
+//
+// The index is built in ONE pass and records the FIRST occurrence of each distinct
+// key in document order, which is exactly what the scan returned, so a lookup is
+// equivalent to the scan rather than merely similar.  Three details make that
+// equality exact rather than approximate:
+//   * A scan that aborts on a malformed string returns false for every key it had
+//     not yet reached.  The build stops at the same character, so keys past that
+//     point are absent from the index and their lookups return false too.
+//   * The scan returns the first occurrence of a duplicated key; only the first is
+//     recorded here.
+//   * The scan's final "value_pos < len" test is applied at lookup, not at build.
+//
+// The resident document is validated by a full character comparison, never by a
+// hash or a fingerprint: a fingerprint collision would silently hand a caller some
+// other document's field, and this parses live position state.  Documents below
+// the threshold keep the direct scan -- they are already cheap, and excluding them
+// stops a stream of small documents from evicting the one large document that a
+// long read is walking through.
+#define JSON_INDEX_MIN_CHARS 4096
+#define JSON_INDEX_BUCKETS   4096
+
+string _json_index_doc = "";
+bool   _json_index_ready = false;
+string _json_index_key[];
+int    _json_index_value_pos[];
+int    _json_index_next[];
+int    _json_index_head[JSON_INDEX_BUCKETS];
+
+uint _JsonKeyHash(const string s) {
+   uint h = 2166136261;
+   int n = (int)StringLen(s);
+   for(int i=0; i<n; i++){
+      h ^= (uint)StringGetCharacter(s, i);
+      h *= 16777619;
+   }
+   return h;
+}
+
+// Bucket walk with a full key comparison on every candidate: the hash chooses
+// where to look, it never decides that two keys are the same.
+int _JsonIndexFindEntry(const string key) {
+   int bucket = (int)(_JsonKeyHash(key) % JSON_INDEX_BUCKETS);
+   for(int e=_json_index_head[bucket]; e>=0; e=_json_index_next[e]){
+      if(_json_index_key[e] == key) return e;
+   }
+   return -1;
+}
+
+void _JsonIndexBuild(const string json) {
+   _json_index_doc   = "";
+   _json_index_ready = false;
+   ArrayResize(_json_index_key, 0, 2048);
+   ArrayResize(_json_index_value_pos, 0, 2048);
+   ArrayResize(_json_index_next, 0, 2048);
+   ArrayInitialize(_json_index_head, -1);
+
+   int len = (int)StringLen(json);
+   for(int i=0; i<len; i++){
+      if((ushort)StringGetCharacter(json, i) != '\"') continue;
+      string token;
+      int end_pos = -1;
+      if(!_JsonReadString(json, i, token, end_pos)) break;   // the scan stopped here too
+      int colon = _JsonSkipWs(json, end_pos + 1);
+      if(colon < len && (ushort)StringGetCharacter(json, colon) == ':' &&
+         _JsonIndexFindEntry(token) < 0){
+         int n = ArraySize(_json_index_key);
+         ArrayResize(_json_index_key, n + 1, 2048);
+         ArrayResize(_json_index_value_pos, n + 1, 2048);
+         ArrayResize(_json_index_next, n + 1, 2048);
+         int bucket = (int)(_JsonKeyHash(token) % JSON_INDEX_BUCKETS);
+         _json_index_key[n]       = token;
+         _json_index_value_pos[n] = _JsonSkipWs(json, colon + 1);
+         _json_index_next[n]      = _json_index_head[bucket];
+         _json_index_head[bucket] = n;
+      }
+      i = end_pos;
+   }
+   _json_index_doc   = json;
+   _json_index_ready = true;
+}
+
+bool _JsonLocateKeyValue(const string json, const string key, int &value_pos) {
+   value_pos = -1;
+   int len = (int)StringLen(json);
+   if(len < JSON_INDEX_MIN_CHARS) return _JsonScanLocateKeyValue(json, key, value_pos);
+   if(!_json_index_ready || StringLen(_json_index_doc) != len || _json_index_doc != json)
+      _JsonIndexBuild(json);
+   int entry = _JsonIndexFindEntry(key);
+   if(entry < 0) return false;
+   value_pos = _json_index_value_pos[entry];
+   return (value_pos >= 0 && value_pos < len);
 }
 
 bool JsonHasKey(const string json, const string key) {

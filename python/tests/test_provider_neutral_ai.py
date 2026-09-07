@@ -75,6 +75,7 @@ class _ScriptedProvider:
     def __init__(self, outputs: dict[str, list[dict]]) -> None:
         self.outputs = {role: list(rows) for role, rows in outputs.items()}
         self.calls: list[tuple[str, dict]] = []
+        self.request_metadata: list[tuple[str, dict]] = []
 
     def model_for_role(self, role: str) -> str:
         return "test-model"
@@ -89,6 +90,7 @@ class _ScriptedProvider:
         **_: object,
     ) -> ProviderResult:
         self.calls.append((role, copy.deepcopy(evidence)))
+        self.request_metadata.append((role, copy.deepcopy(request_metadata)))
         row = self.outputs[role].pop(0)
         return _provider_result(response_schema.model_validate(row), role=role)
 
@@ -656,6 +658,33 @@ class ConsensusPipelineTests(unittest.TestCase):
         self.assertEqual([role for role, _ in provider.calls], ["critic"])
         self.assertNotIn("analyst", provider.calls[0][1])
 
+    def test_invalid_critic_evidence_ids_get_one_bounded_same_provider_repair(self) -> None:
+        provider = _ScriptedProvider(
+            {
+                "critic": [
+                    _critic("PASS", evidence_ref_ids=[999_999]),
+                    _critic("PASS", evidence_ref_ids=[0]),
+                ]
+            }
+        )
+        events: list[str] = []
+        result = run_qualitative_consensus(
+            provider=provider,
+            evidence=_consensus_evidence(),
+            analyst_assessment=_analyst_assessment(),
+            evidence_catalog=_consensus_catalog(),
+            request_metadata={
+                "request_id": "request-A",
+                "request_identity_hash": "REQUESTIDENTITYCONSENSUS123",
+            },
+            event_logger=events.append,
+        )
+        self.assertTrue(result.python_allow)
+        self.assertEqual([role for role, _ in provider.calls], ["critic", "critic"])
+        self.assertTrue(
+            any("result=valid authoritative=true" in event for event in events)
+        )
+
     def test_disagreement_runs_adjudicator_and_can_resolve_only_supported_objection(self) -> None:
         provider = _ScriptedProvider(
             {
@@ -675,6 +704,29 @@ class ConsensusPipelineTests(unittest.TestCase):
         )
         self.assertTrue(result.python_allow)
         self.assertEqual([role for role, _ in provider.calls], ["critic", "adjudicator"])
+
+    def test_consensus_applies_independent_role_timeout_caps(self) -> None:
+        provider = _ScriptedProvider(
+            {
+                "critic": [_critic("BLOCK")],
+                "adjudicator": [_adjudicator("UPHOLD_APPROVE")],
+            }
+        )
+        run_qualitative_consensus(
+            provider=provider,
+            evidence=_consensus_evidence(),
+            analyst_assessment=_analyst_assessment(),
+            evidence_catalog=_consensus_catalog(),
+            request_metadata={
+                "request_id": "request-A",
+                "request_identity_hash": "REQUESTIDENTITYCONSENSUS123",
+                "timeout_sec": 900.0,
+                "critic_timeout_sec": 180.0,
+                "adjudicator_timeout_sec": 120.0,
+            },
+        )
+        self.assertEqual(provider.request_metadata[0][1]["timeout_sec"], 180.0)
+        self.assertEqual(provider.request_metadata[1][1]["timeout_sec"], 120.0)
 
     def test_unresolved_disagreement_abstains(self) -> None:
         provider = _ScriptedProvider(
@@ -830,6 +882,110 @@ class TradeMemoryRetrievalTests(unittest.TestCase):
             )
             self.assertEqual(result.state, "INSUFFICIENT_SAMPLE")
             self.assertEqual(result.sample_count, 0)
+
+    def test_clean_tester_bootstrap_trade_seeds_memory_without_pending_ai_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / "completed_trades.jsonl"
+            completed = {
+                "trade_key": "bootstrap-trade-1",
+                "candidate_id": "bootstrap-candidate-1",
+                "candidate_hash": "bootstrap-hash-1",
+                "decision_quality_tier": "BOOTSTRAP_RULE_ONLY",
+                "decision_source": "bootstrap_rule_only",
+                "provider_mode": "TESTER_BOOTSTRAP_RULE_ONLY",
+                "workload_mode": "TESTER_AI_BOOTSTRAP_RULE_ONLY",
+                "ledger_integrity_status": "CLEAN",
+                "execution_identity_verified": True,
+                "candidate_hash_match": True,
+                "execution_fingerprint_match": True,
+                "learning_eligible": True,
+                "symbol": "GOLD",
+                "setup_taxonomy_enum": "MICRO_RANGE_REENTRY",
+                "setup_family": "micro_intraday",
+                "entry_branch": "fvg_mid",
+                "direction": "buy",
+                "asset_class": "metal",
+                "session": "LON",
+                "killzone": "LONDON_OPEN",
+                "regime_profile": "range",
+                "target_model": "liquidity_target",
+                "entry_price": 2400.0,
+                "sl": 2398.0,
+                "tp1": 2402.0,
+                "tp2": 2404.0,
+                "rr2": 2.0,
+                "full_close_r": 1.25,
+                "mfe_r": 1.7,
+                "mae_r": 0.25,
+                "target_before_stop": True,
+                "full_close_reason": "tp",
+            }
+            ledger.write_text(json.dumps(completed) + "\n", encoding="utf-8")
+            store = TradeMemoryStore(root / "memory.sqlite3")
+
+            summary = store.ingest_completed_ledger(ledger)
+
+            self.assertEqual(summary["inserted"], 1)
+            self.assertEqual(summary["quarantined"], 0)
+            result = store.retrieve_analogues(
+                {
+                    "candidate_hash": "new-candidate-hash",
+                    "setup_taxonomy_enum": "MICRO_RANGE_REENTRY",
+                    "setup_family": "micro_intraday",
+                    "entry_branch": "fvg_mid",
+                    "direction": "buy",
+                    "asset_class": "metal",
+                    "session_code": "LON",
+                    "killzone_code": "LONDON_OPEN",
+                    "regime_profile": "range",
+                    "target_model": "liquidity_target",
+                    "effective_rr2": 2.0,
+                },
+                request_id="new-request",
+                lineage_id="new-lineage",
+            )
+            self.assertEqual(result.state, "AVAILABLE")
+            self.assertEqual(result.sample_count, 1)
+
+    def test_meta_trader_utf16_bootstrap_ledger_is_ingested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / "completed_ai_trades.jsonl"
+            completed = {
+                "trade_key": "utf16-bootstrap-trade",
+                "candidate_id": "utf16-bootstrap-candidate",
+                "candidate_hash": "utf16-bootstrap-hash",
+                "decision_quality_tier": "BOOTSTRAP_RULE_ONLY",
+                "decision_source": "bootstrap_rule_only",
+                "provider_mode": "TESTER_BOOTSTRAP_RULE_ONLY",
+                "workload_mode": "TESTER_AI_BOOTSTRAP_RULE_ONLY",
+                "ledger_integrity_status": "CLEAN",
+                "execution_identity_verified": True,
+                "candidate_hash_match": True,
+                "execution_fingerprint_match": True,
+                "learning_eligible": True,
+                "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+                "setup_family": "micro_continuation_fvg",
+                "direction": "buy",
+                "session": "ASIA",
+                "killzone": "NK",
+                "closed_at": 1_700_000_000,
+            }
+            ledger.write_text(json.dumps(completed) + "\n", encoding="utf-16")
+            store = TradeMemoryStore(root / "memory.sqlite3")
+
+            summary = store.ingest_completed_ledger(ledger)
+
+            self.assertEqual(summary["inserted"], 1)
+            self.assertEqual(summary["quarantined"], 0)
+            with store._connection() as db:
+                payload = json.loads(db.execute("SELECT payload_json FROM completed_memory").fetchone()[0])
+            immutable_candidate = payload["immutable_pre_entry_evidence"]["candidate"]
+            self.assertTrue(immutable_candidate["historical_outcome_fields_excluded"])
+            self.assertNotIn("full_close_r", immutable_candidate)
+            self.assertFalse(payload["python_final_decision"]["python_authority"])
+            self.assertTrue(payload["python_final_decision"]["mql_tester_authority"])
 
 
 class ProviderCacheAndShadowTests(unittest.TestCase):

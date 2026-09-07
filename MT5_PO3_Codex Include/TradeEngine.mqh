@@ -50,6 +50,21 @@ private:
    datetime m_ai_cooldown_until[];
    string m_tester_ai_cache_signatures[];
    AiDecision m_tester_ai_cache_decisions[];
+   // Replay cohort probe: which decision_input_hash the artifacts on disk were
+   // recorded under, sampled once.  Without it a whole-cohort mismatch is
+   // indistinguishable from thousands of individually unrecorded setups.
+   string m_tester_cache_cohort_summary;
+   string m_tester_cache_cohort_dominant;
+   bool   m_tester_cache_cohort_probed;
+   bool   m_tester_cache_cohort_matches;
+   // The histogram above is a bounded sample, but "no artifact carries my
+   // identity" is used to abort a run, so it must be a census rather than a
+   // guess: a cohort of 5 inside 1,497 artifacts would be invisible to a
+   // 200-file sample.  Scanning past the sample cap only ever happens when no
+   // match has been found yet, i.e. in the run that is about to be rejected.
+   int    m_tester_cache_cohort_total;
+   int    m_tester_cache_cohort_sampled;
+   string m_tester_recorded_cache_signatures[];
    string m_tester_snapshot_cache_keys[];
    string m_tester_snapshot_cache_paths[];
    string m_consumed_sweep_keys[];
@@ -112,9 +127,14 @@ private:
    int m_total_ai_cache_hits;
    int m_total_ai_cache_misses;
    int m_total_ai_cache_miss_due_to_schema_version;
+   // Misses where no artifact exists at the computed key at all -- the silent
+   // majority of the 2026.09.06 replay, which produced no journal line of any
+   // kind because the read simply returned false.
+   int m_total_ai_cache_miss_no_artifact;
    int m_total_ai_advisories;
    int m_total_trades_opened;
    int m_total_record_only_requests_exported;
+   int m_total_record_only_duplicate_signatures_skipped;
    int m_total_tester_live_wait_non_tradeable_sim_jump;
    int m_total_tester_live_wait_debug_trading_disabled;
    int m_total_target_feasibility_synthetic_infeasible_max_distance;
@@ -151,6 +171,14 @@ private:
    datetime m_last_penalty_persist;
    datetime m_last_rollover_log;
    string m_last_execution_reject_reason;
+   // The class decided by the detector DURING the current attempt, and the spread
+   // it measured.  _ClassifyExecutionFailure used to honour p.execution_failure_class
+   // instead, but that field holds the PREVIOUS attempt's class -- so once a plan
+   // was classified it could never be reclassified, and the first failure's label
+   // stuck for the life of the plan.  These are per-attempt and are cleared at the
+   // top of every placement path.
+   string m_last_execution_failure_class;
+   double m_last_execution_spread;
    // Counted separately from pre-order execution checks: "attempted execution"
    // was previously indistinguishable from "constructed an order", so 1,149
    // attempts and 0 order constructions looked like the same number.
@@ -230,6 +258,17 @@ private:
       return (_IsTesterRuntime() && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
    }
 
+   bool _TesterBootstrapMode() const {
+      return (_IsTesterRuntime() && _EffectiveTesterAiMode() == TESTER_AI_BOOTSTRAP_RULE_ONLY);
+   }
+
+   bool _IsTesterBootstrapPlan(const TradePlan &p) const {
+      return (_TesterBootstrapMode() &&
+              p.ai.decision_quality_tier == "BOOTSTRAP_RULE_ONLY" &&
+              p.ai.decision_source == "bootstrap_rule_only" &&
+              p.ai.provider_mode == "TESTER_BOOTSTRAP_RULE_ONLY");
+   }
+
    bool _TesterLiveAiBlockingWaitMode() const {
       return (_IsTesterRuntime() && InpUseAI && InpAiWaitInTester && _EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG);
    }
@@ -239,6 +278,7 @@ private:
    }
 
    string _TesterAiModeName(const TesterAiMode mode) const {
+      if(mode == TESTER_AI_BOOTSTRAP_RULE_ONLY) return "TESTER_AI_BOOTSTRAP_RULE_ONLY";
       if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "TESTER_AI_LIVE_WAIT_DEBUG";
       if(mode == TESTER_AI_CACHE_ONLY) return "TESTER_AI_CACHE_ONLY";
       if(mode == TESTER_AI_RECORD_ONLY) return "TESTER_AI_RECORD_ONLY";
@@ -246,6 +286,7 @@ private:
    }
 
    string _TesterAiModeLabel(const TesterAiMode mode) const {
+      if(mode == TESTER_AI_BOOTSTRAP_RULE_ONLY) return "bootstrap_rule_only";
       if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "live_wait_debug";
       if(mode == TESTER_AI_CACHE_ONLY) return "cache_only";
       if(mode == TESTER_AI_RECORD_ONLY) return "record_only";
@@ -257,6 +298,13 @@ private:
               InpUseAI &&
               _EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY &&
               !InpTesterAiCache);
+   }
+
+   bool _InvalidTesterBootstrapConfig() const {
+      if(!_TesterBootstrapMode()) return false;
+      return (InpUseAI || InpAiWaitInTester || InpTesterAllowLiveWaitDebugTrading ||
+              InpTesterBootstrapRiskMultiplier <= 0.0 ||
+              InpTesterBootstrapRiskMultiplier > 1.0);
    }
 
    bool _TesterCacheDecisionSourceLoadable(const string decision_source) const {
@@ -347,7 +395,12 @@ private:
    }
 
    string _CompletedPositionMarkerPath(const long position_identifier) {
-      return m_bus.LogDir() + "\\completed_position_id_" + IntegerToString(position_identifier) + ".json";
+      // Position identifiers are reused when Strategy Tester starts a new run.
+      // Tester state is scoped to its run session; live state is scoped to the
+      // stable account+magic identity so a terminal restart cannot finalize the
+      // same broker position twice.
+      return m_bus.LogDir() + "\\completed_scope_" + m_state.RuntimeScope()
+             + "_position_id_" + IntegerToString(position_identifier) + ".json";
    }
 
    datetime _AnalyticsResetAfter() {
@@ -881,6 +934,70 @@ private:
    void _Journal(const string msg) const {
       if(!_ShouldJournal()) return;
       Print("[PO3_AIGate] ", msg);
+   }
+
+   //--- Graded diagnostics.  See InpJournalDetailLevel in Config.mqh for the levels
+   //--- and the measurement that motivated them.  Callers must test
+   //--- _JournalDetailEnabled() BEFORE building the message: at this volume the string
+   //--- concatenation is itself part of the cost, so a guard that only suppresses the
+   //--- Print still pays for the line it does not emit.
+   bool _JournalDetailEnabled(const int level) const {
+      if(!_ShouldJournal()) return false;
+      return (InpJournalDetailLevel >= level);
+   }
+
+   void _JournalDetail(const int level, const string msg) const {
+      if(InpJournalDetailLevel < level) return;
+      _Journal(msg);
+   }
+
+   //--- Repeat-identical diagnostics are SUPPRESSED, never dropped.
+   // A line whose text has not changed since the last time it was printed carries no
+   // new evidence.  [broker_cost_estimate] emitted 2,215 lines in one scan cycle --
+   // 10.8% of the journal's bytes -- and every one of them said
+   // "source=configured_fallback samples=0 median_per_lot=0.000000
+   //  stressed_per_lot=0.010000", i.e. 13 distinct facts, one per symbol, restated
+   // thousands of times.  Suppression is per key and is counted, and
+   // _LogJournalDedupSummary() reports the counts at the end of the run, so the audit
+   // trail states exactly how many repeats each key absorbed.  A line that changes is
+   // always printed.
+   string m_jd_key[];
+   string m_jd_last[];
+   long   m_jd_printed[];
+   long   m_jd_suppressed[];
+
+   void _JournalOnChange(const string key, const string msg) {
+      if(!_ShouldJournal()) return;
+      int idx = -1;
+      for(int i=0; i<ArraySize(m_jd_key); i++)
+         if(m_jd_key[i] == key){ idx = i; break; }
+      if(idx < 0){
+         idx = ArraySize(m_jd_key);
+         ArrayResize(m_jd_key, idx+1);
+         ArrayResize(m_jd_last, idx+1);
+         ArrayResize(m_jd_printed, idx+1);
+         ArrayResize(m_jd_suppressed, idx+1);
+         m_jd_key[idx]        = key;
+         m_jd_last[idx]       = "";
+         m_jd_printed[idx]    = 0;
+         m_jd_suppressed[idx] = 0;
+      }
+      if(m_jd_printed[idx] > 0 && m_jd_last[idx] == msg){
+         m_jd_suppressed[idx]++;
+         return;
+      }
+      m_jd_last[idx]    = msg;
+      m_jd_printed[idx] = m_jd_printed[idx] + 1;
+      _Journal(msg);
+   }
+
+   void _LogJournalDedupSummary() const {
+      for(int i=0; i<ArraySize(m_jd_key); i++){
+         if(m_jd_suppressed[i] <= 0) continue;
+         _Journal("[journal_dedup] key=" + m_jd_key[i]
+                  + " printed=" + IntegerToString(m_jd_printed[i])
+                  + " suppressed_identical=" + IntegerToString(m_jd_suppressed[i]));
+      }
    }
 
    string _ReasonCode(string reason) const {
@@ -1838,8 +1955,11 @@ private:
    }
 
    void _FinalizePlanEconomics(TradePlan &p, const string stage, const bool emit_log) {
+      // The field is authoritative and is always recomputed; only the diagnostic line
+      // is graded.  The early return must therefore stay AFTER the assignment above.
       p.net_reward_after_cost_r = _CanonicalNetRewardAfterCostR(p);
       if(!emit_log) return;
+      if(!_JournalDetailEnabled(2)) return;
       _Journal("[plan_economics] symbol=" + p.symbol
                + " stage=" + stage
                + " gross_reward_r=" + DoubleToString(MathMax(0.0, _ExecutionRR2(p)), 6)
@@ -2225,9 +2345,18 @@ private:
       m_total_ai_cache_hits = 0;
       m_total_ai_cache_misses = 0;
       m_total_ai_cache_miss_due_to_schema_version = 0;
+      m_total_ai_cache_miss_no_artifact = 0;
+      m_tester_cache_cohort_summary = "";
+      m_tester_cache_cohort_dominant = "";
+      m_tester_cache_cohort_probed = false;
+      m_tester_cache_cohort_matches = false;
+      m_tester_cache_cohort_total = 0;
+      m_tester_cache_cohort_sampled = 0;
       m_total_ai_advisories = 0;
       m_total_trades_opened = 0;
       m_total_record_only_requests_exported = 0;
+      m_total_record_only_duplicate_signatures_skipped = 0;
+      ArrayResize(m_tester_recorded_cache_signatures, 0);
       m_total_tester_live_wait_non_tradeable_sim_jump = 0;
       m_total_tester_live_wait_debug_trading_disabled = 0;
       m_total_target_feasibility_synthetic_infeasible_max_distance = 0;
@@ -2248,6 +2377,44 @@ private:
       ArrayResize(m_total_target_validation_counts, 0);
    }
 
+   // Emitted once per scan as well as at shutdown.  The cost of holding a position is
+   // paid between journal lines, so a counter that only prints at the end cannot be
+   // read while a run is still deciding whether it will ever finish -- which is
+   // exactly the situation this instrumentation exists for.  One line per scan is
+   // ~1 line per 15 simulated minutes.
+   void _LogTradeMetaPerf(const string stage) const {
+      _Journal("[perf_trade_meta] stage=" + stage
+               + " serializes=" + IntegerToString(m_tm_serializes)
+               + " serialize_seconds=" + DoubleToString((double)m_tm_serialize_us / 1000000.0, 3)
+               + " serialize_us_per_call="
+               + DoubleToString(m_tm_serializes > 0 ? (double)m_tm_serialize_us / (double)m_tm_serializes : 0.0, 1)
+               + " writes=" + IntegerToString(m_tm_writes)
+               + " writes_skipped=" + IntegerToString(m_tm_writes_skipped_identical)
+               // Why the skips did not happen, so a collapsing hit rate names its own
+               // cause instead of being inferred from the gap between the two counters.
+               + " miss_content=" + IntegerToString(m_tm_miss_content)
+               + " miss_watermark=" + IntegerToString(m_tm_miss_watermark)
+               + " miss_absent=" + IntegerToString(m_tm_miss_absent)
+               + " miss_new_path=" + IntegerToString(m_tm_miss_new_path)
+               + " write_seconds=" + DoubleToString((double)m_tm_write_us / 1000000.0, 3)
+               + " parses=" + IntegerToString(m_tm_parses)
+               + " parses_skipped=" + IntegerToString(m_tm_parses_skipped_identical)
+               + " parse_seconds=" + DoubleToString((double)m_tm_parse_us / 1000000.0, 3)
+               + " maintain_positions_calls=" + IntegerToString(m_mp_calls)
+               + " maintain_positions_seconds=" + DoubleToString((double)m_mp_us / 1000000.0, 3)
+               // Segments of the same total.  load + meta + penalty + tail is what the
+               // stage spends inside its four named steps; the difference against
+               // maintain_positions_seconds is the position loop itself.  serialize,
+               // write and parse above are sub-costs of load and meta, not additions.
+               + " mp_load_seconds=" + DoubleToString((double)m_mp_load_us / 1000000.0, 3)
+               + " mp_meta_seconds=" + DoubleToString((double)m_mp_meta_us / 1000000.0, 3)
+               + " mp_penalty_seconds=" + DoubleToString((double)m_mp_penalty_us / 1000000.0, 3)
+               + " mp_tail_seconds=" + DoubleToString((double)m_mp_tail_us / 1000000.0, 3)
+               + " mp_other_seconds="
+               + DoubleToString((double)(m_mp_us - m_mp_load_us - m_mp_meta_us
+                                         - m_mp_penalty_us - m_mp_tail_us) / 1000000.0, 3));
+   }
+
    void _LogFinalSummary() const {
       _Journal("[final_summary] scans_total=" + IntegerToString(m_total_scans)
                + " po3_context_created_total=" + IntegerToString(m_total_po3_context_created)
@@ -2259,7 +2426,14 @@ private:
                + " ai_cache_misses_total=" + IntegerToString(m_total_ai_cache_misses)
                + " ai_cache_miss_due_to_schema_version_total=" + IntegerToString(m_total_ai_cache_miss_due_to_schema_version)
                + " tester_ai_cache_miss_total=" + IntegerToString(m_total_reject_tester_ai_cache_miss)
-               + " record_only_requests_exported=" + IntegerToString(m_total_record_only_requests_exported));
+               + " ai_cache_miss_no_artifact_total=" + IntegerToString(m_total_ai_cache_miss_no_artifact)
+               + " record_only_requests_exported=" + IntegerToString(m_total_record_only_requests_exported)
+               + " record_only_duplicate_signatures_skipped=" + IntegerToString(m_total_record_only_duplicate_signatures_skipped));
+      _Journal("[final_summary] decision_input_hash=" + m_ai.DecisionHash()
+               + " decision_identity_frozen=" + (m_ai.IdentityFrozen() ? "true" : "false")
+               + " decision_identity_drift_events=" + IntegerToString(m_ai.IdentityDriftEvents())
+               + " cache_cohort=" + _TesterCacheCohortSummaryCached()
+               + " cache_cohort_match=" + (_TesterCacheCohortMatchesCached() ? "true" : "false"));
       _Journal("[final_summary] ai_requests_queued_total=" + IntegerToString(m_total_ai_requests_queued)
                + " tester_ai_wait_started_total=" + IntegerToString(m_total_tester_ai_wait_started)
                + " tester_ai_wait_completed_total=" + IntegerToString(m_total_tester_ai_wait_completed)
@@ -2299,6 +2473,30 @@ private:
                + " mpc_ai_calls_saved_total=" + IntegerToString(m_total_mpc_ai_calls_saved)
                + " mpc_watchlist_blocks_total=" + IntegerToString(m_total_mpc_watchlist_blocks)
                + " mpc_execution_blocks_total=" + IntegerToString(m_total_mpc_execution_blocks));
+      long bc_hits = 0, bc_misses = 0, bc_epoch = 0, bc_us = 0;
+      BrokerCostCacheStats(bc_hits, bc_misses, bc_epoch, bc_us);
+      _Journal("[final_summary] broker_cost_cache_hits_total=" + IntegerToString(bc_hits)
+               + " broker_cost_cache_misses_total=" + IntegerToString(bc_misses)
+               + " broker_cost_history_epoch=" + IntegerToString(bc_epoch)
+               + " broker_cost_cache_seconds=" + IntegerToString(InpBrokerCostCacheSeconds)
+               + " broker_cost_compute_seconds=" + DoubleToString((double)bc_us / 1000000.0, 3)
+               + " broker_cost_compute_us_per_call="
+               + DoubleToString(bc_misses > 0 ? (double)bc_us / (double)bc_misses : 0.0, 1));
+      _LogTradeMetaPerf("final_summary");
+      _Journal("[final_summary] trade_meta_writes_total=" + IntegerToString(m_tm_writes)
+               + " trade_meta_writes_skipped_identical=" + IntegerToString(m_tm_writes_skipped_identical)
+               + " trade_meta_parses_total=" + IntegerToString(m_tm_parses)
+               + " trade_meta_parses_skipped_identical=" + IntegerToString(m_tm_parses_skipped_identical)
+               + " trade_meta_memo_entries=" + IntegerToString(InpTradeMetaMemoEntries)
+               + " trade_meta_write_seconds=" + DoubleToString((double)m_tm_write_us / 1000000.0, 3)
+               + " trade_meta_parse_seconds=" + DoubleToString((double)m_tm_parse_us / 1000000.0, 3)
+               + " trade_meta_parse_us_per_call="
+               + DoubleToString(m_tm_parses > 0 ? (double)m_tm_parse_us / (double)m_tm_parses : 0.0, 1));
+      _Journal("[final_summary] maintain_positions_calls_total=" + IntegerToString(m_mp_calls)
+               + " maintain_positions_seconds=" + DoubleToString((double)m_mp_us / 1000000.0, 3)
+               + " maintain_positions_us_per_call="
+               + DoubleToString(m_mp_calls > 0 ? (double)m_mp_us / (double)m_mp_calls : 0.0, 1));
+      _LogJournalDedupSummary();
    }
 
    void _TrackPendingOrderDelete(const string reason, const bool expired=false) {
@@ -2353,6 +2551,7 @@ private:
    }
 
    void _LogSetupFunnel() const {
+      _LogTradeMetaPerf("scan");
       _Journal("setup_funnel scans=" + IntegerToString(m_funnel_scans)
                + " closed_sweeps_found=" + IntegerToString(m_funnel_closed_sweeps_found)
                + " displacement_passed=" + IntegerToString(m_funnel_displacement_passed)
@@ -2625,6 +2824,10 @@ private:
       p.assessed_obstacle_kind = p.obstacle_kind;
       p.assessed_obstacle_tf = p.obstacle_tf;
       p.assessed_obstacle_price = p.obstacle_price;
+      p.assessed_obstacle_severity = _EffectiveObstacleSeverity(p.obstacle_kind, p.obstacle_severity);
+      p.live_obstacle_kind = "";
+      p.live_obstacle_price = 0.0;
+      p.live_obstacle_severity = 0.0;
       p.assessed_decision_input_hash = m_ai.DecisionHash();
       p.assessed_strategy_schema_version = ENGINE_INPUT_SCHEMA;
       p.ai_selected_candidate_hash = "";
@@ -2667,47 +2870,160 @@ private:
       return _IntegrityHash(canonical);
    }
 
+   //+---------------------------------------------------------------+
+   //| Exact mismatch diagnostics for candidate-assessment binding.    |
+   //|                                                                 |
+   //| The binding used to fail with a single unqualified              |
+   //| "candidate_hash_mismatch" and no values, which is why 79 of the |
+   //| 1256 decisions in the 2026-09-07 replay -- including an APPROVE |
+   //| -- could not be diagnosed from the journal at all.  Bounded so a |
+   //| systematic failure cannot flood a 1.7 GB tester log.            |
+   //+---------------------------------------------------------------+
+   void _LogAssessmentIdentityMismatch(const AiDecision &dec, const int assessment_index,
+                                       const int assessment_count, const int plan_count,
+                                       const string field, const string assessment_value,
+                                       const string plan_value, const string context) const {
+      static int logged = 0;
+      if(logged >= 40) return;
+      logged++;
+      _Journal("[assessment_identity_mismatch] req_id=" + dec.response_request_id
+               + " assessment_index=" + IntegerToString(assessment_index)
+               + " assessment_count=" + IntegerToString(assessment_count)
+               + " group_plan_count=" + IntegerToString(plan_count)
+               + " chosen_index=" + IntegerToString(dec.chosen_index)
+               + " field=" + field
+               + " assessment_value=" + assessment_value
+               + " plan_value=" + plan_value
+               + " context=" + context
+               + " decision_quality_tier=" + dec.decision_quality_tier);
+   }
+
    bool _DecisionAssessmentsMatchGroup(const AiDecision &dec, const TradePlan &plans[], string &reason) const {
       reason = "ok";
       int plan_count = ArraySize(plans);
       int assessment_count = JsonArrayObjectCount(dec.candidate_assessments_json);
-      if(plan_count <= 0 || assessment_count != plan_count){
+      // Python deliberately caps the provider cohort (normally to three
+      // candidates).  The MQL group can contain more plans, so requiring one
+      // assessment for every original plan rejects an otherwise complete,
+      // identity-bound response.  Validate the returned subset instead: every
+      // assessment must map exactly once to an original plan and duplicates are
+      // forbidden.  Deferred plans have no AI authority and cannot be selected.
+      if(assessment_count <= 0){
+         // A Python error / degraded envelope is contractually allowed to carry
+         // no candidate assessments at all.  Calling that a "count mismatch"
+         // blamed the candidate cohort for what is really a non-trading error
+         // envelope, and hid the true failure category from the journal.
+         bool trading_tier = (dec.decision_quality_tier == "FULL_STRUCTURED"
+                              || dec.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+         reason = (trading_tier
+                   ? "candidate_assessment_count_mismatch"
+                   : "error_envelope_no_candidate_assessments");
+         return false;
+      }
+      if(plan_count <= 0 || assessment_count > plan_count){
          reason = "candidate_assessment_count_mismatch";
          return false;
       }
-      for(int pidx=0; pidx<plan_count; pidx++){
-         int matches = 0;
-         for(int aidx=0; aidx<assessment_count; aidx++){
-            string item = "";
-            if(!JsonArrayGetObject(dec.candidate_assessments_json, aidx, item)){
-               reason = "candidate_assessment_parse_failed";
-               return false;
-            }
-            string item_id = "", item_hash = "", request_fp = "";
-            string taxonomy_version = "", taxonomy_enum = "", taxonomy_source = "";
-            if(!JsonGetStringStrict(item, "candidate_id", item_id) ||
-               !JsonGetStringStrict(item, "candidate_hash", item_hash) ||
-               !JsonGetStringStrict(item, "request_execution_fingerprint", request_fp) ||
-               !JsonGetStringStrict(item, "setup_taxonomy_version", taxonomy_version) ||
-               !JsonGetStringStrict(item, "setup_taxonomy_enum", taxonomy_enum) ||
-               !JsonGetStringStrict(item, "taxonomy_mapping_source", taxonomy_source)){
-               reason = "candidate_assessment_identity_missing";
-               return false;
-            }
-            if(item_hash != plans[pidx].candidate_hash) continue;
-            matches++;
-            if(item_id != plans[pidx].candidate_id || request_fp != plans[pidx].request_execution_fingerprint ||
-               taxonomy_version != plans[pidx].setup_taxonomy_version ||
-               taxonomy_enum != plans[pidx].setup_taxonomy_enum ||
-               taxonomy_source != plans[pidx].taxonomy_mapping_source){
-               reason = "candidate_hash_mismatch";
-               return false;
-            }
-         }
-         if(matches != 1){
-            reason = "candidate_hash_mismatch";
+      bool plan_seen[];
+      ArrayResize(plan_seen, plan_count);
+      ArrayInitialize(plan_seen, false);
+      bool selected_seen = false;
+      for(int aidx=0; aidx<assessment_count; aidx++){
+         string item = "";
+         if(!JsonArrayGetObject(dec.candidate_assessments_json, aidx, item)){
+            reason = "candidate_assessment_parse_failed";
             return false;
          }
+         string item_id = "", item_hash = "", request_fp = "";
+         string taxonomy_version = "", taxonomy_enum = "", taxonomy_source = "";
+         if(!JsonGetStringStrict(item, "candidate_id", item_id) ||
+            !JsonGetStringStrict(item, "candidate_hash", item_hash) ||
+            !JsonGetStringStrict(item, "request_execution_fingerprint", request_fp) ||
+            !JsonGetStringStrict(item, "setup_taxonomy_version", taxonomy_version) ||
+            !JsonGetStringStrict(item, "setup_taxonomy_enum", taxonomy_enum) ||
+            !JsonGetStringStrict(item, "taxonomy_mapping_source", taxonomy_source)){
+            reason = "candidate_assessment_identity_missing";
+            return false;
+         }
+         int matches = 0;
+         int matched_plan = -1;
+         for(int pidx=0; pidx<plan_count; pidx++){
+            if(item_hash != plans[pidx].candidate_hash) continue;
+            matches++;
+            matched_plan = pidx;
+         }
+         // One reason string used to cover four different failures -- the hash was
+         // absent from the group, the hash was ambiguous, a sibling identity field
+         // disagreed, or the cost-snapshot fingerprint moved -- and it never named
+         // the field nor printed the two values.  The 2026-09-07 CACHE_ONLY replay
+         // lost 79 of 1256 decisions to it, one of them the USDCAD 20:05 APPROVE,
+         // with nothing in the journal to say which field moved.  Each failure now
+         // carries its own reason and both values.
+         if(matches == 0){
+            reason = "assessment_candidate_hash_not_in_group";
+            _LogAssessmentIdentityMismatch(dec, aidx, assessment_count, plan_count, "candidate_hash",
+                                           item_hash, "absent_from_group", item_id);
+            return false;
+         }
+         if(matches > 1){
+            reason = "assessment_candidate_hash_ambiguous_in_group";
+            _LogAssessmentIdentityMismatch(dec, aidx, assessment_count, plan_count, "candidate_hash",
+                                           item_hash, "group_matches=" + IntegerToString(matches), item_id);
+            return false;
+         }
+         string mismatch_field = "", assessment_value = "", plan_value = "";
+         if(item_id != plans[matched_plan].candidate_id){
+            mismatch_field = "candidate_id";
+            assessment_value = item_id; plan_value = plans[matched_plan].candidate_id;
+         } else if(taxonomy_version != plans[matched_plan].setup_taxonomy_version){
+            mismatch_field = "setup_taxonomy_version";
+            assessment_value = taxonomy_version; plan_value = plans[matched_plan].setup_taxonomy_version;
+         } else if(taxonomy_enum != plans[matched_plan].setup_taxonomy_enum){
+            mismatch_field = "setup_taxonomy_enum";
+            assessment_value = taxonomy_enum; plan_value = plans[matched_plan].setup_taxonomy_enum;
+         } else if(taxonomy_source != plans[matched_plan].taxonomy_mapping_source){
+            mismatch_field = "taxonomy_mapping_source";
+            assessment_value = taxonomy_source; plan_value = plans[matched_plan].taxonomy_mapping_source;
+         }
+         if(StringLen(mismatch_field) > 0){
+            reason = "assessment_" + mismatch_field + "_mismatch";
+            _LogAssessmentIdentityMismatch(dec, aidx, assessment_count, plan_count, mismatch_field,
+                                           assessment_value, plan_value, item_hash);
+            return false;
+         }
+         // request_execution_fingerprint is a COST SNAPSHOT, not candidate identity.
+         // _ExecutionFingerprint hashes spread_r, slippage_r, execution_cost_r and
+         // net_reward_after_cost_r at six decimals on top of fields that are ALL
+         // already inputs of _CandidateHash, so an equality test on it adds exactly
+         // one thing over the hash that just matched: bit-exact equality of four live
+         // broker measurements which the execution contract explicitly tolerates
+         // drifting by max_cost_deterioration_r and re-checks with that tolerance in
+         // _EvaluateSemanticPlanMatch.  It must still be PRESENT -- a blank one means
+         // the assessment was never identity-bound -- and any divergence is journalled
+         // and separately revalidated by _RestoreTesterRequestProvenance, but it is
+         // not what decides whether this assessment belongs to this candidate.
+         if(StringLen(request_fp) == 0){
+            reason = "assessment_request_fingerprint_missing";
+            _LogAssessmentIdentityMismatch(dec, aidx, assessment_count, plan_count, "request_execution_fingerprint",
+                                           "empty", plans[matched_plan].request_execution_fingerprint, item_hash);
+            return false;
+         }
+         if(request_fp != plans[matched_plan].request_execution_fingerprint){
+            _LogAssessmentIdentityMismatch(dec, aidx, assessment_count, plan_count,
+                                           "request_execution_fingerprint_cost_snapshot",
+                                           request_fp, plans[matched_plan].request_execution_fingerprint, item_hash);
+         }
+         if(matched_plan < 0 || plan_seen[matched_plan]){
+            reason = "candidate_assessment_duplicate";
+            return false;
+         }
+         plan_seen[matched_plan] = true;
+         if(item_hash == dec.selected_candidate_hash)
+            selected_seen = true;
+      }
+      if(!selected_seen){
+         reason = "selected_candidate_not_assessed";
+         return false;
       }
       return true;
    }
@@ -2728,6 +3044,10 @@ private:
    //| A separate fingerprint is still computed for the final order.   |
    //+---------------------------------------------------------------+
    bool _SemanticExecutionCheck(TradePlan &p, const string stage, SemanticPlanMatchResult &out) {
+      // Last writer before the comparison, so it does not matter which of the three
+      // _PublishObstacleEvidence call sites the live rebuild happened to reach: the
+      // blocker that gets judged is always the one on the APPROVED route.
+      _ObserveLiveObstacleOnApprovedRoute(p);
       ExecutionAdjustmentContract contract;
       _BuildExecutionAdjustmentContract(p, contract);
       _EvaluateSemanticPlanMatch(p, contract, out);
@@ -2785,9 +3105,27 @@ private:
       if(p.source_t_bos != p.assessed_source_t_bos) _AppendChangedComponent(changed_components, "source_t_bos");
       if(p.target_source != p.assessed_target_source) _AppendChangedComponent(changed_components, "target_source");
       if(p.target_model != p.assessed_target_model) _AppendChangedComponent(changed_components, "target_model");
-      if(p.obstacle_kind != p.assessed_obstacle_kind) _AppendChangedComponent(changed_components, "obstacle_kind");
-      if(p.obstacle_tf != p.assessed_obstacle_tf) _AppendChangedComponent(changed_components, "obstacle_tf");
-      if(MathAbs(p.obstacle_price - p.assessed_obstacle_price) > price_tol) _AppendChangedComponent(changed_components, "obstacle_price");
+      // Same partition as _EvaluateSemanticPlanMatch: the base obstacle identity is
+      // immutable, the live crossing state and the derived timeframe label are not.
+      // This branch only runs for a plan that was never locked, but it is the same
+      // comparison and must not disagree with the locked one.
+      bool legacy_crossing_changed = false;
+      bool legacy_tf_changed = false;
+      bool legacy_label_changed = false;
+      double legacy_live_sev = 0.0, legacy_assessed_sev = 0.0;
+      if(!_ObstacleIdentityPreserved(_LiveObstacleKindForComparison(p), _LiveObstacleTfForComparison(p),
+                                     _LiveObstacleSeverityForComparison(p),
+                                     p.assessed_obstacle_kind, p.assessed_obstacle_tf,
+                                     p.assessed_obstacle_severity,
+                                     legacy_crossing_changed, legacy_tf_changed,
+                                     legacy_label_changed, legacy_live_sev, legacy_assessed_sev))
+         _AppendChangedComponent(changed_components, "obstacle_more_severe");
+      // The price only identifies the obstacle while it IS the same obstacle.  When a
+      // different, no-more-severe blocker was accepted above, its price is a different
+      // market level, so comparing it would reintroduce the rejection just removed.
+      if(!legacy_label_changed &&
+         MathAbs(_LiveObstaclePriceForComparison(p) - p.assessed_obstacle_price) > price_tol)
+         _AppendChangedComponent(changed_components, "obstacle_price");
       if(m_ai.DecisionHash() != p.assessed_decision_input_hash) _AppendChangedComponent(changed_components, "decision_input_hash");
       if(ENGINE_INPUT_SCHEMA != p.assessed_strategy_schema_version) _AppendChangedComponent(changed_components, "strategy_schema_version");
       if(MathAbs(p.entry_est - p.assessed_entry) > price_tol) _AppendChangedComponent(changed_components, "entry");
@@ -2939,7 +3277,7 @@ private:
       event += JsonKVBool("mql_final_allow", mql_allow) + ",";
       event += JsonKVStr("reason", reason);
       event += "}";
-      m_bus.AppendText("logs\\execution_authority_events.jsonl", event + "\n");
+      m_bus.AppendText(m_bus.LogDir() + "\\execution_authority_events.jsonl", event + "\n");
    }
 
    bool _RangesOverlap(const double low_a, const double high_a, const double low_b, const double high_b) const {
@@ -3080,7 +3418,7 @@ private:
       row += JsonKVStr("fvg_execution_class", p.fvg_execution_class) + ",";
       row += JsonKVStr("reason", p.taxonomy_mapping_failure_reason);
       row += "}";
-      m_bus.AppendText("logs\\unknown_setup_taxonomy.jsonl", row + "\n");
+      m_bus.AppendText(m_bus.LogDir() + "\\unknown_setup_taxonomy.jsonl", row + "\n");
       _Journal("[setup_taxonomy] valid=false action=blocked_before_ai symbol=" + p.symbol +
                " candidate_id=" + p.candidate_id + " reason=" + p.taxonomy_mapping_failure_reason);
    }
@@ -3714,7 +4052,11 @@ private:
             if(risk_money_per_lot > 0.0) p.commission_r = stressed_cost_per_lot / risk_money_per_lot;
          }
       }
-      _Journal("[broker_cost_estimate] symbol=" + p.symbol
+      // Keyed per symbol: a change in any field still prints, an exact repeat is
+      // counted and suppressed.  This is the line the operator was watching scroll
+      // past once per simulated second on a value that never moved.
+      _JournalOnChange("broker_cost_estimate|" + p.symbol,
+               "[broker_cost_estimate] symbol=" + p.symbol
                + " source=" + cost_source
                + " samples=" + IntegerToString(cost_samples)
                + " median_per_lot=" + DoubleToString(median_cost, 6)
@@ -3952,7 +4294,20 @@ private:
 
       if(p.setup_score < hard_floor){
          p.setup_floor_action = "reject";
+         // Report the floor that actually bound.  Leaving soft_floor here made the
+         // reject line unreadable: the score was compared against hard_floor but the
+         // log showed the (higher) soft floor beside it.
+         p.setup_floor_score = hard_floor;
          reason = "pre_ai_floor_hard";
+         _Journal("[setup_floor_gate] symbol=" + p.symbol
+                  + " branch=" + p.entry_branch
+                  + " family=" + p.setup_family
+                  + " setup_score=" + DoubleToString(p.setup_score, 2)
+                  + " hard_floor=" + DoubleToString(hard_floor, 2)
+                  + " soft_floor=" + DoubleToString(soft_floor, 2)
+                  + " default_floor=" + DoubleToString(default_floor, 2)
+                  + " floor_source=" + (m_active_policy.hard_setup_floor > 0.0 ? "active_policy" : "deterministic_default")
+                  + " action=reject_hard");
          return false;
       }
       if(p.setup_score < soft_floor){
@@ -4446,7 +4801,21 @@ private:
       string sig = AI_DECISION_SCHEMA_VERSION + "|" + AI_TARGET_ARBITRATION_SCHEMA_VERSION + "|" + AI_PROMPT_CONTRACT_VERSION + "|" + m_ai.DecisionHash() + "|" + _GroupSignature(plans);
       for(int i=0; i<ArraySize(plans); i++){
          sig += "|" + plans[i].candidate_hash;
-         sig += "|" + plans[i].assessed_execution_fingerprint;
+         // assessed_execution_fingerprint deliberately NOT included.  It is
+         // _ExecutionFingerprint, which mixes identity with four LIVE cost
+         // measurements (spread_r, slippage_r, execution_cost_r,
+         // net_reward_after_cost_r) rendered at 6 decimals.  Those are exactly the
+         // values the execution contract tolerates drifting by max_cost_deterioration_r
+         // (0.02) and re-checks with that tolerance in _EvaluateSemanticPlanMatch, so
+         // hashing them into a key compared for EQUALITY is self-contradicting.
+         // Measured on the 2026-09-05 week replay: 61 of the 159 tester_ai_cache_miss
+         // rejections carried a signature byte-identical to a recorded one except for
+         // this field, and the USDCAD 2026.08.05 20:04:59 APPROVE was lost because
+         // net_reward_after_cost_r read 1.693652 when recorded and 1.693651 on replay
+         // -- one unit in the sixth decimal of a diagnostic number.
+         // Identity is already fully covered: candidate_hash above binds symbol,
+         // direction, ids, taxonomy, branch, sweep/disp/bos times, entry/sl/tp1/tp2,
+         // target source and model, obstacle kind/tf/price and the schema versions.
          sig += "|" + plans[i].setup_family;
          sig += "|" + plans[i].setup_class;
          sig += "|" + plans[i].setup_taxonomy_version;
@@ -4492,6 +4861,125 @@ private:
       return _TesterAiCacheDir() + "\\" + _TesterAiCacheKey(signature) + ".json";
    }
 
+   // Component 4 of a cache signature is the decision_input_hash the artifact was
+   // recorded under.  Layout:
+   //   decision_schema|target_arbitration_schema|prompt_contract|decision_hash|group...
+   string _SignatureDecisionHashComponent(const string signature) const {
+      int start = 0;
+      for(int field=0; field<3; field++){
+         int pos = StringFind(signature, "|", start);
+         if(pos < 0) return "";
+         start = pos + 1;
+      }
+      int end = StringFind(signature, "|", start);
+      if(end < 0) return "";
+      return StringSubstr(signature, start, end - start);
+   }
+
+   // Samples the replay cache once and records which decision_input_hash values
+   // its artifacts carry.  A run whose frozen hash is absent from that set can
+   // never hit anything, and that is a startup fact, not something to rediscover
+   // once per rejected setup.
+   void _ProbeTesterCacheCohort() {
+      if(m_tester_cache_cohort_probed) return;
+      m_tester_cache_cohort_probed = true;
+      m_tester_cache_cohort_summary = "none";
+      m_tester_cache_cohort_dominant = "";
+      m_tester_cache_cohort_matches = false;
+
+      string mine = m_ai.DecisionHash();
+      string hashes[]; int counts[];
+      ArrayResize(hashes, 0);
+      ArrayResize(counts, 0);
+      string found = "";
+      long handle = FileFindFirst(_TesterAiCacheDir() + "\\*.json", found, FILE_COMMON);
+      if(handle == INVALID_HANDLE) return;
+      int sampled = 0;
+      int total = 0;
+      do {
+         string txt = "";
+         if(!m_bus.ReadText(_TesterAiCacheDir() + "\\" + found, txt)) continue;
+         string sig = "";
+         if(!JsonGetStringStrict(txt, "cache_signature", sig)) continue;
+         string h = _SignatureDecisionHashComponent(sig);
+         if(StringLen(h) == 0) continue;
+         total++;
+         // Settled on every artifact, not on the sample: the match decides
+         // whether the run is aborted, so it may not depend on where the cap
+         // happened to fall.
+         if(h == mine) m_tester_cache_cohort_matches = true;
+         if(sampled >= 200){
+            // Histogram is full.  Keep walking only while the match is still
+            // unknown -- once it is settled either way there is nothing left
+            // for this loop to learn.
+            if(m_tester_cache_cohort_matches) break;
+            continue;
+         }
+         sampled++;
+         bool seen = false;
+         for(int i=0; i<ArraySize(hashes); i++){
+            if(hashes[i] == h){ counts[i]++; seen = true; break; }
+         }
+         if(!seen){
+            int n = ArraySize(hashes);
+            ArrayResize(hashes, n+1);
+            ArrayResize(counts, n+1);
+            hashes[n] = h;
+            counts[n] = 1;
+         }
+      } while(FileFindNext(handle, found));
+      FileFindClose(handle);
+
+      m_tester_cache_cohort_total = total;
+      m_tester_cache_cohort_sampled = sampled;
+      if(sampled <= 0) return;
+      string summary = "";
+      int best = -1;
+      for(int i=0; i<ArraySize(hashes); i++){
+         if(StringLen(summary) > 0) summary += ",";
+         summary += hashes[i] + "x" + IntegerToString(counts[i]);
+         if(best < 0 || counts[i] > counts[best]) best = i;
+      }
+      m_tester_cache_cohort_summary = summary;
+      if(best >= 0) m_tester_cache_cohort_dominant = hashes[best];
+   }
+
+   int _TesterCacheCohortTotal() {
+      _ProbeTesterCacheCohort();
+      return m_tester_cache_cohort_total;
+   }
+
+   int _TesterCacheCohortSampled() {
+      _ProbeTesterCacheCohort();
+      return m_tester_cache_cohort_sampled;
+   }
+
+   string _TesterCacheCohortDecisionHash() {
+      _ProbeTesterCacheCohort();
+      return (StringLen(m_tester_cache_cohort_dominant) > 0 ? m_tester_cache_cohort_dominant : "none");
+   }
+
+   bool _TesterCacheCohortMatches() {
+      _ProbeTesterCacheCohort();
+      return m_tester_cache_cohort_matches;
+   }
+
+   string _TesterCacheCohortSummary() {
+      _ProbeTesterCacheCohort();
+      return m_tester_cache_cohort_summary;
+   }
+
+   // Read-only views for const reporting paths.  They never trigger the probe,
+   // so a value of "unprobed" honestly means the cohort was never sampled (a
+   // live run) rather than that no artifacts exist.
+   string _TesterCacheCohortSummaryCached() const {
+      return (m_tester_cache_cohort_probed ? m_tester_cache_cohort_summary : "unprobed");
+   }
+
+   bool _TesterCacheCohortMatchesCached() const {
+      return m_tester_cache_cohort_matches;
+   }
+
    string _DecisionFieldAuthorityJson() const {
       string j = "{";
       j += JsonKVStr("schema_version", ARCHITECTURE_CONTRACT_VERSION) + ",";
@@ -4532,6 +5020,7 @@ private:
       j += JsonKVStr("request_nonce", m_ai.RequestNonce(req_id)) + ",";
       j += JsonKVStr("request_identity_version", dec.request_identity_version) + ",";
       j += JsonKVStr("request_identity_hash", dec.request_identity_hash) + ",";
+      j += JsonKVStr("contract_manifest_hash", dec.contract_manifest_hash) + ",";
       j += JsonKVInt("request_created_sim_time", (int)dec.request_created_sim_time) + ",";
       j += "\"request_created_wall_time\":" + IntegerToString(dec.request_created_wall_time) + ",";
       j += JsonKVInt("candidate_count", dec.response_candidate_count) + ",";
@@ -4729,9 +5218,25 @@ private:
       m_tester_ai_cache_decisions[idx] = dec;
    }
 
+   bool _TesterRecordSignatureSeen(const string signature) const {
+      if(StringLen(signature) == 0) return false;
+      for(int i=0; i<ArraySize(m_tester_recorded_cache_signatures); i++){
+         if(m_tester_recorded_cache_signatures[i] == signature) return true;
+      }
+      return false;
+   }
+
+   void _RememberTesterRecordSignature(const string signature) {
+      if(StringLen(signature) == 0 || _TesterRecordSignatureSeen(signature)) return;
+      int n = ArraySize(m_tester_recorded_cache_signatures);
+      ArrayResize(m_tester_recorded_cache_signatures, n + 1);
+      m_tester_recorded_cache_signatures[n] = signature;
+   }
+
    bool _CacheBindingHashFromJson(const string txt, string &out_hash) const {
       out_hash = "";
       string id = "", session_id = "", request_nonce = "", request_identity_hash = "";
+      string contract_manifest_hash = "";
       string decision_schema = "", quality_tier = "";
       string provider_mode = "", provider_id = "", actual_model_id = "", model_fingerprint = "";
       string generation_settings_hash = "", decision_state = "", selected_candidate_id = "";
@@ -4742,6 +5247,7 @@ private:
          !JsonGetStringStrict(txt, "session_id", session_id) ||
          !JsonGetStringStrict(txt, "request_nonce", request_nonce) ||
          !JsonGetStringStrict(txt, "request_identity_hash", request_identity_hash) ||
+         !JsonGetStringStrict(txt, "contract_manifest_hash", contract_manifest_hash) ||
          !JsonGetStringStrict(txt, "decision_schema_version", decision_schema) ||
          !JsonGetStringStrict(txt, "decision_quality_tier", quality_tier) ||
          !JsonGetStringStrict(txt, "provider_mode", provider_mode) ||
@@ -4760,8 +5266,9 @@ private:
          !JsonGetNumberStrict(txt, "llm_quality_score", llm_quality_score) ||
          !JsonGetNumberStrict(txt, "suggested_risk_multiplier", risk_multiplier)) return false;
       string material = id + "|" + session_id + "|" + request_nonce + "|"
-                        + request_identity_hash + "|"
-                        + decision_schema + "|" + quality_tier + "|" + provider_mode + "|"
+                         + request_identity_hash + "|"
+                         + contract_manifest_hash + "|"
+                         + decision_schema + "|" + quality_tier + "|" + provider_mode + "|"
                         + provider_id + "|" + actual_model_id + "|" + model_fingerprint + "|"
                         + generation_settings_hash + "|" + decision_state + "|"
                         + (model_raw_allow ? "1" : "0") + "|" + (python_final_allow ? "1" : "0") + "|"
@@ -4774,14 +5281,25 @@ private:
       return true;
    }
 
-   bool _ReplaceUniqueJsonStringField(string &txt, const string key, const string replacement) const {
+   bool _ReplaceTopLevelJsonStringField(string &txt, const string key, const string replacement) const {
       string current = "";
       if(!JsonGetStringStrict(txt, key, current)) return false;
-      string token = "\"" + key + "\":\"" + JsonEscape(current) + "\"";
-      int first = StringFind(txt, token);
-      if(first < 0 || StringFind(txt, token, first + StringLen(token)) >= 0) return false;
-      string next = "\"" + key + "\":\"" + JsonEscape(replacement) + "\"";
-      return (StringReplace(txt, token, next) == 1);
+      // Python's cache exporter emits `"key": "value"`, while MQL emits
+      // compact `"key":"value"`. Some keys (notably session_id) are also
+      // repeated inside nested fingerprint contracts. The top-level copy is
+      // serialized first, so replace the first matching representation only.
+      string compact = "\"" + key + "\":\"" + JsonEscape(current) + "\"";
+      string spaced = "\"" + key + "\": \"" + JsonEscape(current) + "\"";
+      int compact_pos = StringFind(txt, compact);
+      int spaced_pos = StringFind(txt, spaced);
+      bool use_spaced = (spaced_pos >= 0 && (compact_pos < 0 || spaced_pos < compact_pos));
+      int first = (use_spaced ? spaced_pos : compact_pos);
+      if(first < 0) return false;
+      string token = (use_spaced ? spaced : compact);
+      string next = "\"" + key + "\":" + (use_spaced ? " " : "")
+                    + "\"" + JsonEscape(replacement) + "\"";
+      txt = StringSubstr(txt, 0, first) + next + StringSubstr(txt, first + StringLen(token));
+      return true;
    }
 
    bool _RebindTesterCacheResponse(string &txt, const string parse_id, string &reason) const {
@@ -4802,16 +5320,16 @@ private:
          reason = "cache_request_identity_mismatch";
          return false;
       }
-      if(!_ReplaceUniqueJsonStringField(txt, "session_id", m_ai.SessionId()) ||
-         !_ReplaceUniqueJsonStringField(txt, "request_nonce", m_ai.RequestNonce(parse_id)) ||
-         !_ReplaceUniqueJsonStringField(txt, "workload_mode", m_ai.WorkloadMode()) ||
-         !_ReplaceUniqueJsonStringField(txt, "behavior_contract_hash", m_ai.BehaviorContractHash())){
+      if(!_ReplaceTopLevelJsonStringField(txt, "session_id", m_ai.SessionId()) ||
+         !_ReplaceTopLevelJsonStringField(txt, "request_nonce", m_ai.RequestNonce(parse_id)) ||
+         !_ReplaceTopLevelJsonStringField(txt, "workload_mode", m_ai.WorkloadMode()) ||
+         !_ReplaceTopLevelJsonStringField(txt, "behavior_contract_hash", m_ai.BehaviorContractHash())){
          reason = "cache_transient_identity_rebind_failed";
          return false;
       }
       string rebound_hash = "";
       if(!_CacheBindingHashFromJson(txt, rebound_hash) ||
-         !_ReplaceUniqueJsonStringField(txt, "response_binding_hash", rebound_hash)){
+          !_ReplaceTopLevelJsonStringField(txt, "response_binding_hash", rebound_hash)){
          reason = "cache_response_binding_rebind_failed";
          return false;
       }
@@ -4836,7 +5354,20 @@ private:
       }
 
       string txt;
-      if(!m_bus.ReadText(_TesterAiCachePath(signature), txt)) return false;
+      if(!m_bus.ReadText(_TesterAiCachePath(signature), txt)){
+         // This was the silent path.  A key with no artifact behind it returned
+         // false without a word, so a run addressing the wrong cohort looked
+         // exactly like a run whose setups were genuinely never recorded.
+         m_total_ai_cache_miss_no_artifact++;
+         if(m_total_ai_cache_miss_no_artifact <= 20){
+            _Journal("[ai_cache] hit=false reason=no_cache_artifact"
+                     + " key=" + _TesterAiCacheKey(signature)
+                     + " decision_input_hash=" + m_ai.DecisionHash()
+                     + " cache_cohort=" + _TesterCacheCohortSummary()
+                     + " cohort_match=" + (_TesterCacheCohortMatches() ? "true" : "false"));
+         }
+         return false;
+      }
       string cached_signature = "";
       if(!JsonGetStringStrict(txt, "cache_signature", cached_signature) || cached_signature != signature){
          _Journal("[ai_cache] hit=false reason=cache_signature_mismatch");
@@ -4937,7 +5468,7 @@ private:
       if(!dec.mandatory_fields_complete || dec.decision_schema_version != AI_DECISION_SCHEMA_VERSION ||
          (dec.decision_quality_tier != "FULL_STRUCTURED" && dec.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED") ||
          dec.provider_contract_version != AI_PROVIDER_CONTRACT_VERSION ||
-         (dec.provider_mode != "REMOTE_API" && dec.provider_mode != "LOCAL_OPENAI_COMPATIBLE") ||
+         !AiProviderModeIsTradeable(dec.provider_mode) ||
          StringLen(dec.provider_id) == 0 || StringLen(dec.actual_model_id) == 0 ||
          StringLen(dec.model_fingerprint) == 0 || StringLen(dec.generation_settings_hash) == 0 ||
          dec.evidence_envelope_version != AI_EVIDENCE_ENVELOPE_VERSION ||
@@ -4964,12 +5495,105 @@ private:
       if(StringFind(source, "error") >= 0 || StringFind(source, "fallback") >= 0) return false;
       _PutTesterAiCacheMemory(signature, dec);
       FolderCreate(_TesterAiCacheDir(), FILE_COMMON);
-      m_bus.WriteText(_TesterAiCachePath(signature), _AiDecisionJson("cached", signature, dec));
+      string cache_path = _TesterAiCachePath(signature);
+      // A replay hit is already an immutable cache artifact. Rewriting it after
+      // consumption used to replace its real request ID with the literal
+      // "cached", breaking all candidate-assessment bindings on the next run.
+      if(_PathExists(cache_path)){
+         _Journal("[ai_cache] stored=false reason=existing_cache_artifact_preserved signature=" + signature);
+         return true;
+      }
+      string cache_request_id = dec.response_request_id;
+      if(StringLen(cache_request_id) == 0){
+         _Journal("[ai_cache] stored=false reason=missing_immutable_request_id signature=" + signature);
+         return false;
+      }
+      m_bus.WriteText(cache_path, _AiDecisionJson(cache_request_id, signature, dec));
+      return true;
+   }
+
+   bool _RestoreTesterRequestProvenance(TradePlan &plans[], const string signature, const AiDecision &dec) {
+      string cache_text = "", provenance = "", snapshots = "";
+      if(m_bus.ReadText(_TesterAiCachePath(signature), cache_text))
+         provenance = JsonGetObject(cache_text, "replay_provenance", "");
+      bool have_provenance = (StringLen(provenance) > 0);
+      snapshots = JsonGetArray(provenance, "candidates", "[]");
+      string recorded_request_id = JsonGetString(provenance, "request_id", "");
+      if(have_provenance &&
+         (JsonGetString(provenance, "schema", "") != "20260907_recorded_request_costs_v1" ||
+          recorded_request_id != dec.response_request_id ||
+          JsonArrayObjectCount(snapshots) <= 0)) return false;
+      int assessment_count = JsonArrayObjectCount(dec.candidate_assessments_json);
+      for(int a=0; a<assessment_count; a++){
+         string assessment = "";
+         if(!JsonArrayGetObject(dec.candidate_assessments_json, a, assessment)) return false;
+         string candidate_hash = JsonGetString(assessment, "candidate_hash", "");
+         string candidate_id = JsonGetString(assessment, "candidate_id", "");
+         string recorded_fp = JsonGetString(assessment, "request_execution_fingerprint", "");
+         int matched = -1, matches = 0;
+         for(int i=0; i<ArraySize(plans); i++){
+            if(plans[i].candidate_hash == candidate_hash && plans[i].candidate_id == candidate_id){
+               matched = i; matches++;
+            }
+         }
+         if(matches != 1 || StringLen(recorded_fp) == 0) return false;
+         if(plans[matched].request_execution_fingerprint == recorded_fp) continue;
+         if(!have_provenance){
+            _Journal("[tester_replay_binding] valid=false reason=recorded_cost_provenance_missing req_id=" + dec.response_request_id);
+            return false;
+         }
+         string snapshot = "";
+         int snapshot_matches = 0;
+         for(int s=0; s<JsonArrayObjectCount(snapshots); s++){
+            string item = "";
+            if(!JsonArrayGetObject(snapshots, s, item)) return false;
+            if(JsonGetString(item, "candidate_hash", "") == candidate_hash &&
+               JsonGetString(item, "candidate_id", "") == candidate_id &&
+               JsonGetString(item, "request_execution_fingerprint", "") == recorded_fp){
+               snapshot = item; snapshot_matches++;
+            }
+         }
+         if(snapshot_matches != 1) return false;
+         double spread=0, slippage=0, cost=0, net=0;
+         if(!JsonGetNumberStrict(snapshot, "spread_r", spread) ||
+            !JsonGetNumberStrict(snapshot, "slippage_r", slippage) ||
+            !JsonGetNumberStrict(snapshot, "execution_cost_r", cost) ||
+            !JsonGetNumberStrict(snapshot, "net_reward_after_cost_r", net) ||
+            !MathIsValidNumber(spread) || !MathIsValidNumber(slippage) ||
+            !MathIsValidNumber(cost) || !MathIsValidNumber(net) ||
+            spread < 0.0 || slippage < 0.0 || cost < 0.0) return false;
+         ExecutionAdjustmentContract contract;
+         _BuildExecutionAdjustmentContract(plans[matched], contract);
+         double tolerance = contract.max_cost_deterioration_r;
+         // The static candidate hash is an exact match; only the cost component
+         // of the recorded request fingerprint can differ. Validate those live
+         // measurements with the same permission used at execution, then carry
+         // the original request's fingerprint as provenance. Never replace the
+         // live measurements or rewrite the approved response.
+         if(MathAbs(plans[matched].spread_r-spread) > tolerance ||
+            MathAbs(plans[matched].slippage_r-slippage) > tolerance ||
+            MathAbs(plans[matched].execution_cost_r-cost) > tolerance ||
+            MathAbs(plans[matched].net_reward_after_cost_r-net) > tolerance){
+            _Journal("[tester_replay_binding] valid=false reason=recorded_cost_deterioration_exceeds_contract req_id=" + dec.response_request_id);
+            return false;
+         }
+         _Journal("[tester_replay_binding] valid=true candidate_hash=" + candidate_hash
+                  + " recorded_request_id=" + recorded_request_id
+                  + " live_execution_fingerprint=" + plans[matched].request_execution_fingerprint
+                  + " recorded_execution_fingerprint=" + recorded_fp
+                  + " action=preserve_recorded_provenance_live_costs_revalidated");
+         plans[matched].request_execution_fingerprint = recorded_fp;
+         plans[matched].assessed_execution_fingerprint = recorded_fp;
+         plans[matched].assessed_spread_r = spread;
+         plans[matched].assessed_slippage_r = slippage;
+         plans[matched].assessed_execution_cost_r = cost;
+      }
       return true;
    }
 
    bool _QueueTesterCachedDecision(TradePlan &plans[], const string signature, const AiDecision &dec) {
       if(ArraySize(plans) <= 0) return false;
+      if(!_RestoreTesterRequestProvenance(plans, signature, dec)) return false;
       string req_id = dec.response_request_id;
       if(StringLen(req_id) == 0){
          _Journal("[ai_cache] hit=false reason=missing_immutable_request_id signature=" + signature);
@@ -5584,7 +6208,7 @@ private:
          return false;
       }
 
-      datetime start = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+      datetime start = _MetaOpenedAt(meta);
       datetime horizon = start + MathMax(1, InpCounterfactualHorizonMinutes) * 60;
       if(meta.broker_session_close > start && meta.broker_session_close < horizon)
          horizon = meta.broker_session_close;
@@ -5769,7 +6393,7 @@ private:
       double risk_dist = _RiskDistanceForMeta(meta);
       if(risk_dist <= 0.0) return;
       datetime now = _NowServerOrLocal();
-      datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+      datetime opened_at = _MetaOpenedAt(meta);
       meta.management_decision_at = now;
       meta.management_features_time_safe = true;
       meta.management_snapshot_action = action;
@@ -5794,6 +6418,48 @@ private:
                + " mfe_r=" + DoubleToString(meta.management_snapshot_mfe_r, 4)
                + " mae_r=" + DoubleToString(meta.management_snapshot_mae_r, 4)
                + " time_safe=true model_authority=shadow_only");
+   }
+
+   // The earlier of two "first observed at" stamps, with 0 meaning "not observed yet".
+   // A first-observation stamp is a latch: it may be created, and it may be corrected
+   // backwards by an observer that saw the same event sooner, but it may never be
+   // erased -- erasing it contradicts the derived minutes_to_* fields sitting beside
+   // it in the same document.
+   datetime _EarliestObservation(const datetime a, const datetime b) const {
+      if(a <= 0) return b;
+      if(b <= 0) return a;
+      return (a < b ? a : b);
+   }
+
+   // The open time every analytics site must agree on.  Three sites used to spell this
+   // out separately and one of them left out the planned_at fallback.
+   datetime _MetaOpenedAt(const TradePlan &meta) const {
+      return (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+   }
+
+   // Minutes from the position opening to a first-observation stamp.  This is a
+   // DERIVATION, not an observation: for a given (opened_at, stamp) pair it has exactly
+   // one correct value, so every site that publishes it has to produce that value.
+   // Returns -1 when it is not derivable yet, which callers read as "leave the field
+   // alone" -- 0 is a legitimate answer (a threshold crossed inside the first minute)
+   // and must not be confused with "not computed".
+   int _MinutesFromOpenToStamp(const datetime opened_at, const datetime stamp) const {
+      if(stamp <= 0 || opened_at <= 0) return -1;
+      long delta = (long)stamp - (long)opened_at;
+      if(delta < 0) delta = 0;
+      return (int)(delta / 60);
+   }
+
+   // The outer of two excursion prices, with <= 0 meaning "not observed yet".
+   // favourable=true asks for the best-case extreme (highest for a buy, lowest for a
+   // sell); favourable=false asks for the worst-case one.  Same rule as the ratchet in
+   // _UpdateAnalyticsSnapshot, so the two writers can no longer disagree about which
+   // direction an extreme is allowed to move.
+   double _MergeExcursionPrice(const double current, const double incoming,
+                               const bool is_buy, const bool favourable) const {
+      if(incoming <= 0.0) return current;
+      if(current <= 0.0) return incoming;
+      return ((is_buy == favourable) ? MathMax(current, incoming) : MathMin(current, incoming));
    }
 
    void _ApplyPenaltyStateToMeta(TradePlan &meta, const PenaltyState &state) {
@@ -5824,24 +6490,43 @@ private:
       meta.invalidation_first_breach_time = state.first_breach_time;
       meta.invalidation_confirmed_time = state.confirmed_time;
       meta.invalidation_confirming_bar = state.confirming_bar;
-      meta.mfe_price = state.mfe_price;
-      meta.mae_price = state.mae_price;
+      // PenaltyWatcher and _UpdateAnalyticsSnapshot both observe the same excursion,
+      // but they measure it differently on purpose: the watcher divides by the broker
+      // position's own risk distance (POSITION_PRICE_OPEN vs POSITION_SL) while the
+      // snapshot divides by _RiskDistanceForMeta(), and entry slippage separates the
+      // two.  So one of them can still read "0.25R not reached" after the other has
+      // already latched the crossing.  Copying the watcher's copy straight over the
+      // top therefore ERASED a latched observation, _UpdateAnalyticsSnapshot re-latched
+      // it to "now" further down the same pass, and the trade meta flipped between 0
+      // and a timestamp on every maintenance tick -- a document that never repeats,
+      // which no content memo can coalesce, so all seven meta aliases were rewritten
+      // every simulated second for the life of the position.
+      // These are merges, not overwrites: every observation is kept and none is lost.
+      meta.mfe_price = _MergeExcursionPrice(meta.mfe_price, state.mfe_price, meta.is_buy, true);
+      meta.mae_price = _MergeExcursionPrice(meta.mae_price, state.mae_price, meta.is_buy, false);
       meta.mfe_r = MathMax(meta.mfe_r, state.mfe_r);
       meta.mae_r = MathMax(meta.mae_r, state.mae_r);
-      meta.first_0_25r_time = state.first_0_25r_time;
-      meta.first_0_50r_time = state.first_0_50r_time;
-      meta.first_adverse_threshold_time = state.first_adverse_threshold_time;
+      meta.first_0_25r_time = _EarliestObservation(meta.first_0_25r_time, state.first_0_25r_time);
+      meta.first_0_50r_time = _EarliestObservation(meta.first_0_50r_time, state.first_0_50r_time);
+      meta.first_adverse_threshold_time =
+         _EarliestObservation(meta.first_adverse_threshold_time, state.first_adverse_threshold_time);
       meta.latest_observed_tick_time = state.latest_observed_tick_time;
       meta.latest_observed_tick_msc = state.latest_observed_tick_msc;
-      meta.path_completeness_status = state.path_completeness_status;
-      meta.path_observation_source = state.path_observation_source;
+      // An unset or UNKNOWN status is not an observation, so it must not erase one.
+      // _UpdateAnalyticsSnapshot fills exactly those two values in when it finds the
+      // field empty, which is the same fight the stamps above were losing.
+      if(StringLen(state.path_completeness_status) > 0 &&
+         state.path_completeness_status != "UNKNOWN")
+         meta.path_completeness_status = state.path_completeness_status;
+      if(StringLen(state.path_observation_source) > 0)
+         meta.path_observation_source = state.path_observation_source;
       meta.path_data_gap = state.path_data_gap;
       meta.path_order_ambiguous = state.path_order_ambiguous;
-      datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
-      if(meta.first_0_25r_time > 0 && opened_at > 0)
-         meta.minutes_to_0_25r_mfe = (int)MathMax(0, (meta.first_0_25r_time - opened_at) / 60);
-      if(meta.first_0_50r_time > 0 && opened_at > 0)
-         meta.minutes_to_0_50r_mfe = (int)MathMax(0, (meta.first_0_50r_time - opened_at) / 60);
+      datetime opened_at = _MetaOpenedAt(meta);
+      int minutes_to_25 = _MinutesFromOpenToStamp(opened_at, meta.first_0_25r_time);
+      if(minutes_to_25 >= 0) meta.minutes_to_0_25r_mfe = minutes_to_25;
+      int minutes_to_50 = _MinutesFromOpenToStamp(opened_at, meta.first_0_50r_time);
+      if(minutes_to_50 >= 0) meta.minutes_to_0_50r_mfe = minutes_to_50;
       meta.penalty_reductions_count = MathMax(meta.penalty_reductions_count, state.strikes);
    }
 
@@ -5880,16 +6565,23 @@ private:
          double sampled_mae_r = (meta.is_buy ? (meta.filled_entry - meta.mae_price) : (meta.mae_price - meta.filled_entry)) / risk_dist;
          meta.mfe_r = MathMax(meta.mfe_r, MathMax(0.0, sampled_mfe_r));
          meta.mae_r = MathMax(meta.mae_r, MathMax(0.0, sampled_mae_r));
-         datetime opened_at = (meta.filled_at > 0 ? meta.filled_at : meta.planned_at);
+         datetime opened_at = _MetaOpenedAt(meta);
          int minutes_open = (opened_at > 0 && now >= opened_at ? (int)((now - opened_at) / 60) : 0);
          if(meta.first_0_25r_time <= 0 && meta.mfe_r >= 0.25) meta.first_0_25r_time = now;
          if(meta.first_0_50r_time <= 0 && meta.mfe_r >= 0.50) meta.first_0_50r_time = now;
          if(meta.first_adverse_threshold_time <= 0 && meta.mae_r >= MathMax(0.01, MathAbs(InpPenaltyMaeTriggerR)))
             meta.first_adverse_threshold_time = now;
-         if(meta.minutes_to_0_25r_mfe <= 0 && meta.first_0_25r_time > 0)
-            meta.minutes_to_0_25r_mfe = minutes_open;
-         if(meta.minutes_to_0_50r_mfe <= 0 && meta.first_0_50r_time > 0)
-            meta.minutes_to_0_50r_mfe = minutes_open;
+         // Derived from the stamp, never from "now".  These two lines used to publish
+         // minutes_open under a "<= 0 means not computed yet" guard, but 0 is the right
+         // answer whenever the threshold is crossed inside the first minute -- which is
+         // what happened here -- so the guard re-fired on every pass and wrote a number
+         // that grew with the clock, while _ApplyPenaltyStateToMeta recomputed the
+         // correct 0 right after it.  At the instant of the crossing the stamp IS now,
+         // so the intended case is unchanged; only the repeat is removed.
+         int minutes_to_25 = _MinutesFromOpenToStamp(opened_at, meta.first_0_25r_time);
+         if(minutes_to_25 >= 0) meta.minutes_to_0_25r_mfe = minutes_to_25;
+         int minutes_to_50 = _MinutesFromOpenToStamp(opened_at, meta.first_0_50r_time);
+         if(minutes_to_50 >= 0) meta.minutes_to_0_50r_mfe = minutes_to_50;
          if(StringLen(meta.path_completeness_status) == 0 || meta.path_completeness_status == "UNKNOWN"){
             meta.path_completeness_status = "TIMER_SAMPLED";
             meta.path_observation_source = "TRADE_ENGINE_TIMER_SNAPSHOT";
@@ -6566,6 +7258,78 @@ private:
       return _CurrentSpreadTicks(symbol) * point;
    }
 
+   //+---------------------------------------------------------------+
+   //| The absolute spread ceiling for one symbol.                     |
+   //|                                                                 |
+   //| InpMaxSpreadTicks alone cannot be this ceiling: it is a raw      |
+   //| point count and point size spans five orders of magnitude across |
+   //| this universe.  The price-fraction allowance is the scale-free    |
+   //| floor under the ceiling, so no symbol can be made untradeable by  |
+   //| its own quote precision; the tick cap survives and still binds    |
+   //| wherever it is the larger of the two.                             |
+   //+---------------------------------------------------------------+
+   double _MaxSpreadPriceForSymbol(const string symbol, const double reference_price,
+                                   string &cap_source) {
+      double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      if(point <= 0.0) point = 0.00001;
+      double tick_cap  = (InpMaxSpreadTicks > 0 ? (double)InpMaxSpreadTicks * point : 0.0);
+      double price_cap = (InpMaxSpreadPriceFrac > 0.0 && reference_price > 0.0
+                          ? reference_price * InpMaxSpreadPriceFrac : 0.0);
+      if(tick_cap <= 0.0 && price_cap <= 0.0){ cap_source = "none"; return 0.0; }
+      if(price_cap <= 0.0){ cap_source = "max_spread_ticks"; return tick_cap; }
+      if(tick_cap <= 0.0){ cap_source = "max_spread_price_frac"; return price_cap; }
+      if(tick_cap >= price_cap){ cap_source = "max_spread_ticks"; return tick_cap; }
+      cap_source = "max_spread_price_frac";
+      return price_cap;
+   }
+
+   //--- The whole spread decision, in one place, reported in every unit it is
+   //--- judged in.  No journal line used to carry the absolute spread at all, so a
+   //--- rejection that named only a raw point count could not be checked against
+   //--- the cap that actually mattered without knowing the symbol's point size.
+   bool _SpreadWithinLimits(const TradePlan &p, const double bid, const double ask,
+                            const double planned_risk, string &reject_reason) {
+      reject_reason = "";
+      double spread = ask - bid;
+      if(spread <= 0.0) return true;
+      double point = SymbolInfoDouble(p.symbol, SYMBOL_POINT);
+      if(point <= 0.0) point = 0.00001;
+      double reference_price = (p.entry_est > 0.0 ? p.entry_est : (bid + ask) * 0.5);
+      string cap_source = "none";
+      double abs_cap  = _MaxSpreadPriceForSymbol(p.symbol, reference_price, cap_source);
+      double risk_cap = (InpMaxSpreadRiskFrac > 0.0 && planned_risk > 0.0
+                         ? planned_risk * InpMaxSpreadRiskFrac : 0.0);
+      bool abs_fail  = (abs_cap > 0.0 && spread > abs_cap);
+      bool risk_fail = (risk_cap > 0.0 && spread > risk_cap);
+
+      // Rejections always explain themselves; a pass only under verbose, because
+      // this runs on every execution attempt.
+      if(abs_fail || risk_fail || InpVerboseJournal)
+         _Journal("[spread_gate] symbol=" + p.symbol
+                  + " spread_price=" + _FmtPrice(p.symbol, spread)
+                  + " spread_ticks=" + DoubleToString(spread / point, 1)
+                  + " spread_frac_of_price=" + DoubleToString(reference_price > 0.0 ? spread / reference_price : 0.0, 8)
+                  + " spread_frac_of_risk=" + DoubleToString(planned_risk > 0.0 ? spread / planned_risk : 0.0, 6)
+                  + " abs_cap_price=" + _FmtPrice(p.symbol, abs_cap)
+                  + " abs_cap_source=" + cap_source
+                  + " risk_cap_price=" + _FmtPrice(p.symbol, risk_cap)
+                  + " action=" + (abs_fail ? "reject_abs_cap" : (risk_fail ? "reject_risk_cap" : "pass")));
+
+      if(abs_fail){
+         // A stable token, deliberately.  Embedding the measured prices here would
+         // give every rejection a unique reason string and shatter the funnel's
+         // reject table into unbounded cardinality; the numbers belong in the
+         // [spread_gate] line above, which carries all of them.
+         reject_reason = "spread_above_symbol_cap";
+         return false;
+      }
+      if(risk_fail){
+         reject_reason = "spread too large relative to stop distance";
+         return false;
+      }
+      return true;
+   }
+
    double _LiveEntryPrice(const TradePlan &p) const {
       return SymbolInfoDouble(p.symbol, p.is_buy ? SYMBOL_ASK : SYMBOL_BID);
    }
@@ -6853,6 +7617,76 @@ private:
       return true;
    }
 
+   //+---------------------------------------------------------------+
+   //| The WORST blocker on a route, as opposed to the nearest one.    |
+   //|                                                                 |
+   //| _NearestObstacleBeforeTarget ranks purely by distance, and its  |
+   //| answer is what gets published as obstacle_kind, scored into     |
+   //| obstacle_severity, shown to the model as the route's blocker    |
+   //| and fed to the killer-severity policy.  A mild level sitting in  |
+   //| front of a severe one therefore MASKS it: #Germany40 on         |
+   //| 2026-09-07 was sent to the model as a session high of severity  |
+   //| 1.50 (pure distance bonus -- session_high scores 0.0 on its own) |
+   //| while an opposing imbalance of severity 5.50 sat further along  |
+   //| the very same route to 26452.90.                                 |
+   //|                                                                 |
+   //| Reporting only for now.  Making this the PUBLISHED blocker      |
+   //| changes p.obstacle_kind, which is an input of _CandidateHash and |
+   //| of _TesterAiCacheSignature, so it retires every recorded replay  |
+   //| artifact and has to be sequenced with a cohort re-record -- the  |
+   //| same call already made for the ai_selected_* naming fix.         |
+   //+---------------------------------------------------------------+
+   bool _WorstObstacleBeforeTarget(const TradePlan &p, const double entry_price, const double target_price,
+                                   const double stop_dist, const PriceLevelCandidate &obstacles[],
+                                   string &out_kind, double &out_price, double &out_severity) const {
+      out_kind = "";
+      out_price = 0.0;
+      out_severity = 0.0;
+      double best_severity = -1.0;
+      double best_dist = DBL_MAX;
+      for(int i=0; i<ArraySize(obstacles); i++){
+         double level = obstacles[i].price;
+         if(!_IsLevelBeforeTarget(p.is_buy, entry_price, target_price, level)) continue;
+         double dist = MathAbs(level - entry_price);
+         double distance_r = (stop_dist > 0.0 ? dist / stop_dist : 0.0);
+         double severity = _ObstacleSeverity(obstacles[i].kind, distance_r);
+         if(severity > best_severity + 0.0001 ||
+            (MathAbs(severity - best_severity) <= 0.0001 && dist < best_dist)){
+            best_severity = severity;
+            best_dist = dist;
+            out_kind = obstacles[i].kind;
+            out_price = level;
+            out_severity = severity;
+         }
+      }
+      return (out_price > 0.0);
+   }
+
+   //--- Report, without changing any identity field, when the published (nearest)
+   //--- blocker understates what the route actually has to cross.
+   void _ReportMaskedRouteObstacle(const TradePlan &p, const double entry_price, const double target_price,
+                                   const double stop_dist, const PriceLevelCandidate &obstacles[],
+                                   const string published_kind, const double published_severity) const {
+      static int logged = 0;
+      if(logged >= 200) return;
+      string worst_kind = "";
+      double worst_price = 0.0, worst_severity = 0.0;
+      if(!_WorstObstacleBeforeTarget(p, entry_price, target_price, stop_dist, obstacles,
+                                     worst_kind, worst_price, worst_severity)) return;
+      if(worst_severity <= published_severity + 0.0001) return;
+      logged++;
+      _Journal("[obstacle_route_scan] symbol=" + p.symbol
+               + " entry=" + _FmtPrice(p.symbol, entry_price)
+               + " target=" + _FmtPrice(p.symbol, target_price)
+               + " published_kind=" + (StringLen(published_kind) > 0 ? published_kind : "none")
+               + " published_severity=" + DoubleToString(published_severity, 2)
+               + " worst_kind=" + worst_kind
+               + " worst_price=" + _FmtPrice(p.symbol, worst_price)
+               + " worst_severity=" + DoubleToString(worst_severity, 2)
+               + " worst_class=" + _ObstacleSeverityClass(worst_severity)
+               + " action=masked_by_nearer_blocker_reported_only");
+   }
+
    bool _HasOpposingObstacleBeforeTarget(const TradePlan &p, const double entry_price, const double target_price,
                                          const PriceLevelCandidate &obstacles[], string &out_kind,
                                          double &out_price) const {
@@ -6883,6 +7717,7 @@ private:
       p.liquidity_target_blocked_by_obstacle = false;
       p.obstacle_distance_r = 0.0;
       p.obstacle_tf = "";
+      p.obstacle_severity = 0.0;
       p.obstacle_strength_features = "";
       p.fallback_tp = 0.0;
       p.fallback_rr = 0.0;
@@ -6907,6 +7742,177 @@ private:
       if(StringLen(obstacle_kind) == 0) return "";
       if(StringFind(obstacle_kind, "crossed_") == 0) return obstacle_kind;
       return "crossed_" + obstacle_kind;
+   }
+
+   //+---------------------------------------------------------------+
+   //| The obstacle's identity, with the crossing state removed.      |
+   //|                                                                |
+   //| "crossed_" is not part of what the obstacle IS.  It records    |
+   //| where the live price sits relative to it, and                  |
+   //| _PublishObstacleEvidence re-derives it on every rebuild, so it  |
+   //| is guaranteed to flip exactly when price travels to the entry   |
+   //| zone -- which is the movement the watchlist exists to wait for. |
+   //| Comparing the prefixed string as immutable identity therefore   |
+   //| rejects a plan for doing what it was armed to do.  The base     |
+   //| kind is the identity and stays immutable.                       |
+   //+---------------------------------------------------------------+
+   string _BaseObstacleKind(const string obstacle_kind) const {
+      if(StringLen(obstacle_kind) == 0) return "";
+      if(StringFind(obstacle_kind, "crossed_") == 0)
+         return StringSubstr(obstacle_kind, 8);
+      return obstacle_kind;
+   }
+
+   bool _ObstacleIsCrossed(const string obstacle_kind) const {
+      return (StringLen(obstacle_kind) > 0 && StringFind(obstacle_kind, "crossed_") == 0);
+   }
+
+   //+---------------------------------------------------------------+
+   //| The obstacle's identity with the timeframe qualifier removed.  |
+   //|                                                                |
+   //| _PublishObstacleEvidence derives obstacle_tf from this very     |
+   //| string ("htf" in the kind), and the execution contract already  |
+   //| classifies an obstacle_tf change as AUTHORIZED.  Leaving "htf_" |
+   //| inside the kind therefore made one and the same timeframe both  |
+   //| immutable and authorized at the same time: GBPCHF was killed on |
+   //| 2026-09-06 for reporting crossed_htf_opposing_imbalance at      |
+   //| assessment and crossed_opposing_imbalance at execution -- the   |
+   //| same obstacle, spelled at two levels of detail.  The severity   |
+   //| difference the qualifier carries is not lost: it is compared    |
+   //| numerically by _ObstacleIdentityPreserved instead.               |
+   //+---------------------------------------------------------------+
+   string _ObstacleKindWithoutTf(const string base_kind) const {
+      if(StringFind(base_kind, "htf_") == 0) return StringSubstr(base_kind, 4);
+      if(StringFind(base_kind, "ltf_") == 0) return StringSubstr(base_kind, 4);
+      return base_kind;
+   }
+
+   //--- The severity to judge an obstacle by.  A stored numeric wins; otherwise the
+   //--- kind alone is scored, with no distance bonus.  That is a LOWER bound on the
+   //--- real severity, so a missing number can only ever make the comparison
+   //--- stricter -- never permissive.  Plans restored from a state file written by
+   //--- a build without the field land here.
+   double _EffectiveObstacleSeverity(const string kind, const double stored) const {
+      if(stored > 0.0) return stored;
+      if(StringLen(kind) == 0) return 0.0;
+      return _ObstacleSeverity(kind, 0.0);
+   }
+
+   //--- Which obstacle the contract comparison is about.  While the plan is locked
+   //--- the engine-owned fields hold the APPROVED obstacle (frozen by
+   //--- _PublishObstacleEvidence), and what the live scan saw sits in live_obstacle_*.
+   //--- Comparing the frozen value against itself would make the check vacuous, so
+   //--- the live observation is what gets judged whenever one exists.
+   bool _HasLiveObstacleObservation(const TradePlan &p) const {
+      return (p.assessed_plan_locked && StringLen(p.live_obstacle_kind) > 0);
+   }
+   string _LiveObstacleKindForComparison(const TradePlan &p) const {
+      return (_HasLiveObstacleObservation(p) ? p.live_obstacle_kind : p.obstacle_kind);
+   }
+   string _LiveObstacleTfForComparison(const TradePlan &p) const {
+      if(!_HasLiveObstacleObservation(p)) return p.obstacle_tf;
+      return (StringFind(p.live_obstacle_kind, "htf") >= 0 ? "htf" : "entry_tf");
+   }
+   double _LiveObstacleSeverityForComparison(const TradePlan &p) const {
+      return (_HasLiveObstacleObservation(p) ? p.live_obstacle_severity : p.obstacle_severity);
+   }
+   double _LiveObstaclePriceForComparison(const TradePlan &p) const {
+      return (_HasLiveObstacleObservation(p) ? p.live_obstacle_price : p.obstacle_price);
+   }
+
+   //+---------------------------------------------------------------+
+   //| Re-observe a locked plan's blocker ON THE ROUTE THAT WAS        |
+   //| APPROVED, not on the drifted live geometry.                     |
+   //|                                                                 |
+   //| The live rebuild scans the landscape from p.entry_est.  The     |
+   //| contract authorises the entry to drift and bounds it separately  |
+   //| (max_entry_drift_r), so once price walks into the entry zone the |
+   //| nearest obstacle simply falls BEHIND the live entry and drops    |
+   //| out of the scan -- and the next blocker along the very same      |
+   //| route is then reported as a brand new, more severe one.          |
+   //| #Germany40 on 2026-09-07 was lost exactly that way, inside the   |
+   //| SAME simulated second as its approval and with bars_waited=0:    |
+   //|   assessed crossed_session_high @26206.6 severity 1.50           |
+   //|   live     crossed_opposing_imbalance      severity 5.50         |
+   //| after the entry moved 26193.60 -> 26207.10, one tick past the    |
+   //| session high.  Nothing about the trade changed; only the point   |
+   //| the question was asked from.  This is the same defect class as   |
+   //| the first-leg floor, resolved the same way (_Tp1FloorStopDistance |
+   //| / _Tp1GeometryLegReward): a property OF THE APPROVED PLAN is     |
+   //| measured on the approved plan.                                   |
+   //|                                                                 |
+   //| Nothing is loosened.  A blocker that is genuinely new on the     |
+   //| approved route, or genuinely more severe on it, still fails      |
+   //| closed through _ObstacleIdentityPreserved, and the entry drift   |
+   //| itself is still bounded and separately validated.                |
+   //+---------------------------------------------------------------+
+   void _ObserveLiveObstacleOnApprovedRoute(TradePlan &p) {
+      if(!p.assessed_plan_locked) return;
+      if(p.assessed_entry <= 0.0 || p.assessed_tp2 <= 0.0) return;
+      double approved_stop = p.assessed_stop_distance;
+      if(approved_stop <= 0.0) approved_stop = MathAbs(p.assessed_entry - p.assessed_sl);
+      if(approved_stop <= 0.0) return;
+
+      PriceLevelCandidate approved_targets[];
+      PriceLevelCandidate approved_obstacles[];
+      _CollectTargetLevels(p, p.assessed_entry, approved_targets, approved_obstacles);
+
+      string kind = "";
+      double price = 0.0, effective_target = 0.0;
+      bool found = _NearestObstacleBeforeTarget(p, p.assessed_entry, p.assessed_tp2,
+                                                approved_obstacles, kind, price, effective_target);
+      // Always replace the observation: whatever the live rebuild happened to write
+      // from the drifted entry is not the question the contract is asking.
+      p.live_obstacle_kind = "";
+      p.live_obstacle_price = 0.0;
+      p.live_obstacle_severity = 0.0;
+      if(!found){
+         _JournalDetail(1, "[obstacle_route_observation] symbol=" + p.symbol
+                        + " approved_entry=" + _FmtPrice(p.symbol, p.assessed_entry)
+                        + " approved_tp2=" + _FmtPrice(p.symbol, p.assessed_tp2)
+                        + " assessed_kind=" + (StringLen(p.assessed_obstacle_kind) > 0 ? p.assessed_obstacle_kind : "none")
+                        + " live_kind=none action=no_obstacle_on_approved_route");
+         return;
+      }
+      _PublishObstacleEvidence(p, kind, price, approved_stop, true, p.assessed_entry);
+      _JournalDetail(1, "[obstacle_route_observation] symbol=" + p.symbol
+                     + " approved_entry=" + _FmtPrice(p.symbol, p.assessed_entry)
+                     + " live_entry=" + _FmtPrice(p.symbol, p.entry_est)
+                     + " approved_tp2=" + _FmtPrice(p.symbol, p.assessed_tp2)
+                     + " approved_stop=" + _FmtPrice(p.symbol, approved_stop)
+                     + " assessed_kind=" + (StringLen(p.assessed_obstacle_kind) > 0 ? p.assessed_obstacle_kind : "none")
+                     + " live_kind=" + p.live_obstacle_kind
+                     + " live_price=" + _FmtPrice(p.symbol, p.live_obstacle_price)
+                     + " live_severity=" + DoubleToString(p.live_obstacle_severity, 2)
+                     + " action=observed_on_approved_route");
+   }
+
+   //--- Classify a live obstacle against its assessed one.  Identity is the base
+   //--- kind without crossing state and without the timeframe qualifier; both of
+   //--- those are carried in their own fields and are authorized to move.  A
+   //--- genuinely different blocker is accepted only while it is not a WORSE one,
+   //--- which is the property the AI actually reasoned about.
+   bool _ObstacleIdentityPreserved(const string live_kind, const string live_tf,
+                                   const double live_severity_stored,
+                                   const string assessed_kind, const string assessed_tf,
+                                   const double assessed_severity_stored,
+                                   bool &crossing_changed, bool &tf_changed,
+                                   bool &label_changed, double &live_severity,
+                                   double &assessed_severity) const {
+      crossing_changed = false;
+      tf_changed = false;
+      label_changed = false;
+      live_severity     = _EffectiveObstacleSeverity(live_kind, live_severity_stored);
+      assessed_severity = _EffectiveObstacleSeverity(assessed_kind, assessed_severity_stored);
+      string live_base     = _ObstacleKindWithoutTf(_BaseObstacleKind(live_kind));
+      string assessed_base = _ObstacleKindWithoutTf(_BaseObstacleKind(assessed_kind));
+      crossing_changed = (_ObstacleIsCrossed(live_kind) != _ObstacleIsCrossed(assessed_kind));
+      tf_changed       = (live_tf != assessed_tf);
+      label_changed    = (live_base != assessed_base);
+      if(!label_changed) return true;
+      // Different blocker: allowed only when it is no more severe than the approved
+      // one.  Fails closed when the live severity is unknown but the kind is not.
+      return (live_severity <= assessed_severity + 0.0001);
    }
 
    double _TargetRR(const TradePlan &p, const double target_price) const {
@@ -7024,6 +8030,54 @@ private:
       return "none";
    }
 
+   // Every consumer of obstacle evidence -- the ranking, the AI target-candidate payload
+   // and the model's own veto reasoning -- reads these fields together.  They used to be
+   // written in one branch only (an obstacle found before the *liquidity* target), so a
+   // plan with no valid liquidity target shipped obstacle_kind with
+   // obstacle_strength_features EMPTY -- asking the model to classify an obstacle's
+   // strength with the strength blank, which its own contract forbids.  One writer, so
+   // the kind and its severity can never travel apart again.
+   // `mark_crossed` distinguishes a route that passes THROUGH the obstacle from one that
+   // stops in front of it; only the former earns the "crossed_" label.
+   // `anchor_entry` is the entry the obstacle's distance is measured from.  It is the
+   // live entry for a plan still being built; for the live re-observation of a LOCKED
+   // plan it is the approved entry, because severity carries a distance bonus and an
+   // authorized entry drift must not be able to inflate it.
+   void _PublishObstacleEvidence(TradePlan &p, const string obstacle_kind,
+                                 const double obstacle_price, const double stop_dist,
+                                 const bool mark_crossed, const double anchor_entry = 0.0) {
+      if(StringLen(obstacle_kind) == 0 || obstacle_price <= 0.0) return;
+      double entry_ref = (anchor_entry > 0.0 ? anchor_entry : p.entry_est);
+      double distance_r = (stop_dist > 0.0 ? MathAbs(obstacle_price - entry_ref) / stop_dist : 0.0);
+      double severity = _ObstacleSeverity(obstacle_kind, distance_r);
+      // An approved plan owns its obstacle evidence exactly as it already owns its
+      // target identity (_ApplyAssessedTargetUnderContract) and its first leg
+      // (tp1_from_target_model).  The live rebuild still runs the whole landscape
+      // scan -- it must, to revalidate the approved target -- but whichever obstacle
+      // that scan happens to surface must not overwrite the one the AI was shown and
+      // the assessment fingerprint froze.  #Germany40 and GBPCHF were both lost this
+      // way on 2026-09-06: identical route, identical tp2, identical target model,
+      // and the rebuild published a different blocker inside the same simulated
+      // instant, so the plan died as execution_fingerprint_mismatch:obstacle_kind.
+      // The live observation is kept and judged by the same comparison, through
+      // _LiveObstacleKindForComparison, which fails closed on a genuinely worse
+      // blocker -- a stronger test than a string equality, because it is about
+      // severity rather than vocabulary.
+      if(p.assessed_plan_locked){
+         p.live_obstacle_kind     = (mark_crossed ? _CrossedObstacleKind(obstacle_kind) : obstacle_kind);
+         p.live_obstacle_price    = obstacle_price;
+         p.live_obstacle_severity = severity;
+         return;
+      }
+      p.obstacle_kind = (mark_crossed ? _CrossedObstacleKind(obstacle_kind) : obstacle_kind);
+      p.obstacle_price = obstacle_price;
+      p.obstacle_distance_r = distance_r;
+      p.obstacle_tf = (StringFind(obstacle_kind, "htf") >= 0 ? "htf" : "entry_tf");
+      p.obstacle_severity = severity;
+      p.obstacle_strength_features = "severity=" + DoubleToString(severity, 2)
+                                   + ";class=" + _ObstacleSeverityClass(severity);
+   }
+
    void _SeedTargetArbitrationCandidates(TradePlan &p, const double stop_dist,
                                          const PriceLevelCandidate &obstacles[]) {
       if(p.po3.liquidity_target <= 0.0 || !_IsRewardSideLevel(p.is_buy, p.entry_est, p.po3.liquidity_target))
@@ -7041,14 +8095,13 @@ private:
       if(_NearestObstacleBeforeTarget(p, p.entry_est, p.liquidity_target_preserved, obstacles,
                                       obstacle_kind, obstacle_price, effective_target)){
          p.liquidity_target_blocked_by_obstacle = true;
-         p.obstacle_kind = _CrossedObstacleKind(obstacle_kind);
-         p.obstacle_price = obstacle_price;
-         p.obstacle_distance_r = (stop_dist > 0.0 ? MathAbs(obstacle_price - p.entry_est) / stop_dist : 0.0);
+         _PublishObstacleEvidence(p, obstacle_kind, obstacle_price, stop_dist, true);
          p.obstacle_r = p.obstacle_distance_r;
-         p.obstacle_tf = (StringFind(obstacle_kind, "htf") >= 0 ? "htf" : "entry_tf");
-         double severity = _ObstacleSeverity(p.obstacle_kind, p.obstacle_distance_r);
-         p.obstacle_strength_features = "severity=" + DoubleToString(severity, 2)
-                                       + ";class=" + _ObstacleSeverityClass(severity);
+         // Measure, without changing anything, how often the nearest blocker hides a
+         // worse one on the same route.  See _WorstObstacleBeforeTarget.
+         if(!p.assessed_plan_locked)
+            _ReportMaskedRouteObstacle(p, p.entry_est, p.liquidity_target_preserved, stop_dist,
+                                       obstacles, p.obstacle_kind, p.obstacle_severity);
 
          double capped_rr = _TargetRR(p, effective_target);
          if(capped_rr > 0.0){
@@ -7192,6 +8245,7 @@ private:
    }
 
    void _LogTargetCandidates(const TradePlan &p) {
+      if(!_JournalDetailEnabled(2)) return;
       _Journal("[target_candidates] " + p.symbol
                + " liquidity_tp=" + _FmtPrice(p.symbol, p.liquidity_target_preserved)
                + " liquidity_rr=" + DoubleToString(p.liquidity_rr, 2)
@@ -7289,6 +8343,9 @@ private:
          }
          p.tp1 = tp1;
          p.tp2 = tp2;
+         // Restoring a stored partial-then-liquidity decision restores its first leg
+         // too, so the generic R-multiple builder must not rewrite it downstream.
+         p.tp1_from_target_model = true;
          p.target_source = "ai_selected_partial_then_liquidity";
          p.target_model = "partial_before_obstacle_then_liquidity";
          p.tp_model = "partial_then_liquidity";
@@ -7364,6 +8421,12 @@ private:
       p.assessed_obstacle_kind               = p.obstacle_kind;
       p.assessed_obstacle_tf                 = p.obstacle_tf;
       p.assessed_obstacle_price              = p.obstacle_price;
+      p.assessed_obstacle_severity           = _EffectiveObstacleSeverity(p.obstacle_kind, p.obstacle_severity);
+      // Nothing has been observed live yet; a value carried over from a previous
+      // lifecycle would be compared against this brand new assessment.
+      p.live_obstacle_kind                   = "";
+      p.live_obstacle_price                  = 0.0;
+      p.live_obstacle_severity               = 0.0;
       p.assessed_net_rr                      = (p.assessed_stop_distance > 0.0
                                                 ? _RewardToTarget(p.is_buy, p.entry_est, p.tp2) / p.assessed_stop_distance
                                                 : 0.0);
@@ -7374,6 +8437,25 @@ private:
       p.execution_order_construction_attempts= 0;
       p.execution_attempts_suppressed        = 0;
       p.execution_retry_not_before           = 0;
+
+      // A plan whose frozen first leg is already under its own frozen geometry floor
+      // can never pass _BuildPlanPrices, so it will sit on the watchlist until the
+      // rebuild kills it as a "structural invalidation" that never happened.  AUDUSD
+      // on 2026-09-06 waited 12 bars to be rejected for a leg of 0.00136 against a
+      // floor of 0.00151 that it already failed the moment it was frozen.  Reported,
+      // not acted on: which of the two values is the wrong one is not yet established,
+      // and guessing would either force a trade or discard a real approval.
+      double locked_leg   = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1);
+      double locked_floor = p.assessed_stop_distance * 0.65;
+      if(p.assessed_tp1 > 0.0 && locked_floor > 0.0 && locked_leg > 0.0 && locked_leg < locked_floor)
+         _Journal("[assessed_leg_below_floor] symbol=" + p.symbol
+                  + " assessed_tp1=" + _FmtPrice(p.symbol, p.assessed_tp1)
+                  + " assessed_leg_reward=" + _FmtPrice(p.symbol, locked_leg)
+                  + " geometry_floor=" + _FmtPrice(p.symbol, locked_floor)
+                  + " assessed_stop_distance=" + _FmtPrice(p.symbol, p.assessed_stop_distance)
+                  + " leg_r=" + DoubleToString(locked_leg / p.assessed_stop_distance, 4)
+                  + " target_model=" + p.assessed_target_model
+                  + " detected_at=lock action=diagnostic_only_plan_cannot_execute");
 
       _Journal("[assessed_plan_identity] symbol=" + p.symbol
                + " candidate_id=" + p.candidate_id
@@ -7488,6 +8570,43 @@ private:
             return false;
          }
          double reward = live_risk * approved_rr;
+         // The contract authorises the entry to drift (up to max_entry_drift_r) and in
+         // the same breath MANDATES that a synthetic target be recomputed as
+         // approved_rr * live_risk.  With the stop held, an adverse entry drift
+         // multiplies the reward while the max-distance cap -- built from ADR/ATR --
+         // does not move at all, so the mandated recomputation can walk straight
+         // through the cap and the plan is then killed for obeying its own contract.
+         // EURUSD, 2026-09-06: entry 1.15321 -> 1.15386, a drift of 0.08R against a
+         // 0.40R permission, grew the reward 0.00822 -> 0.00889 against a cap of
+         // 0.00848458, and a live approval died as
+         // ai_chosen_target_exceeds_max_distance three milliseconds after that very
+         // contract had passed it.
+         // Capping is the resolution the engine already applies to its own synthetic
+         // targets (synthetic_rr_capped_to_max_distance).  It only ever shortens a
+         // target, never widens or invents one, and when the cap would drop the trade
+         // under the contract's own minimum RR the plan is genuinely no longer
+         // feasible and still fails closed.
+         double max_dist = _MaxPlanTargetDistance(p, p.entry_est, live_risk);
+         if(max_dist > 0.0 && !RewardWithinMaxDistance(reward, max_dist, _PlanTickSize(p.symbol))){
+            double capped_rr = max_dist / live_risk;
+            _Journal("[deterministic_rr_target_cap] symbol=" + p.symbol
+                     + " approved_rr=" + DoubleToString(approved_rr, 6)
+                     + " live_risk=" + _FmtPrice(p.symbol, live_risk)
+                     + " assessed_risk=" + _FmtPrice(p.symbol, p.assessed_stop_distance)
+                     + " requested_reward=" + _FmtPrice(p.symbol, reward)
+                     + " max_target_distance=" + _FmtPrice(p.symbol, max_dist)
+                     + " capped_rr=" + DoubleToString(capped_rr, 6)
+                     + " min_resulting_rr=" + DoubleToString(c.min_resulting_rr, 6)
+                     + " action=" + (capped_rr + 0.0001 < c.min_resulting_rr
+                                     ? "reject_capped_rr_below_contract_minimum"
+                                     : "cap_reward_to_max_distance"));
+            if(capped_rr + 0.0001 < c.min_resulting_rr){
+               reason = "ai_chosen_target_exceeds_max_distance";
+               failure_class = EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE;
+               return false;
+            }
+            reward = max_dist;
+         }
          p.tp2 = (p.is_buy ? p.entry_est + reward : p.entry_est - reward);
          double tp1_ratio = 0.0;
          double assessed_reward = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp2);
@@ -7506,6 +8625,10 @@ private:
       p.effective_rr2  = _TargetRR(p, p.tp2);
       p.ai_chosen_rr2  = p.effective_rr2;
       p.target_arbitration_required = false;
+      // An approved plan owns both legs.  Without this the generic TP1 builder in
+      // _BuildPlanPrices rewrote the approved first leg from tp1_r_multiple, which is
+      // exactly the fingerprint drift the comment at the top of this function describes.
+      p.tp1_from_target_model = true;
 
       // Revalidate the *preserved* target against current structure.  This is
       // where a genuinely dead trade is still killed.
@@ -7580,8 +8703,52 @@ private:
       if(p.source_t_bos != p.assessed_source_t_bos) _AppendChangedComponent(out.immutable_fields_changed, "source_t_bos");
       if(c.target_source_preserved && p.target_source != p.assessed_target_source) _AppendChangedComponent(out.immutable_fields_changed, "target_source");
       if(c.target_model_preserved && p.target_model != p.assessed_target_model) _AppendChangedComponent(out.immutable_fields_changed, "target_model");
-      if(p.obstacle_kind != p.assessed_obstacle_kind) _AppendChangedComponent(out.immutable_fields_changed, "obstacle_kind");
-      if(p.obstacle_tf != p.assessed_obstacle_tf) _AppendChangedComponent(out.immutable_fields_changed, "obstacle_tf");
+      // The obstacle's IDENTITY is immutable; its live crossing state is not.
+      // obstacle_price -- the primitive the kind is derived from -- has always been
+      // compared with a tolerance and classified as authorized.  The derived label
+      // was compared by exact string equality with none, so a plan died the moment
+      // price crossed the obstacle it was waiting behind.  Three of the eleven
+      // 2026-09-05 approvals were lost this way; USDCAD cycled
+      // crossed_opposing_imbalance -> crossed_session_high ->
+      // crossed_htf_opposing_imbalance inside one hour, and GBPCHF was killed on a
+      // two-point entry move.  The base kind still fails closed: a genuinely
+      // different obstacle is still a semantic change.
+      bool obstacle_crossing_changed = false;
+      bool obstacle_tf_changed = false;
+      bool obstacle_label_changed = false;
+      double live_obstacle_sev = 0.0, assessed_obstacle_sev = 0.0;
+      bool obstacle_ok = _ObstacleIdentityPreserved(
+                            _LiveObstacleKindForComparison(p), _LiveObstacleTfForComparison(p),
+                            _LiveObstacleSeverityForComparison(p),
+                            p.assessed_obstacle_kind, p.assessed_obstacle_tf,
+                            p.assessed_obstacle_severity,
+                            obstacle_crossing_changed, obstacle_tf_changed,
+                            obstacle_label_changed, live_obstacle_sev, assessed_obstacle_sev);
+      if(!obstacle_ok){
+         _AppendChangedComponent(out.immutable_fields_changed, "obstacle_more_severe");
+      } else {
+         if(obstacle_crossing_changed)
+            _AppendChangedComponent(out.authorized_fields_changed, "obstacle_crossing_state");
+         if(obstacle_tf_changed)
+            _AppendChangedComponent(out.authorized_fields_changed, "obstacle_tf");
+         if(obstacle_label_changed)
+            _AppendChangedComponent(out.authorized_fields_changed, "obstacle_label_no_worse");
+      }
+      // Always emitted, pass or fail: the 2026-09-06 rejections named the field and
+      // nothing else, so neither side of the comparison was ever visible in a journal.
+      if(obstacle_label_changed || obstacle_crossing_changed || obstacle_tf_changed || !obstacle_ok)
+         _Journal("[obstacle_identity_gate] symbol=" + p.symbol
+                  + " assessed_kind=" + (StringLen(p.assessed_obstacle_kind) > 0 ? p.assessed_obstacle_kind : "none")
+                  + " assessed_tf=" + (StringLen(p.assessed_obstacle_tf) > 0 ? p.assessed_obstacle_tf : "none")
+                  + " assessed_severity=" + DoubleToString(assessed_obstacle_sev, 2)
+                  + " live_kind=" + (StringLen(_LiveObstacleKindForComparison(p)) > 0 ? _LiveObstacleKindForComparison(p) : "none")
+                  + " live_tf=" + (StringLen(_LiveObstacleTfForComparison(p)) > 0 ? _LiveObstacleTfForComparison(p) : "none")
+                  + " live_severity=" + DoubleToString(live_obstacle_sev, 2)
+                  + " observation_source=" + (_HasLiveObstacleObservation(p) ? "live_scan_while_locked" : "plan_fields")
+                  + " label_changed=" + (obstacle_label_changed ? "true" : "false")
+                  + " crossing_changed=" + (obstacle_crossing_changed ? "true" : "false")
+                  + " tf_changed=" + (obstacle_tf_changed ? "true" : "false")
+                  + " action=" + (obstacle_ok ? "authorized" : "reject_live_obstacle_more_severe"));
       if(m_ai.DecisionHash() != p.assessed_decision_input_hash) _AppendChangedComponent(out.immutable_fields_changed, "decision_input_hash");
       if(ENGINE_INPUT_SCHEMA != p.assessed_strategy_schema_version) _AppendChangedComponent(out.immutable_fields_changed, "strategy_schema_version");
       // A structural target's price is immutable; a synthetic one is not.
@@ -7612,7 +8779,7 @@ private:
          if(!c.tp2_adjustment_allowed)
             _AppendChangedComponent(out.unauthorized_fields_changed, "tp2_changed_without_permission");
       }
-      if(MathAbs(p.obstacle_price - p.assessed_obstacle_price) > price_tol)
+      if(MathAbs(_LiveObstaclePriceForComparison(p) - p.assessed_obstacle_price) > price_tol)
          _AppendChangedComponent(out.authorized_fields_changed, "obstacle_price");
 
       double live_risk = MathAbs(p.entry_est - p.sl);
@@ -7830,11 +8997,38 @@ private:
    //| that cannot change without an input changing must not be        |
    //| retried until an input actually changes.                        |
    //+---------------------------------------------------------------+
+   //+---------------------------------------------------------------+
+   //| Is a spread rejection transient?  Only while the spread moves.  |
+   //|                                                                 |
+   //| The 2026-09-05 replay logged 213 rejections at a CONSTANT       |
+   //| "ticks=800.0" over two hours, every one classified              |
+   //| TRANSIENT_SPREAD_FAILURE and given a bounded backoff -- a label |
+   //| that asserted the value was changing while it demonstrably was  |
+   //| not.  A spread that has not moved across                        |
+   //| InpMaxPersistentSpreadAttempts consecutive rejections is a      |
+   //| broker constraint, not a transient widening, and is classified  |
+   //| as one so the plan stops re-attempting a settled outcome.       |
+   //+---------------------------------------------------------------+
+   string _ClassifySpreadFailure(const TradePlan &p, const double spread) const {
+      double tick = _PlanTickSize(p.symbol);
+      bool unchanged = (p.execution_failure_spread > 0.0 && spread > 0.0 &&
+                        MathAbs(spread - p.execution_failure_spread) <= tick * 0.5);
+      int consecutive = (unchanged ? p.execution_spread_unchanged_attempts + 1 : 1);
+      if(InpMaxPersistentSpreadAttempts > 0 && consecutive >= InpMaxPersistentSpreadAttempts)
+         return EXEC_FAIL_PERMANENT_BROKER;
+      return EXEC_FAIL_TRANSIENT_SPREAD;
+   }
+
    string _ClassifyExecutionFailure(const TradePlan &p, const string reason) const {
-      // A class already decided by the code that detected the failure wins:
-      // it knows more than a string match ever can.
-      if(StringLen(p.execution_failure_class) > 0 && p.execution_failure_class != EXEC_FAIL_NONE)
-         return p.execution_failure_class;
+      // A class decided by the code that detected the failure DURING THIS ATTEMPT
+      // wins: it knows more than a string match ever can.  Reading
+      // p.execution_failure_class here instead would read the PREVIOUS attempt's
+      // verdict, which made the first classification permanent -- a plan that first
+      // failed on spread kept reporting TRANSIENT_SPREAD_FAILURE even after the
+      // reason became a semantic change.
+      if(StringLen(m_last_execution_failure_class) > 0 &&
+         m_last_execution_failure_class != EXEC_FAIL_NONE)
+         return m_last_execution_failure_class;
 
       string r = _NormToken(reason);
       if(StringLen(r) == 0) return EXEC_FAIL_NONE;
@@ -7854,6 +9048,10 @@ private:
 
       if(StringFind(r, "missing_live_bid") >= 0 || StringFind(r, "quote") >= 0)
          return EXEC_FAIL_TRANSIENT_QUOTE;
+      // Reached only when the spread detector did not classify this attempt (a
+      // spread mentioned by some other reject text).  The spread gate itself
+      // always sets m_last_execution_failure_class, so the persistent case is
+      // decided by _ClassifySpreadFailure, not by this string match.
       if(StringFind(r, "spread") >= 0)
          return EXEC_FAIL_TRANSIENT_SPREAD;
 
@@ -7904,6 +9102,27 @@ private:
 
       string state = _ExecutionStateFingerprint(p);
       if(ExecFailureIsTransient(p.execution_failure_class)){
+         // A spread rejection can only clear when the SPREAD moves.  The generic
+         // state fingerprint moves with bid or ask, so a drifting quote at a
+         // constant spread unsuppressed the retry every tick: 213 prechecks and
+         // 5,597 duplicate execution attempts for one plan whose spread never
+         // changed.  Gate this class on the quantity it was actually rejected on.
+         if(p.execution_failure_class == EXEC_FAIL_TRANSIENT_SPREAD &&
+            p.execution_failure_spread > 0.0){
+            double live_spread = _CurrentSpreadPrice(p.symbol);
+            double tick = _PlanTickSize(p.symbol);
+            if(MathAbs(live_spread - p.execution_failure_spread) <= tick * 0.5){
+               suppress_reason = "unchanged_spread_after_" + p.execution_failure_class;
+               p.execution_attempts_suppressed++;
+               if(p.execution_attempts_suppressed == 1)
+                  _Journal("[execution_retry_suppressed] symbol=" + p.symbol
+                           + " failure_class=" + p.execution_failure_class
+                           + " action=" + ExecFailureAction(p.execution_failure_class)
+                           + " spread=" + _FmtPrice(p.symbol, live_spread)
+                           + " reason=" + suppress_reason);
+               return true;
+            }
+         }
          datetime now = _NowServerOrLocal();
          if(p.execution_retry_not_before > 0 && now < p.execution_retry_not_before){
             suppress_reason = "transient_backoff";
@@ -7930,6 +9149,19 @@ private:
 
    void _RecordExecutionFailure(TradePlan &p, const string reason) {
       p.execution_precheck_attempts++;
+      // Track the spread this attempt was rejected on BEFORE classifying, so the
+      // consecutive-unchanged count the classifier already computed is the one
+      // that gets stored.
+      if(m_last_execution_spread > 0.0){
+         double tick = _PlanTickSize(p.symbol);
+         bool unchanged = (p.execution_failure_spread > 0.0 &&
+                           MathAbs(m_last_execution_spread - p.execution_failure_spread) <= tick * 0.5);
+         p.execution_spread_unchanged_attempts = (unchanged ? p.execution_spread_unchanged_attempts + 1 : 1);
+         p.execution_failure_spread = m_last_execution_spread;
+      } else {
+         p.execution_spread_unchanged_attempts = 0;
+         p.execution_failure_spread = 0.0;
+      }
       p.execution_failure_class = _ClassifyExecutionFailure(p, reason);
       p.execution_failure_state_fingerprint = _ExecutionStateFingerprint(p);
       if(ExecFailureIsTransient(p.execution_failure_class)){
@@ -7943,6 +9175,8 @@ private:
                + " precheck_attempts=" + IntegerToString(p.execution_precheck_attempts)
                + " order_construction_attempts=" + IntegerToString(p.execution_order_construction_attempts)
                + " duplicate_execution_attempts=" + IntegerToString(p.execution_attempts_suppressed)
+               + " failure_spread=" + _FmtPrice(p.symbol, p.execution_failure_spread)
+               + " spread_unchanged_attempts=" + IntegerToString(p.execution_spread_unchanged_attempts)
                + " state_fingerprint=" + p.execution_failure_state_fingerprint
                + " reason=" + reason);
    }
@@ -8169,8 +9403,31 @@ private:
       p.why_not_partial_before_obstacle = dec.why_not_partial_before_obstacle;
       p.why_not_capped_before_obstacle = dec.why_not_capped_before_obstacle;
       p.why_not_synthetic_fallback = dec.why_not_synthetic_fallback;
-      if(StringLen(dec.target_blocker_kind) > 0) p.obstacle_kind = dec.target_blocker_kind;
-      if(chosen_tp1 > 0.0) p.tp1 = chosen_tp1;
+      // The obstacle label is engine-owned evidence, never a model output.  Letting
+      // dec.target_blocker_kind overwrite p.obstacle_kind made the model's free-text
+      // spelling the plan's frozen identity (_LockAssessedPlan -> assessed_obstacle_kind),
+      // while execution re-derived the engine's own spelling through
+      // _PublishObstacleEvidence -- so the two could never match and the plan died as
+      // execution_fingerprint_mismatch:obstacle_kind.  That killed 4 of the 11 approvals
+      // in the 2026-09-05 week replay: the model wrote "opposing_htf_imbalance",
+      // "opposing_imbalance", "fresh_htf_opposing_imbalance" and "crossed_session_high"
+      // for obstacles this engine names "crossed_htf_opposing_imbalance" and
+      // "crossed_opposing_imbalance" -- identical severity, different vocabulary.
+      // The model's view stays available as p.ai.target_blocker_kind; its severity,
+      // class and killer flag already had their own ai_* fields above.
+      if(StringLen(dec.target_blocker_kind) > 0 &&
+         _BaseObstacleKind(dec.target_blocker_kind) != _BaseObstacleKind(p.obstacle_kind))
+         _Journal("[obstacle_label_authority] symbol=" + p.symbol
+                  + " engine_obstacle_kind=" + (StringLen(p.obstacle_kind) > 0 ? p.obstacle_kind : "none")
+                  + " model_target_blocker_kind=" + dec.target_blocker_kind
+                  + " owner=deterministic action=model_label_kept_diagnostic_only");
+      if(chosen_tp1 > 0.0){
+         p.tp1 = chosen_tp1;
+         // The AI arbitrated this first leg; the generic R-multiple builder downstream
+         // must not silently move it.
+         p.tp1_from_target_model = true;
+      }
+      if(!_FinalizeFirstLeg(p, false, reason)) return false;
       p.target_arbitration_required = false;
       _NormalizeTargetLabels(p);
       _PersistNormalizedTargetArbitration(p, dec);
@@ -8203,6 +9460,320 @@ private:
       return true;
    }
 
+   // The single definition of "a first leg the execution layer will actually place".
+   // _BuildPlanPrices has always enforced this when it builds TP1; target *selection*
+   // did not know about it, so it could choose a partial-before-obstacle route whose
+   // first leg the builder then had to move -- past the very obstacle the route existed
+   // to respect.  One definition, two callers, so the route and the price cannot disagree.
+   //+---------------------------------------------------------------+
+   //| Which stop distance the geometry half of the TP1 floor measures. |
+   //|                                                                 |
+   //| The floor has two halves and they answer different questions:   |
+   //|   spread * InpMinTP1SpreadMult -- can the broker place this leg |
+   //|     at all?  A live question, always measured live.             |
+   //|   0.65 of the stop distance -- is this leg a meaningful fraction |
+   //|     of the risk taken?  A property of the PLAN's geometry.      |
+   //|                                                                 |
+   //| Measuring the geometry half against the *rebuilt* stop is what  |
+   //| killed three of the eleven approvals in the 2026-09-05 replay.  |
+   //| The contract authorises the entry to drift (InpMaxEntryDriftR)  |
+   //| and the stop to move (max_sl_drift_r), so at execution time     |
+   //| stop_dist grows while the approved TP1 price is frozen: the     |
+   //| floor rises and the leg's reward falls, both from the same       |
+   //| authorised drift.  Satisfying it would have required the plan to |
+   //| carry tp1_reward >= 0.65R + 1.65d, i.e. TP1 at 1.31R for the     |
+   //| permitted d = 0.4R -- unreachable for a partial first leg.       |
+   //|                                                                 |
+   //| AUDUSD:  stop 0.00233 -> 0.00293, floor 0.00190, leg 0.00171     |
+   //|          (short by 1.9 points) while live_rr2 1.05 > min_rr 0.90.|
+   //| GBPJPY:  floor 0.115 -> 0.138, leg 0.106, RR2 would have been 3.35|
+   //|                                                                 |
+   //| So for a locked plan the geometry half is measured against the   |
+   //| stop the plan was APPROVED on.  The invariant this buys: a leg   |
+   //| that cleared the floor at approval cannot fail it at execution   |
+   //| because of drift the contract already authorised and separately  |
+   //| validated (max_entry_drift_r, max_sl_drift_r, min_resulting_rr). |
+   //| Nothing is loosened -- the live spread half still binds, and an  |
+   //| unlocked plan is measured live exactly as before.                |
+   //+---------------------------------------------------------------+
+   double _Tp1FloorStopDistance(const TradePlan &p, const double live_stop_dist) const {
+      if(p.assessed_plan_locked && p.assessed_stop_distance > 0.0)
+         return p.assessed_stop_distance;
+      return live_stop_dist;
+   }
+
+   //--- Half one: is this leg a meaningful fraction of the risk being taken?
+   //--- A property of the PLAN, so a locked plan is measured against the stop it
+   //--- was approved on.
+   double _MinTp1GeometryReward(const TradePlan &p, const double live_stop_dist) const {
+      double geometry_stop_dist = _Tp1FloorStopDistance(p, live_stop_dist);
+      return geometry_stop_dist * 0.65;
+   }
+
+   //--- Half two: can the broker actually place this leg right now?  Always live,
+   //--- in both states, because it is a live broker constraint.
+   double _MinTp1SpreadReward(const TradePlan &p) {
+      return _CurrentSpreadPrice(p.symbol) * InpMinTP1SpreadMult;
+   }
+
+   // Not const: _CurrentSpreadPrice queries live symbol state.  Both callers
+   // (_SelectObstacleAwareTarget and _BuildPlanPrices) are non-const anyway.
+   double _MinTp1Reward(const TradePlan &p, const double stop_dist) {
+      return MathMax(_MinTp1GeometryReward(p, stop_dist), _MinTp1SpreadReward(p));
+   }
+
+   //+---------------------------------------------------------------+
+   //| The first leg the floor is asking ABOUT, for the geometry half.  |
+   //|                                                                 |
+   //| Anchoring only the stop is not enough.  The contract also        |
+   //| authorises the ENTRY to drift (InpMaxEntryDriftR = 0.4), and the |
+   //| route-owned TP1 is a frozen price, so an adverse entry move      |
+   //| shrinks the leg's measured reward on its own.  GBPJPY: the leg   |
+   //| was 0.142 against a 0.115 plan-time floor -- comfortably clear   |
+   //| -- and became 0.106 purely because the entry moved 212.693 ->    |
+   //| 212.657.  Re-measuring an approval-time ratio at drifted prices  |
+   //| is double jeopardy for a drift the contract already bounds and   |
+   //| separately validates.                                            |
+   //|                                                                 |
+   //| So the geometry half asks its question of the plan that was      |
+   //| approved.  What still protects the trade at execution, unchanged: |
+   //|   - max_entry_drift_r / max_sl_drift_r bound the drift itself;    |
+   //|   - min_resulting_rr re-checks the LIVE economics;                |
+   //|   - the spread half below is measured from the LIVE entry;        |
+   //|   - wrong-side and beyond-target are checked on LIVE prices.      |
+   //+---------------------------------------------------------------+
+   // Not const: _RewardToTarget is not const.
+   double _Tp1GeometryLegReward(const TradePlan &p, const double live_leg_reward) {
+      if(p.assessed_plan_locked && p.assessed_tp1 > 0.0 && p.assessed_entry > 0.0){
+         double assessed_leg = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1);
+         if(assessed_leg > 0.0) return assessed_leg;
+      }
+      return live_leg_reward;
+   }
+
+   bool _FinalizeFirstLeg(TradePlan &p, const bool allow_generic_adjustment, string &reason) {
+      double risk = MathAbs(p.entry_est-p.sl);
+      double target_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
+      double leg = _RewardToTarget(p.is_buy, p.entry_est, p.tp1);
+      double geometry_floor = _MinTp1GeometryReward(p, risk);
+      double spread_floor = _MinTp1SpreadReward(p);
+      double epsilon = MathMax(risk, 0.00000001)*0.00000001;
+      if(allow_generic_adjustment && !p.assessed_plan_locked && !p.tp1_from_target_model){
+         // Target sanitization can replace TP2 after the generic TP1 builder.
+         // Reconcile the two legs before freezing/serializing the candidate.
+         // Previously a 0.70*old-TP2 cap undid the 0.65R floor; the sanitizer
+         // then extended TP2 and left a first leg the execution gate would reject.
+         double minimum = MathMax(geometry_floor, spread_floor);
+         double maximum = target_reward*0.70;
+         if(minimum > maximum+epsilon){
+            reason = "target_model_tp1_below_min_reward";
+            return false;
+         }
+         double adjusted = MathMin(maximum, MathMax(minimum, leg));
+         if(MathAbs(adjusted-leg) > epsilon){
+            p.tp1 = (p.is_buy ? p.entry_est+adjusted : p.entry_est-adjusted);
+            // Claim the leg.  Reconciling it and then leaving it unclaimed is the
+            // exact hazard the tp1-authority contract exists to stop: the next
+            // _BuildPlanPrices takes the generic branch, rebuilds the leg from
+            // tp1_r_multiple and lands somewhere else, so the leg frozen into the
+            // request is not the leg the execution gate later measures.  That is how
+            // AUDUSD 2026.08.03 shipped a 0.583R first leg to the model and then met
+            // its own 0.65R floor at execution.  From here the leg is validated, never
+            // silently rebuilt -- and this value is already inside [minimum, maximum],
+            // so the route-owned branch it now takes accepts it.
+            //
+            // This CHANGES p.tp1 and therefore candidate_hash on exactly the plans
+            // whose first leg was mis-built, so it retires their recorded replay
+            // artifacts: measured on the 2026.08.03-08 cohort, ai_cache_hits fell
+            // 1256 -> 1102 and misses rose 109 -> 254.  That is the correct trade:
+            // those artifacts recorded decisions about plans this engine no longer
+            // builds.  Judging those setups again needs a fresh RECORD_ONLY export.
+            p.tp1_from_target_model = true;
+            _Journal("[first_leg_finalized] symbol=" + p.symbol
+                     + " previous_reward=" + _FmtPrice(p.symbol, leg)
+                     + " final_reward=" + _FmtPrice(p.symbol, adjusted)
+                     + " geometry_floor=" + _FmtPrice(p.symbol, geometry_floor)
+                     + " spread_floor=" + _FmtPrice(p.symbol, spread_floor)
+                     + " max_leg=" + _FmtPrice(p.symbol, maximum)
+                     + " owner=engine_reconciled"
+                     + " stage=before_request_identity action=align_with_final_target_and_floor");
+            leg = adjusted;
+         }
+      }
+      if(risk <= 0.0 || leg <= 0.0){ reason = "target_model_tp1_wrong_side_of_entry"; return false; }
+      if(leg >= target_reward){ reason = "target_model_tp1_beyond_target"; return false; }
+      double geometry_leg = _Tp1GeometryLegReward(p, leg);
+      if(geometry_leg+epsilon < geometry_floor || leg+epsilon < spread_floor){
+         reason = "target_model_tp1_below_min_reward";
+         _Journal("[first_leg_validation] valid=false symbol=" + p.symbol
+                  + " leg_reward=" + _FmtPrice(p.symbol, geometry_leg)
+                  + " geometry_floor=" + _FmtPrice(p.symbol, geometry_floor)
+                  + " spread_floor=" + _FmtPrice(p.symbol, spread_floor)
+                  + " approved_plan=" + (allow_generic_adjustment ? "false" : "true")
+                  + " action=reject_without_rewriting_approval");
+         return false;
+      }
+      reason = "ok";
+      return true;
+   }
+
+   void _RankAddTarget(TargetRankCandidate &list[], const string kind, const double price,
+                       const double partial_tp, const double partial_rr, const bool partial_ok,
+                       const double rr, const bool crosses,
+                       const double severity, const string obstacle_kind, const double obstacle_price,
+                       const bool ok_rr, const bool ok_dist, const bool truncated,
+                       const string reject_reason) const {
+      int n = ArraySize(list);
+      ArrayResize(list, n + 1);
+      list[n].kind                  = kind;
+      list[n].price                 = price;
+      list[n].partial_tp            = partial_tp;
+      list[n].partial_rr            = partial_rr;
+      list[n].partial_meets_floor   = partial_ok;
+      list[n].rr                    = rr;
+      list[n].crosses_obstacle      = crosses;
+      list[n].obstacle_severity     = severity;
+      list[n].obstacle_kind         = obstacle_kind;
+      list[n].obstacle_price        = obstacle_price;
+      list[n].meets_rr_floor        = ok_rr;
+      list[n].meets_min_distance    = ok_dist;
+      list[n].truncated_by_obstacle = truncated;
+      list[n].order                 = n;
+      list[n].reject_reason         = reject_reason;
+   }
+
+   bool _TargetRankEligible(const TargetRankCandidate &c) const {
+      // A route that declares a first leg is only eligible if that leg is one the
+      // execution layer can place as-is.  Without this the runner's RR alone decided
+      // admission and the partial was never measured at all.
+      if(c.partial_tp > 0.0 && !c.partial_meets_floor) return false;
+      return (c.price > 0.0 && c.rr > 0.0 && c.meets_rr_floor && c.meets_min_distance &&
+              StringLen(c.reject_reason) == 0);
+   }
+
+   bool _TargetRankCrossesMajor(const TargetRankCandidate &c) const {
+      return (c.crosses_obstacle && c.obstacle_severity >= InpBlockerMajorSeverity);
+   }
+
+   bool _TargetRankObstacleInvolved(const TargetRankCandidate &c) const {
+      return (c.crosses_obstacle || c.truncated_by_obstacle);
+   }
+
+   // Ordering contract:
+   //   1. eligible routes beat ineligible ones;
+   //   2. a route crossing a MAJOR obstacle ranks below every non-crossing route no
+   //      matter how much more RR it offers -- crossing is a demotion, not a tie-break;
+   //   3. once an obstacle is in play and neither route crosses a *major* one, the
+   //      obstacle has already been priced into each route's reward, so the higher RR
+   //      wins.  Without this a 0.57R route that stops in front of a minor imbalance
+   //      would beat a 3.07R partial route purely because it was collected first;
+   //   4. otherwise keep collection order, which is priority order.  Rule 4 is what
+   //      keeps the pre-existing choice identical whenever no obstacle is involved.
+   bool _TargetRankBetter(const TargetRankCandidate &a, const TargetRankCandidate &b) const {
+      bool ea = _TargetRankEligible(a);
+      bool eb = _TargetRankEligible(b);
+      if(ea != eb) return ea;
+      bool ca = _TargetRankCrossesMajor(a);
+      bool cb = _TargetRankCrossesMajor(b);
+      if(ca != cb) return (!ca);
+      if(_TargetRankObstacleInvolved(a) || _TargetRankObstacleInvolved(b)){
+         if(MathAbs(a.rr - b.rr) > _RREps()) return (a.rr > b.rr);
+      }
+      return (a.order < b.order);
+   }
+
+   int _PickBestRankedTarget(const TargetRankCandidate &list[]) const {
+      int best = -1;
+      for(int i=0; i<ArraySize(list); i++){
+         if(!_TargetRankEligible(list[i])) continue;
+         if(best < 0 || _TargetRankBetter(list[i], list[best])) best = i;
+      }
+      return best;
+   }
+
+   bool _RankedListHasCleanRoute(const TargetRankCandidate &list[]) const {
+      for(int i=0; i<ArraySize(list); i++){
+         if(_TargetRankEligible(list[i]) && !_TargetRankCrossesMajor(list[i])) return true;
+      }
+      return false;
+   }
+
+   // Best eligible route that passes THROUGH an obstacle.  Only consulted once every
+   // clean route has been ruled out and the alternative is a synthetic that crosses the
+   // same obstacle: at that point the crossing risk is already being taken, so the
+   // decision is purely which crossing route pays more.  A killer-severity crossing is
+   // never a candidate -- that is a "do not trade" signal, not a target choice.
+   int _PickBestCrossingRoute(const TargetRankCandidate &list[]) const {
+      int best = -1;
+      for(int i=0; i<ArraySize(list); i++){
+         if(!_TargetRankEligible(list[i])) continue;
+         if(!list[i].crosses_obstacle) continue;
+         if(list[i].obstacle_severity >= InpBlockerKillSeverity) continue;
+         if(best < 0 || list[i].rr > list[best].rr) best = i;
+      }
+      return best;
+   }
+
+   void _LogTargetRank(const TradePlan &p, const TargetRankCandidate &list[], const int chosen_index) const {
+      // One line per route per candidate: the single largest producer in the journal
+      // at 51.7% of its bytes.  Route detail, so level 2.
+      if(!_JournalDetailEnabled(2)) return;
+      for(int i=0; i<ArraySize(list); i++){
+         _Journal("[target_rank] symbol=" + p.symbol
+                  + " kind=" + list[i].kind
+                  + " tp=" + _FmtPrice(p.symbol, list[i].price)
+                  + " rr=" + DoubleToString(list[i].rr, 4)
+                  + " partial_tp=" + (list[i].partial_tp > 0.0 ? _FmtPrice(p.symbol, list[i].partial_tp) : "none")
+                  + " partial_rr=" + DoubleToString(list[i].partial_rr, 4)
+                  + " partial_meets_floor=" + (list[i].partial_tp > 0.0
+                                               ? (list[i].partial_meets_floor ? "true" : "false")
+                                               : "n/a")
+                  + " crosses_obstacle=" + (list[i].crosses_obstacle ? "true" : "false")
+                  + " truncated=" + (list[i].truncated_by_obstacle ? "true" : "false")
+                  + " obstacle=" + (StringLen(list[i].obstacle_kind) > 0 ? list[i].obstacle_kind : "none")
+                  + " severity=" + DoubleToString(list[i].obstacle_severity, 2)
+                  + " meets_rr_floor=" + (list[i].meets_rr_floor ? "true" : "false")
+                  + " meets_min_distance=" + (list[i].meets_min_distance ? "true" : "false")
+                  + " eligible=" + (_TargetRankEligible(list[i]) ? "true" : "false")
+                  + " reject=" + (StringLen(list[i].reject_reason) > 0 ? list[i].reject_reason : "none")
+                  + " chosen=" + (i == chosen_index ? "true" : "false"));
+      }
+   }
+
+   bool _ApplyRankedTarget(TradePlan &p, const TargetRankCandidate &c, const double stop_dist) {
+      p.tp2            = c.price;
+      p.tp_model       = c.kind;
+      p.target_source  = c.kind;
+      p.target_model   = c.kind;
+      // Publish the obstacle with its severity, not just its name.  A route selected here
+      // used to leave obstacle_strength_features at whatever an earlier stage happened to
+      // set -- empty whenever no liquidity target existed to trigger the only writer.
+      _PublishObstacleEvidence(p, c.obstacle_kind, c.obstacle_price, stop_dist, c.crosses_obstacle);
+      p.obstacle_r     = c.rr;
+      p.effective_rr2  = c.rr;
+      if(c.partial_tp > 0.0){
+         // Partial-then-liquidity banks a first leg in front of the obstacle and runs
+         // the remainder to the structural objective.  Publish the partial level so
+         // downstream partial management and the AI arbitration payload agree on the
+         // same two legs.
+         p.capped_before_obstacle_tp = c.partial_tp;
+         p.capped_before_obstacle_rr = (stop_dist > 0.0
+                                        ? _RewardToTarget(p.is_buy, p.entry_est, c.partial_tp) / stop_dist
+                                        : 0.0);
+         if(StringLen(p.capped_before_obstacle_source) == 0)
+            p.capped_before_obstacle_source = "capped_before_" + c.obstacle_kind;
+         // Publishing the level was never enough: _BuildPlanPrices rebuilt tp1 from
+         // tp1_r_multiple afterwards and its 0.65R floor pushed the first leg past the
+         // obstacle.  The route owns its first leg -- say so, and the builder honours it.
+         p.tp1                  = c.partial_tp;
+         p.tp1_from_target_model = true;
+      } else {
+         p.tp1_from_target_model = false;
+      }
+      _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
+      return true;
+   }
+
    bool _SelectObstacleAwareTarget(TradePlan &p, const double stop_dist, const double min_target_dist,
                                    const double max_target_dist, string &reason) {
       reason = "ok";
@@ -8212,6 +9783,12 @@ private:
       p.obstacle_price = 0.0;
       p.obstacle_r = 0.0;
       p.effective_rr2 = 0.0;
+      // Re-selection re-decides who owns the first leg.  Clearing it here means a
+      // route that no longer wins cannot leave a stale tp1 claim behind.
+      p.tp1_from_target_model = false;
+      // Publish the first-leg floor before any route is scored, so the ranking, the
+      // price builder and the AI target-candidate payload all read one number.
+      p.min_tp1_reward = _MinTp1Reward(p, stop_dist);
       _ResetTargetArbitrationFields(p);
 
       PriceLevelCandidate targets[];
@@ -8222,47 +9799,124 @@ private:
       bool saw_too_near = false;
       bool saw_liquidity_too_near = false;
       bool saw_valid_target = false;
+      // PLAN B: a structural target clamped back to an obstacle is a *different*
+      // failure from one that is genuinely too close.  Collapsing both into
+      // saw_too_near destroyed the diagnosis and handed control to the synthetic.
+      bool saw_truncated_by_obstacle = false;
+      bool structural_target_exists = false;
       double min_rr = MathMax(0.0, _FamilyMinRR(p));
+
+      TargetRankCandidate ranked[];
+      ArrayResize(ranked, 0);
 
       for(int i=0; i<ArraySize(targets); i++){
          double candidate_target = targets[i].price;
          if(!_IsRewardSideLevel(p.is_buy, p.entry_est, candidate_target)) continue;
+         structural_target_exists = true;
 
          string obstacle_kind = "";
          double obstacle_price = 0.0;
          double effective_target = candidate_target;
-         _NearestObstacleBeforeTarget(p, p.entry_est, candidate_target, obstacles,
-                                      obstacle_kind, obstacle_price, effective_target);
+         bool truncated = _NearestObstacleBeforeTarget(p, p.entry_est, candidate_target, obstacles,
+                                                       obstacle_kind, obstacle_price, effective_target);
 
          double reward = _RewardToTarget(p.is_buy, p.entry_est, effective_target);
          if(reward <= 0) continue;
          saw_valid_target = true;
-         if(min_target_dist > 0 && reward < min_target_dist){
-            saw_too_near = true;
-            if(targets[i].priority <= 1) saw_liquidity_too_near = true;
-            continue;
-         }
-         double rr = (stop_dist > 0 ? reward / stop_dist : 0.0);
-         if(!_RRMeetsFloor(rr, min_rr)){
-            saw_too_near = true;
-            if(targets[i].priority <= 1) saw_liquidity_too_near = true;
-            continue;
-         }
 
-         p.tp2 = effective_target;
-         p.tp_model = targets[i].kind;
-         p.target_source = targets[i].kind;
-         p.target_model = targets[i].kind;
-         p.obstacle_kind = obstacle_kind;
-         p.obstacle_price = obstacle_price;
-         p.obstacle_r = rr;
-         p.effective_rr2 = rr;
-         if(InpRejectAgainstHtfImbalance && obstacle_kind == "htf_opposing_imbalance" && rr < InpObstacleMinStopMult){
-            reason = "liquidity_target_too_near";
-            return false;
+         double rr = (stop_dist > 0 ? reward / stop_dist : 0.0);
+         double obstacle_r = ((obstacle_price > 0.0 && stop_dist > 0)
+                              ? MathAbs(obstacle_price - p.entry_est) / stop_dist : 0.0);
+         double severity = (StringLen(obstacle_kind) > 0 ? _ObstacleSeverity(obstacle_kind, obstacle_r) : 0.0);
+         bool ok_dist = (min_target_dist <= 0 || reward >= min_target_dist);
+         bool ok_rr = _RRMeetsFloor(rr, min_rr);
+
+         string reject = "";
+         if(!ok_dist || !ok_rr){
+            saw_too_near = true;
+            if(targets[i].priority <= 1) saw_liquidity_too_near = true;
+            if(truncated){
+               saw_truncated_by_obstacle = true;
+               reject = "truncated_by_obstacle_below_floor";
+            } else {
+               reject = (ok_dist ? "below_rr_floor" : "below_min_target_distance");
+            }
          }
-         _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
-         return true;
+         if(InpRejectAgainstHtfImbalance && obstacle_kind == "htf_opposing_imbalance" &&
+            rr < InpObstacleMinStopMult)
+            reject = "htf_opposing_imbalance_too_near";
+
+         // The clamped route stops in front of the obstacle, so it never crosses.
+         _RankAddTarget(ranked, (truncated ? "capped_before_" + obstacle_kind : targets[i].kind),
+                        effective_target, 0.0, 0.0, true, rr, false, severity, obstacle_kind, obstacle_price,
+                        ok_rr, ok_dist, truncated, reject);
+
+         // PLAN A step 4 / PLAN B step 2: when the obstacle is the only reason the
+         // structural objective failed, offer partial-then-liquidity as a first-class
+         // route rather than dropping to a synthetic that ignores that same obstacle.
+         if(truncated){
+            double full_reward = _RewardToTarget(p.is_buy, p.entry_est, candidate_target);
+            double full_rr = (stop_dist > 0 ? full_reward / stop_dist : 0.0);
+            if(full_reward > 0.0){
+               bool p_ok_rr = _RRMeetsFloor(full_rr, min_rr);
+               bool p_ok_dist = (min_target_dist <= 0 || full_reward >= min_target_dist);
+               // Both flags above describe the RUNNER.  The first leg -- the whole point
+               // of this route -- has its own economics and must clear the same minimum
+               // TP1 reward the execution layer enforces, otherwise the route is asking
+               // for a partial nobody can place.  A 0.0108R leg used to pass a gate
+               // literally named after it because only the 45.67R runner was measured.
+               double partial_reward = _RewardToTarget(p.is_buy, p.entry_est, effective_target);
+               double partial_rr = (stop_dist > 0 ? partial_reward / stop_dist : 0.0);
+               bool p_ok_leg = (partial_reward > 0.0 && partial_reward >= p.min_tp1_reward &&
+                                partial_reward < full_reward);
+               // A newly promoted route must obey the same distance ceiling every other
+               // route obeys; otherwise partial-then-liquidity becomes a way to smuggle
+               // a target past InpMaxTargetAdrFrac / InpMaxTargetAtrMult.
+               string p_reject = "";
+               if(max_target_dist > 0.0 && full_reward > max_target_dist)
+                  p_reject = "partial_runner_exceeds_max_target_distance";
+               else if(!p_ok_leg)
+                  p_reject = "partial_leg_below_tp1_floor";
+               else if(!p_ok_rr || !p_ok_dist)
+                  p_reject = "partial_runner_below_floor";
+               if(!p_ok_leg && _JournalDetailEnabled(2))
+                  _Journal("[partial_leg_gate] symbol=" + p.symbol
+                           + " entry=" + _FmtPrice(p.symbol, p.entry_est)
+                           + " partial_tp=" + _FmtPrice(p.symbol, effective_target)
+                           + " partial_reward=" + _FmtPrice(p.symbol, partial_reward)
+                           + " partial_rr=" + DoubleToString(partial_rr, 4)
+                           + " min_tp1_reward=" + _FmtPrice(p.symbol, p.min_tp1_reward)
+                           + " runner_tp=" + _FmtPrice(p.symbol, candidate_target)
+                           + " runner_rr=" + DoubleToString(full_rr, 4)
+                           + " obstacle=" + obstacle_kind
+                           + " severity=" + DoubleToString(severity, 2)
+                           + " action=route_ineligible");
+               _RankAddTarget(ranked, "partial_before_obstacle_then_liquidity", candidate_target,
+                              effective_target, partial_rr, p_ok_leg, full_rr, true, severity,
+                              obstacle_kind, obstacle_price,
+                              p_ok_rr, p_ok_dist, true, p_reject);
+
+               // The obstacle must bind the same way for EVERY route.  The synthetic
+               // fallback below is measured straight through this obstacle and therefore
+               // clears the RR floor, while this structural target is only ever scored on
+               // its clamped reward and discarded.  That asymmetry is what made
+               // "cross it for 1.05R" beat "cross it for 4.75R" and produced
+               // ai_veto_target_arbitration_incoherent: "the feasible liquidity target was
+               // not selected".  Offer the same target taken in full, explicitly marked as
+               // crossing, so the two are comparable when no clean route survives.
+               // It is a crossing route, so _TargetRankBetter still ranks it below every
+               // non-crossing option and the clean-route path is untouched.
+               string through_reject = "";
+               if(max_target_dist > 0.0 && full_reward > max_target_dist)
+                  through_reject = "through_obstacle_exceeds_max_target_distance";
+               else if(!p_ok_rr || !p_ok_dist)
+                  through_reject = "through_obstacle_below_floor";
+               _RankAddTarget(ranked, targets[i].kind, candidate_target,
+                              0.0, 0.0, true, full_rr, true, severity,
+                              obstacle_kind, obstacle_price,
+                              p_ok_rr, p_ok_dist, false, through_reject);
+            }
+         }
       }
 
       double swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
@@ -8278,39 +9932,66 @@ private:
             double reward = _RewardToTarget(p.is_buy, p.entry_est, effective_target);
             if(reward > 0){
                saw_valid_target = true;
-               if(min_target_dist > 0 && reward < min_target_dist){
-                  saw_too_near = true;
-               } else {
-                  p.tp2 = effective_target;
-                  p.tp_model = "fib_extension";
-                  p.target_source = "fib_extension";
-                  p.target_model = "fib_extension";
-                  p.obstacle_kind = obstacle_kind;
-                  p.obstacle_price = obstacle_price;
-                  p.obstacle_r = (stop_dist > 0 ? reward / stop_dist : 0.0);
-                  p.effective_rr2 = p.obstacle_r;
-                  if(_RRMeetsFloor(p.effective_rr2, min_rr)){
-                     _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
-                     return true;
-                  }
-               }
+               structural_target_exists = true;
+               double fib_rr = (stop_dist > 0 ? reward / stop_dist : 0.0);
+               double fib_obstacle_r = ((obstacle_price > 0.0 && stop_dist > 0)
+                                        ? MathAbs(obstacle_price - p.entry_est) / stop_dist : 0.0);
+               double fib_severity = (StringLen(obstacle_kind) > 0
+                                      ? _ObstacleSeverity(obstacle_kind, fib_obstacle_r) : 0.0);
+               bool fib_ok_dist = (min_target_dist <= 0 || reward >= min_target_dist);
+               bool fib_ok_rr = _RRMeetsFloor(fib_rr, min_rr);
+               if(!fib_ok_dist || !fib_ok_rr) saw_too_near = true;
+               _RankAddTarget(ranked, "fib_extension", effective_target, 0.0, 0.0, true, fib_rr, false,
+                              fib_severity, obstacle_kind, obstacle_price,
+                              fib_ok_rr, fib_ok_dist, false,
+                              ((fib_ok_rr && fib_ok_dist) ? "" : "below_rr_floor"));
             }
          }
       }
 
+      // The synthetic fallback is the safety net that every LATER stage re-reads:
+      // _ApplyFeasibleTargetSanitizer, the AI target-arbitration payload and the live
+      // plan rebuild all consult p.fallback_tp.  Plan A only requires that a crossing
+      // synthetic never OUTRANK a clean structural route -- not that it go uncomputed.
+      // Publishing it here, before the structural early return, keeps both guarantees:
+      // the structural route still wins selection, and the net still exists downstream.
+      // (Leaving it unset made the sanitizer report fallback_reason=missing_tp with
+      //  reward == entry price, surfacing as no_feasible_target.)
       double fallback_rr = MathMax(_EffectiveFallbackRR(), min_rr);
       if(InpMaxPlanRR2 > 0) fallback_rr = MathMin(fallback_rr, InpMaxPlanRR2);
-      _Journal("[fallback_target] configured_fallback_rr=" + DoubleToString(InpFallbackRR2, 6)
+      _JournalDetail(2, "[fallback_target] configured_fallback_rr=" + DoubleToString(InpFallbackRR2, 6)
                + " min_live_rr=" + DoubleToString(InpMinLiveRR2, 6)
                + " buffer=" + DoubleToString(InpFallbackRRBufferR, 6)
                + " effective_fallback_rr=" + DoubleToString(fallback_rr, 6));
       double synthetic_reward = stop_dist * fallback_rr;
-      if(InpAllowSyntheticRRTarget && synthetic_reward > 0 && (saw_valid_target || saw_too_near)){
-         double synthetic_target = (p.is_buy ? p.entry_est + synthetic_reward : p.entry_est - synthetic_reward);
+      double synthetic_target = 0.0;
+      bool synthetic_available = (InpAllowSyntheticRRTarget && synthetic_reward > 0
+                                  && (saw_valid_target || saw_too_near));
+      if(synthetic_available){
+         synthetic_target = (p.is_buy ? p.entry_est + synthetic_reward : p.entry_est - synthetic_reward);
          p.fallback_tp = synthetic_target;
          p.fallback_rr = fallback_rr;
          p.fallback_source = "synthetic_rr_fallback";
          _RefreshTargetFeasibility(p, "pre_ai");
+      }
+
+      // PLAN A step 3 / PLAN B step 5: a structural route that merely got clamped is
+      // still a real route.  Take the best ranked one now, so a crossing fallback can
+      // never outrank a clean target -- the fallback published above stays a fallback.
+      int structural_best = _PickBestRankedTarget(ranked);
+      if(structural_best >= 0 && !_TargetRankCrossesMajor(ranked[structural_best])){
+         _LogTargetRank(p, ranked, structural_best);
+         _Journal("[rr_floor_decision] symbol=" + p.symbol
+                  + " chosen=" + ranked[structural_best].kind
+                  + " rr=" + DoubleToString(ranked[structural_best].rr, 4)
+                  + " floor=" + DoubleToString(min_rr, 4)
+                  + " truncated=" + (ranked[structural_best].truncated_by_obstacle ? "true" : "false")
+                  + " fallback_tp=" + _FmtPrice(p.symbol, p.fallback_tp)
+                  + " binding_constraint=structural_target_selected");
+         return _ApplyRankedTarget(p, ranked[structural_best], stop_dist);
+      }
+
+      if(synthetic_available){
          string obstacle_kind = "";
          double obstacle_price = 0.0;
          bool obstacle_before = _HasOpposingObstacleBeforeTarget(p, p.entry_est, synthetic_target, obstacles,
@@ -8324,12 +10005,11 @@ private:
                p.capped_before_obstacle_tp = capped_target;
                p.capped_before_obstacle_rr = capped_rr;
                p.capped_before_obstacle_source = "capped_before_" + obstacle_kind;
-               p.obstacle_distance_r = (stop_dist > 0 ? MathAbs(obstacle_price - p.entry_est) / stop_dist : 0.0);
             }
-            p.obstacle_kind = _CrossedObstacleKind(obstacle_kind);
-            p.obstacle_price = obstacle_price;
+            // This branch used to set the kind but never the severity, which is exactly
+            // the case that shipped obstacle_strength_features empty to the model.
+            _PublishObstacleEvidence(p, obstacle_kind, obstacle_price, stop_dist, true);
             p.obstacle_r = p.obstacle_distance_r;
-            p.obstacle_tf = (StringFind(obstacle_kind, "htf") >= 0 ? "htf" : "entry_tf");
             _RefreshTargetFeasibility(p, "pre_ai_obstacle");
             if(capped_reward > 0 &&
                (min_target_dist <= 0 || capped_reward >= min_target_dist) &&
@@ -8347,6 +10027,106 @@ private:
             if(_SyntheticTargetBlockedByObstacle(obstacle_kind) && !_CanAskAiForTargetArbitration(p)){
                reason = "synthetic_fallback_crossed_obstacle_blocked";
                return false;
+            }
+            // PLAN B step 3: the floor must bind the same way for every route.  A
+            // synthetic that crosses the obstacle only "clears" min_rr by measuring
+            // reward *through* it; measured to the obstacle -- the only distance it can
+            // actually bank before meeting opposing flow -- it does not clear at all.
+            // PLAN A step 3: never let that route become tp2 while a clean route exists.
+            //
+            // The condition must be "a clean route is ELIGIBLE", not "a route was seen".
+            // `saw_valid_target` only records that some target was evaluated; gating on it
+            // sent plans with zero eligible routes into this branch, where
+            // _PickBestRankedTarget returned -1 and the plan was killed as
+            // synthetic_fallback_crossed_obstacle_blocked -- a reason asserting that a
+            // clean route existed when none did.  With no clean route the synthetic is
+            // the only remaining option, so fall through to the normal capped/max-distance
+            // handling below instead of rejecting.
+            if(_RankedListHasCleanRoute(ranked)){
+               p.why_not_synthetic_fallback =
+                  "Crosses " + obstacle_kind + " at " + DoubleToString(p.obstacle_distance_r, 2)
+                  + "R; a non-crossing structural route was available.";
+               _Journal("[rr_floor_decision] symbol=" + p.symbol
+                        + " rejected=synthetic_rr_fallback"
+                        + " raw_rr=" + DoubleToString(fallback_rr, 4)
+                        + " truncated_rr=" + DoubleToString(capped_rr, 4)
+                        + " floor=" + DoubleToString(min_rr, 4)
+                        + " binding_constraint=crosses_obstacle_clean_route_exists");
+               int clean_best = _PickBestRankedTarget(ranked);
+               _LogTargetRank(p, ranked, clean_best);
+               // _RankedListHasCleanRoute and _PickBestRankedTarget share _TargetRankEligible,
+               // so this is always >= 0 here; the guard stays defensive rather than fatal.
+               if(clean_best >= 0) return _ApplyRankedTarget(p, ranked[clean_best], stop_dist);
+            }
+
+            // No clean route survives, so the only remaining options all pass through this
+            // obstacle.  Two questions follow, in this order.
+            double synthetic_severity = _ObstacleSeverity(obstacle_kind, p.obstacle_distance_r);
+
+            // 1. Is crossing acceptable at all?  A killer-severity obstacle immediately in
+            //    front of entry is not a target-selection problem, it is a "do not trade"
+            //    signal.  Shipping the synthetic anyway produced
+            //    ai_veto_target_arbitration_incoherent every time; reject it here, with a
+            //    reason that names the real constraint, instead of paying for that veto.
+            //    Judged on the synthetic's own obstacle -- the one it would actually cross.
+            if(synthetic_severity >= InpBlockerKillSeverity){
+               // _ObstacleSeverity adds a flat +1.5 for ANY obstacle inside
+               // InpObstacleRejectR, so a level 0.0003R from entry scores exactly the
+               // same 8.50 as one at 0.69R.  Below InpObstacleMinStopMult the level is
+               // not a route blocker at all -- it sits inside the entry's own structure,
+               // and _DeterministicExecutionGate already refuses the whole plan for it
+               // as obstacle_too_close.  Both paths reject, so behaviour is unchanged;
+               // only the published reason differed, and this one runs first, which
+               // filed 80% of this bucket under a name asserting a route comparison
+               // that was never the binding constraint.  Name the real constraint.
+               bool degenerate_obstacle = (p.obstacle_distance_r > 0.0 &&
+                                           p.obstacle_distance_r < InpObstacleMinStopMult);
+               p.why_not_synthetic_fallback = (degenerate_obstacle
+                  ? "Nearest " + obstacle_kind + " sits " + DoubleToString(p.obstacle_distance_r, 4)
+                    + "R from entry, inside InpObstacleMinStopMult ("
+                    + DoubleToString(InpObstacleMinStopMult, 2)
+                    + "R): the entry has no room in front of it, so no target route exists."
+                  : "Crosses " + obstacle_kind + " at " + DoubleToString(p.obstacle_distance_r, 2)
+                    + "R with severity " + DoubleToString(synthetic_severity, 2)
+                    + "; no route reaches a target without crossing a killer obstacle.");
+               _Journal("[obstacle_crossing_gate] symbol=" + p.symbol
+                        + " obstacle=" + obstacle_kind
+                        + " obstacle_distance_r=" + DoubleToString(p.obstacle_distance_r, 4)
+                        + " severity=" + DoubleToString(synthetic_severity, 2)
+                        + " class=" + _ObstacleSeverityClass(synthetic_severity)
+                        + " kill_threshold=" + DoubleToString(InpBlockerKillSeverity, 2)
+                        + " min_stop_mult=" + DoubleToString(InpObstacleMinStopMult, 4)
+                        + " degenerate=" + (degenerate_obstacle ? "true" : "false")
+                        + " synthetic_rr=" + DoubleToString(fallback_rr, 4)
+                        + " action=" + (degenerate_obstacle
+                                        ? "reject_obstacle_inside_entry_structure"
+                                        : "reject_no_route_without_killer_crossing"));
+               _LogTargetRank(p, ranked, -1);
+               reason = (degenerate_obstacle ? "obstacle_inside_entry_structure"
+                                             : "all_routes_cross_killer_obstacle");
+               return false;
+            }
+
+            // 2. Crossing is permitted, so it is now purely a question of which crossing
+            //    route pays more.  The synthetic was the only route allowed to measure its
+            //    reward THROUGH the obstacle; the structural route through the same
+            //    obstacle is now ranked on the same basis, so prefer whichever is larger.
+            int crossing_best = _PickBestCrossingRoute(ranked);
+            if(crossing_best >= 0 && ranked[crossing_best].rr > fallback_rr + _RREps()){
+               p.why_not_synthetic_fallback =
+                  "A structural route through the same " + obstacle_kind + " pays "
+                  + DoubleToString(ranked[crossing_best].rr, 2) + "R versus "
+                  + DoubleToString(fallback_rr, 2) + "R for the synthetic.";
+               _Journal("[obstacle_crossing_gate] symbol=" + p.symbol
+                        + " obstacle=" + obstacle_kind
+                        + " severity=" + DoubleToString(synthetic_severity, 2)
+                        + " class=" + _ObstacleSeverityClass(synthetic_severity)
+                        + " chosen=" + ranked[crossing_best].kind
+                        + " structural_rr=" + DoubleToString(ranked[crossing_best].rr, 4)
+                        + " synthetic_rr=" + DoubleToString(fallback_rr, 4)
+                        + " action=prefer_structural_through_same_obstacle");
+               _LogTargetRank(p, ranked, crossing_best);
+               return _ApplyRankedTarget(p, ranked[crossing_best], stop_dist);
             }
          }
          double reward = _RewardToTarget(p.is_buy, p.entry_est, synthetic_target);
@@ -8379,6 +10159,19 @@ private:
             p.effective_rr2 = (stop_dist > 0 ? reward / stop_dist : 0.0);
             if(_RRMeetsFloor(p.effective_rr2, min_rr) &&
                (min_target_dist <= 0 || reward >= min_target_dist)){
+               // PLAN B step 5: the synthetic is now reachable only when no structural
+               // route survived.  Record which of the two it was so every remaining
+               // synthetic in the journal carries its own justification.
+               _Journal("[rr_floor_decision] symbol=" + p.symbol
+                        + " chosen=synthetic_rr_fallback"
+                        + " rr=" + DoubleToString(p.effective_rr2, 4)
+                        + " floor=" + DoubleToString(min_rr, 4)
+                        + " structural_routes_seen=" + (saw_valid_target ? "true" : "false")
+                        + " truncated_by_obstacle=" + (saw_truncated_by_obstacle ? "true" : "false")
+                        + " binding_constraint="
+                        + (saw_valid_target ? "structural_routes_below_floor"
+                                            : "no_structural_target_existed"));
+               _LogTargetRank(p, ranked, -1);
                _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
                return true;
             }
@@ -8387,7 +10180,19 @@ private:
          }
       }
 
-      if(saw_liquidity_too_near) reason = "liquidity_target_too_near";
+      // Last resort: a route that is merely below the floor still beats no plan at all
+      // only when it does not cross a major obstacle.  Anything crossing stays rejected.
+      int fallback_best = _PickBestRankedTarget(ranked);
+      if(fallback_best >= 0 && !_TargetRankCrossesMajor(ranked[fallback_best])){
+         _LogTargetRank(p, ranked, fallback_best);
+         return _ApplyRankedTarget(p, ranked[fallback_best], stop_dist);
+      }
+      _LogTargetRank(p, ranked, -1);
+
+      // PLAN B step 1: report truncation distinctly so the funnel can tell a target that
+      // was blocked by structure from one that was simply too close to be worth taking.
+      if(saw_truncated_by_obstacle) reason = "liquidity_target_truncated_by_obstacle";
+      else if(saw_liquidity_too_near) reason = "liquidity_target_too_near";
       else if(saw_too_near) reason = "target_too_close_for_swing_duration";
       else reason = "liquidity_target_too_near";
       return false;
@@ -8470,6 +10275,22 @@ private:
       return (p.is_buy ? px >= target_price - eps : px <= target_price + eps);
    }
 
+   bool _TargetCrossesKnownMajorObstacle(const TradePlan &p, const double target_price) {
+      if(target_price <= 0.0 || p.entry_est <= 0.0 || p.obstacle_price <= 0.0 ||
+         StringLen(p.obstacle_kind) == 0)
+         return false;
+      if(!_IsRewardSideLevel(p.is_buy, p.entry_est, p.obstacle_price) ||
+         !_IsRewardSideLevel(p.is_buy, p.entry_est, target_price))
+         return false;
+      double obstacle_reward = _RewardToTarget(p.is_buy, p.entry_est, p.obstacle_price);
+      double target_reward = _RewardToTarget(p.is_buy, p.entry_est, target_price);
+      if(obstacle_reward <= 0.0 || target_reward <= obstacle_reward + _RREps())
+         return false;
+      double risk = MathAbs(p.entry_est - p.sl);
+      double obstacle_r = (risk > 0.0 ? obstacle_reward / risk : p.obstacle_distance_r);
+      return (_ObstacleSeverity(p.obstacle_kind, obstacle_r) >= InpBlockerMajorSeverity);
+   }
+
    void _RefreshTargetFeasibility(TradePlan &p, const string stage) {
       double risk = MathAbs(p.entry_est - p.sl);
       double min_rr = MathMax(0.0, InpMinLiveRR2);
@@ -8506,11 +10327,15 @@ private:
          double capped_rr = max_dist / risk;
          double capped_tp = _TpFromReward(p, max_dist);
          if(capped_tp > 0.0 && _RRMeetsFloor(capped_rr, min_rr) && !_PriceAlreadyReachedTarget(p, capped_tp, risk)){
-            p.synthetic_capped_to_max_distance_tp = capped_tp;
-            p.synthetic_capped_to_max_distance_rr = capped_rr;
-            p.synthetic_capped_to_max_distance_feasible = true;
-            p.synthetic_capped_to_max_distance_reason = "fallback_capped_by_max_distance";
-            m_total_target_feasibility_synthetic_capped_to_max_distance++;
+            if(_TargetCrossesKnownMajorObstacle(p, capped_tp)){
+               p.synthetic_capped_to_max_distance_reason = "crosses_known_major_obstacle";
+            } else {
+               p.synthetic_capped_to_max_distance_tp = capped_tp;
+               p.synthetic_capped_to_max_distance_rr = capped_rr;
+               p.synthetic_capped_to_max_distance_feasible = true;
+               p.synthetic_capped_to_max_distance_reason = "fallback_capped_by_max_distance";
+               m_total_target_feasibility_synthetic_capped_to_max_distance++;
+            }
          }
          m_total_target_feasibility_synthetic_infeasible_max_distance++;
       }
@@ -8518,7 +10343,8 @@ private:
       if(StringLen(p.fallback_infeasible_reason) == 0 && !p.fallback_feasible_for_tp2)
          p.fallback_infeasible_reason = "unknown";
 
-      if(StringLen(p.fallback_infeasible_reason) > 0 || p.fallback_tp > 0.0){
+      if(_JournalDetailEnabled(2) &&
+         (StringLen(p.fallback_infeasible_reason) > 0 || p.fallback_tp > 0.0)){
          _Journal("[target_feasibility] stage=" + stage
                   + " model=synthetic_rr_fallback"
                   + " configured_rr=" + DoubleToString(InpFallbackRR2, 2)
@@ -8530,6 +10356,7 @@ private:
                   + " target_reached=" + (target_reached ? "true" : "false")
                   + " direction_valid=" + (direction_valid ? "true" : "false"));
       }
+      if(!_JournalDetailEnabled(2)) return;
       if(p.synthetic_capped_to_max_distance_feasible){
          _Journal("[target_feasibility] stage=" + stage
                   + " model=synthetic_rr_capped_to_max_distance"
@@ -8537,6 +10364,12 @@ private:
                   + " rr=" + DoubleToString(p.synthetic_capped_to_max_distance_rr, 4)
                   + " feasible=true"
                   + " reason=fallback_capped_by_max_distance");
+      } else if(p.synthetic_capped_to_max_distance_reason == "crosses_known_major_obstacle"){
+         _Journal("[target_feasibility] stage=" + stage
+                  + " model=synthetic_rr_capped_to_max_distance"
+                  + " feasible=false reason=crosses_known_major_obstacle"
+                  + " obstacle_kind=" + p.obstacle_kind
+                  + " obstacle_price=" + _FmtPrice(p.symbol, p.obstacle_price));
       }
    }
 
@@ -8567,10 +10400,10 @@ private:
    }
 
    double _PlanTickSize(const string symbol) const {
-      double tick = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
-      if(tick <= 0.0) tick = SymbolInfoDouble(symbol, SYMBOL_POINT);
-      if(tick <= 0.0) tick = 0.00001;
-      return tick;
+      // One definition, shared with AIGateBridge so the payload measures the
+      // same ticks the sanitizer does.  See PlanTickSize in
+      // ExecutionAdjustmentContract.mqh.
+      return PlanTickSize(symbol);
    }
 
    //+---------------------------------------------------------------+
@@ -8638,21 +10471,27 @@ private:
       out.reward_ticks          = PriceDistanceToTicks(out.reward, tick);
       out.max_allowed_ticks     = PriceDistanceToTicks(out.max_allowed_distance, tick);
 
-      out.max_distance_pass = (out.max_allowed_distance <= 0.0 ||
-                               TicksWithinCap(out.reward_ticks, out.max_allowed_ticks));
+      // All three gates are measured before any of them decides the reason.
+      // They used to short-circuit, which left the unreached flags at their
+      // Reset() default of false -- so the EURCHF rejection printed
+      // "rr=5.72928 min_rr=0.90000 rr_floor_pass=false" and read as three
+      // simultaneous failures when exactly one check had been run.  A
+      // diagnostic that names checks it never performed is how a correct
+      // decision becomes undiagnosable.
+      out.max_distance_pass = RewardWithinMaxDistance(out.reward, out.max_allowed_distance, tick);
+      out.min_distance_pass = (out.min_required_distance <= 0.0 ||
+                               out.reward_ticks >= PriceDistanceToTicks(out.min_required_distance, tick));
+      out.rr_floor_pass     = (!require_min_rr || _RRMeetsFloor(out.rr, out.min_required_rr));
+
+      // Precedence is unchanged: max distance, then min distance, then RR floor.
       if(!out.max_distance_pass){
          out.reason = "ai_chosen_target_exceeds_max_distance";
          return;
       }
-
-      out.min_distance_pass = (out.min_required_distance <= 0.0 ||
-                               out.reward_ticks >= PriceDistanceToTicks(out.min_required_distance, tick));
       if(!out.min_distance_pass){
          out.reason = "target_too_close_for_swing_duration";
          return;
       }
-
-      out.rr_floor_pass = (!require_min_rr || _RRMeetsFloor(out.rr, out.min_required_rr));
       if(!out.rr_floor_pass){
          out.reason = "rr_below_live_floor";
          return;
@@ -8744,6 +10583,9 @@ private:
          _TargetPriceFeasibleForTp(p, p.liquidity_target_preserved, true)){
          p.tp1 = p.capped_before_obstacle_tp;
          p.tp2 = p.liquidity_target_preserved;
+         // This substitution exists precisely to bank a leg in front of the obstacle,
+         // so the leg is the route's, not the generic builder's.
+         p.tp1_from_target_model = true;
          p.target_source = "ai_selected_partial_then_liquidity";
          p.target_model = "partial_before_obstacle_then_liquidity";
          p.tp_model = "partial_then_liquidity";
@@ -8918,7 +10760,20 @@ private:
          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       }
       if(stop_dist > p.entry_est * InpStopMaxFracOfPrice){
-         reject_reason = "structural_stop_invalid";
+         // The stop here is structurally *valid* -- it is simply wider than the
+         // configured fraction-of-price risk cap.  Reporting it as
+         // "structural_stop_invalid" merged this risk-cap rejection into the
+         // genuine geometry failures above and made the single largest bucket in
+         // the funnel impossible to diagnose.  Name the real constraint, and log
+         // the numbers needed to judge whether the cap or the universe is wrong.
+         reject_reason = "stop_distance_exceeds_max_frac_of_price";
+         _Journal("[stop_distance_cap] symbol=" + p.symbol
+                  + " entry=" + _FmtPrice(p.symbol, p.entry_est)
+                  + " sl=" + _FmtPrice(p.symbol, p.sl)
+                  + " stop_dist=" + _FmtPrice(p.symbol, stop_dist)
+                  + " stop_frac_of_price=" + DoubleToString(stop_dist / p.entry_est, 6)
+                  + " max_frac_of_price=" + DoubleToString(InpStopMaxFracOfPrice, 6)
+                  + " stop_model=" + _StopModelName());
          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       }
 
@@ -8943,6 +10798,11 @@ private:
          string contract_failure = "";
          if(!_ApplyAssessedTargetUnderContract(p, contract, contract_reason, contract_failure)){
             p.execution_failure_class = contract_failure;
+            // This runs on the live COPY inside _PlaceMarket, so the line above is
+            // discarded with that copy.  Publish the detector's verdict for the
+            // current attempt as well, or _ClassifyExecutionFailure falls back to
+            // matching the reason string and can only approximate it.
+            m_last_execution_failure_class = contract_failure;
             reject_reason = contract_reason;
             return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
          }
@@ -9006,24 +10866,82 @@ private:
          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       }
 
-      double tp1_reward = stop_dist * MathMax(0.40, p.tp1_r_multiple);
-      if(InpTP1UseFibExtension){
-         double tp1_swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
-         if(tp1_swing_range > 0.0 && InpTP1FibExtension > 1.0){
-            double fib_tp1 = (p.is_buy
-                              ? p.po3.swing_high + tp1_swing_range * (InpTP1FibExtension - 1.0)
-                              : p.po3.swing_low - tp1_swing_range * (InpTP1FibExtension - 1.0));
-            double fib_tp1_reward = _RewardToTarget(p.is_buy, p.entry_est, fib_tp1);
-            if(fib_tp1_reward > 0.0 && fib_tp1_reward < tp2_reward)
-               tp1_reward = fib_tp1_reward;
+      double min_tp1_reward = _MinTp1Reward(p, stop_dist);
+      if(p.tp1_from_target_model && p.tp1 > 0.0){
+         // A target model that defines its own first leg is the authority on it.  This
+         // builder used to overwrite that leg unconditionally: for
+         // partial_before_obstacle_then_liquidity the 0.65R floor moved a partial sitting
+         // 0.0108R in front of a major obstacle out to 1.0R -- *past* the obstacle -- so
+         // the shipped plan contradicted both its own tp_model and its own
+         // target_candidates table, and the AI vetoed it as
+         // ai_veto_target_arbitration_incoherent.  Validate the route's leg and fail
+         // closed if it is unusable; never silently relocate it.
+         double route_tp1_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp1);
+         if(route_tp1_reward <= 0.0){
+            reject_reason = "target_model_tp1_wrong_side_of_entry";
+            return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
          }
+         if(route_tp1_reward >= tp2_reward){
+            reject_reason = "target_model_tp1_beyond_target";
+            return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+         }
+         // The two halves of the floor answer different questions, so each is
+         // compared against the quantity it is actually about.  Measuring both
+         // against the drifted live leg is what killed three of the eleven
+         // 2026-09-05 approvals: the geometry floor rose with the widened stop
+         // while the frozen leg's reward fell with the drifted entry, so a plan
+         // needed TP1 at 1.31R at approval to survive its own execution.
+         double geometry_floor      = _MinTp1GeometryReward(p, stop_dist);
+         double geometry_leg_reward = _Tp1GeometryLegReward(p, route_tp1_reward);
+         double spread_floor        = _MinTp1SpreadReward(p);
+         bool geometry_fail = (geometry_floor > 0.0 && geometry_leg_reward < geometry_floor);
+         bool spread_fail   = (spread_floor > 0.0 && route_tp1_reward < spread_floor);
+         if(geometry_fail || spread_fail){
+            reject_reason = "target_model_tp1_below_min_reward";
+            _Journal("[tp1_authority] symbol=" + p.symbol
+                     + " owner=target_model model=" + p.target_model
+                     + " tp1=" + _FmtPrice(p.symbol, p.tp1)
+                     + " tp1_reward=" + _FmtPrice(p.symbol, route_tp1_reward)
+                     + " min_tp1_reward=" + _FmtPrice(p.symbol, min_tp1_reward)
+                     + " geometry_leg_reward=" + _FmtPrice(p.symbol, geometry_leg_reward)
+                     + " geometry_floor=" + _FmtPrice(p.symbol, geometry_floor)
+                     + " spread_floor=" + _FmtPrice(p.symbol, spread_floor)
+                     + " live_stop_dist=" + _FmtPrice(p.symbol, stop_dist)
+                     + " floor_stop_dist=" + _FmtPrice(p.symbol, _Tp1FloorStopDistance(p, stop_dist))
+                     + " floor_basis=" + (p.assessed_plan_locked && p.assessed_stop_distance > 0.0
+                                          ? "assessed_plan" : "live_rebuild")
+                     + " failed_half=" + (geometry_fail ? (spread_fail ? "geometry_and_spread" : "geometry")
+                                                        : "spread")
+                     + " action=reject_fail_closed");
+            return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+         }
+         if(InpVerboseJournal)
+            _Journal("[tp1_authority] symbol=" + p.symbol
+                     + " owner=target_model model=" + p.target_model
+                     + " tp1=" + _FmtPrice(p.symbol, p.tp1)
+                     + " tp1_rr=" + DoubleToString(route_tp1_reward / stop_dist, 4)
+                     + " tp2=" + _FmtPrice(p.symbol, p.tp2)
+                     + " obstacle=" + (StringLen(p.obstacle_kind) > 0 ? p.obstacle_kind : "none")
+                     + " action=preserved");
+      } else {
+         double tp1_reward = stop_dist * MathMax(0.40, p.tp1_r_multiple);
+         if(InpTP1UseFibExtension){
+            double tp1_swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
+            if(tp1_swing_range > 0.0 && InpTP1FibExtension > 1.0){
+               double fib_tp1 = (p.is_buy
+                                 ? p.po3.swing_high + tp1_swing_range * (InpTP1FibExtension - 1.0)
+                                 : p.po3.swing_low - tp1_swing_range * (InpTP1FibExtension - 1.0));
+               double fib_tp1_reward = _RewardToTarget(p.is_buy, p.entry_est, fib_tp1);
+               if(fib_tp1_reward > 0.0 && fib_tp1_reward < tp2_reward)
+                  tp1_reward = fib_tp1_reward;
+            }
+         }
+         if(min_tp1_reward > 0) tp1_reward = MathMax(tp1_reward, min_tp1_reward);
+         if(tp2_reward > 0) tp1_reward = MathMin(tp1_reward, tp2_reward * 0.70);
+         if(tp1_reward <= 0) tp1_reward = MathMin(tp2_reward, stop_dist);
+         if(p.is_buy) p.tp1 = p.entry_est + tp1_reward;
+         else         p.tp1 = p.entry_est - tp1_reward;
       }
-      double min_tp1_reward = MathMax(stop_dist * 0.65, spread_price * InpMinTP1SpreadMult);
-      if(min_tp1_reward > 0) tp1_reward = MathMax(tp1_reward, min_tp1_reward);
-      if(tp2_reward > 0) tp1_reward = MathMin(tp1_reward, tp2_reward * 0.70);
-      if(tp1_reward <= 0) tp1_reward = MathMin(tp2_reward, stop_dist);
-      if(p.is_buy) p.tp1 = p.entry_est + tp1_reward;
-      else         p.tp1 = p.entry_est - tp1_reward;
 
       if(!_StopsDistanceOk(p.symbol, p.is_buy, p.entry_est, p.sl, p.tp2)){
          reject_reason = "broker_distance_invalid";
@@ -9042,6 +10960,8 @@ private:
          reject_reason = ai_target_validation_reason;
          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       }
+      if(!_FinalizeFirstLeg(p, true, reject_reason))
+         return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       _LogBuildPlanAccepted(p, min_target_dist);
 
       return true;
@@ -9158,6 +11078,32 @@ private:
       }
       if(execution_stage && requires_full_po3 && (!p.po3.has_bos || p.po3.t_bos <= p.po3.t_disp) && !tier_b_execution_allowed){
          reason = "structure_not_after_displacement";
+         return false;
+      }
+      // PRE-AI BOS CONTRACT GATE.
+      // The decision contract marks htf_bos_required for full-PO3 families, so a
+      // candidate carrying setup_family=full_po3_* with has_bos=false is a *guaranteed*
+      // provider rejection (observed live as ai_veto_missing_mandatory_evidence on 7 of
+      // 10 decisions).  Sending it burns a paid provider call for a foregone outcome.
+      //
+      // The tier-B waiver above deliberately lets a developing context reach EXECUTION
+      // once something has approved it; it cannot waive the AI's own evidence
+      // requirement, because the AI is the thing doing the approving.  So this check is
+      // intentionally not subject to tier_b_execution_allowed.
+      if(!execution_stage && InpUseAI && requires_full_po3 &&
+         (!p.po3.has_bos || p.po3.t_bos <= p.po3.t_disp)){
+         reason = "full_po3_family_without_confirmed_bos";
+         _Journal("[bos_contract_gate] symbol=" + p.symbol
+                  + " family=" + (StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p))
+                  + " has_bos=" + (p.po3.has_bos ? "true" : "false")
+                  + " htf_bos=" + (p.po3.htf_bos ? "true" : "false")
+                  + " ltf_bos=" + (p.po3.ltf_bos ? "true" : "false")
+                  + " developing_bos=" + (p.po3.developing_bos ? "true" : "false")
+                  + " t_bos=" + IntegerToString((long)p.po3.t_bos)
+                  + " t_disp=" + IntegerToString((long)p.po3.t_disp)
+                  + " context_tier=" + p.po3.context_tier
+                  + " po3_state=" + p.po3.po3_state
+                  + " action=reject_before_provider_call");
          return false;
       }
       if(execution_stage && InpRequireFvgAfterDisp && p.fvg.t_form <= p.po3.t_disp){
@@ -9353,121 +11299,121 @@ private:
    bool _TryBuildCandidateFromBranch(const TradePlan &base, const FVGZone &zone, const string branch,
                                      TradePlan &out_plan, string &reason) {
       reason = "ok";
-      TradePlan p = base;
-      p.fvg = zone;
-      p.entry_branch = branch;
-      p.entry_model = branch;
-      p.setup_taxonomy = UNKNOWN_UNCLASSIFIED;
-      p.setup_taxonomy_version = "";
-      p.setup_taxonomy_enum = "";
-      p.taxonomy_mapping_source = "";
-      p.taxonomy_mapping_failure_reason = "";
-      p.setup_type = "";
-      p.setup_subtype = "";
-      p.setup_story_scope = "";
+      out_plan = base;   // work directly on the caller's plan so every exit publishes
+      out_plan.fvg = zone;
+      out_plan.entry_branch = branch;
+      out_plan.entry_model = branch;
+      out_plan.setup_taxonomy = UNKNOWN_UNCLASSIFIED;
+      out_plan.setup_taxonomy_version = "";
+      out_plan.setup_taxonomy_enum = "";
+      out_plan.taxonomy_mapping_source = "";
+      out_plan.taxonomy_mapping_failure_reason = "";
+      out_plan.setup_type = "";
+      out_plan.setup_subtype = "";
+      out_plan.setup_story_scope = "";
       if(!_BranchEnabledByConfig(branch, reason)) return false;
-      if(InpRequireFvgAfterDisp && p.po3.has_displacement && zone.t_form <= p.po3.t_disp){
+      if(InpRequireFvgAfterDisp && out_plan.po3.has_displacement && zone.t_form <= out_plan.po3.t_disp){
          reason = "fvg_not_after_impulse";
          return false;
       }
-      if(p.po3.has_sweep && p.po3.has_displacement && p.po3.has_bos){
-         PO3SetState(p.po3, PO3_FVG_CONFIRMED, "valid_fvg_after_impulse");
-      } else if(!p.po3.has_bos){
-         if(p.po3.has_displacement)
-            PO3SetState(p.po3, PO3_DISPLACEMENT_CONFIRMED, "missing_structure_confirmation");
-         else if(p.po3.has_sweep)
-            PO3SetState(p.po3, PO3_SWEEP_CONFIRMED, "missing_displacement_confirmation");
+      if(out_plan.po3.has_sweep && out_plan.po3.has_displacement && out_plan.po3.has_bos){
+         PO3SetState(out_plan.po3, PO3_FVG_CONFIRMED, "valid_fvg_after_impulse");
+      } else if(!out_plan.po3.has_bos){
+         if(out_plan.po3.has_displacement)
+            PO3SetState(out_plan.po3, PO3_DISPLACEMENT_CONFIRMED, "missing_structure_confirmation");
+         else if(out_plan.po3.has_sweep)
+            PO3SetState(out_plan.po3, PO3_SWEEP_CONFIRMED, "missing_displacement_confirmation");
          else
-            PO3SetState(p.po3, PO3_DEVELOPING, "missing_po3_sequence");
+            PO3SetState(out_plan.po3, PO3_DEVELOPING, "missing_po3_sequence");
       }
-      if(branch == "fvg_edge") p.entry_model = (p.is_buy ? "fvg_upper" : "fvg_lower");
-      p.fvg_execution_class = _FvgExecutionClass(p);
+      if(branch == "fvg_edge") out_plan.entry_model = (out_plan.is_buy ? "fvg_upper" : "fvg_lower");
+      out_plan.fvg_execution_class = _FvgExecutionClass(out_plan);
       string taxonomy_reason = "";
-      if(!_ResolveSetupTaxonomy(p, taxonomy_reason)){
+      if(!_ResolveSetupTaxonomy(out_plan, taxonomy_reason)){
          reason = "unknown_setup_taxonomy";
-         _LogUnknownSetupTaxonomy(p, "candidate_generation");
+         _LogUnknownSetupTaxonomy(out_plan, "candidate_generation");
          return false;
       }
-      p.setup_family = _DeriveSetupFamily(p);
+      out_plan.setup_family = _DeriveSetupFamily(out_plan);
       string family_reason = "";
-      if(!_FamilyAllowedByStrategy(p, family_reason)){
+      if(!_FamilyAllowedByStrategy(out_plan, family_reason)){
          reason = family_reason;
          return false;
       }
-      if(p.setup_family == "micro_continuation_fvg" && !p.po3.has_displacement){
+      if(out_plan.setup_family == "micro_continuation_fvg" && !out_plan.po3.has_displacement){
          reason = "continuation_no_impulse";
          return false;
       }
-      if(p.setup_family == "micro_continuation_fvg" && p.po3.t_disp > 0 && zone.t_form < p.po3.t_disp){
+      if(out_plan.setup_family == "micro_continuation_fvg" && out_plan.po3.t_disp > 0 && zone.t_form < out_plan.po3.t_disp){
          reason = "continuation_fvg_missing";
          return false;
       }
-      if(p.setup_family == "micro_failed_breakout_reclaim" && p.po3.t_sweep > 0 && zone.t_form <= p.po3.t_sweep){
+      if(out_plan.setup_family == "micro_failed_breakout_reclaim" && out_plan.po3.t_sweep > 0 && zone.t_form <= out_plan.po3.t_sweep){
          reason = "failed_breakout_fvg_missing";
          return false;
       }
-      p.setup_class = _DeriveSetupClass(p);
-      _ApplySetupManagementProfile(p);
-      _InitializeNarrativeFields(p);
+      out_plan.setup_class = _DeriveSetupClass(out_plan);
+      _ApplySetupManagementProfile(out_plan);
+      _InitializeNarrativeFields(out_plan);
       if(InpOnlyBreakerRetestVirginStrongOrigin && InpExclusiveModelFilterBeforeAI){
-         if(!_ApplyExclusiveModelFilter(p, "exclusive_model_filter", true)){
+         if(!_ApplyExclusiveModelFilter(out_plan, "exclusive_model_filter", true)){
             reason = "exclusive_breaker_retest_virgin_strong_origin_only";
             return false;
          }
       }
 
       double entry_price = 0.0;
-      if(!_ResolveBranchEntryPrice(p, branch, entry_price, reason)) return false;
+      if(!_ResolveBranchEntryPrice(out_plan, branch, entry_price, reason)) return false;
       string price_reason = "";
-      if(!_BuildPlanPrices(p, entry_price, price_reason)){
+      if(!_BuildPlanPrices(out_plan, entry_price, price_reason)){
          reason = (StringLen(price_reason) > 0 ? price_reason : "invalid_plan_prices");
          return false;
       }
       m_funnel_plan_prices_valid++;
       m_total_plans_valid++;
-      if(p.po3.state == PO3_FVG_CONFIRMED)
-         PO3SetState(p.po3, PO3_ENTRY_WAITING, "valid_entry_zone_waiting");
-      if(!m_po3.CheckOTE(p)){
+      if(out_plan.po3.state == PO3_FVG_CONFIRMED)
+         PO3SetState(out_plan.po3, PO3_ENTRY_WAITING, "valid_entry_zone_waiting");
+      if(!m_po3.CheckOTE(out_plan)){
          reason = "ote_failed";
          return false;
       }
       string live_reason = "";
-      if(!_WatchlistStillValidEx(p, live_reason)){
+      if(!_WatchlistStillValidEx(out_plan, live_reason)){
          reason = live_reason;
          return false;
       }
 
       _LoadActivePolicyIfNeeded();
-      _PopulateDerivedPlanFields(p);
-      p.setup_score = _SetupScore(p);
+      _PopulateDerivedPlanFields(out_plan);
+      out_plan.setup_score = _SetupScore(out_plan);
       string subtype_reason = "";
-      if(!_ApplySubtypeEvidence(p, subtype_reason)){
+      if(!_ApplySubtypeEvidence(out_plan, subtype_reason)){
          reason = subtype_reason;
          return false;
       }
       string context_reason = "";
-      if(!_ApplyContextPolicy(p, context_reason)){
+      if(!_ApplyContextPolicy(out_plan, context_reason)){
          reason = context_reason;
          return false;
       }
       string session_weekday_reason = "";
-      if(!_ApplySessionWeekdayPolicy(p, session_weekday_reason)){
+      if(!_ApplySessionWeekdayPolicy(out_plan, session_weekday_reason)){
          reason = session_weekday_reason;
          return false;
       }
-      _PopulateDerivedPlanFields(p);
+      _PopulateDerivedPlanFields(out_plan);
       string floor_reason = "";
-      if(!_ApplyPreAiSetupFloor(p, floor_reason)){
+      if(!_ApplyPreAiSetupFloor(out_plan, floor_reason)){
          reason = floor_reason;
          return false;
       }
-      _PopulateDerivedPlanFields(p);
+      _PopulateDerivedPlanFields(out_plan);
       string rule_reason = "";
-      if(!_DeterministicExecutionGate(p, rule_reason, false)){
+      if(!_DeterministicExecutionGate(out_plan, rule_reason, false)){
          reason = rule_reason;
          return false;
       }
-      out_plan = p;
+      // out_plan already holds the finished plan -- see the assignment above.
       return true;
    }
 
@@ -9518,9 +11464,10 @@ private:
    bool _AddToWatchlist(const TradePlan &p) {
       TradePlan staged = p;
       _InitializeNarrativeFields(staged);
+      bool tester_bootstrap = _IsTesterBootstrapPlan(staged);
       bool full_structured = (staged.ai.decision_quality_tier == "FULL_STRUCTURED" || staged.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
-      if(!full_structured || !staged.ai.mandatory_fields_complete || staged.ai.decision_state != "APPROVE" ||
-         !staged.ai.allow || !staged.ai.raw_allow){
+      if(!tester_bootstrap && (!full_structured || !staged.ai.mandatory_fields_complete || staged.ai.decision_state != "APPROVE" ||
+         !staged.ai.allow || !staged.ai.raw_allow)){
          string response_reason = (!full_structured ? "degraded_ai_response_non_trading" : "ai_quality_schema_incomplete");
          if(staged.ai.decision_state == "ABSTAIN") response_reason = "ai_abstain";
          _LogSetupReject(staged.symbol, "decision_integrity", response_reason,
@@ -9650,6 +11597,156 @@ private:
       return true;
    }
 
+   void _PrepareTesterBootstrapApproval(TradePlan &p) {
+      // Canonicalize the deterministic target exactly as the normal approved
+      // target path does before the assessed plan is locked.  Candidate/request
+      // identity remains the immutable pre-decision identity; execution identity
+      // records the selected canonical target.
+      _NormalizeTargetLabels(p);
+      p.ai_chosen_target_model = _EffectiveTargetModel(p);
+      _NormalizeTargetLabels(p);
+
+      AiDecision dec;
+      ZeroMemory(dec);
+      dec.ok = true;
+      // There is deliberately no model/Python authority in bootstrap mode.
+      // The explicit tester-only MQL authority is recorded separately.
+      dec.allow = false;
+      dec.raw_allow = false;
+      dec.model_raw_allow = false;
+      dec.python_final_allow = false;
+      dec.mql_final_allow = false;
+      dec.decision_state = "APPROVE";
+      dec.decision_quality_tier = "BOOTSTRAP_RULE_ONLY";
+      dec.response_quality_alias = "BOOTSTRAP_RULE_ONLY";
+      dec.mandatory_fields_complete = true;
+      dec.decision_schema_version = "20260809_tester_bootstrap_rule_only_v1";
+      dec.provider_contract_version = "tester_bootstrap_rule_only_v1";
+      dec.provider_mode = "TESTER_BOOTSTRAP_RULE_ONLY";
+      dec.provider_id = "mql_deterministic_engine";
+      dec.endpoint_class = "not_applicable";
+      dec.endpoint_identity_hash = "tester_bootstrap_not_applicable";
+      dec.configured_models_hash = "tester_bootstrap_not_applicable";
+      dec.actual_model_id = "tester_bootstrap_rule_only";
+      dec.fallback_model = "not_applicable";
+      dec.model_fingerprint = "tester_bootstrap_rule_only_v1";
+      dec.evidence_envelope_version = "tester_bootstrap_evidence_v1";
+      dec.family_profile_version = "20260809_family_context_v2";
+      dec.memory_schema_version = "tester_bootstrap_memory_seed_v1";
+      dec.retrieval_policy_version = "tester_bootstrap_no_retrieval_v1";
+      dec.role_contract_version = "tester_bootstrap_no_roles_v1";
+      dec.consensus_resolver_version = "tester_bootstrap_deterministic_selection_v1";
+      dec.generation_settings_hash = "tester_bootstrap_not_applicable";
+      dec.input_fingerprint = p.request_execution_fingerprint;
+      dec.historical_evidence_state = "INSUFFICIENT_SAMPLE";
+      dec.final_resolver_reason = "deterministic_tester_bootstrap";
+      dec.provider_health_state = "NOT_APPLICABLE";
+      dec.role_latencies_json = "{}";
+      dec.provider_retry_counts_json = "{}";
+      dec.provider_usage_json = "{}";
+      dec.unsupported_generation_parameters_json = "[]";
+      dec.analyst_output_json = "{}";
+      dec.critic_output_json = "{}";
+      dec.adjudicator_output_json = "{}";
+      dec.chosen_index = p.candidate_index;
+      dec.selected_candidate_id = p.candidate_id;
+      dec.selected_candidate_hash = p.candidate_hash;
+      dec.request_execution_fingerprint = p.request_execution_fingerprint;
+      dec.selected_target_identity = _EffectiveTargetModel(p);
+      dec.selected_target_price = p.tp2;
+      dec.assessed_entry = p.entry_est;
+      dec.assessed_sl = p.sl;
+      dec.assessed_tp1 = p.tp1;
+      dec.assessed_tp2 = p.tp2;
+      dec.rule_score = p.setup_score;
+      dec.suggested_risk_multiplier = MathMax(0.01, MathMin(1.0, InpTesterBootstrapRiskMultiplier));
+      dec.model_version = "tester_bootstrap_rule_only_v1";
+      dec.reasons_json = "tester_only_deterministic_cold_start_seed";
+      dec.decision_source = "bootstrap_rule_only";
+      dec.decision_id = "bootstrap_" + p.candidate_hash;
+      dec.rejection_codes_json = "[]";
+      dec.narrative_state = "bootstrap_staged";
+      dec.invalidation_risks_json = "[]";
+      dec.missing_confirmations_json = "[]";
+      dec.veto_fields_present = true;
+      dec.veto_enabled = false;
+      dec.veto_evidence_fields_json = "[]";
+      dec.llm_numeric_diagnostics_authority = "not_applicable_tester_bootstrap";
+      dec.chosen_target_model = _EffectiveTargetModel(p);
+      dec.chosen_tp1 = p.tp1;
+      dec.chosen_tp2 = p.tp2;
+      dec.chosen_rr2 = _ExecutionRR2(p);
+      dec.target_decision_reason = "deterministic_plan_target";
+      dec.target_arbitration_schema_version = "tester_bootstrap_target_v1";
+      dec.prompt_contract_version = "tester_bootstrap_no_prompt_v1";
+      dec.workload_mode = "TESTER_AI_BOOTSTRAP_RULE_ONLY";
+      dec.reasoning_configuration = "deterministic_rule_only";
+      dec.bucket_prior_hash = "tester_bootstrap_no_prior";
+      dec.calibration_artifact_id = "tester_bootstrap_not_applicable";
+      dec.hierarchical_prior_artifact_hash = "tester_bootstrap_no_prior";
+      dec.hierarchical_prior_schema_version = "tester_bootstrap_no_prior_v1";
+      dec.repeatability_schema_version = "tester_bootstrap_not_applicable_v1";
+      dec.repeatability_status = "NOT_APPLICABLE";
+      dec.repeatability_required_live = false;
+      dec.repeatability_artifact_state = "not_applicable_tester_bootstrap";
+      dec.repeatability_score_threshold_authority = false;
+      dec.repeatability_trading_eligible = false;
+      dec.repeatability_group_key = "tester_bootstrap";
+      dec.repeatability_authority_hash = "tester_bootstrap_not_applicable";
+
+      dec.assessed_execution_fingerprint = _AssessedFingerprintFromDecision(p, dec);
+      p.ai = dec;
+      p.ai_decision_id = dec.decision_id;
+      p.ai_decision_source = dec.decision_source;
+      p.model_raw_allow = false;
+      p.python_final_allow = false;
+      p.mql_final_allow = false;
+      p.decision_field_authority_json = "{\"bootstrap_rule_only\":{\"owner\":\"mql_tester\",\"authority\":\"tester_only\"}}";
+      p.python_decision_reasons = "not_applicable_tester_bootstrap";
+      p.mql_decision_reasons = "pending_final_mql_execution_gates";
+      p.reasoning_configuration = dec.reasoning_configuration;
+      p.prompt_contract_version = dec.prompt_contract_version;
+      p.bucket_prior_hash = "tester_bootstrap_no_prior";
+      p.calibration_artifact_id = dec.calibration_artifact_id;
+      p.repeatability_artifact_id = dec.repeatability_authority_hash;
+      p.hierarchical_prior_artifact_hash = dec.hierarchical_prior_artifact_hash;
+      p.hierarchical_prior_schema_version = dec.hierarchical_prior_schema_version;
+      p.repeatability_status = dec.repeatability_status;
+      p.repeatability_required_live = false;
+      p.repeatability_artifact_state = dec.repeatability_artifact_state;
+      p.repeatability_rejection_code = "";
+      p.repeatability_score_threshold_authority = false;
+      p.repeatability_trading_eligible = false;
+      p.repeatability_group_key = dec.repeatability_group_key;
+      p.repeatability_authority_hash = dec.repeatability_authority_hash;
+      p.ai_selected_candidate_hash = p.candidate_hash;
+      p.candidate_hash_match = true;
+      p.assessed_execution_fingerprint = dec.assessed_execution_fingerprint;
+      _LockAssessedPlan(p, dec);
+      _PopulateCohortMetadata(p);
+   }
+
+   bool _QueueTesterBootstrapCandidate(TradePlan &cands[]) {
+      for(int i=0; i<ArraySize(cands); i++){
+         TradePlan selected = cands[i];
+         string deterministic_reason = "";
+         if(!_DeterministicExecutionGate(selected, deterministic_reason, false)){
+            _LogSetupReject(selected.symbol, "bootstrap_precheck", deterministic_reason,
+                            "candidate=" + IntegerToString(selected.candidate_index));
+            continue;
+         }
+         _PrepareTesterBootstrapApproval(selected);
+         _Journal("[tester_bootstrap] selected=true symbol=" + selected.symbol
+                  + " candidate_id=" + selected.candidate_id
+                  + " candidate_hash=" + selected.candidate_hash
+                  + " risk_multiplier=" + DoubleToString(selected.ai.suggested_risk_multiplier, 4)
+                  + " wall_clock_wait=false live_ai_calls=false");
+         _WriteShadowDecisionUpdate(selected, selected.ai, "bootstrap_rule_only_selected", "", false);
+         if(_AddToWatchlist(selected)) return true;
+      }
+      return false;
+   }
+
    bool _QueueCandidateGroup(TradePlan &cands[]) {
       int count = ArraySize(cands);
       if(count <= 0) return false;
@@ -9692,9 +11789,20 @@ private:
          cands[i].candidate_count = count;
          _PrepareDecisionIdentity(cands[i]);
       }
+      if(_TesterBootstrapMode())
+         return _QueueTesterBootstrapCandidate(cands);
       string group_signature = _GroupSignature(cands);
       string tester_cache_signature = _TesterAiCacheSignature(cands);
       AiDecision cached_decision;
+      // The frozen identity is what keeps this lookup addressing the same cohort
+      // for the whole run.  Report any disagreement between the frozen value and
+      // a fresh computation: it cannot change the key any more, but it is the
+      // only way the condition becomes visible instead of looking like a setup
+      // that simply was not recorded.
+      string identity_drift_detail = "";
+      if(m_ai.CheckIdentityDrift(identity_drift_detail) && m_ai.IdentityDriftEvents() <= 20){
+         _Journal("[decision_identity_drift] symbol=" + cands[0].symbol + " " + identity_drift_detail);
+      }
       if(InpUseAI && _TryLoadTesterAiDecision(tester_cache_signature, cached_decision)){
          if(_QueueTesterCachedDecision(cands, tester_cache_signature, cached_decision)) return true;
          _Journal(cands[0].symbol + " tester AI cache response staging failed; using normal AI path");
@@ -9702,12 +11810,22 @@ private:
       if(InpUseAI && MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY){
          m_total_reject_tester_ai_cache_miss++;
          m_total_ai_cache_misses++;
+         // decision_input_hash is component 4 of the signature and is shared by
+         // every request in a cohort, so printing it beside the cohort value the
+         // artifacts on disk were recorded with distinguishes "this setup was
+         // never recorded" from "this whole run is addressing the wrong cohort".
+         string miss_identity = " decision_input_hash=" + m_ai.DecisionHash()
+                                + " cache_cohort_decision_hash=" + _TesterCacheCohortDecisionHash()
+                                + " cohort_match=" + (_TesterCacheCohortMatches() ? "true" : "false")
+                                + " cache_key=" + _TesterAiCacheKey(tester_cache_signature);
          _LogSetupReject(cands[0].symbol, "ai", "tester_ai_cache_miss",
                          "signature=" + tester_cache_signature
                          + " tester_ai_cache=" + (InpTesterAiCache ? "true" : "false")
-                         + " tester_ai_mode=cache_only");
+                         + " tester_ai_mode=cache_only"
+                         + miss_identity);
          _Journal("[tester_ai_mode] mode=cache_only cache_miss=true live_ai_calls=false action=reject tester_ai_cache_miss"
                   + " symbol=" + cands[0].symbol
+                  + miss_identity
                   + " signature=" + tester_cache_signature);
          return false;
       }
@@ -9732,7 +11850,16 @@ private:
          string req_id;
          string tester_cache_key = _TesterAiCacheKey(tester_cache_signature);
          if(MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_RECORD_ONLY){
+            if(_TesterRecordSignatureSeen(tester_cache_signature)){
+               m_total_record_only_duplicate_signatures_skipped++;
+               _Journal("[tester_ai_mode] mode=record_only duplicate_cache_signature=true"
+                        + " action=skip_duplicate_export"
+                        + " tester_cache_key=" + tester_cache_key
+                        + " tester_cache_signature=" + tester_cache_signature);
+               return false;
+            }
             if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key)){
+               _RememberTesterRecordSignature(tester_cache_signature);
                m_funnel_ai_requests++;
                m_total_ai_requests_queued++;
                m_total_record_only_requests_exported++;
@@ -10318,10 +12445,228 @@ private:
       return m_state.ParseTradePlanJson(txt, p);
    }
 
+   //--- Trade-meta memo -------------------------------------------------------
+   // One entry per bus path, holding the exact text last written to or read from
+   // that path.  Two pure-function memos ride on it:
+   //
+   //   write : serializing the same plan twice yields the same characters, and
+   //           writing the same characters over a file that already holds them is
+   //           a no-op on disk.  Skipping it is invisible to every consumer.
+   //   parse : ParseTradePlanJson() is deterministic, so a parse of bytes we have
+   //           already parsed must produce the same plan.  Returning the stored
+   //           plan is the same value, not a cheaper approximation of it.
+   //
+   // Neither memo may decide anything.  m_tm_parsed is cleared on every real write
+   // so a plan is only ever served from a genuine parse of the bytes now on disk,
+   // and the write path re-checks that the file still exists, so an external delete
+   // is repaired by the next write rather than papered over.
+   string    m_tm_path[];
+   string    m_tm_json[];
+   TradePlan m_tm_plan[];
+   bool      m_tm_parsed[];
+   datetime  m_tm_written_at[];
+   int       m_tm_next;
+   long      m_tm_writes;
+   long      m_tm_writes_skipped_identical;
+   long      m_tm_parses;
+   long      m_tm_parses_skipped_identical;
+   long      m_tm_write_us;
+   long      m_tm_parse_us;
+   long      m_tm_serialize_us;
+   long      m_tm_serializes;
+   long      m_mp_calls;
+   long      m_mp_us;
+   long      m_mp_load_us;
+   long      m_mp_meta_us;
+   long      m_mp_penalty_us;
+   long      m_mp_tail_us;
+   long      m_tm_miss_content;
+   long      m_tm_miss_watermark;
+   long      m_tm_miss_absent;
+   long      m_tm_miss_new_path;
+   int       m_tm_diff_reports;
+
+   int _TradeMetaMemoFind(const string path) {
+      for(int i=0; i<ArraySize(m_tm_path); i++)
+         if(m_tm_path[i] == path) return i;
+      return -1;
+   }
+
+   // Replace a top-level numeric value with 0 in place.  One StringFind and one
+   // splice -- no parse, no allocation per field.
+   void _BlankJsonNumber(string &j, const string key) const {
+      string needle = "\"" + key + "\":";
+      int at = StringFind(j, needle);
+      if(at < 0) return;
+      int start = at + StringLen(needle);
+      int len = (int)StringLen(j);
+      int end = start;
+      while(end < len){
+         ushort c = (ushort)StringGetCharacter(j, end);
+         if((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'){ end++; continue; }
+         break;
+      }
+      if(end <= start) return;
+      j = StringSubstr(j, 0, start) + "0" + StringSubstr(j, end);
+   }
+
+   // The document with the tick watermark blanked.  PenaltyWatcher stamps
+   // latest_observed_tick_time / _msc on EVERY tick and _ApplyPenaltyStateToMeta
+   // copies them into the trade meta, so the serialized document is different on
+   // every simulated second even when nothing about the trade has changed.  Comparing
+   // on the blanked form is what lets the memo coalesce; the watermark still reaches
+   // disk, both on the next material change and on the interval below.
+   string _TradeMetaComparisonKey(const string j) const {
+      string key = j;
+      _BlankJsonNumber(key, "latest_observed_tick_time");
+      _BlankJsonNumber(key, "latest_observed_tick_msc");
+      return key;
+   }
+
+   // The watermark's source of truth is PenaltyState, which _PersistPenaltyStates()
+   // already writes every 15 simulated seconds.  Bounding the trade-meta copy to the
+   // same window keeps the mirror no staler than the field it mirrors, and turns
+   // ~10 alias writes per simulated second into ~10 per interval.
+   bool _TradeMetaWatermarkDue(const int idx) const {
+      if(InpTradeMetaWatermarkSeconds <= 0) return true;
+      datetime now = _NowServerOrLocal();
+      datetime written = m_tm_written_at[idx];
+      if(written <= 0 || now < written) return true;
+      return ((now - written) >= (datetime)InpTradeMetaWatermarkSeconds);
+   }
+
+   // Existing slot, else a fresh one, else the round-robin victim.  Eviction only
+   // costs a rewrite or a reparse; it can never produce a wrong answer.
+   int _TradeMetaMemoSlot(const string path) {
+      int idx = _TradeMetaMemoFind(path);
+      if(idx >= 0) return idx;
+      int size = ArraySize(m_tm_path);
+      if(size < InpTradeMetaMemoEntries){
+         if(ArrayResize(m_tm_path, size+1) != size+1) return -1;
+         ArrayResize(m_tm_json, size+1);
+         ArrayResize(m_tm_plan, size+1);
+         ArrayResize(m_tm_parsed, size+1);
+         ArrayResize(m_tm_written_at, size+1);
+         return size;
+      }
+      if(size <= 0) return -1;
+      int victim = m_tm_next % size;
+      m_tm_next = (victim + 1) % size;
+      return victim;
+   }
+
+   void _TradeMetaMemoStore(const string path, const string comparison_key) {
+      int slot = _TradeMetaMemoSlot(path);
+      if(slot < 0) return;
+      m_tm_path[slot]       = path;
+      m_tm_json[slot]       = comparison_key;
+      m_tm_parsed[slot]     = false;
+      m_tm_written_at[slot] = _NowServerOrLocal();
+   }
+
+   // First character at which two documents differ, or -1 when they are identical.
+   int _FirstDifferenceAt(const string a, const string b) const {
+      int la = (int)StringLen(a);
+      int lb = (int)StringLen(b);
+      int n = (la < lb ? la : lb);
+      for(int i=0; i<n; i++)
+         if(StringGetCharacter(a, i) != StringGetCharacter(b, i)) return i;
+      return (la == lb ? -1 : n);
+   }
+
+   // Why a write could not be skipped.  "The memo stopped working" is not a
+   // diagnosis, and a hit-rate that silently collapses turns a fix into a
+   // regression that nothing reports.  The excerpt names the field that moved,
+   // bounded so a permanently unstable document cannot flood the journal.
+   void _ReportTradeMetaContentMiss(const string path, const string old_key, const string new_key) {
+      m_tm_miss_content++;
+      // Early samples catch the opening transitions, which are legitimate and change
+      // several fields at once; the periodic samples are the ones that show whether the
+      // document is still moving once the position has settled.  Without the second
+      // kind the first five reports are spent on the fill and say nothing about steady
+      // state -- which is exactly how the first attempt at this measurement was wasted.
+      bool due = (m_tm_miss_content <= 5 || (m_tm_miss_content % 997) == 0);
+      if(!due || m_tm_diff_reports >= 30) return;
+      m_tm_diff_reports++;
+      int at = _FirstDifferenceAt(old_key, new_key);
+      int from = (at > 80 ? at - 80 : 0);
+      _Journal("[trade_meta_diff] path=" + path
+               + " first_diff_at=" + IntegerToString(at)
+               + " old_len=" + IntegerToString((int)StringLen(old_key))
+               + " new_len=" + IntegerToString((int)StringLen(new_key))
+               + " old=[" + StringSubstr(old_key, from, 200) + "]"
+               + " new=[" + StringSubstr(new_key, from, 200) + "]");
+   }
+
+   // comparison_key is _TradeMetaComparisonKey(json).  It is computed once by the
+   // caller and handed down because every alias receives the identical document, and
+   // deriving it here rebuilt the same ~76,000 character string ten times per pass for
+   // no possible difference in the answer.
+   void _WriteTradeMetaFile(const string path, const string json, const string comparison_key) {
+      if(InpTradeMetaMemoEntries > 0){
+         // comparison_key is used directly rather than copied into a local: it is the
+         // blanked ~76,000 character document, and a local copy per alias is the same
+         // waste the caller-side derivation just removed.
+         int idx = _TradeMetaMemoFind(path);
+         if(idx < 0) m_tm_miss_new_path++;
+         else if(m_tm_json[idx] != comparison_key)
+            _ReportTradeMetaContentMiss(path, m_tm_json[idx], comparison_key);
+         else if(_TradeMetaWatermarkDue(idx)) m_tm_miss_watermark++;
+         else if(!m_bus.Exists(path)) m_tm_miss_absent++;
+         if(idx >= 0 && m_tm_json[idx] == comparison_key &&
+            !_TradeMetaWatermarkDue(idx) && m_bus.Exists(path)){
+            m_tm_writes_skipped_identical++;
+            return;
+         }
+         ulong t0 = GetMicrosecondCount();
+         m_bus.WriteText(path, json);
+         m_tm_write_us += (long)(GetMicrosecondCount() - t0);
+         m_tm_writes++;
+         _TradeMetaMemoStore(path, comparison_key);
+         return;
+      }
+      ulong t1 = GetMicrosecondCount();
+      m_bus.WriteText(path, json);
+      m_tm_write_us += (long)(GetMicrosecondCount() - t1);
+      m_tm_writes++;
+   }
+
    bool _ReadTradeMetaPath(const string path, TradePlan &p){
       string txt;
       if(!m_bus.ReadText(path, txt)) return false;
-      return _ParseTradeMetaJson(txt, p);
+      string key = "";
+      if(InpTradeMetaMemoEntries > 0){
+         key = _TradeMetaComparisonKey(txt);
+         int idx = _TradeMetaMemoFind(path);
+         if(idx >= 0 && m_tm_parsed[idx] && m_tm_json[idx] == key){
+            p = m_tm_plan[idx];
+            // The stored plan was parsed from a document whose watermark may be an
+            // older tick, so read the two blanked fields back from the bytes actually
+            // on disk.  What the caller receives is then exactly what a full reparse
+            // would have produced -- the memo returns the same value, not a cheaper
+            // approximation of it.
+            p.latest_observed_tick_time = (datetime)JsonGetNumber(txt, "latest_observed_tick_time", 0);
+            p.latest_observed_tick_msc  = (long)JsonGetNumber(txt, "latest_observed_tick_msc", 0);
+            m_tm_parses_skipped_identical++;
+            return true;
+         }
+      }
+      ulong t0 = GetMicrosecondCount();
+      bool ok = _ParseTradeMetaJson(txt, p);
+      m_tm_parse_us += (long)(GetMicrosecondCount() - t0);
+      m_tm_parses++;
+      if(ok && InpTradeMetaMemoEntries > 0){
+         int slot = _TradeMetaMemoSlot(path);
+         if(slot >= 0){
+            m_tm_path[slot]   = path;
+            m_tm_json[slot]   = key;
+            m_tm_plan[slot]   = p;
+            m_tm_parsed[slot] = true;
+            // A read does not make the file any fresher than the last real write did.
+            if(m_tm_written_at[slot] <= 0) m_tm_written_at[slot] = _NowServerOrLocal();
+         }
+      }
+      return ok;
    }
 
    void _WriteTradeMeta(const TradePlan &p, const ulong ticket=0) {
@@ -10340,24 +12685,36 @@ private:
       if(meta.planned_tp2 <= 0) meta.planned_tp2 = meta.tp2;
       if(meta.planned_at <= 0) meta.planned_at = (meta.created_at > 0 ? meta.created_at : _NowServerOrLocal());
       if(StringLen(meta.ai_decision_source) == 0) meta.ai_decision_source = "unavailable_non_trading";
+      // Timed separately from the write: the memo can remove the write but the
+      // document still has to be built to know what the write would have said, so
+      // serialization is the floor cost of calling this function at all.
+      ulong ser0 = GetMicrosecondCount();
       string j = m_state.TradePlanToJson(meta);
-      m_bus.WriteText(_TradeKeyPath(meta.trade_key), j);
+      m_tm_serialize_us += (long)(GetMicrosecondCount() - ser0);
+      m_tm_serializes++;
+      // Every alias below receives the same characters, so each one is memoized
+      // independently: the alias set is unchanged, only the redundant rewrites go.
+      // The comparison key is derived once here for the same reason -- it is a pure
+      // function of j, and every alias would otherwise recompute it identically.
+      string comparison_key = (InpTradeMetaMemoEntries > 0 ? _TradeMetaComparisonKey(j) : "");
+      _WriteTradeMetaFile(_TradeKeyPath(meta.trade_key), j, comparison_key);
       if(StringLen(meta.broker_comment) > 0 && meta.broker_comment != meta.trade_key)
-         m_bus.WriteText(_TradeKeyPath(meta.broker_comment), j);
-      if(ticket > 0) m_bus.WriteText(_TradeTicketPath(ticket), j);
+         _WriteTradeMetaFile(_TradeKeyPath(meta.broker_comment), j, comparison_key);
+      if(ticket > 0) _WriteTradeMetaFile(_TradeTicketPath(ticket), j, comparison_key);
       if(meta.result_order_ticket > 0){
-         m_bus.WriteText(_TradeOrderPath(meta.result_order_ticket), j);
-         m_bus.WriteText(_TradeTicketPath(meta.result_order_ticket), j);
+         _WriteTradeMetaFile(_TradeOrderPath(meta.result_order_ticket), j, comparison_key);
+         _WriteTradeMetaFile(_TradeTicketPath(meta.result_order_ticket), j, comparison_key);
       }
-      if(meta.result_deal_ticket > 0) m_bus.WriteText(_TradeDealPath(meta.result_deal_ticket), j);
+      if(meta.result_deal_ticket > 0)
+         _WriteTradeMetaFile(_TradeDealPath(meta.result_deal_ticket), j, comparison_key);
       if(meta.broker_position_ticket > 0){
-         m_bus.WriteText(_TradePositionPath(meta.broker_position_ticket), j);
-         m_bus.WriteText(_TradeTicketPath(meta.broker_position_ticket), j);
+         _WriteTradeMetaFile(_TradePositionPath(meta.broker_position_ticket), j, comparison_key);
+         _WriteTradeMetaFile(_TradeTicketPath(meta.broker_position_ticket), j, comparison_key);
       }
       if(meta.broker_position_identifier > 0)
-         m_bus.WriteText(_TradePositionIdentifierPath(meta.broker_position_identifier), j);
+         _WriteTradeMetaFile(_TradePositionIdentifierPath(meta.broker_position_identifier), j, comparison_key);
       if(meta.position_id > 0)
-         m_bus.WriteText(_TradePositionIdentifierPath(meta.position_id), j);
+         _WriteTradeMetaFile(_TradePositionIdentifierPath(meta.position_id), j, comparison_key);
    }
 
    bool _TradeMetaIdentityMatches(const TradePlan &p,
@@ -10443,6 +12800,41 @@ private:
                + " order_ticket=" + IntegerToString((long)order_ticket)
                + " deal_ticket=" + IntegerToString((long)deal_ticket)
                + " candidate_hash=" + meta.candidate_hash);
+   }
+
+   //+---------------------------------------------------------------+
+   //| Which identity failures can only mean "the terminal has not     |
+   //| finished registering this execution yet".                       |
+   //|                                                                 |
+   //| _ResolveExactExecutionIdentity is called twice for a market     |
+   //| order: once the instant OrderSend returns, and again when the   |
+   //| entry deal reaches OnTradeTransaction.  On 2026-09-06 BOTH of   |
+   //| the run's two trades failed the first call on the position's    |
+   //| open time and passed the second 163 ms and 255 ms later --      |
+   //| #Japan225 order 2 and GBPJPY order 7, each ending                |
+   //| POSITION_FILLED_IDENTITY_VERIFIED.  The first call had          |
+   //| nevertheless written a quarantine artifact and driven the trade |
+   //| lineage through broker_accepted_identity_quarantined, so the    |
+   //| audit trail recorded a contradiction for two executions that    |
+   //| were, in the end, exactly what they claimed to be.              |
+   //|                                                                 |
+   //| These reasons are transient by construction: they say a record  |
+   //| is absent or not yet mutually consistent.  Everything else -- a |
+   //| magic, symbol, comment, direction or volume that does not match |
+   //| -- is a real contradiction and is still quarantined at once.     |
+   //| Deferring is not accepting: the trade stays unverified, stays   |
+   //| non-attributable and stays out of learning until the            |
+   //| authoritative fill-time call verifies it or quarantines it.      |
+   //+---------------------------------------------------------------+
+   bool _ExecutionIdentityFailureIsSettlementPending(const string reason) const {
+      if(StringLen(reason) == 0) return false;
+      if(StringFind(reason, "result_deal_not_in_history") == 0) return true;
+      if(StringFind(reason, "result_order_not_in_history") == 0) return true;
+      if(StringFind(reason, "missing_deal_position_id") == 0) return true;
+      if(StringFind(reason, "exact_position_not_found_by_deal_position_id") == 0) return true;
+      if(StringFind(reason, "position_open_time_unavailable") == 0) return true;
+      if(StringFind(reason, "position_open_time_mismatch") == 0) return true;
+      return false;
    }
 
    bool _ResolveExactExecutionIdentity(TradePlan &meta,
@@ -10562,9 +12954,23 @@ private:
       }
       datetime deal_time = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
       datetime position_time = (datetime)PositionGetInteger(POSITION_TIME);
-      if(deal_time <= 0 || position_time <= 0 ||
-         MathAbs((double)(position_time - deal_time)) > (double)MathMax(0, InpLedgerTimestampToleranceSec)){
-         reason = "position_open_time_mismatch";
+      // A missing timestamp and two timestamps that disagree are different
+      // conditions and used to share one reason string.  The #Japan225 entry on
+      // 2026.08.03 quarantined as "position_open_time_mismatch" and then verified
+      // on a later transaction event for the same deal, which is the shape of an
+      // unsettled read rather than a real disagreement -- but the reason string
+      // could not tell the two apart, so the ledger recorded a mismatch that may
+      // never have been one.  Both still fail closed; they are only nameable now.
+      if(deal_time <= 0 || position_time <= 0){
+         reason = "position_open_time_unavailable:deal_time=" + IntegerToString((long)deal_time)
+                  + ":position_time=" + IntegerToString((long)position_time);
+         return false;
+      }
+      if(MathAbs((double)(position_time - deal_time)) > (double)MathMax(0, InpLedgerTimestampToleranceSec)){
+         reason = "position_open_time_mismatch:deal_time=" + IntegerToString((long)deal_time)
+                  + ":position_time=" + IntegerToString((long)position_time)
+                  + ":delta_sec=" + IntegerToString((long)(position_time - deal_time))
+                  + ":tolerance_sec=" + IntegerToString(MathMax(0, InpLedgerTimestampToleranceSec));
          return false;
       }
 
@@ -10902,6 +13308,8 @@ private:
       row += JsonKVStr("decision_schema_version", meta.ai.decision_schema_version) + ",";
       row += JsonKVStr("decision_quality_tier", meta.ai.decision_quality_tier) + ",";
       row += JsonKVStr("response_quality", meta.ai.response_quality_alias) + ",";
+      row += JsonKVStr("decision_source", meta.ai.decision_source) + ",";
+      row += JsonKVStr("workload_mode", meta.ai.workload_mode) + ",";
       row += JsonKVStr("provider_contract_version", meta.ai.provider_contract_version) + ",";
       row += JsonKVStr("provider_mode", meta.ai.provider_mode) + ",";
       row += JsonKVStr("provider_id", meta.ai.provider_id) + ",";
@@ -11099,7 +13507,7 @@ private:
       row += JsonKVInt("opened_at", (int)meta.filled_at) + ",";
       row += JsonKVInt("closed_at", (int)meta.closed_at);
       row += "}";
-      m_bus.AppendText("logs\\completed_ai_trades.jsonl", row + "\n");
+      m_bus.AppendText(m_bus.LogDir() + "\\completed_ai_trades.jsonl", row + "\n");
       _Journal("[trade_completed] ticket=" + IntegerToString((long)meta.broker_position_ticket)
                + " key=" + meta.trade_key
                + " symbol=" + meta.symbol
@@ -11116,6 +13524,17 @@ private:
       string key = key_hint;
       if(StringLen(key) == 0 && position_id > 0) key = symbol_hint + "_" + IntegerToString(position_id);
       if(StringLen(key) == 0) return false;
+      // An OUT deal can be a partial risk-management exit.  The deal comment is
+      // often "expert_exit", not the original trade key, so comment-based open
+      // checks cannot prove that the position is fully closed.  The immutable
+      // DEAL_POSITION_ID/POSITION_IDENTIFIER relationship is authoritative.
+      if(position_id > 0 && _FindPositionTicketByIdentifier(position_id) > 0){
+         _Journal("[trade_completion_deferred] reason=position_identifier_still_open"
+                  + " position_id=" + IntegerToString(position_id)
+                  + " key_hint=" + key
+                  + " partial_exit_not_final=true");
+         return false;
+      }
       if(position_id > 0 && _PathExists(_CompletedPositionMarkerPath(position_id))) return false;
       if(_PathExists(_TradeResultPath(key))) return false;
       if(_HasOpenPositionWithKey(key)) return false;
@@ -11125,6 +13544,9 @@ private:
       if(StringLen(key_hint) > 0) have_meta = _ReadTradeMetaPath(_TradeKeyPath(key_hint), meta);
       if(!have_meta && position_id > 0) have_meta = _ReadTradeMetaPath(_TradePositionIdentifierPath(position_id), meta);
       if(have_meta && StringLen(meta.trade_key) > 0) key = meta.trade_key;
+      // Re-check after resolving the canonical trade key. Exit-deal comments
+      // such as "expert_exit" or "sl ..." are not stable dedupe identities.
+      if(have_meta && _PathExists(_TradeResultPath(key))) return false;
       if(!have_meta){
          _Journal("[execution_identity_quarantine] reason=closed_trade_metadata_missing"
                   + " position_id=" + IntegerToString(position_id)
@@ -11357,10 +13779,14 @@ private:
             meta.path_observation_source = "DEAL_HISTORY_ONLY";
             meta.path_data_gap = true;
          }
-         if(meta.first_0_25r_time > 0 && meta.filled_at > 0)
-            meta.minutes_to_0_25r_mfe = (int)MathMax(0, (meta.first_0_25r_time - meta.filled_at) / 60);
-         if(meta.first_0_50r_time > 0 && meta.filled_at > 0)
-            meta.minutes_to_0_50r_mfe = (int)MathMax(0, (meta.first_0_50r_time - meta.filled_at) / 60);
+         // Third publisher of the same derivation.  It used filled_at alone, without the
+         // planned_at fallback the other two apply, so an unfilled-but-planned meta got a
+         // different answer here than it did one function away.
+         datetime ledger_opened_at = _MetaOpenedAt(meta);
+         int ledger_minutes_25 = _MinutesFromOpenToStamp(ledger_opened_at, meta.first_0_25r_time);
+         if(ledger_minutes_25 >= 0) meta.minutes_to_0_25r_mfe = ledger_minutes_25;
+         int ledger_minutes_50 = _MinutesFromOpenToStamp(ledger_opened_at, meta.first_0_50r_time);
+         if(ledger_minutes_50 >= 0) meta.minutes_to_0_50r_mfe = ledger_minutes_50;
       }
 
       double exit_price = (out_vol > 0 ? out_value / out_vol : 0.0);
@@ -11439,6 +13865,7 @@ private:
       string data_integrity_reasons = "[";
       int integrity_count = 0;
       bool critical_integrity_failure = false;
+      bool tester_bootstrap_trade = _IsTesterBootstrapPlan(meta);
       if(!meta.execution_identity_verified || meta.execution_identity_quarantined){
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "execution_identity_not_verified");
          critical_integrity_failure = true;
@@ -11463,7 +13890,7 @@ private:
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "unknown_setup_taxonomy");
          critical_integrity_failure = true;
       }
-      if(meta.ai.decision_quality_tier != "FULL_STRUCTURED" && meta.ai.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED"){
+      if(!tester_bootstrap_trade && meta.ai.decision_quality_tier != "FULL_STRUCTURED" && meta.ai.decision_quality_tier != "CACHE_OF_FULL_STRUCTURED"){
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "degraded_ai_response_non_trading");
          critical_integrity_failure = true;
       }
@@ -11524,8 +13951,12 @@ private:
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "path_event_order_ambiguous");
       if(meta.counterfactual_ambiguous && !meta.counterfactual_pending)
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "counterfactual_path_ambiguous_or_unavailable");
-      if(!meta.model_raw_allow || !meta.python_final_allow || !meta.mql_final_allow){
+      if(!tester_bootstrap_trade && (!meta.model_raw_allow || !meta.python_final_allow || !meta.mql_final_allow)){
          _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "three_stage_decision_authority_incomplete");
+         critical_integrity_failure = true;
+      }
+      if(tester_bootstrap_trade && !meta.mql_final_allow){
+         _AppendLedgerIntegrityReason(data_integrity_reasons, integrity_count, "bootstrap_mql_authority_incomplete");
          critical_integrity_failure = true;
       }
       if(!meta.broker_submission_attempted || !meta.broker_request_accepted ||
@@ -11546,7 +13977,8 @@ private:
       bool clean_eligible = (data_integrity_status == "CLEAN" && meta.execution_identity_verified &&
                              meta.candidate_hash_match && meta.execution_fingerprint_match &&
                              meta.setup_taxonomy != UNKNOWN_UNCLASSIFIED && meta.cohort_complete &&
-                             meta.model_raw_allow && meta.python_final_allow && meta.mql_final_allow &&
+                             ((tester_bootstrap_trade && meta.mql_final_allow) ||
+                              (!tester_bootstrap_trade && meta.model_raw_allow && meta.python_final_allow && meta.mql_final_allow)) &&
                              meta.broker_submission_attempted && meta.broker_request_accepted &&
                              meta.final_execution_success);
       meta.learning_eligible = clean_eligible;
@@ -11640,6 +14072,11 @@ private:
       j += JsonKVNum("lot_size", meta.initial_volume, 4) + ",";
       j += JsonKVNum("position_id", (double)meta.position_id, 0) + ",";
       j += JsonKVNum("realized_pnl", meta.realized_pnl, 2) + ",";
+      // Which run produced this trade.  <bus>\logs\trade_results is shared by every
+      // run against the same bus, and the behavioural circuit-breaker reads the whole
+      // directory, so without this a Strategy Tester replay inherits the previous
+      // replay's losing streak.  See PO3SetBehaviorRuntimeScope in Risk.mqh.
+      j += JsonKVStr("runtime_scope", m_state.RuntimeScope()) + ",";
       j += JsonKVNum("realized_r", meta.realized_r, 6) + ",";
       j += JsonKVNum("gross_price_pnl", meta.gross_price_pnl, 2) + ",";
       j += JsonKVNum("total_commission", meta.total_commission, 2) + ",";
@@ -11933,6 +14370,8 @@ private:
          string marker = "{";
          marker += JsonKVNum("position_id", (double)position_id, 0) + ",";
          marker += JsonKVStr("trade_key", key) + ",";
+         marker += JsonKVStr("run_session_id", m_ai.SessionId()) + ",";
+         marker += JsonKVStr("runtime_state_scope", m_state.RuntimeScope()) + ",";
          marker += JsonKVStr("ledger_schema_version", TRADE_LEDGER_SCHEMA_VERSION) + ",";
          marker += JsonKVInt("closed_at", (int)meta.closed_at);
          marker += "}";
@@ -11984,20 +14423,25 @@ private:
 
 bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, const bool force_market_only=false) {
       m_last_execution_reject_reason = "";
+      m_last_execution_failure_class = "";
+      m_last_execution_spread = 0.0;
       m_last_order_construction_attempted = false;
+      bool tester_bootstrap = _IsTesterBootstrapPlan(p);
       bool full_structured = (p.ai.decision_quality_tier == "FULL_STRUCTURED" || p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
-      if(!full_structured || !p.ai.mandatory_fields_complete || p.ai.decision_state != "APPROVE" ||
-         !p.ai.python_final_allow || !p.ai.model_raw_allow)
-         return _RejectPlacement(p, (!full_structured ? "degraded_ai_response_non_trading" : "ai_quality_schema_incomplete"));
-      if(p.ai.decision_state == "ABSTAIN") return _RejectPlacement(p, "ai_abstain");
-      if(p.ai.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
-         p.ai.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION)
-         return _RejectPlacement(p, "ai_quality_schema_incomplete");
-      if(p.ai.repeatability_required_live &&
-         (p.ai.repeatability_status != "REPEATABLE" || !p.ai.repeatability_trading_eligible))
-         return _RejectPlacement(p, StringLen(p.ai.repeatability_rejection_code) > 0
-                                 ? p.ai.repeatability_rejection_code
-                                 : "repeatability_unavailable");
+      if(!tester_bootstrap){
+         if(!full_structured || !p.ai.mandatory_fields_complete || p.ai.decision_state != "APPROVE" ||
+            !p.ai.python_final_allow || !p.ai.model_raw_allow)
+            return _RejectPlacement(p, (!full_structured ? "degraded_ai_response_non_trading" : "ai_quality_schema_incomplete"));
+         if(p.ai.decision_state == "ABSTAIN") return _RejectPlacement(p, "ai_abstain");
+         if(p.ai.repeatability_schema_version != REPEATABILITY_SCHEMA_VERSION ||
+            p.ai.hierarchical_prior_schema_version != HIERARCHICAL_PRIOR_SCHEMA_VERSION)
+            return _RejectPlacement(p, "ai_quality_schema_incomplete");
+         if(p.ai.repeatability_required_live &&
+            (p.ai.repeatability_status != "REPEATABLE" || !p.ai.repeatability_trading_eligible))
+            return _RejectPlacement(p, StringLen(p.ai.repeatability_rejection_code) > 0
+                                    ? p.ai.repeatability_rejection_code
+                                    : "repeatability_unavailable");
+      }
       if(p.candidate_hash != p.ai_selected_candidate_hash || p.candidate_hash != p.ai.selected_candidate_hash)
          return _RejectPlacement(p, "candidate_hash_mismatch");
       if(p.request_execution_fingerprint != p.ai.request_execution_fingerprint ||
@@ -12032,11 +14476,12 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       double planned_risk = MathAbs(p.entry_est - p.sl);
       if(planned_risk <= 0) return _RejectPlacement(p, "planned risk distance is invalid");
 
-      double spread_ticks = _CurrentSpreadTicks(p.symbol);
-      if(InpMaxSpreadTicks > 0 && spread_ticks > InpMaxSpreadTicks)
-         return _RejectPlacement(p, "spread too wide ticks=" + DoubleToString(spread_ticks, 1));
-      if(InpMaxSpreadRiskFrac > 0 && (ask - bid) > planned_risk * InpMaxSpreadRiskFrac)
-         return _RejectPlacement(p, "spread too large relative to stop distance");
+      string spread_reject_reason = "";
+      if(!_SpreadWithinLimits(p, bid, ask, planned_risk, spread_reject_reason)){
+         m_last_execution_spread = ask - bid;
+         m_last_execution_failure_class = _ClassifySpreadFailure(p, m_last_execution_spread);
+         return _RejectPlacement(p, spread_reject_reason);
+      }
 
       double adverse_drift = (p.is_buy ? entry_px - p.entry_est : p.entry_est - entry_px);
       double point = SymbolInfoDouble(p.symbol, SYMBOL_POINT);
@@ -12218,7 +14663,33 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
          string identity_reason = "";
          bool identity_ok = _ResolveExactExecutionIdentity(live, result_order, result_deal, vol,
                                                             identity_reason, accepted_volume);
-         if(!identity_ok){
+         if(!identity_ok && _ExecutionIdentityFailureIsSettlementPending(identity_reason)){
+            // The broker has accepted, but the terminal has not finished registering
+            // the execution.  Wait for the entry deal instead of recording a
+            // contradiction that does not exist yet; OnTradeTransaction runs the same
+            // resolution and is the authority on the answer.
+            live.filled_entry = (m_trade.ResultPrice() > 0.0 ? m_trade.ResultPrice() : entry_px);
+            live.filled_at = _NowServerOrLocal();
+            live.final_execution_success = false;
+            live.execution_identity_verified = false;
+            live.execution_identity_quarantined = false;
+            live.execution_identity_reason = "settlement_pending:" + identity_reason;
+            live.attribution_status = "PENDING_SETTLEMENT";
+            live.learning_eligible = false;
+            live.optimization_eligible = false;
+            live.suppression_eligible = false;
+            live.execution_authority_state = "BROKER_ACCEPTED_IDENTITY_PENDING";
+            live.narrative_state = "broker_accepted_identity_pending";
+            _WriteTradeMeta(live, result_order);
+            _Journal("[execution_identity_deferred] order_ticket=" + IntegerToString((long)result_order)
+                     + " deal_ticket=" + IntegerToString((long)result_deal)
+                     + " candidate_hash=" + live.candidate_hash
+                     + " reason=" + identity_reason
+                     + " resolver=on_trade_transaction_entry_deal"
+                     + " action=await_settlement_not_quarantined");
+            _SetExecutionAuthority(live, "BROKER_ACCEPTED_IDENTITY_PENDING", true,
+                                   "broker_accepted_identity_not_yet_settled:" + identity_reason);
+         } else if(!identity_ok){
             live.filled_entry = (m_trade.ResultPrice() > 0.0 ? m_trade.ResultPrice() : entry_px);
             live.filled_at = _NowServerOrLocal();
             live.final_execution_success = false;
@@ -12722,6 +15193,8 @@ public:
       m_last_penalty_persist = 0;
       m_last_rollover_log = 0;
       m_last_execution_reject_reason = "";
+      m_last_execution_failure_class = "";
+      m_last_execution_spread = 0.0;
       m_policy_loaded_at = 0;
       m_account_position_mode = "unknown";
       m_internal_account_position_mode = UNSUPPORTED_ACCOUNT_MODE;
@@ -12746,6 +15219,72 @@ public:
       MathSrand((int)TimeLocal());
       m_bus = CFileBus(InpBusRoot);
       m_bus.Ensure();
+      string replay_identity_reason = "";
+      if(!m_ai.ValidateReplayIdentityMode(replay_identity_reason)){
+         _Journal("[startup_reject] reason=" + replay_identity_reason);
+         return false;
+      }
+      // Freeze the replay identity before anything can consume it.  Every later
+      // reader -- the startup policy manifest, request payloads, the plan cohort
+      // stamp and the tester cache signature -- must see one value for the whole
+      // process, otherwise a recorded cohort becomes unreachable part way through
+      // a replay and the run silently reports cache misses instead of decisions.
+      // See CAIGateBridge::FreezeReplayIdentity.
+      _Journal("[decision_identity] " + m_ai.FreezeReplayIdentity());
+      if(MQLInfoInteger(MQL_TESTER) && InpTesterAiCache){
+         // One startup verdict instead of thousands of indistinguishable misses.
+         bool cohort_match = _TesterCacheCohortMatches();
+         _Journal("[tester_ai_cache_cohort] decision_input_hash=" + m_ai.DecisionHash()
+                  + " recorded_cohorts=" + _TesterCacheCohortSummary()
+                  + " dominant=" + _TesterCacheCohortDecisionHash()
+                  + " artifacts_total=" + IntegerToString(_TesterCacheCohortTotal())
+                  + " artifacts_sampled=" + IntegerToString(_TesterCacheCohortSampled())
+                  + " match=" + (cohort_match ? "true" : "false")
+                  + " verdict=" + (cohort_match ? "replayable"
+                                                : "no_recorded_artifact_addressable_by_this_build_or_inputs"));
+         // CACHE_ONLY exists to replay a recorded cohort.  When not one artifact
+         // on disk carries this build's decision identity, every lookup is a
+         // guaranteed miss and the run cannot reach a single AI decision -- it
+         // burns a full pass to report zero approvals, which reads exactly like
+         // a strategy failure and is not one.  Reject at startup instead, and
+         // say which identity was expected against which was found.
+         //
+         // Only CACHE_ONLY is affected.  RECORD_ONLY legitimately starts against
+         // a foreign or empty cohort -- recording one is its whole purpose.
+         if(!cohort_match && _EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY){
+            Print("[PO3_AIGate] [startup_reject] reason=tester_cache_cohort_unaddressable",
+                  " mode=cache_only",
+                  " decision_input_hash=", m_ai.DecisionHash(),
+                  " recorded_cohorts=", _TesterCacheCohortSummary(),
+                  " artifacts_total=", IntegerToString(_TesterCacheCohortTotal()),
+                  " addressable=0",
+                  " next_step=rerecord_cohort_with_TESTER_AI_RECORD_ONLY_then_export_then_CACHE_ONLY");
+            return false;
+         }
+      }
+      string runtime_state_scope = "";
+      if(MQLInfoInteger(MQL_TESTER)){
+         runtime_state_scope = "tester_session_" + m_ai.SessionId()
+                               + "_magic_" + IntegerToString((long)InpMagicNumber);
+      } else {
+         // Keep live recovery state across terminal restarts while isolating it
+         // from every tester run and from other accounts/strategies.
+         runtime_state_scope = "live_account_"
+                               + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+                               + "_magic_" + IntegerToString((long)InpMagicNumber);
+      }
+      if(!m_state.SetRuntimeScope(runtime_state_scope)){
+         Print("[PO3_AIGate] [startup_reject] reason=runtime_state_scope_unavailable scope=",
+               runtime_state_scope);
+         return false;
+      }
+      Print("[PO3_AIGate] [runtime_state_scope] scope=", m_state.RuntimeScope(),
+            " tester=", (MQLInfoInteger(MQL_TESTER) ? "true" : "false"),
+            " legacy_global_state_loaded=false");
+      // The behavioural circuit-breaker reads a bus-wide trade_results directory.
+      // Give it this run's identity so it cannot inherit another run's losing
+      // streak.  See PO3SetBehaviorRuntimeScope in Risk.mqh.
+      PO3SetBehaviorRuntimeScope(m_state.RuntimeScope());
 #ifdef PO3_TEST_ORDER_ADAPTER
       // Bind here rather than from the EA so the harness EA can reuse the
       // production EA verbatim instead of maintaining a forked copy of the
@@ -12780,12 +15319,32 @@ public:
                " contract_version=", LIVE_FORWARD_CONTRACT_VERSION,
                " demo_real_equivalent=true");
       }
-      if(MQLInfoInteger(MQL_TESTER) && InpUseAI){
+      if(MQLInfoInteger(MQL_TESTER) && (InpUseAI || _TesterBootstrapMode())){
          Print("[PO3_AIGate] [tester_ai_mode] raw_value=", IntegerToString((int)InpTesterAiMode),
                " raw_name=", _TesterAiModeName(InpTesterAiMode),
                " effective_name=", _TesterAiModeName(_EffectiveTesterAiMode()),
                " tester_ai_cache=", (InpTesterAiCache ? "true" : "false"),
                " allow_live_wait_debug_trading=", (InpTesterAllowLiveWaitDebugTrading ? "true" : "false"));
+         if(_InvalidTesterBootstrapConfig()){
+            Print("[PO3_AIGate] [fatal_config] bootstrap_rule_only requires InpUseAI=false, InpAiWaitInTester=false, InpTesterAllowLiveWaitDebugTrading=false, and risk multiplier in (0,1]. Aborting test.");
+            return false;
+         }
+         if(_EffectiveTesterAiMode() == TESTER_AI_LIVE_WAIT_DEBUG && InpTesterAllowLiveWaitDebugTrading){
+            // This remains a diagnostic, non-authoritative historical mode: a
+            // browser wait can advance tester time.  Permit it only behind the
+            // explicit acknowledgement and the strongest available snapshot,
+            // stale-result and blocking-wait controls.  The assessed plan is
+            // immutable and the current market state is revalidated before an
+            // order can be submitted.
+            if(!InpAiWaitInTester ||
+               !InpTesterFreezeAiExecutionSnapshot ||
+               !InpTesterRejectStaleAiResults ||
+               InpTesterMaxAiResultAgeSimMinutes <= 0){
+               Print("[PO3_AIGate] [fatal_config] live_wait_debug trading requires InpAiWaitInTester=true, InpTesterFreezeAiExecutionSnapshot=true, InpTesterRejectStaleAiResults=true, and a positive simulated-age limit. Aborting test.");
+               return false;
+            }
+            Print("[PO3_AIGate] [tester_ai_mode] live_wait_debug_trading_explicitly_acknowledged=true authoritative_historical_backtest=false immutable_execution_snapshot=true current_market_revalidation=true simulated_time_may_advance=true");
+         }
          if(_InvalidTesterCacheOnlyConfig()){
             Print("[PO3_AIGate] [fatal_config] tester_ai_mode=cache_only requires InpTesterAiCache=true. No AI decisions can be produced. Aborting test.");
             Print("[PO3_AIGate] [tester_ai_workflow] clean_backtest_requires_cache_replay=true");
@@ -12794,7 +15353,10 @@ public:
             Print("[PO3_AIGate] [tester_ai_workflow] Step 3: rerun with CACHE_ONLY and InpTesterAiCache=true.");
             return false;
          }
-         if(_EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY){
+         if(_EffectiveTesterAiMode() == TESTER_AI_BOOTSTRAP_RULE_ONLY){
+            Print("[PO3_AIGate] [tester_ai_mode] bootstrap_rule_only_active=true live_ai_calls=false wall_clock_wait=false simulated_trading=true tester_only=true risk_multiplier=",
+                  DoubleToString(InpTesterBootstrapRiskMultiplier, 4));
+         } else if(_EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY){
             Print("[PO3_AIGate] [tester_ai_workflow] clean_backtest_requires_cache_replay=true");
             if(!_TesterAiCacheHasFiles()){
                Print("[PO3_AIGate] [fatal_config] CACHE_ONLY has no tester cache files. Run RECORD_ONLY + Python cache exporter first.");
@@ -13075,6 +15637,13 @@ public:
 
    void HandleTradeTransaction(const MqlTradeTransaction &trans) {
       if(trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
+      // Any added deal changes the population the broker-cost estimate is computed
+      // from: entry deals carry commission, exit deals carry commission, swap and
+      // fee.  Drop the memo here, BEFORE the magic and entry-kind filters below --
+      // those exist to decide whether this deal opens one of our positions, which is
+      // a different question from whether the cost history moved.  Over-invalidating
+      // costs one recomputation; under-invalidating would serve a stale cost.
+      BrokerCostHistoryInvalidate();
       if(!HistoryDealSelect(trans.deal)) return;
       if((ulong)HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != InpMagicNumber) return;
       ENUM_DEAL_ENTRY entry_kind = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
@@ -14172,17 +16741,47 @@ public:
          TradePlan selected;
          bool have_selected = false;
          int selected_matches = 0;
+         // Identity is candidate_index + candidate_id + candidate_hash.
+         // request_execution_fingerprint used to be a fourth condition here.  It is a
+         // cost snapshot: every input of _ExecutionFingerprint except spread_r,
+         // slippage_r, execution_cost_r and net_reward_after_cost_r is already an
+         // input of _CandidateHash, and those four are live broker measurements the
+         // execution contract authorises to drift by max_cost_deterioration_r.  Using
+         // them to decide WHICH candidate the AI selected could only ever turn a cost
+         // wobble into "no candidate was selected".  Presence is still required and
+         // the values are revalidated against the contract by
+         // _RestoreTesterRequestProvenance before the group is ever queued.
          for(int i=0; i<ArraySize(decision_group); i++){
             if(decision_group[i].candidate_index != dec.chosen_index) continue;
             if(decision_group[i].candidate_id != dec.selected_candidate_id) continue;
             if(decision_group[i].candidate_hash != dec.selected_candidate_hash) continue;
-            if(decision_group[i].request_execution_fingerprint != dec.request_execution_fingerprint) continue;
             selected = decision_group[i];
             selected_matches++;
          }
          have_selected = (selected_matches == 1);
-         if(!have_selected && StringLen(assessment_integrity_reason) == 0)
-            assessment_integrity_reason = "candidate_hash_mismatch";
+         if(!have_selected){
+            // The group holds a handful of candidates and this path is a hard reject,
+            // so printing the whole group is what makes the failure diagnosable
+            // instead of leaving a bare "candidate_hash_mismatch" with no data.
+            string group_dump = "";
+            for(int i=0; i<ArraySize(decision_group); i++){
+               if(StringLen(group_dump) > 0) group_dump += ";";
+               group_dump += IntegerToString(decision_group[i].candidate_index)
+                           + ":" + decision_group[i].candidate_hash
+                           + ":" + decision_group[i].candidate_id;
+            }
+            _Journal("[selected_candidate_unresolved] req_id=" + req_ids[r]
+                     + " matches=" + IntegerToString(selected_matches)
+                     + " group_plan_count=" + IntegerToString(ArraySize(decision_group))
+                     + " decision_chosen_index=" + IntegerToString(dec.chosen_index)
+                     + " decision_candidate_hash=" + dec.selected_candidate_hash
+                     + " decision_candidate_id=" + dec.selected_candidate_id
+                     + " group=" + group_dump);
+            // "ok" is what _DecisionAssessmentsMatchGroup writes on success, so the
+            // old StringLen()==0 guard could never fire and the reason was lost.
+            if(StringLen(assessment_integrity_reason) == 0 || assessment_integrity_reason == "ok")
+               assessment_integrity_reason = "selected_candidate_not_resolved_in_group";
+         }
 
          string deterministic_reason = "candidate_not_selected";
          bool deterministic_pass = false;
@@ -14294,7 +16893,10 @@ public:
          if(allow){
             m_funnel_ai_final_allow++;
             m_total_ai_final_allow_true++;
-            selected.req_id = "";
+            // The plan is no longer pending, but the immutable AI request id is
+            // still part of its audit lineage and must survive through entry,
+            // fill attribution, close logging, and completed-memory ingestion.
+            selected.req_id = req_ids[r];
             selected.ai_requested_at = 0;
             selected.ai_requested_wall_ms = 0;
             selected.last_confirm_bar_time = _LastClosedBarTime(selected.symbol, selected.confirm_tf);
@@ -14390,9 +16992,11 @@ public:
             selected.assessed_tp2 = dec.assessed_tp2;
             double assessed_risk = MathAbs(dec.assessed_entry - dec.assessed_sl);
             selected.assessed_net_rr = (assessed_risk > 0.0 ? _RewardToTarget(selected.is_buy, dec.assessed_entry, dec.assessed_tp2) / assessed_risk : 0.0);
-            selected.assessed_spread_r = selected.spread_r;
-            selected.assessed_slippage_r = selected.slippage_r;
-            selected.assessed_execution_cost_r = selected.execution_cost_r;
+            if(!(MQLInfoInteger(MQL_TESTER) && _EffectiveTesterAiMode() == TESTER_AI_CACHE_ONLY)){
+               selected.assessed_spread_r = selected.spread_r;
+               selected.assessed_slippage_r = selected.slippage_r;
+               selected.assessed_execution_cost_r = selected.execution_cost_r;
+            }
             selected.assessed_symbol = selected.symbol;
             selected.assessed_is_buy = selected.is_buy;
             selected.assessed_setup_code = selected.model_code;
@@ -14620,6 +17224,16 @@ public:
          }
 
          PO3State watch_state = (p.po3.state != PO3_IDLE ? p.po3.state : PO3StateFromString(p.po3.po3_state));
+         // Which sequence this setup is DEFINED by.  _DeterministicExecutionGate has
+         // guarded its sweep/displacement/BOS checks with this predicate since §4o;
+         // this gate never consulted it, so it demanded a closed BOS from families
+         // that have none by definition.  #Germany40 (micro_continuation_fvg, story
+         // "...|none_continuation|...") was approved, armed, and then touched its
+         // entry zone 3,340 times with ZERO execution attempts: tier_b_execution_allowed
+         // requires has_sweep, a micro continuation has no sweep, so the waiver could
+         // never apply and the gate waited forever for an event the family excludes.
+         // Any micro continuation setup was structurally unexecutable.
+         bool watch_requires_full_po3 = _FamilyRequiresFullPO3Sequence(p);
          bool needs_live_sequence = (!p.po3.has_bos || p.po3.developing_bos || p.po3.sweep_running ||
                                      watch_state == PO3_DEVELOPING || watch_state == PO3_SWEEP_CONFIRMED ||
                                      watch_state == PO3_DISPLACEMENT_CONFIRMED);
@@ -14628,19 +17242,51 @@ public:
                                           p.po3.has_sweep &&
                                           p.po3.has_displacement &&
                                           !p.po3.sweep_running);
-         if(ok && (InpRequireConfirmedPO3ForExecution || (needs_live_sequence && !tier_b_execution_allowed)) && watch_state != PO3_CONFIRMED){
+         // A family outside the full-PO3 contract is held on the evidence its own
+         // contract names -- a confirmed displacement -- not on a BOS it never claims.
+         // InpRequireConfirmedPO3ForExecution still overrides everything, and
+         // _DeterministicExecutionGate inside _PlaceMarket still applies every
+         // family-appropriate check, so nothing is waived, only re-aimed.
+         bool family_sequence_hold = (watch_requires_full_po3
+                                      ? (needs_live_sequence && !tier_b_execution_allowed)
+                                      : (!p.po3.has_displacement || p.po3.sweep_running));
+         if(ok && !watch_requires_full_po3 && !family_sequence_hold &&
+            needs_live_sequence && watch_state != PO3_CONFIRMED && new_confirm_bar)
+            _Journal("[execution_sequence_gate] symbol=" + p.symbol
+                     + " family=" + (StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p))
+                     + " requires_full_po3=false"
+                     + " has_sweep=" + (p.po3.has_sweep ? "true" : "false")
+                     + " has_displacement=" + (p.po3.has_displacement ? "true" : "false")
+                     + " has_bos=" + (p.po3.has_bos ? "true" : "false")
+                     + " po3_state=" + p.po3.po3_state
+                     + " action=allow_family_contract_satisfied");
+         if(ok && (InpRequireConfirmedPO3ForExecution || family_sequence_hold) && watch_state != PO3_CONFIRMED){
             PO3Context live_confirm_po3;
             bool confirmed_now = false;
             if(m_po3.Build(p.symbol, p.htf, live_confirm_po3)){
                PO3State live_state = (live_confirm_po3.state != PO3_IDLE ? live_confirm_po3.state : PO3StateFromString(live_confirm_po3.po3_state));
-               confirmed_now = ((live_state == PO3_STRUCTURE_CONFIRMED || live_state == PO3_FVG_CONFIRMED ||
-                                 live_state == PO3_ENTRY_WAITING || live_state == PO3_CONFIRMED) &&
-                                live_confirm_po3.t_sweep == p.po3.t_sweep &&
-                                live_confirm_po3.has_displacement &&
-                                live_confirm_po3.t_disp > live_confirm_po3.t_sweep &&
-                                live_confirm_po3.has_bos &&
-                                live_confirm_po3.t_bos > live_confirm_po3.t_disp &&
-                                (!InpRequireFvgAfterDisp || p.fvg.t_form > live_confirm_po3.t_disp));
+               bool live_state_ok = (live_state == PO3_STRUCTURE_CONFIRMED || live_state == PO3_FVG_CONFIRMED ||
+                                     live_state == PO3_ENTRY_WAITING || live_state == PO3_CONFIRMED);
+               bool fvg_after_disp_ok = (!InpRequireFvgAfterDisp || p.fvg.t_form > live_confirm_po3.t_disp);
+               if(watch_requires_full_po3 || InpRequireConfirmedPO3ForExecution){
+                  confirmed_now = (live_state_ok &&
+                                   live_confirm_po3.t_sweep == p.po3.t_sweep &&
+                                   live_confirm_po3.has_displacement &&
+                                   live_confirm_po3.t_disp > live_confirm_po3.t_sweep &&
+                                   live_confirm_po3.has_bos &&
+                                   live_confirm_po3.t_bos > live_confirm_po3.t_disp &&
+                                   fvg_after_disp_ok);
+               } else {
+                  // The promotion criterion has to be reachable by the family being
+                  // promoted.  Demanding a closed sweep->displacement->BOS chain from a
+                  // micro continuation -- which is defined without a sweep and without a
+                  // BOS -- made this branch unsatisfiable, so a held plan could never be
+                  // released even when its own contract was fully satisfied.
+                  confirmed_now = (live_state_ok &&
+                                   live_confirm_po3.has_displacement &&
+                                   !live_confirm_po3.sweep_running &&
+                                   fvg_after_disp_ok);
+               }
                if(confirmed_now){
                   p.po3 = live_confirm_po3;
                   PO3SetState(p.po3, PO3_CONFIRMED, "entry_retrace_confirmed");
@@ -14650,8 +17296,21 @@ public:
             }
             if(!confirmed_now){
                ok = false;
-               if(new_confirm_bar)
+               if(new_confirm_bar){
                   _Journal(p.symbol + " execution held: PO3 state=" + p.po3.po3_state + " awaiting closed BOS/displacement sequence");
+                  _Journal("[execution_sequence_gate] symbol=" + p.symbol
+                           + " family=" + (StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p))
+                           + " requires_full_po3=" + (watch_requires_full_po3 ? "true" : "false")
+                           + " require_confirmed_input=" + (InpRequireConfirmedPO3ForExecution ? "true" : "false")
+                           + " has_sweep=" + (p.po3.has_sweep ? "true" : "false")
+                           + " has_displacement=" + (p.po3.has_displacement ? "true" : "false")
+                           + " has_bos=" + (p.po3.has_bos ? "true" : "false")
+                           + " sweep_running=" + (p.po3.sweep_running ? "true" : "false")
+                           + " tier=" + p.po3.context_tier
+                           + " tier_b_waiver=" + (tier_b_execution_allowed ? "true" : "false")
+                           + " po3_state=" + p.po3.po3_state
+                           + " action=hold_awaiting_family_sequence");
+               }
             }
          }
 
@@ -14679,16 +17338,41 @@ public:
             if(ExecFailureIsTerminal(p.execution_failure_class)){
                // A semantic change means the approved trade no longer exists.
                // Retrying it is meaningless; the setup must be reassessed.
-               p.narrative_state = "invalidated";
+               //
+               // "Reassessed" is what the action name promised and what the code
+               // never did: PO3_INVALIDATED buried the whole sequence, so the
+               // setup could not come back even though only the obstacle/target
+               // picture had moved.  A live NZDCHF approval died here five
+               // milliseconds after arming, on obstacle_kind/obstacle_tf alone,
+               // with unauthorized_fields_changed=none.
+               //
+               // Reassessment is only offered when the change was confined to
+               // fields the contract already authorises movement in.  Anything
+               // unauthorized is corruption, not market movement, and keeps the
+               // original hard invalidation.  The approved plan still leaves the
+               // watchlist either way, so no stale approval can ever execute;
+               // the only difference is whether the next scan may rebuild the
+               // setup and ask the AI again against current evidence.
+               bool reassess = (InpRequeueAiOnSemanticPlanChange &&
+                                p.execution_failure_class == EXEC_FAIL_SEMANTIC_PLAN_CHANGED &&
+                                StringLen(p.semantic_unauthorized_fields_changed) == 0);
+               p.narrative_state = (reassess ? "awaiting_reassessment" : "invalidated");
                p.invalidation_cause = p.execution_failure_class;
-               PO3SetState(p.po3, PO3_INVALIDATED, p.execution_failure_class);
+               if(!reassess)
+                  PO3SetState(p.po3, PO3_INVALIDATED, p.execution_failure_class);
                _WriteTradeMeta(p);
                _LogSetupReject(p.symbol, "watchlist_execution_rebuild", p.execution_failure_class,
-                               "watchlist_action=" + ExecFailureAction(p.execution_failure_class)
+                               "watchlist_action=" + (reassess ? "requeue_ai_next_scan"
+                                                              : ExecFailureAction(p.execution_failure_class))
                                + " duplicate_execution_attempts=" + IntegerToString(p.execution_attempts_suppressed)
                                + " raw_reason=" + m_last_execution_reject_reason);
                _Journal("[execution_rebuild] failure_class=" + p.execution_failure_class
-                        + " action=" + ExecFailureAction(p.execution_failure_class)
+                        + " action=" + (reassess ? "requeue_ai_next_scan"
+                                                 : ExecFailureAction(p.execution_failure_class))
+                        + " po3_preserved=" + (reassess ? "true" : "false")
+                        + " immutable_changed=" + p.semantic_immutable_fields_changed
+                        + " unauthorized_changed=" + (StringLen(p.semantic_unauthorized_fields_changed) > 0
+                                                      ? p.semantic_unauthorized_fields_changed : "none")
                         + " semantic_plan_match=" + (p.semantic_plan_match ? "true" : "false")
                         + " duplicate_execution_attempts=" + IntegerToString(p.execution_attempts_suppressed)
                         + " reason=" + m_last_execution_reject_reason);
@@ -14801,11 +17485,22 @@ public:
       m_penalty.ObserveChartTick(chart_symbol);
    }
 
+   // Timed at the entry point.  This is the whole per-simulated-second cost of
+   // holding a position, and it is the stage that collapsed replay throughput from
+   // 359x to 0.333x real time the moment the first position opened.  The clock is
+   // permanent so the next regression here is reported as a number rather than
+   // inferred from gaps between journal lines.
    void MaintainPositions() {
-      // TP1 partial + BE; penalty watcher tick.
       if(m_last_positions_tick == TimeLocal()) return;
       m_last_positions_tick = TimeLocal();
+      ulong t0 = GetMicrosecondCount();
+      _MaintainPositionsBody();
+      m_mp_us += (long)(GetMicrosecondCount() - t0);
+      m_mp_calls++;
+   }
 
+   void _MaintainPositionsBody() {
+      // TP1 partial + BE; penalty watcher tick.
       // TP1 partial logic (basic; extend with per-position state to avoid repeat)
       for(int i=PositionsTotal()-1; i>=0; i--){
          ulong ticket = PositionGetTicket(i);
@@ -14823,7 +17518,15 @@ public:
          TradePlan meta;
          if(!_SymbolEligible(sym)) continue;
          string position_identity_reason = "";
-         if(!_LoadAndResolvePositionMeta(ticket, sym, comment, meta, position_identity_reason)){
+         // Segment clocks.  The serialize/write/parse clocks account for part of this
+         // stage; without the segments the rest is a single unattributed number and the
+         // next optimisation is a guess.  A recovery path inside the loader can itself
+         // write a meta, so a rare load is charged for that write too -- the common
+         // path, where the position file resolves first, cannot reach it.
+         ulong load0 = GetMicrosecondCount();
+         bool meta_resolved = _LoadAndResolvePositionMeta(ticket, sym, comment, meta, position_identity_reason);
+         m_mp_load_us += (long)(GetMicrosecondCount() - load0);
+         if(!meta_resolved){
             TradePlan quarantined;
             ZeroMemory(quarantined);
             long live_position_id = (long)PositionGetInteger(POSITION_IDENTIFIER);
@@ -14931,11 +17634,15 @@ public:
                 }
              }
           }
+          ulong meta0 = GetMicrosecondCount();
           _WriteTradeMeta(meta, ticket);
+          m_mp_meta_us += (long)(GetMicrosecondCount() - meta0);
        }
 
       // Penalties
+      ulong pen0 = GetMicrosecondCount();
       m_penalty.Tick(m_trade);
+      m_mp_penalty_us += (long)(GetMicrosecondCount() - pen0);
       for(int state_i=PositionsTotal()-1; state_i>=0; state_i--){
          ulong state_ticket = PositionGetTicket(state_i);
          if(!PositionMatchesMagic(state_ticket)) continue;
@@ -14945,11 +17652,14 @@ public:
          if(!m_penalty.GetState(state_position_id, state_symbol, penalty_state)) continue;
          TradePlan state_meta;
          string state_meta_reason = "";
-         if(!_LoadAndResolvePositionMeta(state_ticket,
-                                         state_symbol,
-                                         PositionGetString(POSITION_COMMENT),
-                                         state_meta,
-                                         state_meta_reason)) continue;
+         ulong state_load0 = GetMicrosecondCount();
+         bool state_resolved = _LoadAndResolvePositionMeta(state_ticket,
+                                                          state_symbol,
+                                                          PositionGetString(POSITION_COMMENT),
+                                                          state_meta,
+                                                          state_meta_reason);
+         m_mp_load_us += (long)(GetMicrosecondCount() - state_load0);
+         if(!state_resolved) continue;
          _ApplyPenaltyStateToMeta(state_meta, penalty_state);
          if(StringLen(penalty_state.requested_action) > 0 &&
             penalty_state.requested_action != "NO_BROKER_ACTION"){
@@ -14961,14 +17671,18 @@ public:
                                                (state_meta.planned_sl > 0.0 ? state_meta.planned_sl : state_meta.sl),
                                                (state_meta.planned_tp2 > 0.0 ? state_meta.planned_tp2 : state_meta.tp2));
          }
+         ulong state_meta0 = GetMicrosecondCount();
          _WriteTradeMeta(state_meta, state_ticket);
+         m_mp_meta_us += (long)(GetMicrosecondCount() - state_meta0);
       }
+      ulong tail0 = GetMicrosecondCount();
       if(m_last_penalty_persist == 0 || (TimeLocal() - m_last_penalty_persist) >= 15){
          _PersistPenaltyStates();
       }
       _FinalizeClosedTrades();
       _MaintainCounterfactualEvaluations();
       _MaintainShadowCandidateOutcomes();
+      m_mp_tail_us += (long)(GetMicrosecondCount() - tail0);
    }
 
    void Persist() {

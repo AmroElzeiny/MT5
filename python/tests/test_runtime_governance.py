@@ -191,6 +191,11 @@ class FingerprintAndRepeatabilityTests(unittest.TestCase):
 
 
 class HierarchicalPriorTests(unittest.TestCase):
+    def test_singleton_buckets_are_strict_json_serializable(self) -> None:
+        artifact = build_hierarchical_prior_artifact([clean_row(1)])
+        encoded = json.dumps(artifact, allow_nan=False)
+        self.assertIn('"standard_error": null', encoded)
+
     def test_all_hierarchy_levels_are_separate_and_dirty_rows_are_excluded(self) -> None:
         rows = [clean_row(i, result_r=0.4 if i % 2 == 0 else -0.1) for i in range(40)]
         dirty = clean_row(100, result_r=100.0)

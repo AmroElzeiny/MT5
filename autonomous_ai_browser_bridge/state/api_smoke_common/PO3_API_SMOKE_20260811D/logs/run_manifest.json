@@ -1,0 +1,23 @@
+{
+  "contract_manifest_hash": "1518826968",
+  "decision_schema_version": "20260724_canonical_frozen_request_v10",
+  "ea_name": "",
+  "ex5_bytes": 0,
+  "ex5_hash": "",
+  "ex5_path": "",
+  "host": "WIN-FOVCL5KBJ2M",
+  "model": "gpt-5-nano",
+  "mql_session_id": "",
+  "prompt_contract_version": "20260724_canonical_frozen_request_v12",
+  "provider_id": "openai_remote_api",
+  "provider_mode": "REMOTE_API",
+  "provider_process_id": 15552,
+  "python_session_id": "python_15552_1786474606",
+  "run_manifest_version": "20260731_correlated_run_manifest_v1",
+  "runtime_input_hash": "",
+  "started_at": 1786474606.8424847,
+  "test_period_from": "",
+  "test_period_to": "",
+  "test_run_id": "run_1279083a0146f150",
+  "tester_mode": ""
+}

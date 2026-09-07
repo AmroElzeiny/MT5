@@ -9,10 +9,29 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Mapping
 
-from governance_contracts import SETUP_TAXONOMY_VERSION, SetupTaxonomy
+from governance_contracts import (
+    BREAKER_RETEST_ENTRY_BRANCHES,
+    CONTINUATION_ENTRY_BRANCHES,
+    FAILED_BREAKOUT_ENTRY_BRANCHES,
+    FULL_PO3_STRUCTURAL_ENTRY_BRANCHES,
+    FVG_EDGE_ENTRY_BRANCHES,
+    FVG_MID_ENTRY_BRANCHES,
+    NESTED_CONTINUATION_ENTRY_BRANCHES,
+    OTE_ENTRY_BRANCHES,
+    RANGE_REENTRY_ENTRY_BRANCHES,
+    SESSION_REENTRY_ENTRY_BRANCHES,
+    SETUP_TAXONOMY_VERSION,
+    SetupTaxonomy,
+)
 
 
-FAMILY_PROFILE_VERSION = "20260718_family_context_v1"
+# v3: permitted_entry_branches now comes from classify_setup_taxonomy's own
+# vocabulary.  v2 restated it by hand and drifted into family/state tokens the EA
+# never emits as entry_branch ("full_po3_continuation", "continuation_fvg",
+# "nested_continuation", "reclaim", "ote", ...), so the payload told the model that
+# the very branch which produced the taxonomy was not permitted for it.  Every
+# full-PO3 candidate in the 2026-08-18 run was vetoed on that contradiction.
+FAMILY_PROFILE_VERSION = "20260818_family_context_v3"
 
 
 @dataclass(frozen=True)
@@ -120,7 +139,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_FVG_MID_REVERSAL,
         "micro reversal from the deterministic FVG midpoint entry branch",
         ("declared source context", "deterministic displacement/FVG", "midpoint entry"),
-        ("fvg_mid", "micro_mid", "midpoint"),
+        FVG_MID_ENTRY_BRANCHES,
         ("range", "reversal", "transition"),
         ("weak displacement", "late midpoint entry", "near opposing liquidity"),
     ),
@@ -128,7 +147,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_FVG_EDGE_REVERSAL,
         "micro reversal from the deterministic FVG edge entry branch",
         ("declared source context", "deterministic displacement/FVG", "edge entry"),
-        ("fvg_edge", "micro_edge", "edge"),
+        FVG_EDGE_ENTRY_BRANCHES,
         ("range", "reversal", "transition"),
         ("edge already mitigated", "weak origin", "late entry"),
     ),
@@ -136,7 +155,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_BREAKER_RETEST,
         "micro breaker retest using the deterministic breaker identity and retest state",
         ("declared source context", "breaker formation", "clean retest"),
-        ("breaker_retest", "micro_breaker"),
+        BREAKER_RETEST_ENTRY_BRANCHES,
         ("reversal", "transition", "trend pullback"),
         ("non-virgin breaker", "weak origin", "retest invalidation"),
     ),
@@ -144,7 +163,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_OTE_REVERSAL,
         "micro reversal at the deterministic OTE branch",
         ("declared source context", "displacement", "OTE retracement"),
-        ("ote", "micro_ote"),
+        OTE_ENTRY_BRANCHES,
         ("reversal", "trend pullback"),
         ("OTE reached without confirmation", "sequence conflict", "target obstruction"),
     ),
@@ -152,7 +171,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_CONTINUATION_FVG,
         "micro continuation through a deterministically classified continuation FVG",
         ("trend context", "continuation displacement", "continuation FVG entry"),
-        ("continuation_fvg", "fvg_mid", "fvg_edge"),
+        CONTINUATION_ENTRY_BRANCHES + FVG_MID_ENTRY_BRANCHES + FVG_EDGE_ENTRY_BRANCHES,
         ("trend", "expansion"),
         ("stale FVG", "touched continuation without clean retest", "trend exhaustion"),
     ),
@@ -160,7 +179,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_NESTED_CONTINUATION,
         "nested micro continuation inside deterministic higher-order context",
         ("parent context", "nested displacement", "nested entry"),
-        ("nested_continuation", "nested_fvg"),
+        NESTED_CONTINUATION_ENTRY_BRANCHES,
         ("trend", "expansion"),
         ("parent-child contradiction", "stale nested FVG", "overextended entry"),
     ),
@@ -168,7 +187,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_RANGE_REENTRY,
         "micro reentry into a deterministic range after the declared range event",
         ("range identity", "range excursion", "range reentry"),
-        ("range_reentry", "micro_range"),
+        RANGE_REENTRY_ENTRY_BRANCHES,
         ("range", "compression"),
         ("range expansion underway", "opposite confirmed structure", "poor target clearance"),
     ),
@@ -176,7 +195,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.MICRO_SESSION_REENTRY,
         "micro session reentry using deterministic session boundaries and timing",
         ("session range identity", "session excursion", "session reentry"),
-        ("session_reentry", "micro_session"),
+        SESSION_REENTRY_ENTRY_BRANCHES,
         ("session transition", "range"),
         ("off-session timing", "session objective already reached", "stale session context"),
     ),
@@ -184,7 +203,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.FAILED_BREAKOUT_RECLAIM,
         "failed breakout followed by deterministic reclaim evidence",
         ("breakout", "failure", "reclaim", "entry confirmation"),
-        ("failed_breakout_reclaim", "reclaim"),
+        FAILED_BREAKOUT_ENTRY_BRANCHES,
         ("range", "transition", "reversal"),
         ("no true reclaim", "continued breakout acceptance", "late reclaim"),
     ),
@@ -192,7 +211,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.FULL_PO3_REVERSAL,
         "full PO3 reversal using the deterministic range, sweep, displacement, and BOS sequence",
         ("dealing range", "liquidity sweep", "displacement", "BOS", "entry"),
-        ("full_po3", "po3_reversal", "fvg_mid", "fvg_edge"),
+        FULL_PO3_STRUCTURAL_ENTRY_BRANCHES,
         ("reversal", "transition"),
         ("sequence contradiction", "superseded sweep", "target obstruction"),
     ),
@@ -200,7 +219,7 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
         SetupTaxonomy.FULL_PO3_CONTINUATION,
         "full PO3 continuation using the deterministic continuation sequence",
         ("dealing range", "liquidity event", "continuation displacement", "BOS", "entry"),
-        ("full_po3_continuation", "continuation_fvg"),
+        FULL_PO3_STRUCTURAL_ENTRY_BRANCHES + CONTINUATION_ENTRY_BRANCHES,
         ("trend", "expansion"),
         ("trend exhaustion", "stale continuation FVG", "opposite confirmed structure"),
     ),
@@ -213,4 +232,3 @@ def family_context_for(taxonomy: str) -> FamilyContextProfile:
     if profile is None:
         raise ValueError("family_context_unknown_taxonomy:" + (value or "missing"))
     return profile
-

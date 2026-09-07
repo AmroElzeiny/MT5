@@ -209,6 +209,36 @@ def resolve_account_position_mode(
     return AccountModeResolution(raw, AccountPositionMode.UNSUPPORTED_ACCOUNT_MODE, policy, False, False, reason)
 
 
+# Authoritative entry-branch vocabulary.
+#
+# classify_setup_taxonomy is the only place that turns an MQL entry_branch into a
+# taxonomy, so the sets it tests ARE the contract.  family_context.py used to
+# restate them by hand and drifted: FULL_PO3_CONTINUATION listed
+# ("full_po3_continuation", "continuation_fvg") -- a family name and a state name,
+# neither of which MQL ever emits as entry_branch.  Python therefore assigned the
+# taxonomy *because* the branch was breaker_retest, then told the model
+# breaker_retest was not permitted for that taxonomy, and the model correctly
+# vetoed the contradiction (ai_veto_execution_plan_mismatch).  Naming them once
+# here makes that class of divergence unrepresentable.
+FULL_PO3_STRUCTURAL_ENTRY_BRANCHES: tuple[str, ...] = (
+    "fvg_mid",
+    "fvg_edge",
+    "breaker_retest",
+    "ote_inside_fvg",
+    "nested_htf_ltf_fvg",
+    "nested_fvg_edge",
+)
+CONTINUATION_ENTRY_BRANCHES: tuple[str, ...] = ("continuation_reentry",)
+NESTED_CONTINUATION_ENTRY_BRANCHES: tuple[str, ...] = ("nested_htf_ltf_fvg", "nested_fvg_edge")
+FAILED_BREAKOUT_ENTRY_BRANCHES: tuple[str, ...] = ("fvg_mid", "fvg_edge", "range_reentry")
+RANGE_REENTRY_ENTRY_BRANCHES: tuple[str, ...] = ("range_reentry",)
+SESSION_REENTRY_ENTRY_BRANCHES: tuple[str, ...] = ("session_reentry",)
+BREAKER_RETEST_ENTRY_BRANCHES: tuple[str, ...] = ("breaker_retest",)
+OTE_ENTRY_BRANCHES: tuple[str, ...] = ("ote_inside_fvg",)
+FVG_EDGE_ENTRY_BRANCHES: tuple[str, ...] = ("fvg_edge",)
+FVG_MID_ENTRY_BRANCHES: tuple[str, ...] = ("fvg_mid",)
+
+
 def classify_setup_taxonomy(fields: Mapping[str, Any]) -> TaxonomyResolution:
     """Map exact internal branch/state values; never infer from substrings/comments."""
 
@@ -232,7 +262,7 @@ def classify_setup_taxonomy(fields: Mapping[str, Any]) -> TaxonomyResolution:
     known_full_classes = {"full_po3", "full_po3_reversal", "full_po3_continuation"}
     full_scope = family in known_full_families or setup_class in known_full_classes or scope == "institutional_po3"
     continuation = (
-        branch == "continuation_reentry"
+        branch in CONTINUATION_ENTRY_BRANCHES
         or structure in {"continuation_bos", "continuation", "micro_continuation"}
         or fvg_state == "continuation_reentry"
         or family in {"micro_continuation_fvg", "full_po3_continuation"}
@@ -244,28 +274,28 @@ def classify_setup_taxonomy(fields: Mapping[str, Any]) -> TaxonomyResolution:
         or setup_class == "failed_breakout_reclaim"
     )
 
-    if failed_breakout and branch in {"fvg_mid", "fvg_edge", "range_reentry"}:
+    if failed_breakout and branch in FAILED_BREAKOUT_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.FAILED_BREAKOUT_RECLAIM, "exact_family_branch_state")
     if full_scope:
         if continuation:
             return TaxonomyResolution(SetupTaxonomy.FULL_PO3_CONTINUATION, "exact_scope_branch_state")
-        if branch in {"fvg_mid", "fvg_edge", "breaker_retest", "ote_inside_fvg", "nested_htf_ltf_fvg", "nested_fvg_edge"}:
+        if branch in FULL_PO3_STRUCTURAL_ENTRY_BRANCHES:
             return TaxonomyResolution(SetupTaxonomy.FULL_PO3_REVERSAL, "exact_scope_branch_state")
-    if branch == "session_reentry":
+    if branch in SESSION_REENTRY_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_SESSION_REENTRY, "exact_branch_state")
-    if branch == "range_reentry":
+    if branch in RANGE_REENTRY_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_RANGE_REENTRY, "exact_branch_state")
-    if branch in {"nested_htf_ltf_fvg", "nested_fvg_edge"}:
+    if branch in NESTED_CONTINUATION_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_NESTED_CONTINUATION, "exact_branch_state")
     if continuation:
         return TaxonomyResolution(SetupTaxonomy.MICRO_CONTINUATION_FVG, "exact_branch_state")
-    if branch == "breaker_retest":
+    if branch in BREAKER_RETEST_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_BREAKER_RETEST, "exact_branch_state")
-    if branch == "ote_inside_fvg":
+    if branch in OTE_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_OTE_REVERSAL, "exact_branch_state")
-    if branch == "fvg_edge":
+    if branch in FVG_EDGE_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_FVG_EDGE_REVERSAL, "exact_branch_state")
-    if branch == "fvg_mid":
+    if branch in FVG_MID_ENTRY_BRANCHES:
         return TaxonomyResolution(SetupTaxonomy.MICRO_FVG_MID_REVERSAL, "exact_branch_state")
     raw = "|".join((branch or "missing_branch", family or "missing_family", setup_class or "missing_class", scope or "missing_scope", structure or "missing_structure", fvg_state or "missing_fvg_state"))
     return TaxonomyResolution(SetupTaxonomy.UNKNOWN_UNCLASSIFIED, "strict_mapping_failed", raw)

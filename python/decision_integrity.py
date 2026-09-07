@@ -271,7 +271,12 @@ def normalize_and_freeze_candidates(
     *,
     candidate_cap: int = 12,
 ) -> list[dict[str, Any]]:
-    """Normalize, deduplicate, cap, and freeze ordering before identity hashing."""
+    """Normalize, deduplicate, cap, and freeze ordering before identity hashing.
+
+    ``candidate_index`` is the immutable MQL plan index. A live provider cohort
+    may be a sparse subset of the original plans (for example 0, 2, 3), so the
+    indexes must remain unique and non-negative but do not have to be contiguous.
+    """
 
     if not candidates:
         raise ValueError("request_identity_candidates_missing")
@@ -306,9 +311,9 @@ def normalize_and_freeze_candidates(
     )
     normalized = normalized[: max(1, int(candidate_cap))]
     indexes = [int(row.get("candidate_index", -1)) for row in normalized]
-    if indexes != list(range(len(normalized))):
+    if any(index < 0 for index in indexes):
         raise ValueError(
-            "request_identity_candidate_indexes_not_contiguous:"
+            "request_identity_candidate_index_negative:"
             + ",".join(str(value) for value in indexes)
         )
     return normalized
@@ -769,6 +774,12 @@ def validate_candidate_assessment(
         )
         for name in required_arbitration_fields:
             if name not in target_arbitration or target_arbitration[name] is None:
+                invalid.append(f"target_arbitration.{name}")
+        # MQL's strict schema validator requires these two fields to contain
+        # meaningful text.  Mirror that rule here so Python can never label a
+        # response FULL_STRUCTURED that the terminal must later downgrade.
+        for name in ("blocker_class", "target_decision_reason"):
+            if not str(target_arbitration.get(name) or "").strip():
                 invalid.append(f"target_arbitration.{name}")
         if target_arbitration.get("target_arbitration_schema_version") != AI_TARGET_ARBITRATION_SCHEMA_VERSION:
             invalid.append("target_arbitration_schema_version")

@@ -1,0 +1,198 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "MT5 Cache Replay: Current Status and Next Step",
+    "description": "Decision-ready audit of the completed GOLD M15 cache-only replay.",
+    "generatedAt": "2026-08-10T22:05:24Z",
+    "filters": [],
+    "cards": [
+      {
+        "id": "trades_card",
+        "description": "Executed trades in the completed cache-only replay.",
+        "dataset": "headline_metrics",
+        "sourceId": "audit_snapshot",
+        "filter": { "metric": "Executed trades" },
+        "metrics": [
+          { "label": "Executed trades", "field": "value", "format": "number" }
+        ]
+      },
+      {
+        "id": "cache_card",
+        "description": "Valid decisions available to the MT5 tester cache.",
+        "dataset": "headline_metrics",
+        "sourceId": "audit_snapshot",
+        "filter": { "metric": "Valid tester-cache decisions" },
+        "metrics": [
+          { "label": "Valid cache decisions", "field": "value", "format": "number" }
+        ]
+      },
+      {
+        "id": "coverage_card",
+        "description": "Valid tester-cache decisions as a share of recorded two-month requests.",
+        "dataset": "headline_metrics",
+        "sourceId": "audit_snapshot",
+        "filter": { "metric": "Recorded-request coverage" },
+        "metrics": [
+          { "label": "Cache coverage", "field": "value", "format": "percent" }
+        ]
+      },
+      {
+        "id": "approval_card",
+        "description": "AI approvals among the 27 valid tester-cache decisions.",
+        "dataset": "headline_metrics",
+        "sourceId": "audit_snapshot",
+        "filter": { "metric": "AI approvals" },
+        "metrics": [
+          { "label": "AI approvals", "field": "value", "format": "number" }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "decision_chart",
+        "title": "Cached decisions by outcome",
+        "subtitle": "27 valid tester-cache decisions; counts are not a performance-rate estimate.",
+        "type": "bar",
+        "dataset": "decision_outcomes",
+        "sourceId": "audit_snapshot",
+        "valueFormat": "number",
+        "encodings": {
+          "x": { "field": "decision", "type": "nominal", "label": "Decision" },
+          "y": { "field": "count", "type": "quantitative", "label": "Cached decisions" },
+          "tooltip": [
+            { "field": "share", "type": "quantitative", "label": "Share", "format": "percent" }
+          ]
+        }
+      }
+    ],
+    "tables": [],
+    "sources": [
+      {
+        "id": "audit_snapshot",
+        "label": "Reviewed MT5 cache-replay audit snapshot",
+        "path": "analysis_snapshot.sql"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "## Executive Summary\n\n- **The run completed cleanly, but it is not a valid performance test.** MT5 processed 3,924 bars and 235,381 ticks with 100% history quality, then finished with 0 trades and 0 deals.\n- **The cache covered only 27 of 3,715 recorded requests — 0.73%.** The AI approved just 1 of those 27 decisions, so a zero-trade result is unsurprising and cannot be used to judge profitability.\n- **The AI is no longer blind.** All 27 decisions had historical evidence available, backed by 81 clean completed-memory records and 32 prior buckets. The old bootstrap loop is solved.\n- **The next step is diagnosis, not another full run.** Replay only 10–11 June 2026 with verbose cache and execution telemetry to trace the single approval end-to-end."
+      },
+      {
+        "id": "definitions",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "## What This Run Actually Tested\n\nThis was a **cache-only deterministic replay** on GOLD M15 from 27 May to 27 July 2026. Its useful question is whether recorded setup signatures can load saved AI decisions and reach the execution layer. It is not yet a strategy-performance test because the denominator is 3,715 recorded requests while only 27 valid responses were available for replay."
+      },
+      { "id": "headline_metrics", "type": "metric-strip", "cardIds": ["trades_card", "cache_card", "coverage_card", "approval_card"] },
+      {
+        "id": "run_facts_intro",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "### MT5 itself was stable\n\nThe tester passed in 14m 44.814s without a crash, data-quality warning, balance change, or drawdown. It processed 3,924 bars and 235,381 ticks at 100% history quality. That validates the mechanics of finishing the replay; it does not validate trade selection or execution."
+      },
+      {
+        "id": "decision_findings",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "## The AI Sample Is Real but Far Too Small\n\nTwenty decisions were rejected, six were abstentions, and one was approved. The 3.7% observed approval rate is informative only as a sample diagnostic: the 27 decisions were intentionally selected for cache filling and are too few for a stable performance conclusion."
+      },
+      { "id": "decision_chart_block", "type": "chart", "chartId": "decision_chart" },
+      {
+        "id": "family_findings",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "### Range is present; BISI/SIBI was not the final chosen family\n\nThe final selected-family mix was 12 continuation FVG, 6 breaker retest, 4 FVG-edge reversal, 4 range re-entry, and 1 nested continuation. None ended with an explicit BISI/SIBI taxonomy as the analyst's final choice, even though the cache-fill selection included BISI/SIBI-primary requests. That is a model-selection observation, not proof that the detector failed."
+      },
+      {
+        "id": "context_recovered",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "## Historical Context Is No Longer the Blocker\n\nThe memory database now contains 81 completed trades, and the priors artifact contains 32 clean buckets with zero rejected records. Every cached decision reports historical evidence as available. Future approvals can therefore use context; adding more history is useful for robustness, but it is not the reason this replay produced zero trades."
+      },
+      {
+        "id": "single_approval",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "## The Single Approval Is the Unresolved Point\n\nThe approved MICRO_CONTINUATION_FVG occurred at 10 June 2026, 14:44:40 UTC. It scored 8.1, carried a 0.65 risk multiplier, and proposed a SELL from 4161.665 with SL 4180.59, TP1 4147.755125, and TP2 4141.79375. No trade was recorded. Because verbose journaling was off, the run cannot show whether this cache item loaded and then failed a watchlist or execution check, or whether its exact signature missed the cache."
+      },
+      {
+        "id": "readiness_intro",
+        "type": "markdown",
+        "sourceId": "audit_snapshot",
+        "body": "## Current Readiness\n\n- **Tester stability:** ready.\n- **Historical context:** ready for testing; the bootstrap loop is resolved.\n- **Cache coverage:** not ready for performance conclusions.\n- **Approval-to-execution trace:** unknown until the 10–11 June diagnostic.\n- **Live readiness:** not ready; staged smoke and practical validation are still required."
+      },
+      {
+        "id": "recommendations",
+        "type": "markdown",
+        "body": "## Recommended Next Steps\n\n1. **Make the final diagnostic summary unconditional.** Persist scans, valid plans, cache hits and misses, approvals, watchlist additions, order attempts, trades, and rejection reasons even when verbose journaling is off.\n2. **Run one narrow cache-only replay for 10–11 June 2026.** Keep the same trading inputs and cache; enable verbose telemetry. This should take minutes and needs no browser AI.\n3. **Branch on the evidence.** If the approved item misses the cache, fix cache identity/loading. If it hits but is rejected downstream, inspect and decide whether that execution rejection is correct.\n4. **Only then expand the cache and rerun.** Use the multi-tab browser bridge in balanced batches. Track approved and executed trades, not just processed requests.\n5. **Use evidence gates before live.** First target at least 30 closed AI-approved trades for an execution smoke test; then 100+ closed trades for practical validation, matching the configured policy minimum of 100."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## Further Questions\n\n- Did cache key `n577667844` load during the replay?\n- If it loaded, which deterministic gate prevented a watchlist entry, order, or fill?\n- Why were 33 of the 60 processed cache-fill requests skipped rather than written?\n- Does the final family selection underrepresent BISI/SIBI after candidate competition, or is the 27-decision sample simply too small?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Caveats and Assumptions\n\nThe 27 decisions are an intentionally bounded cache-fill sample, not a random performance sample. Approval-rate extrapolations are planning estimates only: at the observed 3.7% rate, roughly 810 valid decisions would yield 30 approvals and 2,700 would yield 100, but the true rate can move materially with broader sampling. The separate Python decision cache has 12 legacy-schema rows; this does not invalidate the 27-file tester cache used here."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-10T22:05:24Z",
+    "status": "ready",
+    "datasets": {
+      "headline_metrics": [
+        { "metric": "Executed trades", "value": 0 },
+        { "metric": "Valid tester-cache decisions", "value": 27 },
+        { "metric": "Recorded-request coverage", "value": 0.0072678331 },
+        { "metric": "AI approvals", "value": 1 }
+      ],
+      "run_facts": [
+        { "metric": "Tester result", "value": "Passed in 14m 44.814s", "interpretation": "The run completed without a technical crash." },
+        { "metric": "History quality", "value": "100%", "interpretation": "The test data was internally complete for the selected run." },
+        { "metric": "Bars / ticks", "value": "3,924 / 235,381", "interpretation": "The selected two-month GOLD M15 period was processed." },
+        { "metric": "Initial / final balance", "value": "$10,000 / $10,000", "interpretation": "No trading P&L occurred." },
+        { "metric": "Trades / deals", "value": "0 / 0", "interpretation": "No order reached an executed position." },
+        { "metric": "Tester mode", "value": "TESTER_AI_CACHE_ONLY", "interpretation": "Only exact cached AI decisions were eligible; no browser wait was used." }
+      ],
+      "decision_outcomes": [
+        { "decision": "REJECT", "count": 20, "share": 0.7407407407, "meaning": "Qualitative block or veto prevented capital commitment." },
+        { "decision": "ABSTAIN", "count": 6, "share": 0.2222222222, "meaning": "The evidence did not resolve to an approval." },
+        { "decision": "APPROVE", "count": 1, "share": 0.037037037, "meaning": "One cached plan was eligible for downstream MT5 validation." }
+      ],
+      "family_mix": [
+        { "family": "Continuation FVG", "count": 12, "share": 0.4444444444 },
+        { "family": "Breaker retest", "count": 6, "share": 0.2222222222 },
+        { "family": "FVG-edge reversal", "count": 4, "share": 0.1481481481 },
+        { "family": "Range re-entry", "count": 4, "share": 0.1481481481 },
+        { "family": "Nested continuation", "count": 1, "share": 0.037037037 }
+      ],
+      "readiness": [
+        { "layer": "Tester stability", "status": "Ready", "next_step": "No immediate MT5 stability blocker." },
+        { "layer": "AI historical context", "status": "Ready for testing", "next_step": "The bootstrap loop is resolved." },
+        { "layer": "Cache replay coverage", "status": "Not ready", "next_step": "Do not use this run for performance conclusions." },
+        { "layer": "Approval-to-execution trace", "status": "Unknown", "next_step": "Run the 10–11 June diagnostic." },
+        { "layer": "Live readiness", "status": "Not ready", "next_step": "Require staged smoke and practical validation." }
+      ]
+    },
+    "accessIssues": []
+  },
+  "sources": [
+    {
+      "id": "audit_snapshot",
+      "label": "Reviewed MT5 cache-replay audit snapshot",
+      "path": "analysis_snapshot.sql"
+    }
+  ],
+  "package_info": {
+    "originUrl": "artifact://mt5-cache-replay-20260811",
+    "controls": { "edit": false, "refresh": false }
+  }
+}

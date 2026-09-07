@@ -7,12 +7,30 @@
 #include "Types.mqh"
 #include "Config.mqh"
 #include "JsonLite.mqh"
+// RewardWithinMaxDistance / PlanTickSize: the target menu must measure
+// feasibility with the same function the sanitizer enforces it with.
+#include "ExecutionAdjustmentContract.mqh"
 
 class CAIGateBridge {
 private:
    CFileBus *m_bus;
    datetime m_next_allowed; // backoff if AI failed recently
    string m_session_id;
+
+   // Replay identity.  DecisionInputHash() is component 4 of every tester cache
+   // signature, so it decides which recorded cohort a run can reach.  It used to
+   // be recomputed on every lookup, so a single unstable term could re-key the
+   // cohort mid-run and orphan every remaining recorded decision -- observed on
+   // the 2026.09.06 CACHE_ONLY replay, where it changed once at simulated
+   // 2026.08.03 09:34:59 and turned 11 recorded approvals into 1,276 cache
+   // misses and 0 trades.  The identity is now computed once and frozen for the
+   // life of the process; later drift is reported, never silently applied.
+   bool   m_identity_frozen;
+   string m_frozen_runtime_input_hash;
+   string m_frozen_decision_input_hash;
+   string m_frozen_policy_content_hash;
+   string m_frozen_invalidation_content_hash;
+   int    m_identity_drift_events;
 
    string _NowId(const string symbol) {
       uint r = (uint)MathRand();
@@ -99,7 +117,62 @@ private:
          obstacle_to_liquidity_r = MathAbs(liquidity_tp - p.obstacle_price) / risk_dist;
       double fvg_width = MathAbs(p.fvg.upper - p.fvg.lower);
       double fvg_width_atr = (p.fvg.gap_width_atr_score > 0.0 ? p.fvg.gap_width_atr_score : 0.0);
-      bool tp1_before_obstacle_possible = (InpAllowPartialBeforeObstacle && capped_tp > 0.0 && capped_rr > 0.0);
+      // A partial leg is only "possible" if the execution layer will actually place it.
+      // capped_rr > 0 was never that test: a 0.0108R leg in front of an adjacent major
+      // obstacle satisfied it, so this payload advertised a partial that _BuildPlanPrices
+      // then had to move past the obstacle -- and the AI vetoed the contradiction as
+      // ai_veto_target_arbitration_incoherent.  p.min_tp1_reward is the same number the
+      // ranking and the price builder use, published by CTradeEngine::_MinTp1Reward.
+      double capped_tp1_reward = (capped_tp > 0.0
+                                  ? (p.is_buy ? capped_tp - p.entry_est : p.entry_est - capped_tp)
+                                  : 0.0);
+      // p.min_tp1_reward is MathMax(stop_dist * 0.65, spread * mult) and is therefore
+      // strictly positive for any plan that reached target selection.  Zero means the
+      // floor was never computed -- a plan restored from a pre-fix state file -- and an
+      // unmeasured leg must not be advertised as placeable.  Fail closed on unknown.
+      bool capped_tp1_clears_floor = (capped_tp1_reward > 0.0 &&
+                                      p.min_tp1_reward > 0.0 &&
+                                      capped_tp1_reward >= p.min_tp1_reward);
+      bool tp1_before_obstacle_possible = (InpAllowPartialBeforeObstacle && capped_tp > 0.0 &&
+                                           capped_rr > 0.0 && capped_tp1_clears_floor);
+
+      // Every route must be measured against the SAME cap the target sanitizer
+      // will apply to whatever the model picks.  Offering a route that clears
+      // the minimum RR floor while breaching the maximum distance is how the
+      // 2026-09-04 EURCHF approval died: the payload said feasible_for_tp2=true
+      // at rr2=5.7293 with max_allowed_distance sitting unused in the same
+      // object, and _EvaluateTargetFeasibility then refused the approved plan
+      // as ai_chosen_target_exceeds_max_distance.  A cap of 0 means "no cap",
+      // matching RewardWithinMaxDistance and the sanitizer exactly, so this
+      // can never be stricter than the enforcement.
+      double tick_size = PlanTickSize(p.symbol);
+      double max_allowed = p.fallback_max_allowed_distance;
+      double liquidity_reward = (risk_dist > 0.0 ? liquidity_rr * risk_dist : 0.0);
+      double capped_reward    = (risk_dist > 0.0 ? capped_rr * risk_dist : 0.0);
+      bool liquidity_within_max = RewardWithinMaxDistance(liquidity_reward, max_allowed, tick_size);
+      bool capped_within_max    = RewardWithinMaxDistance(capped_reward, max_allowed, tick_size);
+      bool liquidity_rr_ok = (liquidity_rr + 0.0001 >= InpMinLiveRR2);
+      bool capped_rr_ok    = (capped_rr + 0.0001 >= InpMinLiveRR2);
+      bool liquidity_feasible = (liquidity_tp > 0.0 && liquidity_rr_ok && liquidity_within_max);
+      bool capped_feasible    = (capped_tp > 0.0 && capped_rr_ok && capped_within_max);
+
+      // The incumbent.  CTradeEngine already honours "keep_current" as an
+      // arbitration answer (see the chosen_model == "keep_current" branch in
+      // _ApplyAiTargetArbitration, which binds chosen_tp to p.tp2), but the
+      // menu never told the model the option existed.  With the max-distance
+      // test above now correctly retiring an over-cap liquidity route, a plan
+      // whose OWN deterministic target is perfectly feasible -- EURCHF held
+      // prev_day_high at 4.4254R inside a 5.0R cap -- would otherwise be left
+      // with an all-infeasible menu and no way to say "the plan is fine".
+      double current_reward = (p.tp2 > 0.0
+                               ? (p.is_buy ? p.tp2 - p.entry_est : p.entry_est - p.tp2)
+                               : 0.0);
+      double current_rr = p.effective_rr2;
+      if(current_rr <= 0.0 && risk_dist > 0.0 && current_reward > 0.0)
+         current_rr = current_reward / risk_dist;
+      bool current_within_max = RewardWithinMaxDistance(current_reward, max_allowed, tick_size);
+      bool current_rr_ok = (current_rr + 0.0001 >= InpMinLiveRR2);
+      bool current_feasible = (p.tp2 > 0.0 && current_reward > 0.0 && current_rr_ok && current_within_max);
 
       string j = "{";
       j += JsonKVBool("arbitration_required", p.target_arbitration_required) + ",";
@@ -145,40 +218,64 @@ private:
       j += JsonKVBool("is_ltf_obstacle", (StringFind(p.obstacle_tf, "ltf") >= 0 || p.obstacle_tf == "entry_tf"));
       j += "},";
       j += "\"liquidity_target\":{";
-      j += JsonKVBool("available", liquidity_tp > 0.0) + ",";
+      j += JsonKVBool("available", liquidity_feasible) + ",";
       j += JsonKVStr("model", liquidity_model) + ",";
       j += JsonKVNum("tp2", liquidity_tp, 8) + ",";
       j += JsonKVNum("rr2", liquidity_rr, 4) + ",";
-      j += JsonKVNum("reward_distance_price", (risk_dist > 0.0 ? liquidity_rr * risk_dist : 0.0), 8) + ",";
-      j += JsonKVNum("max_allowed_distance", p.fallback_max_allowed_distance, 8) + ",";
-      j += JsonKVBool("feasible_for_tp2", (liquidity_tp > 0.0 && liquidity_rr + 0.0001 >= InpMinLiveRR2)) + ",";
+      j += JsonKVNum("reward_distance_price", liquidity_reward, 8) + ",";
+      j += JsonKVNum("max_allowed_distance", max_allowed, 8) + ",";
+      j += JsonKVBool("exceeds_max_target_distance", !liquidity_within_max) + ",";
+      j += JsonKVBool("min_rr_pass", liquidity_rr_ok) + ",";
+      j += JsonKVBool("max_rr_pass", liquidity_within_max) + ",";
+      j += JsonKVBool("feasible_for_tp2", liquidity_feasible) + ",";
       j += JsonKVBool("feasible_for_tp1_only", false) + ",";
-      j += JsonKVStr("infeasible_reason", (liquidity_tp <= 0.0 ? "missing_tp" : (liquidity_rr + 0.0001 >= InpMinLiveRR2 ? "" : "rr_below_min"))) + ",";
+      // Reason precedence mirrors _EvaluateTargetFeasibility: max distance is
+      // decided before the RR floor, so the two never disagree on why.
+      j += JsonKVStr("infeasible_reason", (liquidity_tp <= 0.0 ? "missing_tp"
+                                           : (!liquidity_within_max ? "exceeds_max_target_distance"
+                                              : (liquidity_rr_ok ? "" : "rr_below_min")))) + ",";
       j += JsonKVBool("valid_structurally", p.liquidity_target_valid_structurally) + ",";
       j += JsonKVBool("blocked_by_obstacle", p.liquidity_target_blocked_by_obstacle);
       j += "},";
       j += "\"capped_before_obstacle\":{";
-      j += JsonKVBool("available", capped_tp > 0.0) + ",";
+      j += JsonKVBool("available", capped_feasible) + ",";
       j += JsonKVStr("model", (StringLen(p.capped_before_obstacle_source) > 0 ? p.capped_before_obstacle_source : "capped_before_obstacle")) + ",";
       j += JsonKVNum("tp2", capped_tp, 8) + ",";
       j += JsonKVNum("rr2", capped_rr, 4) + ",";
-      j += JsonKVNum("reward_distance_price", (risk_dist > 0.0 ? capped_rr * risk_dist : 0.0), 8) + ",";
-      j += JsonKVNum("max_allowed_distance", p.fallback_max_allowed_distance, 8) + ",";
-      j += JsonKVBool("feasible_for_tp2", (capped_tp > 0.0 && capped_rr + 0.0001 >= InpMinLiveRR2)) + ",";
-      j += JsonKVBool("feasible_for_tp1_only", (capped_tp > 0.0 && InpAllowPartialBeforeObstacle)) + ",";
-      j += JsonKVStr("infeasible_reason", (capped_tp <= 0.0 ? "missing_tp" : (capped_rr + 0.0001 >= InpMinLiveRR2 ? "" : "rr_below_min"))) + ",";
+      j += JsonKVNum("reward_distance_price", capped_reward, 8) + ",";
+      j += JsonKVNum("max_allowed_distance", max_allowed, 8) + ",";
+      j += JsonKVBool("exceeds_max_target_distance", !capped_within_max) + ",";
+      j += JsonKVBool("min_rr_pass", capped_rr_ok) + ",";
+      j += JsonKVBool("max_rr_pass", capped_within_max) + ",";
+      j += JsonKVBool("feasible_for_tp2", capped_feasible) + ",";
+      j += JsonKVBool("feasible_for_tp1_only", (capped_tp > 0.0 && InpAllowPartialBeforeObstacle && capped_tp1_clears_floor)) + ",";
+      j += JsonKVStr("infeasible_reason", (capped_tp <= 0.0 ? "missing_tp"
+                                           : (!capped_within_max ? "exceeds_max_target_distance"
+                                              : (capped_rr_ok ? "" : "rr_below_min")))) + ",";
       j += JsonKVBool("partial_allowed", InpAllowPartialBeforeObstacle);
       j += "},";
       j += "\"partial_before_obstacle_then_liquidity\":{";
-      j += JsonKVBool("available", (InpAllowPartialBeforeObstacle && capped_tp > 0.0 && liquidity_tp > 0.0)) + ",";
+      // Availability and feasibility must judge BOTH legs.  They used to judge only the
+      // runner, which is how a route whose first leg the engine cannot place was offered
+      // to the model with an empty infeasible_reason.
+      // The runner leg is the liquidity target, so it carries the liquidity
+      // route's max-distance verdict too: a partial whose tp2 breaches the cap
+      // is refused by the sanitizer exactly like a plain liquidity target.
+      j += JsonKVBool("available", (InpAllowPartialBeforeObstacle && capped_tp > 0.0 && liquidity_tp > 0.0 && capped_tp1_clears_floor && liquidity_within_max)) + ",";
       j += JsonKVStr("model", "partial_before_obstacle_then_liquidity") + ",";
       j += JsonKVNum("tp1", capped_tp, 8) + ",";
       j += JsonKVNum("rr1", capped_rr, 4) + ",";
+      j += JsonKVNum("tp1_reward_price", capped_tp1_reward, 8) + ",";
+      j += JsonKVNum("tp1_min_required_reward", p.min_tp1_reward, 8) + ",";
       j += JsonKVNum("tp2", liquidity_tp, 8) + ",";
       j += JsonKVNum("rr2", liquidity_rr, 4) + ",";
-      j += JsonKVBool("feasible_for_tp2", (InpAllowPartialBeforeObstacle && liquidity_tp > 0.0 && liquidity_rr + 0.0001 >= InpMinLiveRR2)) + ",";
+      j += JsonKVNum("reward_distance_price", liquidity_reward, 8) + ",";
+      j += JsonKVNum("max_allowed_distance", max_allowed, 8) + ",";
+      j += JsonKVBool("exceeds_max_target_distance", !liquidity_within_max) + ",";
+      j += JsonKVBool("max_rr_pass", liquidity_within_max) + ",";
+      j += JsonKVBool("feasible_for_tp2", (InpAllowPartialBeforeObstacle && liquidity_tp > 0.0 && liquidity_rr_ok && liquidity_within_max && capped_tp1_clears_floor)) + ",";
       j += JsonKVBool("feasible_for_tp1_only", false) + ",";
-      j += JsonKVStr("infeasible_reason", (!InpAllowPartialBeforeObstacle ? "partial_disabled" : (liquidity_tp <= 0.0 ? "missing_liquidity_tp2" : (liquidity_rr + 0.0001 >= InpMinLiveRR2 ? "" : "tp2_rr_below_min"))));
+      j += JsonKVStr("infeasible_reason", (!InpAllowPartialBeforeObstacle ? "partial_disabled" : (liquidity_tp <= 0.0 ? "missing_liquidity_tp2" : (!capped_tp1_clears_floor ? "partial_leg_below_tp1_floor" : (!liquidity_within_max ? "tp2_exceeds_max_target_distance" : (liquidity_rr_ok ? "" : "tp2_rr_below_min"))))));
       j += "},";
       j += "\"synthetic_rr_fallback\":{";
       j += JsonKVBool("available", p.fallback_feasible_for_tp2) + ",";
@@ -213,6 +310,30 @@ private:
       j += JsonKVBool("feasible_for_tp1_only", false) + ",";
       j += JsonKVStr("reason", p.synthetic_capped_to_max_distance_reason) + ",";
       j += JsonKVStr("infeasible_reason", (p.synthetic_capped_to_max_distance_feasible ? "" : "unavailable"));
+      j += "},";
+      // "keep_current" is already a valid answer to arbitration -- CTradeEngine
+      // binds it to p.tp2 -- it was simply never on the menu.  The model must
+      // be able to say "the target the engine already chose is the right one"
+      // instead of being forced onto an alternative route.
+      j += "\"keep_current_target\":{";
+      j += JsonKVBool("available", current_feasible) + ",";
+      j += JsonKVStr("model", "keep_current") + ",";
+      j += JsonKVNum("tp2", p.tp2, 8) + ",";
+      j += JsonKVNum("rr2", current_rr, 4) + ",";
+      // The level's identity is already on the envelope as current_target_source
+      // / current_tp_model; duplicating it here would emit fields the Python
+      // compactor whitelist drops, so the raw request would disagree with what
+      // the model actually reads.
+      j += JsonKVNum("reward_distance_price", current_reward, 8) + ",";
+      j += JsonKVNum("max_allowed_distance", max_allowed, 8) + ",";
+      j += JsonKVBool("exceeds_max_target_distance", !current_within_max) + ",";
+      j += JsonKVBool("min_rr_pass", current_rr_ok) + ",";
+      j += JsonKVBool("max_rr_pass", current_within_max) + ",";
+      j += JsonKVBool("feasible_for_tp2", current_feasible) + ",";
+      j += JsonKVBool("feasible_for_tp1_only", false) + ",";
+      j += JsonKVStr("infeasible_reason", (p.tp2 <= 0.0 || current_reward <= 0.0 ? "missing_tp"
+                                           : (!current_within_max ? "exceeds_max_target_distance"
+                                              : (current_rr_ok ? "" : "rr_below_min"))));
       j += "}";
       j += "}";
       return j;
@@ -226,12 +347,21 @@ private:
       return h;
    }
 
+   uint _Fnv1aBytes(const uchar &bytes[], const int count) const {
+      uint h = 2166136261;
+      for(int i=0; i<count; i++){
+         h = (h ^ (uint)bytes[i]) * 16777619;
+      }
+      return h;
+   }
+
    string _RequestNonce(const string req_id) const {
       return IntegerToString((int)(_Fnv1a(m_session_id + "|" + req_id) % 2147483647));
    }
 
    string _WorkloadMode() const {
       if(!(bool)MQLInfoInteger(MQL_TESTER)) return "LIVE_FORWARD";
+      if(InpTesterAiMode == TESTER_AI_BOOTSTRAP_RULE_ONLY) return "TESTER_AI_BOOTSTRAP_RULE_ONLY";
       if(InpTesterAiMode == TESTER_AI_RECORD_ONLY) return "TESTER_AI_RECORD_ONLY";
       if(InpTesterAiMode == TESTER_AI_CACHE_ONLY) return "TESTER_AI_CACHE_ONLY";
       return "TESTER_AI_LIVE_WAIT_DEBUG";
@@ -244,16 +374,60 @@ private:
       return IntegerToString((int)(_Fnv1a(contract) % 2147483647));
    }
 
+   // Byte-exact content hash.  This used to open the file with FILE_TXT -- which
+   // is UTF-16 in MQL5 unless FILE_ANSI is given -- and concatenate
+   // FileReadString() results.  Both policy files are odd-length ASCII JSON, so
+   // the byte stream does not divide into whole UTF-16 code units, and under the
+   // file I/O load of a real scan that read did not return the same string
+   // twice.  Measured on the 2026.09.06 one-day replay, against a file whose
+   // mtime had not moved since 2026.07.17: 49736647 at init, then 1990245157,
+   // 1989935653 and 1984261413 during the run.  That is what moved
+   // DecisionInputHash(), which is component 4 of every replay cache signature.
+   //
+   // Hashing the raw bytes removes the decode entirely, and a short read is now
+   // reported as unavailable instead of silently hashing as different content.
    string _CommonFileContentHash(const string path) const {
-      int h = FileOpen(path, FILE_READ|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      int h = FileOpen(path, FILE_READ|FILE_BIN|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
       if(h == INVALID_HANDLE) return "UNAVAILABLE";
-      string content = "";
-      while(!FileIsEnding(h)) content += FileReadString(h);
+      ulong size64 = FileSize(h);
+      if(size64 > 268435456){ FileClose(h); return "UNAVAILABLE"; }
+      int size = (int)size64;
+      uchar bytes[];
+      if(size > 0 && ArrayResize(bytes, size) != size){ FileClose(h); return "UNAVAILABLE"; }
+      uint got = 0;
+      if(size > 0) got = FileReadArray(h, bytes, 0, size);
       FileClose(h);
-      return IntegerToString((int)(_Fnv1a(content) % 2147483647));
+      if((int)got != size) return "UNAVAILABLE";
+      return IntegerToString((int)(_Fnv1aBytes(bytes, size) % 2147483647));
    }
 
-   string RuntimeInputHash() const {
+   string _PolicyIdentityContentHash(const string path) const {
+      if(!InpTesterLegacyPolicyFingerprint || !(bool)MQLInfoInteger(MQL_TESTER) ||
+         InpTesterAiMode != TESTER_AI_CACHE_ONLY)
+         return _CommonFileContentHash(path);
+      // Versioned compatibility with the historical digest, not the defective
+      // FILE_TXT reader. Only complete little-endian code units participated in
+      // the original stable cohort. The full raw bytes (including the odd tail)
+      // are pinned separately at startup and monitored by CheckIdentityDrift.
+      int h = FileOpen(path, FILE_READ|FILE_BIN|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+      if(h == INVALID_HANDLE) return "UNAVAILABLE";
+      ulong size64 = FileSize(h);
+      if(size64 > 268435456){ FileClose(h); return "UNAVAILABLE"; }
+      int size = (int)size64;
+      uchar bytes[];
+      if(size > 0 && ArrayResize(bytes, size) != size){ FileClose(h); return "UNAVAILABLE"; }
+      uint got = (size > 0 ? FileReadArray(h, bytes, 0, size) : 0);
+      FileClose(h);
+      if((int)got != size) return "UNAVAILABLE";
+      uint digest = 2166136261;
+      for(int i=0; i+1<size; i+=2){
+         uint unit = (uint)bytes[i] | ((uint)bytes[i+1] << 8);
+         digest = (digest ^ unit) * 16777619;
+      }
+      return IntegerToString((int)(digest % 2147483647));
+   }
+
+   string _ComputeRuntimeInputHash() const {
       string s = ENGINE_INPUT_SCHEMA + "|";
       s += IntegerToString((int)InpStrategyMode) + "|" + InpStrategyPreset + "|";
       s += IntegerToString((int)InpStopModel) + "|" + IntegerToString((int)PO3EffectiveHTF()) + "|" + IntegerToString((int)PO3EffectiveEntryTF()) + "|";
@@ -281,7 +455,7 @@ private:
       s += IntegerToString((int)InpNormalizedFvgMode) + "|" + DoubleToString(InpNormalizedFvgSpreadMult, 4) + "|";
       s += DoubleToString(InpNormalizedFvgAtrFrac, 6) + "|" + DoubleToString(InpNormalizedFvgSessionNoiseFrac, 6) + "|";
       s += IntegerToString(InpNormalizedFvgMinAssetClassSamples) + "|" + InpNormalizedFvgAssetClassPolicyFile + "|";
-      s += _CommonFileContentHash(InpNormalizedFvgAssetClassPolicyFile) + "|";
+      s += _PolicyIdentityContentHash(InpNormalizedFvgAssetClassPolicyFile) + "|";
       s += (InpBrokerCostHistoryEnable ? "1" : "0") + "|" + IntegerToString(InpBrokerCostMinSamples) + "|";
       s += DoubleToString(InpBrokerCostStressedPercentile, 4) + "|" + DoubleToString(InpCommissionFallbackPerLotRoundTurn, 6) + "|";
       s += (InpMaxTotalRiskEnable ? "1" : "0") + "|" + DoubleToString(InpMaxTotalRiskPct, 4) + "|" + DoubleToString(InpMaxTotalRiskMoney, 4) + "|";
@@ -290,13 +464,13 @@ private:
       s += IntegerToString(InpInvalidationPersistenceSeconds) + "|" + DoubleToString(InpInvalidationSpreadBufferMult, 4) + "|";
       s += IntegerToString(InpManagementActionRetryCooldownSec) + "|" + IntegerToString(InpManagementActionMaxRetries) + "|";
       s += (InpInvalidationAssetClassPolicyEnable ? "1" : "0") + "|" + InpInvalidationAssetClassPolicyFile + "|";
-      s += _CommonFileContentHash(InpInvalidationAssetClassPolicyFile) + "|";
+      s += _PolicyIdentityContentHash(InpInvalidationAssetClassPolicyFile) + "|";
       s += IntegerToString(InpCounterfactualHorizonMinutes) + "|" + IntegerToString(InpShadowCandidateHorizonMinutes) + "|";
       s += (InpUseBrokerSymbolSessions ? "1" : "0") + "|" + IntegerToString(InpSymbolNoEntryBeforeCloseMin) + "|" + IntegerToString(InpSymbolFlattenBeforeCloseMin);
       return IntegerToString((int)(_Fnv1a(s) % 2147483647));
    }
 
-   string DecisionInputHash() const {
+   string _ComputeDecisionInputHash() const {
       // Tester workflow/debug controls intentionally do not participate in this
       // economic decision identity. A decision recorded in RECORD_ONLY or
       // LIVE_WAIT_DEBUG must bind to the same setup during CACHE_ONLY replay.
@@ -323,12 +497,27 @@ private:
       s += IntegerToString((int)InpNormalizedFvgMode) + "|" + DoubleToString(InpNormalizedFvgSpreadMult, 4) + "|";
       s += DoubleToString(InpNormalizedFvgAtrFrac, 6) + "|" + DoubleToString(InpNormalizedFvgSessionNoiseFrac, 6) + "|";
       s += IntegerToString(InpNormalizedFvgMinAssetClassSamples) + "|" + InpNormalizedFvgAssetClassPolicyFile + "|";
-      s += _CommonFileContentHash(InpNormalizedFvgAssetClassPolicyFile) + "|";
+      s += _PolicyIdentityContentHash(InpNormalizedFvgAssetClassPolicyFile) + "|";
       s += (InpBrokerCostHistoryEnable ? "1" : "0") + "|" + IntegerToString(InpBrokerCostMinSamples) + "|";
       s += DoubleToString(InpBrokerCostStressedPercentile, 4) + "|" + DoubleToString(InpCommissionFallbackPerLotRoundTurn, 6) + "|";
       s += MANAGEMENT_SCHEMA_VERSION + "|" + IntegerToString((int)InpThesisInvalidationPolicy) + "|";
       s += IntegerToString((int)InpInvalidationConfirmationMode) + "|" + IntegerToString(InpCounterfactualHorizonMinutes);
       return IntegerToString((int)(_Fnv1a(s) % 2147483647));
+   }
+
+   // Frozen accessors.  Every caller -- request payloads, the policy manifest,
+   // the plan cohort stamp and the tester cache signature -- goes through these,
+   // so they cannot disagree with each other the way the recomputing versions
+   // did.  Before FreezeReplayIdentity() runs they fall back to computing, so an
+   // early caller still gets a correct value rather than an empty string.
+   string RuntimeInputHash() const {
+      if(m_identity_frozen) return m_frozen_runtime_input_hash;
+      return _ComputeRuntimeInputHash();
+   }
+
+   string DecisionInputHash() const {
+      if(m_identity_frozen) return m_frozen_decision_input_hash;
+      return _ComputeDecisionInputHash();
    }
 
    string RuntimeInputsJson() const {
@@ -451,7 +640,7 @@ private:
       j += JsonKVNum("normalized_fvg_session_noise_frac", InpNormalizedFvgSessionNoiseFrac, 6) + ",";
       j += JsonKVInt("normalized_fvg_min_asset_class_samples", InpNormalizedFvgMinAssetClassSamples) + ",";
       j += JsonKVStr("normalized_fvg_asset_class_policy_file", InpNormalizedFvgAssetClassPolicyFile) + ",";
-      j += JsonKVStr("normalized_fvg_asset_class_policy_hash", _CommonFileContentHash(InpNormalizedFvgAssetClassPolicyFile)) + ",";
+      j += JsonKVStr("normalized_fvg_asset_class_policy_hash", _PolicyIdentityContentHash(InpNormalizedFvgAssetClassPolicyFile)) + ",";
       j += JsonKVInt("invalidation_confirmation_mode", (int)InpInvalidationConfirmationMode) + ",";
       j += JsonKVInt("thesis_invalidation_policy", (int)InpThesisInvalidationPolicy) + ",";
       j += JsonKVInt("invalidation_persistence_seconds", InpInvalidationPersistenceSeconds) + ",";
@@ -460,7 +649,7 @@ private:
       j += JsonKVInt("management_action_max_retries", InpManagementActionMaxRetries) + ",";
       j += JsonKVBool("invalidation_asset_class_policy_enable", InpInvalidationAssetClassPolicyEnable) + ",";
       j += JsonKVStr("invalidation_asset_class_policy_file", InpInvalidationAssetClassPolicyFile) + ",";
-      j += JsonKVStr("invalidation_asset_class_policy_hash", _CommonFileContentHash(InpInvalidationAssetClassPolicyFile)) + ",";
+      j += JsonKVStr("invalidation_asset_class_policy_hash", _PolicyIdentityContentHash(InpInvalidationAssetClassPolicyFile)) + ",";
       j += JsonKVInt("counterfactual_horizon_minutes", InpCounterfactualHorizonMinutes) + ",";
       j += JsonKVInt("shadow_candidate_horizon_minutes", InpShadowCandidateHorizonMinutes) + ",";
       j += JsonKVBool("use_broker_symbol_sessions", InpUseBrokerSymbolSessions) + ",";
@@ -581,8 +770,8 @@ private:
       _SchemaRequireString(arb, "chosen_target_model", chosen, missing, invalid);
       _SchemaRequireNumber(arb, "chosen_tp1", tp1, -1.0e15, 1.0e15, missing, invalid);
       _SchemaRequireNumber(arb, "chosen_tp2", tp2, -1.0e15, 1.0e15, missing, invalid);
-      _SchemaRequireNumber(arb, "chosen_rr1", rr1, -1.0e6, 1.0e6, missing, invalid);
-      _SchemaRequireNumber(arb, "chosen_rr2", rr2, -1.0e6, 1.0e6, missing, invalid);
+      _SchemaRequireNumber(arb, "chosen_rr1", rr1, 0.0, 1.0e6, missing, invalid);
+      _SchemaRequireNumber(arb, "chosen_rr2", rr2, 0.0, 1.0e6, missing, invalid);
       string rejected = "", comparison = "";
       _SchemaRequireArray(arb, "rejected_target_models", rejected, missing, invalid);
       _SchemaRequireString(arb, "blocker_kind", blocker_kind, missing, invalid, true);
@@ -762,11 +951,94 @@ private:
    }
 
 public:
+   bool ValidateReplayIdentityMode(string &reason) const {
+      reason = "ok";
+      if(!InpTesterLegacyPolicyFingerprint) return true;
+      if(!(bool)MQLInfoInteger(MQL_TESTER) || InpTesterAiMode != TESTER_AI_CACHE_ONLY){
+         reason = "legacy_policy_identity_requires_cache_only_tester";
+         return false;
+      }
+      if(StringLen(InpTesterLegacyNormalizedPolicyRawHash) == 0 ||
+         StringLen(InpTesterLegacyInvalidationPolicyRawHash) == 0 ||
+         InpTesterLegacyNormalizedPolicyRawHash == "UNAVAILABLE" ||
+         InpTesterLegacyInvalidationPolicyRawHash == "UNAVAILABLE"){
+         reason = "legacy_policy_identity_requires_full_byte_pins";
+         return false;
+      }
+      if(_CommonFileContentHash(InpNormalizedFvgAssetClassPolicyFile) != InpTesterLegacyNormalizedPolicyRawHash ||
+         _CommonFileContentHash(InpInvalidationAssetClassPolicyFile) != InpTesterLegacyInvalidationPolicyRawHash){
+         reason = "legacy_policy_identity_raw_bytes_mismatch";
+         return false;
+      }
+      return true;
+   }
+
    CAIGateBridge(CFileBus &bus){
       m_bus=&bus;
       m_next_allowed=0;
       m_session_id = IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
                      + IntegerToString((int)TimeLocal()) + "_" + IntegerToString((int)GetTickCount());
+      m_identity_frozen = false;
+      m_frozen_runtime_input_hash = "";
+      m_frozen_decision_input_hash = "";
+      m_frozen_policy_content_hash = "";
+      m_frozen_invalidation_content_hash = "";
+      m_identity_drift_events = 0;
+   }
+
+   // Called once from OnInit, after inputs are bound and before the first plan
+   // is built.  From here on the replay identity is immutable for this process.
+   string FreezeReplayIdentity() {
+      m_frozen_policy_content_hash = _CommonFileContentHash(InpNormalizedFvgAssetClassPolicyFile);
+      m_frozen_invalidation_content_hash = _CommonFileContentHash(InpInvalidationAssetClassPolicyFile);
+      m_frozen_runtime_input_hash = _ComputeRuntimeInputHash();
+      m_frozen_decision_input_hash = _ComputeDecisionInputHash();
+      m_identity_frozen = true;
+      return IdentityDiagnostics();
+   }
+
+   bool IdentityFrozen() const { return m_identity_frozen; }
+   int  IdentityDriftEvents() const { return m_identity_drift_events; }
+
+   string IdentityDiagnostics() const {
+      return "frozen=" + (m_identity_frozen ? "true" : "false")
+             + " policy_identity_version=" + (InpTesterLegacyPolicyFingerprint ? "legacy_utf16_units_v1_pinned" : "raw_bytes_v2")
+             + " decision_input_hash=" + m_frozen_decision_input_hash
+             + " runtime_input_hash=" + m_frozen_runtime_input_hash
+             + " normalized_fvg_policy_content=" + m_frozen_policy_content_hash
+             + " invalidation_policy_content=" + m_frozen_invalidation_content_hash
+             + " normalized_fvg_policy_file=" + InpNormalizedFvgAssetClassPolicyFile
+             + " invalidation_policy_file=" + InpInvalidationAssetClassPolicyFile
+             + " drift_events=" + IntegerToString(m_identity_drift_events);
+   }
+
+   // Recomputes the identity and reports disagreement with the frozen value.
+   // It deliberately does NOT adopt the new value: adopting it is precisely the
+   // failure this freeze exists to prevent.  Returns true when drift is seen.
+   bool CheckIdentityDrift(string &detail) {
+      detail = "";
+      if(!m_identity_frozen) return false;
+      string policy_now = _CommonFileContentHash(InpNormalizedFvgAssetClassPolicyFile);
+      string invalidation_now = _CommonFileContentHash(InpInvalidationAssetClassPolicyFile);
+      string decision_now = _ComputeDecisionInputHash();
+      string runtime_now = _ComputeRuntimeInputHash();
+      if(decision_now == m_frozen_decision_input_hash &&
+         runtime_now == m_frozen_runtime_input_hash &&
+         policy_now == m_frozen_policy_content_hash &&
+         invalidation_now == m_frozen_invalidation_content_hash)
+         return false;
+      m_identity_drift_events++;
+      detail = "frozen_decision_input_hash=" + m_frozen_decision_input_hash
+               + " observed_decision_input_hash=" + decision_now
+               + " frozen_runtime_input_hash=" + m_frozen_runtime_input_hash
+               + " observed_runtime_input_hash=" + runtime_now
+               + " frozen_normalized_fvg_policy_content=" + m_frozen_policy_content_hash
+               + " observed_normalized_fvg_policy_content=" + policy_now
+               + " frozen_invalidation_policy_content=" + m_frozen_invalidation_content_hash
+               + " observed_invalidation_policy_content=" + invalidation_now
+               + " drift_events=" + IntegerToString(m_identity_drift_events)
+               + " action=frozen_identity_retained";
+      return true;
    }
 
    string RuntimeHash() const {
@@ -783,9 +1055,10 @@ public:
    string RequestNonce(const string req_id) const { return _RequestNonce(req_id); }
    string ResponseBindingHash(const string req_id, const AiDecision &dec) const {
        string material = req_id + "|" + m_session_id + "|" + _RequestNonce(req_id)
-                         + "|" + dec.request_identity_hash
-                         + "|" + AI_DECISION_SCHEMA_VERSION + "|CACHE_OF_FULL_STRUCTURED"
-                        + "|" + dec.provider_mode
+                          + "|" + dec.request_identity_hash
+                          + "|" + dec.contract_manifest_hash
+                          + "|" + AI_DECISION_SCHEMA_VERSION + "|CACHE_OF_FULL_STRUCTURED"
+                         + "|" + dec.provider_mode
                         + "|" + dec.provider_id
                         + "|" + dec.actual_model_id
                         + "|" + dec.model_fingerprint
@@ -1613,7 +1886,7 @@ public:
       _SchemaRequireObject(txt, "critic_output", out.critic_output_json, missing, invalid);
       _SchemaRequireObject(txt, "adjudicator_output", out.adjudicator_output_json, missing, invalid);
       if(out.provider_contract_version != AI_PROVIDER_CONTRACT_VERSION) _AppendSchemaField(invalid, "provider_contract_version");
-      if(out.provider_mode != "REMOTE_API" && out.provider_mode != "LOCAL_OPENAI_COMPATIBLE")
+      if(!AiProviderModeIsTradeable(out.provider_mode))
          _AppendSchemaField(invalid, "provider_mode");
       if(out.endpoint_class != "official_remote" && out.endpoint_class != "loopback" && out.endpoint_class != "non_loopback")
          _AppendSchemaField(invalid, "endpoint_class");
@@ -1793,8 +2066,8 @@ public:
       _SchemaRequireString(txt, "chosen_target_model", out.chosen_target_model, missing, invalid);
       _SchemaRequireNumber(txt, "chosen_tp1", out.chosen_tp1, -1.0e15, 1.0e15, missing, invalid);
       _SchemaRequireNumber(txt, "chosen_tp2", out.chosen_tp2, -1.0e15, 1.0e15, missing, invalid);
-      _SchemaRequireNumber(txt, "chosen_rr1", out.chosen_rr1, -1.0e6, 1.0e6, missing, invalid);
-      _SchemaRequireNumber(txt, "chosen_rr2", out.chosen_rr2, -1.0e6, 1.0e6, missing, invalid);
+      _SchemaRequireNumber(txt, "chosen_rr1", out.chosen_rr1, 0.0, 1.0e6, missing, invalid);
+      _SchemaRequireNumber(txt, "chosen_rr2", out.chosen_rr2, 0.0, 1.0e6, missing, invalid);
       _SchemaRequireArray(txt, "rejected_target_models", out.rejected_target_models_json, missing, invalid);
       _SchemaRequireString(txt, "target_blocker_kind", out.target_blocker_kind, missing, invalid, true);
       _SchemaRequireNumber(txt, "target_blocker_severity", out.target_blocker_severity, -1.0, 10.0, missing, invalid);
@@ -1995,6 +2268,24 @@ public:
       if(out.decision_state == "ABSTAIN" && out.allow) _AppendSchemaField(invalid, "abstain_allow_true");
       if(out.decision_state == "APPROVE" && (out.selected_target_price <= 0.0 || out.assessed_entry <= 0.0 || out.assessed_sl <= 0.0 || out.assessed_tp2 <= 0.0))
          _AppendSchemaField(invalid, "approve_plan_prices_invalid");
+      if(out.decision_state == "APPROVE"){
+         double risk_distance = MathAbs(out.assessed_entry - out.assessed_sl);
+         bool is_buy = (out.assessed_sl < out.assessed_entry);
+         double reward2 = (is_buy ? out.assessed_tp2 - out.assessed_entry
+                                  : out.assessed_entry - out.assessed_tp2);
+         double deterministic_rr2 = (risk_distance > 0.0 ? reward2 / risk_distance : 0.0);
+         if(risk_distance <= 0.0 || deterministic_rr2 <= 0.0 || out.chosen_rr2 <= 0.0 ||
+            MathAbs(deterministic_rr2 - out.chosen_rr2) > 0.00001)
+            _AppendSchemaField(invalid, "approve_rr2_mismatch");
+         if(out.assessed_tp1 > 0.0){
+            double reward1 = (is_buy ? out.assessed_tp1 - out.assessed_entry
+                                     : out.assessed_entry - out.assessed_tp1);
+            double deterministic_rr1 = (risk_distance > 0.0 ? reward1 / risk_distance : 0.0);
+            if(deterministic_rr1 <= 0.0 || out.chosen_rr1 <= 0.0 ||
+               MathAbs(deterministic_rr1 - out.chosen_rr1) > 0.00001)
+               _AppendSchemaField(invalid, "approve_rr1_mismatch");
+         }
+      }
 
        string binding_material = rid + "|" + out.response_session_id + "|" + out.response_request_nonce
                                  + "|" + out.request_identity_hash

@@ -1,0 +1,119 @@
+{
+  "audit_generated_at": "2026-08-10T22:05:24Z",
+  "assessment": "NEEDS_REVISION_NOT_LIVE_READY",
+  "decision": "Do not repeat the full two-month run yet. First run a narrow, verbose cache-only diagnostic around the single approved decision.",
+  "run": {
+    "expert": "PO3_AIGate_ScannerEA",
+    "symbol": "GOLD",
+    "timeframe": "M15",
+    "period_start": "2026-05-27",
+    "period_end": "2026-07-27",
+    "tester_mode": "TESTER_AI_CACHE_ONLY",
+    "history_quality_pct": 100,
+    "bars": 3924,
+    "ticks": 235381,
+    "execution_seconds": 884.814,
+    "initial_balance_usd": 10000.0,
+    "final_balance_usd": 10000.0,
+    "net_profit_usd": 0.0,
+    "trades": 0,
+    "deals": 0,
+    "technical_status": "Test passed"
+  },
+  "cache": {
+    "recorded_requests_available": 3715,
+    "fill_requests_selected": 60,
+    "fill_requests_processed": 60,
+    "tester_cache_valid": 27,
+    "tester_cache_invalid": 0,
+    "fill_skipped": 33,
+    "coverage_of_recorded_requests": 0.0072678331,
+    "python_decision_cache_valid": 15,
+    "python_decision_cache_invalid_legacy_schema": 12,
+    "python_decision_cache_used_by_tester_replay": false
+  },
+  "ai_decisions": {
+    "total": 27,
+    "approve": 1,
+    "abstain": 6,
+    "reject": 20,
+    "approval_rate": 0.037037037,
+    "historical_evidence_available": 27,
+    "average_score": 5.37,
+    "minimum_score": 2.3,
+    "maximum_score": 8.1,
+    "resolver_counts": {
+      "qualitative_block_upheld": 20,
+      "qualitative_dispute_unresolved": 6,
+      "analyst_approve_critic_pass": 1
+    },
+    "selected_family_counts": {
+      "MICRO_CONTINUATION_FVG": 12,
+      "MICRO_BREAKER_RETEST": 6,
+      "MICRO_FVG_EDGE_REVERSAL": 4,
+      "MICRO_RANGE_REENTRY": 4,
+      "MICRO_NESTED_CONTINUATION": 1
+    },
+    "veto_counts": {
+      "none": 19,
+      "ai_veto_structural_contradiction": 5,
+      "ai_veto_execution_plan_mismatch": 2,
+      "ai_veto_missing_mandatory_evidence": 1
+    }
+  },
+  "single_approved_decision": {
+    "cache_file": "n577667844.json",
+    "request_id": "591813800_1779840000_280907546_1781102695_GOLD_2409",
+    "simulated_time_utc": "2026-06-10T14:44:40Z",
+    "family": "MICRO_CONTINUATION_FVG",
+    "direction": "SELL",
+    "score": 8.1,
+    "risk_multiplier": 0.65,
+    "entry": 4161.665,
+    "sl": 4180.59,
+    "tp1": 4147.755125,
+    "tp2": 4141.79375,
+    "final_resolver_reason": "analyst_approve_critic_pass",
+    "historical_evidence_state": "AVAILABLE",
+    "execution_outcome": "No trade was recorded; the exact downstream reason is not observable in this run."
+  },
+  "memory_and_priors": {
+    "completed_memory": 81,
+    "pending_decisions": 96,
+    "quarantine": 10,
+    "prior_buckets": 32,
+    "prior_clean_records": 81,
+    "prior_rejected_records": 0,
+    "prior_integrity": "clean_only",
+    "completed_family_counts": {
+      "micro_continuation_fvg": 30,
+      "micro_bisi_sibi_edge": 24,
+      "micro_range_reentry": 21,
+      "micro_po3_reversal": 6
+    }
+  },
+  "observability": {
+    "verbose_journal": false,
+    "final_summary_suppressed": true,
+    "missing_run_counters": [
+      "ai_cache_hits_total",
+      "ai_cache_misses_total",
+      "tester_ai_cache_miss_total",
+      "ai_final_allow_true_total",
+      "watchlist_added_total",
+      "orders_placed_total",
+      "trades_opened_total",
+      "execution_rejection_reasons"
+    ]
+  },
+  "validation_targets": {
+    "diagnostic_window_start": "2026-06-10",
+    "diagnostic_window_end": "2026-06-11",
+    "smoke_minimum_closed_ai_approved_trades": 30,
+    "practical_minimum_closed_trades": 100,
+    "configured_policy_minimum_closed_trades": 100,
+    "rough_decisions_for_30_approvals_at_observed_rate": 810,
+    "rough_decisions_for_100_approvals_at_observed_rate": 2700,
+    "estimate_warning": "Approval-rate extrapolations are planning estimates from a small, intentionally sampled set, not forecasts."
+  }
+}

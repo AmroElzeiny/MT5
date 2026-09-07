@@ -74,6 +74,10 @@ class DeadlinePolicy:
         # A margin can never consume the whole terminal window; clamp to half so
         # a misconfigured margin degrades to "less provider time", never to
         # "no provider time and no response".
+        #
+        # The margin is a subtractive reserve for writing one response file, so
+        # it is deliberately NOT scaled alongside the wait timeouts: raising it
+        # shortens the provider budget rather than lengthening it.
         margin_ms = max(0, min(margin_ms, terminal_ms // 2))
         return cls(
             mt5_terminal_timeout_ms=terminal_ms,

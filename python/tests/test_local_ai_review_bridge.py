@@ -260,6 +260,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     if isinstance(body.get("response_format"), dict)
                     else ""
                 ),
+                "deadline_epoch_ms": self.headers.get("X-PO3-Deadline-Epoch-Ms"),
+                "deadline_contract": self.headers.get("X-PO3-Deadline-Contract"),
                 "started_at": time.monotonic(),
             }
         )
@@ -695,6 +697,36 @@ class BridgeStructuredOutputTests(BridgeTestCase):
 
 
 class BridgeDeadlineTests(BridgeTestCase):
+    def test_k_bridge_header_is_capped_by_the_role_timeout(self) -> None:
+        """A stuck critic must not inherit the whole still-open MT5 window."""
+
+        self.state.scripted = ['{"verdict":"PASS"}']
+        provider = self.provider(timeout_sec=900.0)
+        started_wall_ms = int(time.time() * 1000.0)
+        metadata = {
+            "request_id": "bridge-request-1",
+            "request_identity_hash": "a" * 64,
+            "decision_schema_version": "test",
+            "prompt_contract_version": "test",
+            "deadline": _deadline(terminal_sec=600.0),
+            "timeout_sec": 180.0,
+        }
+        provider.generate_structured(
+            role="critic",
+            system_prompt="Return strict JSON only.",
+            evidence={"request_id": "bridge-request-1", "candidate": "A"},
+            response_schema=_ReviewSchema,
+            request_metadata=metadata,
+        )
+
+        recorded = self.state.generation_calls[0]
+        header_deadline_ms = int(recorded["deadline_epoch_ms"])
+        # The browser receives roughly 178 seconds: the 180-second role cap
+        # minus the two seconds reserved for its 504 to reach Python.
+        self.assertGreaterEqual(header_deadline_ms - started_wall_ms, 175_000)
+        self.assertLessEqual(header_deadline_ms - started_wall_ms, 180_000)
+        self.assertEqual(recorded["deadline_contract"], "20260730_absolute_request_deadline_v1")
+
     def test_k_sdk_receives_the_remaining_budget_not_the_configured_timeout(self) -> None:
         """The regression this whole change exists for.
 
@@ -1016,14 +1048,14 @@ class BridgeSerializationTests(BridgeTestCase):
             "two generations overlapped inside the single browser conversation",
         )
 
-    def test_n_configuration_pins_provider_parallelism_to_one(self) -> None:
+    def test_n_configuration_caps_provider_parallelism_to_three_tabs(self) -> None:
         env = bridge_env()
         env["LOCAL_AI_PARALLELISM"] = "4"
         config = ai_gate.AIGateRuntimeConfig.from_env(env)
         self.assertEqual(
             config.local_parallelism,
-            1,
-            "LOCAL_AI_PARALLELISM is hard-clamped; a browser chat cannot interleave",
+            3,
+            "LOCAL_AI_PARALLELISM must not exceed the three isolated browser lanes",
         )
 
     def test_n_all_three_roles_share_the_one_serialized_transport(self) -> None:
@@ -1086,6 +1118,50 @@ class BridgeCandidateBudgetTests(unittest.TestCase):
         config = ai_gate.AIGateRuntimeConfig.from_env(bridge_env())
         self.assertEqual(config.live_candidate_budget, 3)
         self.assertEqual(config.local_parallelism, 1)
+
+    def test_o_live_budget_is_applied_before_identity_freeze(self) -> None:
+        payload = {
+            "id": "live-budget-1",
+            "runtime": {"account_trade_mode": "demo", "tester": False},
+            "candidate_count": 6,
+            "request_identity_hash": "stale-full-cohort-hash",
+            "ordered_candidate_identities": [{"candidate_index": i} for i in range(6)],
+            "candidates": [
+                {"candidate_index": i, "setup_family": f"FAM{i % 3}"}
+                for i in range(6)
+            ],
+        }
+        with patch("ai_gate._rule_score", side_effect=[(10.0 - i, "ok") for i in range(6)]):
+            bounded = ai_gate._apply_live_candidate_budget(payload)
+        self.assertEqual(len(bounded["candidates"]), 3)
+        self.assertEqual(
+            [row["candidate_index"] for row in bounded["candidates"]],
+            [0, 1, 2],
+        )
+        self.assertNotIn("candidate_count", bounded)
+        self.assertNotIn("request_identity_hash", bounded)
+        self.assertNotIn("ordered_candidate_identities", bounded)
+
+    def test_o_sparse_cohort_keeps_original_mql_indexes_and_resolves_by_index(self) -> None:
+        payload = {
+            "id": "live-budget-sparse",
+            "runtime": {"account_trade_mode": "demo", "tester": False},
+            "candidates": [
+                {"candidate_index": i, "setup_family": "A" if i < 3 else "B"}
+                for i in range(6)
+            ],
+        }
+        scores = [10.0, 8.0, 7.0, 9.0, 6.0, 5.0]
+        with patch("ai_gate._rule_score", side_effect=[(score, "ok") for score in scores]):
+            bounded = ai_gate._apply_live_candidate_budget(payload)
+        self.assertEqual(
+            [row["candidate_index"] for row in bounded["candidates"]],
+            [0, 1, 3],
+        )
+        self.assertIs(
+            ai_gate._candidate_with_index(bounded["candidates"], 3),
+            bounded["candidates"][2],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1165,14 +1241,19 @@ class BridgeDeploymentSettingsTests(unittest.TestCase):
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
                 values[key.strip()] = value.strip()
-        self.assertEqual(values.get("AI_USE_REMOTE_API"), "false")
+        if values.get("AI_USE_REMOTE_API") != "false":
+            self.skipTest("runtime intentionally selects REMOTE_API, not the local browser bridge")
         self.assertEqual(values.get("LOCAL_AI_BASE_URL"), "http://127.0.0.1:1234/v1")
         self.assertEqual(values.get("LOCAL_AI_ANALYST_MODEL"), BRIDGE_MODEL)
         self.assertEqual(values.get("LOCAL_AI_MAX_RETRIES"), "0")
-        self.assertEqual(values.get("LOCAL_AI_PARALLELISM"), "1")
+        self.assertEqual(values.get("LOCAL_AI_PARALLELISM"), "3")
         self.assertEqual(values.get("AI_LIVE_CANDIDATE_BUDGET"), "3")
         self.assertEqual(values.get("AI_ENABLE_SNAPSHOTS"), "false")
-        self.assertEqual(values.get("AI_MT5_TERMINAL_TIMEOUT_SEC"), "180")
+        self.assertEqual(values.get("AI_MT5_TERMINAL_TIMEOUT_SEC"), "1800")
+        self.assertEqual(values.get("LOCAL_AI_TIMEOUT_SEC"), "1800")
+        self.assertEqual(values.get("LOCAL_AI_ANALYST_TIMEOUT_SEC"), "900")
+        self.assertEqual(values.get("LOCAL_AI_CRITIC_TIMEOUT_SEC"), "450")
+        self.assertEqual(values.get("LOCAL_AI_ADJUDICATOR_TIMEOUT_SEC"), "300")
         self.assertEqual(values.get("AI_RESPONSE_WRITE_MARGIN_SEC"), "15")
         self.assertEqual(
             endpoint_class(values.get("LOCAL_AI_BASE_URL", "")), "loopback"

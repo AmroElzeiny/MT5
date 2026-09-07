@@ -29,7 +29,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from openai_usage_logger import log_ai_usage
-from po3_env import load_dotenv, peek_dotenv_value
+from po3_env import (
+    PROVIDER_SELECT_OPENAI,
+    bootstrap_provider_env,
+    load_dotenv,
+    peek_dotenv_value,
+)
 from calibration_pipeline import run_shadow_calibration, write_calibration_reports
 from experiment_registry import ExperimentRegistry
 from architecture_contracts import partition_homogeneous_cohorts
@@ -46,28 +51,24 @@ from governance_contracts import (
     write_feature_lineage,
 )
 
-# Standalone analytics uses the same explicit provider selector as ai_gate.
-# In local/invalid mode the remote secret is neither parsed nor retained.
-_EXPECTANCY_PROVIDER_SWITCH = (
-    peek_dotenv_value(None, "AI_USE_REMOTE_API")
-    or os.environ.get("AI_USE_REMOTE_API")
-    or ""
-).strip().lower()
-_EXPECTANCY_REMOTE_MODE = _EXPECTANCY_PROVIDER_SWITCH == "true"
-load_dotenv(
-    override=True,
-    exclude_keys=(
-        ("LOCAL_AI_API_KEY", "LOCAL_AI_MODEL_PATH")
-        if _EXPECTANCY_REMOTE_MODE
-        else ("OPENAI_API_KEY", "OPENAI_BASE_URL")
-    ),
-)
-if _EXPECTANCY_REMOTE_MODE:
-    os.environ.pop("LOCAL_AI_API_KEY", None)
-    os.environ.pop("LOCAL_AI_MODEL_PATH", None)
-else:
-    os.environ.pop("OPENAI_API_KEY", None)
-    os.environ.pop("OPENAI_BASE_URL", None)
+# Standalone analytics uses the same explicit provider selector as ai_gate, via
+# the one shared resolver in ``po3_env``.
+#
+# It must not re-derive the selection here.  This module used to read the legacy
+# ``AI_USE_REMOTE_API`` boolean alone, which is absent whenever the modern
+# ``AI_PROVIDER_SELECT`` key is the one configured.  An absent boolean read as
+# "not remote", so under ``AI_PROVIDER_SELECT=openai_remote`` this block took the
+# local branch: it re-loaded the whole env file -- re-injecting the OpenRouter
+# and local secrets that ``ai_gate``'s bootstrap had just stripped -- and then
+# popped ``OPENAI_API_KEY``, the credential the selected provider requires.
+# Because ``ai_gate`` imports this module *after* its own bootstrap, this ran
+# last and won, and the gate failed closed with ``OPENAI_API_KEY=missing_remote``
+# on a correct configuration.
+#
+# ``bootstrap_provider_env`` is idempotent, so running it again here re-applies
+# the same exclusions instead of contradicting them.
+_EXPECTANCY_PROVIDER_SELECT, _EXPECTANCY_PROVIDER_SELECT_ERROR = bootstrap_provider_env()
+_EXPECTANCY_REMOTE_MODE = _EXPECTANCY_PROVIDER_SELECT == PROVIDER_SELECT_OPENAI
 
 _EXPECTANCY_AI_PROVIDER: Any = None
 

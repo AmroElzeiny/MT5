@@ -1,0 +1,2 @@
+# No third-party dependency is required by the R&D Factory itself.
+# It uses Python 3.11+ standard library and optionally reuses MT5 repo modules when present.

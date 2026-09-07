@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import ai_gate
 
@@ -8,6 +11,7 @@ from ai_gate import (
     _hard_model_rejection_codes,
     _normalize_advisory_metadata,
     _runtime_inputs,
+    _select_tester_cache_requests,
 )
 
 
@@ -54,6 +58,55 @@ class AIGateLogicTests(unittest.TestCase):
             ["DISTANT_FROM_FVG", "FVG_STRUCTURE_INVALIDATED", "OBSTACLE_NEARBY_RT"]
         )
         self.assertEqual(hard, [])
+
+    def test_tester_cache_selection_is_bounded_balanced_and_deterministic(self) -> None:
+        families = {
+            "micro_continuation_fvg": 9,
+            "micro_bisi_sibi_edge": 4,
+            "micro_range_reentry": 3,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = []
+            ordinal = 0
+            for family, count in families.items():
+                for _ in range(count):
+                    ordinal += 1
+                    path = root / f"request_{ordinal:03d}.json"
+                    path.write_text(
+                        json.dumps(
+                            {
+                                "tester_cache_signature": f"signature-{ordinal}",
+                                "candidates": [{"setup_family": family}],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    paths.append(path)
+
+            selected_a, summary_a = _select_tester_cache_requests(
+                paths,
+                max_requests=6,
+                max_per_family=2,
+            )
+            selected_b, summary_b = _select_tester_cache_requests(
+                list(reversed(paths)),
+                max_requests=6,
+                max_per_family=2,
+            )
+
+            self.assertEqual([path.name for path in selected_a], [path.name for path in selected_b])
+            self.assertEqual(summary_a, summary_b)
+            self.assertEqual(summary_a["requests_selected"], 6)
+            self.assertEqual(summary_a["requests_deferred"], 10)
+            self.assertEqual(
+                summary_a["selected_primary_families"],
+                {
+                    "micro_bisi_sibi_edge": 2,
+                    "micro_continuation_fvg": 2,
+                    "micro_range_reentry": 2,
+                },
+            )
 
 
 if __name__ == "__main__":

@@ -83,6 +83,49 @@ _CANDIDATE_FIELDS: tuple[str, ...] = (
     "source_t_sweep",
     "source_t_disp",
     "source_t_bos",
+    "po3_state",
+    "po3_state_reason",
+    "po3_scope",
+    "source_context_tier",
+    "structure_type",
+    "final_setup_class",
+    "fvg_execution_class",
+    "fvg_mitigation_state",
+    "fvg_invalidation_reason",
+    "fvg_continuation",
+    "fvg_reversal",
+    "fvg_context_type",
+    "fvg_mid_mitigated",
+    "fvg_fully_filled",
+    "fvg_invalidated",
+    "fvg_entry_invalid",
+    "fvg_structure_invalidated",
+    "fvg_score",
+    "origin_score",
+    "cleanliness_score",
+    "freshness_score",
+    "retest_quality_score",
+    "continuation_score",
+    "reversal_score",
+    "displacement_candle_score",
+    "opposing_obstruction_score",
+    "stop_model",
+    "configured_stop_model",
+    "stop_quality_score",
+    "target_arbitration_required",
+    "liquidity_target_valid_structurally",
+    "liquidity_target_blocked_by_obstacle",
+    "historical_evidence_state",
+    "retrieved_analogue_ids",
+    "rule_score",
+    "family_scope",
+    "full_po3_sequence_required",
+    "htf_bos_required",
+    "htf_bos_observed",
+    "htf_bos_absence_classification",
+    "follow_through_required",
+    "follow_through_observed",
+    "follow_through_absence_classification",
 )
 
 _MAX_SCALAR_CHARS = 160
@@ -291,6 +334,32 @@ def build_evidence_catalog(envelope: Mapping[str, Any]) -> EvidenceCatalog:
                         canonical_path=f"{base}.authoritative_numbers.{name}.value",
                         value=body.get("value"),
                     )
+            family_requirements = row.get("family_requirement_contract")
+            if isinstance(family_requirements, Mapping):
+                for name in (
+                    "context_version",
+                    "family_scope",
+                    "full_po3_sequence_required",
+                    "htf_bos_required",
+                    "htf_bos_observed",
+                    "htf_bos_absence_classification",
+                    "follow_through_required",
+                    "follow_through_observed",
+                    "follow_through_absence_classification",
+                    "required_event_sequence",
+                ):
+                    if name not in family_requirements:
+                        continue
+                    value = family_requirements[name]
+                    if _is_scalar(value) or (
+                        isinstance(value, list) and all(_is_scalar(entry) for entry in value)
+                    ):
+                        _append(
+                            items,
+                            candidate_index=index,
+                            canonical_path=f"{base}.family_requirement_contract.{name}",
+                            value=value,
+                        )
 
     catalog_hash = sha256(
         json.dumps(

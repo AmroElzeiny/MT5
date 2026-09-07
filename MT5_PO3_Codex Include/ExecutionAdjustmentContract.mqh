@@ -282,4 +282,41 @@ bool TicksWithinCap(const long reward_ticks, const long cap_ticks) {
    return (reward_ticks <= cap_ticks);
 }
 
+double PlanTickSize(const string symbol) {
+   double tick = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tick <= 0.0) tick = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   if(tick <= 0.0) tick = 0.00001;
+   return tick;
+}
+
+//+------------------------------------------------------------------+
+//| THE max-target-distance test.                                     |
+//|                                                                   |
+//| Two parties ask this question about the same target: the payload  |
+//| that OFFERS a route to the model, and the sanitizer that later    |
+//| ENFORCES the choice.  On 2026-09-04 only the second one asked.    |
+//| AIGateBridge advertised the EURCHF liquidity target as            |
+//|                                                                   |
+//|   "reward_distance_price": 0.005185,                              |
+//|   "max_allowed_distance":  0.004525,                              |
+//|   "feasible_for_tp2": true, "infeasible_reason": ""               |
+//|                                                                   |
+//| -- both numbers in the same object, never compared.  The model    |
+//| took the route it was told was feasible, Python approved, and     |
+//| _EvaluateTargetFeasibility then killed the only approval of the   |
+//| run with ai_chosen_target_exceeds_max_distance.                   |
+//|                                                                   |
+//| Routing both parties through this one function is what makes that |
+//| disagreement unrepresentable.  A cap of zero means "no cap        |
+//| configured", exactly as TicksWithinCap already defines it, so the |
+//| offer can never be stricter than the enforcement either.          |
+//+------------------------------------------------------------------+
+bool RewardWithinMaxDistance(const double reward,
+                             const double max_allowed_distance,
+                             const double tick_size) {
+   if(max_allowed_distance <= 0.0) return true;   // no cap configured
+   return TicksWithinCap(PriceDistanceToTicks(reward, tick_size),
+                         PriceDistanceToTicks(max_allowed_distance, tick_size));
+}
+
 #endif // __PO3_EXECUTION_ADJUSTMENT_CONTRACT_MQH__

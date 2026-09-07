@@ -60,6 +60,13 @@ public:
       return true;
    }
 
+   // Existence only.  _PathExists() in TradeEngine answers the same question by
+   // reading the whole file back, which costs a full 152 KB read for a trade-meta
+   // document; callers that only need "is it still there" must use this instead.
+   bool Exists(const string rel_path) const {
+      return FileIsExist(rel_path, FILE_COMMON);
+   }
+
    bool WriteText(const string rel_path, const string content) {
       string tmp_path = rel_path + ".tmp";
       int h = FileOpen(tmp_path, FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);

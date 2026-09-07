@@ -13,12 +13,28 @@ const string AI_ROLE_CONTRACT_VERSION = "20260724_python_bound_roles_v3";
 const string AI_PROVIDER_CONTRACT_VERSION = "20260723_provider_neutral_transport_v2";
 const string AI_REQUEST_IDENTITY_VERSION = "20260724_ai_request_identity_v3";
 const string AI_EVIDENCE_ENVELOPE_VERSION = "20260718_decision_evidence_v1";
-const string AI_FAMILY_PROFILE_VERSION = "20260718_family_context_v1";
+const string AI_FAMILY_PROFILE_VERSION = "20260818_family_context_v3";
 const string AI_TRADE_MEMORY_SCHEMA_VERSION = "20260718_trade_memory_v1";
 const string AI_RETRIEVAL_POLICY_VERSION = "20260718_hybrid_analogue_retrieval_v1";
 const string AI_CONSENSUS_RESOLVER_VERSION = "20260718_deterministic_consensus_v1";
 const string TRADE_LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_provider_identity_v8";
 const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
+
+//--- Provider transport modes MT5 will bind a decision to.
+// Single definition shared by the response validator (AIGateBridge.mqh) and the
+// persisted-plan validator (StateStore.mqh).  Duplicating the literals let one
+// side accept a mode the other rejected.  Python carries the identical set in
+// ai_provider.PROVIDER_MODES_TRADING and a governance test asserts they match.
+const string AI_PROVIDER_MODE_REMOTE     = "REMOTE_API";
+const string AI_PROVIDER_MODE_LOCAL      = "LOCAL_OPENAI_COMPATIBLE";
+const string AI_PROVIDER_MODE_OPENROUTER = "OPENROUTER_API";
+
+bool AiProviderModeIsTradeable(const string mode)
+  {
+   return(mode == AI_PROVIDER_MODE_REMOTE
+       || mode == AI_PROVIDER_MODE_LOCAL
+       || mode == AI_PROVIDER_MODE_OPENROUTER);
+  }
 const string FEATURE_LINEAGE_VERSION = "20260718_tick_path_evidence_v3";
 const string RISK_MODEL_VERSION = "20260717_original_initial_risk_v3";
 const string REPEATABILITY_SCHEMA_VERSION = "20260718_provider_neutral_repeatability_v3";
@@ -44,7 +60,7 @@ const string FILE_BUS_LIFECYCLE_VERSION = "20260724_file_bus_lifecycle_v3";
 const string REQUEST_LIFECYCLE_VERSION = "20260724_exactly_once_request_v1";
 const string CONTRACT_MANIFEST_VERSION = "20260724_contract_compatibility_v1";
 const string CALIBRATION_CONTRACT_VERSION = "20260716_oos_calibration_v1";
-const string DEPLOYMENT_MANIFEST_SCHEMA_VERSION = "20260717_deployment_manifest_v1";
+const string DEPLOYMENT_MANIFEST_SCHEMA_VERSION = "20260730_deployment_manifest_v1";
 const double SHADOW_ADVERSE_THRESHOLD_R = 0.50;
 
 uint PO3ContractFnv1a(const string value)
@@ -102,7 +118,10 @@ enum TesterAiMode
 {
    TESTER_AI_RECORD_ONLY = 0,
    TESTER_AI_CACHE_ONLY = 1,
-   TESTER_AI_LIVE_WAIT_DEBUG = 2
+   TESTER_AI_LIVE_WAIT_DEBUG = 2,
+   // Deterministic cold-start research mode. It is valid only in the
+   // Strategy Tester and never performs wall-clock AI waits.
+   TESTER_AI_BOOTSTRAP_RULE_ONLY = 3
 };
 
 enum ENUM_NETTING_POSITION_POLICY
@@ -136,41 +155,66 @@ enum ENUM_THESIS_INVALIDATION_POLICY
 
 // --- Scan / scheduling ---
 input ENUM_STRATEGY_MODE InpStrategyMode = STRATEGY_HYBRID;
-input string InpStrategyPreset       = "micro_intraday";
-input int   InpScanIntervalMinutes   = 1;
+input string InpStrategyPreset       = "swing_po3";
+input int   InpScanIntervalMinutes   = 15;
 input int   InpTimerTickSeconds      = 1;
 input int   InpMaxSymbolsPerTick     = 80;
 input bool  InpScanAllMarketWatch    = true;
 input string InpTesterSymbols        = "";
 input bool  InpPauseScanWhilePendingAI = false;
-input int   InpMaxPendingAiRequests  = 12;
-input int   InpWatchlistMaxBars      = 90;
-input int   InpWatchlistMaxMinutes   = 90;
-input int   InpPendingAiTimeoutMin   = 6;
+input int   InpMaxPendingAiRequests  = 8;
+input int   InpWatchlistMaxBars      = 600;
+input int   InpWatchlistMaxMinutes   = 2880;
+input int   InpPendingAiTimeoutMin   = 45;
 input bool  InpAiWaitInTester        = true;
 input int   InpAiWaitPollMs          = 250;
-input int   InpAiWaitSliceSeconds    = 15;
-input int   InpAiWaitTimeoutRealMin  = 2;
+input int   InpAiWaitSliceSeconds    = 75;
+input int   InpAiWaitTimeoutRealMin  = 30;
 input int   InpTesterPersistIntervalMin = 15;
 input bool  InpTesterRejectStaleAiResults = true;
 input int   InpTesterMaxAiResultAgeSimMinutes = 15;
 input bool  InpTesterFreezeAiExecutionSnapshot = true;
 input TesterAiMode InpTesterAiMode = TESTER_AI_RECORD_ONLY;
+// Explicit historical replay only. Pin the complete policy bytes while reproducing
+// the old UTF-16 code-unit digest deterministically from a binary read.
+input bool  InpTesterLegacyPolicyFingerprint = false;
+input string InpTesterLegacyNormalizedPolicyRawHash = "";
+input string InpTesterLegacyInvalidationPolicyRawHash = "";
 input bool  InpTesterAllowLiveWaitDebugTrading = false;
 input int   InpTesterLiveWaitDebugMaxDurationHours = 6;
+input double InpTesterBootstrapRiskMultiplier = 0.25;
 input bool  InpVerboseJournal        = true;
+// Journal detail level.  InpVerboseJournal is a single on/off switch, so the only two
+// settings available were "every per-route diagnostic" and "no evidence at all", and
+// every diagnostic ever added for one investigation stayed at full volume forever.
+// Measured on the 2026.08.03 replay: one scan cycle wrote 16,697 lines, of which
+// [target_rank] was 51.7% of the bytes, [partial_leg_gate] 11.8%, [broker_cost_estimate]
+// 10.8% and [target_feasibility] 5.9%.  Once the broker-cost memo removed the CPU
+// bottleneck the same content arrived ~10x faster and the agent log reached 627.7 MB in
+// two minutes, after which the tester stopped writing to it altogether while still
+// consuming CPU -- so the volume had become the next blocker, not a cosmetic issue.
+//   0 = decisions, rejections, summaries and errors only
+//   1 = + authority and gate lines: tp1_authority, spread_gate, obstacle_crossing_gate,
+//       execution_sequence_gate, setup_floor_gate, bos_contract_gate, stop_distance_cap,
+//       semantic_plan_match, execution_adjustment_validation, final_summary   <- default
+//   2 = + per-route and per-candidate detail: target_rank, partial_leg_gate,
+//       target_feasibility, target_candidates, fallback_target, plan_economics
+//       (this is the pre-2026.09.06 behaviour, restored by setting the level to 2)
+// Operational only: this changes no decision, is not part of RuntimeInputsJson() and
+// therefore not part of RuntimeInputHash(), so it can never invalidate a replay cohort.
+input int   InpJournalDetailLevel    = 1;
 input bool   InpJournalTesterOnly     = false;
 input bool   InpRolloverProtectionEnable = true;
 input string InpTradingFreezeStartServerTime = "23:54";
 input string InpTradingFreezeEndServerTime = "01:05";
 input string InpServerMarketCloseTime = "00:00";
-input int    InpCloseManagedTradesBeforeMarketCloseMin = 6;
+input int    InpCloseManagedTradesBeforeMarketCloseMin = 0;
 
 // --- Timeframes ---
-input ENUM_TIMEFRAMES InpHTF         = PERIOD_M15;
-input ENUM_TIMEFRAMES InpEntryTF     = PERIOD_M1;
-input ENUM_TIMEFRAMES InpConfirmTF   = PERIOD_M1;
-input ENUM_TIMEFRAMES InpSessionMapTF = PERIOD_M5;
+input ENUM_TIMEFRAMES InpHTF         = PERIOD_H4;
+input ENUM_TIMEFRAMES InpEntryTF     = PERIOD_M15;
+input ENUM_TIMEFRAMES InpConfirmTF   = PERIOD_M15;
+input ENUM_TIMEFRAMES InpSessionMapTF = PERIOD_H1;
 input bool InpPresetOverridesTimeframes = false;
 
 // --- PO3 / dealing range ---
@@ -250,7 +294,7 @@ input double InpNormalizedFvgSessionNoiseFrac = 0.10;
 input int    InpNormalizedFvgSessionNoiseBars = 120;
 input int    InpNormalizedFvgMinAssetClassSamples = 100;
 input string InpNormalizedFvgAssetClassPolicyFile = "PO3_AI_BUS\\config\\normalized_fvg_policy.v2.json";
-input double InpStopMaxFracOfPrice   = 0.05;
+input double InpStopMaxFracOfPrice   = 0.08;
 input int    InpSLBufferPts          = 4;
 input double InpSLBufferAtrFrac      = 0.018;
 input int    InpMidTouchLookbackBars = 6;
@@ -307,8 +351,35 @@ input double InpRiskPerTradePct      = 0.5;
 input double InpRiskPerTradeMoney    = 0.0;
 input double InpMaxRiskPerTradePct   = 2.5;
 input int    InpMaxSlippagePts       = 6;
+// A raw point count is not a spread guard.  Point size spans 1e-5 (FX) to 1e-2
+// (indices) across this universe, so InpMaxSpreadTicks=100 means 0.001 on EURUSD
+// -- roughly ten normal spreads, i.e. inert -- and 1.00 index point on #Japan225,
+// which is an eighth of that symbol's normal spread and therefore unreachable by
+// construction.  The 2026-09-05 replay lost its only index approval to exactly
+// that: 213 rejections at a constant "spread too wide ticks=800.0", where 800
+// points = 8.00 index points = 1.4% of the planned risk against a 22% allowance.
+// The guard is therefore expressed in the two units that are invariant across
+// symbols: a fraction of price (quote quality) and a fraction of planned risk
+// (trade economics).  InpMaxSpreadTicks is kept and still enforced, but it may
+// only raise the absolute ceiling above the symbol's own price-fraction
+// allowance -- it can never place a symbol's ceiling below what its own quote
+// scale makes reachable.  It therefore binds only when
+// price <= InpMaxSpreadTicks * point / InpMaxSpreadPriceFrac.
 input int    InpMaxSpreadTicks       = 100;
 input double InpMaxSpreadRiskFrac    = 0.22;
+// Measured across the 2026-09-05 replay (13 symbols with both a spread_r and a
+// plan geometry sample): median spread/price ranged 0.0017% (GOLD) to 0.0592%
+// (#USSPX500); #Japan225 sat at 0.0128%.  0.25% is 4.2x the worst healthy
+// observation, so it catches a genuinely blown-out quote while leaving
+// InpMaxSpreadRiskFrac as the binding constraint on every measured symbol.
+input double InpMaxSpreadPriceFrac   = 0.0025;
+// A spread that has not moved across this many consecutive rejections is not a
+// transient widening.  It is reclassified from TRANSIENT_SPREAD_FAILURE to
+// PERMANENT_BROKER_CONSTRAINT so the plan stops re-attempting an outcome that
+// cannot change; the earlier attempts are still suppressed while the measured
+// spread is unchanged, which is what turned one blocked plan into 213 prechecks
+// and 5,597 duplicate execution attempts.
+input int    InpMaxPersistentSpreadAttempts = 3;
 input int    InpMinStopTicks         = 25;
 input double InpMinStopAtrFrac       = 0.07;
 input double InpMinStopEntryAtrFrac  = 0.16;
@@ -317,14 +388,14 @@ input double InpMaxEntryDriftR       = 0.4;
 input double InpMarketEntryToleranceR = 0.55;
 input double InpEntryZoneToleranceR  = 0.35;
 input int    InpPendingEntryRelaxAfterBars = 3;
-input double InpMinLiveRR2           = 0.85;
+input double InpMinLiveRR2           = 0.90;
 input double InpMaxPlanRR2           = 5.0;
-input double InpMaxTargetAdrFrac     = 0.80;
-input double InpMaxTargetAtrMult     = 5.00;
+input double InpMaxTargetAdrFrac     = 1.50;
+input double InpMaxTargetAtrMult     = 8.00;
 input double InpMinTargetAtrMult     = 0.08;
 input double InpMinTargetAdrFrac     = 0.006;
 input double InpMinTP1SpreadMult     = 4.0;
-input int    InpPendingOrderExpiryMin = 45;
+input int    InpPendingOrderExpiryMin = 480;
 input int    InpPendingExpiryH1Minutes = 240;
 input int    InpPendingExpiryH4Minutes = 720;
 input int    InpPendingExpiryD1Minutes = 2880;
@@ -334,6 +405,59 @@ input bool   InpBrokerCostHistoryEnable = true;
 input int    InpBrokerCostMinSamples = 20;
 input double InpBrokerCostStressedPercentile = 0.95;
 input int    InpBrokerCostHistoryDays = 90;
+// How long a computed broker-cost estimate stays valid, in SERVER seconds.
+// BrokerCostEstimatePerLot() runs HistorySelect() across InpBrokerCostHistoryDays
+// and then walks every deal in the selection, and _EstimateExecutionCosts() calls it
+// once per plan build.  Measured on the 2026.08.03 CACHE_ONLY replay: 2,215 calls in
+// a single scan cycle, 0.2243 s of wall clock per call, 678.3 s out of the 680.7 s
+// the run spent between journal lines -- 99.6% of real time -- for an answer that was
+// identical every time (source=configured_fallback samples=0).  At that rate one scan
+// cycle costs ~8 minutes and a five-day replay cannot finish.
+// The estimate is a pure function of (symbol, deals in history, trailing window), so
+// it is memoized per symbol.  A deal added by this EA drops the memo immediately via
+// BrokerCostHistoryInvalidate(); this interval bounds the only other way the answer
+// can move -- old deals sliding out of the trailing window - which for a 90-day
+// window is a boundary effect, not a step change.
+// 0 disables the memo and restores per-call recomputation (for falsification).
+input int    InpBrokerCostCacheSeconds = 3600;
+// How many trade-meta documents to remember, by exact content, per bus path.
+// MaintainPositions() runs once per SIMULATED second for every managed position and
+// each pass loads the position's trade meta, writes it back through _WriteTradeMeta(),
+// then loads and writes it a second time in the penalty loop.  One meta document is
+// 1,737 fields / 76,084 characters, _WriteTradeMeta() fans it out in ten write calls
+// (seven distinct files for a filled position -- the ticket and position-id aliases
+// collapse), and CFileBus::WriteText() costs six filesystem operations per path -- so
+// a single open position spends ~84 filesystem operations and ~2.1 MB of writes on
+// every simulated second.  Measured on the 2026.08.03 CACHE_ONLY replay: two
+// consecutive writes of trade_position_2.json were byte-identical (76,084 == 76,084),
+// and simulated time advanced 15 seconds in 45 seconds of wall clock -- 0.333x real
+// time, against 359x before the position opened.  A five-day replay needs 360 hours.
+// Reading is the same document twice per simulated second, and JsonLite's key lookup
+// rescans from position 0 and materializes a temporary string for every quoted token
+// it passes, so parsing 1,737 fields out of 76,084 characters is quadratic.
+// The memo therefore holds, per path, the exact text last written or read: a write
+// whose content is unchanged (and whose file still exists) is skipped, and a read
+// whose bytes match the memo returns the stored parse instead of reparsing.  Both are
+// pure-function memos -- the bytes on disk and the parsed plan are identical either
+// way -- so no consumer, restart path or authority field can observe the difference.
+// 0 disables both memos and restores per-call write and reparse (for falsification).
+input int    InpTradeMetaMemoEntries = 256;
+// How often, in SERVER seconds, the trade meta must be rewritten purely to refresh
+// its copy of the tick watermark.
+// PenaltyWatcher stamps latest_observed_tick_time / latest_observed_tick_msc on every
+// tick and _ApplyPenaltyStateToMeta() copies them into the trade meta, so the
+// serialized document differs on every simulated second even when nothing about the
+// trade has changed -- which defeats content addressing by construction.  Measured on
+// the 2026.08.03 replay after the memo was added: two consecutive writes of
+// trade_position_2.json differed in exactly those two fields and nothing else.
+// The watermark's source of truth is PenaltyState, which _PersistPenaltyStates()
+// already writes every 15 simulated seconds, so the trade-meta copy is a mirror.
+// Bounding the mirror to the same 15 seconds keeps it no staler than the field it
+// mirrors while turning ~10 alias writes per simulated second into ~10 per interval.
+// Any MATERIAL change still writes immediately -- this interval only governs how long
+// a document whose only difference is the watermark may wait.
+// 0 restores an immediate write whenever the watermark moves.
+input int    InpTradeMetaWatermarkSeconds = 15;
 input double InpCommissionFallbackPerLotRoundTurn = 0.01;
 input int    InpSessionFillPenaltyPtsActive = 2;
 input int    InpSessionFillPenaltyPtsOffHours = 8;
@@ -345,10 +469,18 @@ input bool   InpBlockSyntheticTargetThroughOpposingImbalance = false;
 input bool   InpAllowSyntheticRRTarget = true;
 input bool   InpRejectSyntheticFallbackAfterCrossedObstacle = true;
 input bool   InpRequireAITargetArbitrationOnObstacle = true;
+// A SEMANTIC_PLAN_CHANGED at execution means the obstacle/target picture moved
+// between approval and the entry trigger. The approved plan is genuinely dead,
+// but the PO3 sequence behind it is not: marking the context INVALIDATED buried
+// the setup for good, when the action it was filed under literally reads
+// "terminal_invalidate_or_requeue_ai". With this enabled the plan still leaves
+// the watchlist and no stale approval can execute -- the setup is simply left
+// eligible for the next scan to rebuild and re-ask the AI with current evidence.
+input bool   InpRequeueAiOnSemanticPlanChange = true;
 input bool   InpHardRejectCrossedObstacleTarget = false;
 input bool   InpAllowAIToUseLiquidityTargetBehindMinorBlocker = true;
 input bool   InpAllowPartialBeforeObstacle = true;
-input double InpBlockerKillSeverity = 8.0;
+input double InpBlockerKillSeverity = 9.0;
 input double InpBlockerMajorSeverity = 6.5;
 input double InpBlockerMinorMaxSeverity = 3.5;
 input double InpObstacleRejectR = 0.70;
@@ -491,7 +623,7 @@ input int    InpManagementActionRetryCooldownSec = 30;
 input int    InpManagementActionMaxRetries = 20;
 input int    InpPenaltyCloseStrikes  = 6;
 input int    InpPenaltyCutStrikes    = 3;
-input int    InpMinMinutesBeforePenaltyCuts = 20;
+input int    InpMinMinutesBeforePenaltyCuts = 30;
 
 input double InpPenaltyMaeTriggerR   = -1.05;
 input double InpPenaltyGivebackTrigMfeR = 1.8;
@@ -614,4 +746,3 @@ string PO3ScopeLabel(const ENUM_TIMEFRAMES tf) {
 }
 
 #endif
-

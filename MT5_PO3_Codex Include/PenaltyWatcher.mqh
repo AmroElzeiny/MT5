@@ -599,7 +599,7 @@ private:
       experiment += JsonKVBool("policy_selection_eligible", false) + ",";
       experiment += JsonKVStr("eligibility_reason", "clean_oos_management_alpha_not_yet_available");
       experiment += "}";
-      m_bus.AppendText("logs\\management_experiments.jsonl", experiment + "\n");
+      m_bus.AppendText(m_bus.LogDir() + "\\management_experiments.jsonl", experiment + "\n");
    }
 
    void _ObserveSelectedPositionPath(const ulong ticket,

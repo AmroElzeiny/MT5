@@ -35,9 +35,20 @@ from structured_models import (
 
 
 PROVIDER_CONTRACT_VERSION = "20260723_provider_neutral_transport_v2"
+PROVIDER_EXCHANGE_CONTRACT_VERSION = "20260811_provider_exchange_v1"
 PROVIDER_MODE_REMOTE = "REMOTE_API"
 PROVIDER_MODE_LOCAL = "LOCAL_OPENAI_COMPATIBLE"
+PROVIDER_MODE_OPENROUTER = "OPENROUTER_API"
 PROVIDER_MODE_UNAVAILABLE = "UNAVAILABLE"
+
+# Every mode MQL is willing to bind a decision to.  ``AIGateBridge.mqh`` and
+# ``StateStore.mqh`` carry the identical literal set; adding a mode here without
+# adding it there turns a healthy decision into an MQL schema rejection.
+PROVIDER_MODES_TRADING = (
+    PROVIDER_MODE_REMOTE,
+    PROVIDER_MODE_LOCAL,
+    PROVIDER_MODE_OPENROUTER,
+)
 
 # Reserved, non-trading request id used by the structured-output capability
 # probe.  A local OpenAI-compatible server (including the Local AI Review
@@ -47,7 +58,7 @@ PROVIDER_CAPABILITY_PROBE_ID = "provider_capability_probe"
 
 # Upper bound for the local ``/models`` reachability GET.  See
 # ``LocalOpenAICompatibleProvider._health_timeout_sec``.
-LOCAL_HEALTHCHECK_MAX_TIMEOUT_SEC = 30.0
+LOCAL_HEALTHCHECK_MAX_TIMEOUT_SEC = 150.0
 
 
 def _canonical_hash(value: Any) -> str:
@@ -162,6 +173,69 @@ class ProviderResult:
     unsupported_generation_parameters: tuple[str, ...] = ()
     schema_fingerprint: str = ""
     repair_attempted: bool = False
+    exchange_contract_hash: str = ""
+
+
+@dataclass(frozen=True)
+class ProviderExchangeContract:
+    """Transport-neutral request that both browser and API providers must carry."""
+
+    version: str
+    role: str
+    system_prompt: str
+    evidence_json: str
+    schema_name: str
+    schema_fingerprint: str
+    schema: dict[str, Any]
+    request_id: str
+    request_identity_hash: str
+    max_output_tokens: int
+    timeout_sec: float
+    deadline_contract_version: str
+    contract_hash: str
+
+
+def build_provider_exchange_contract(
+    *,
+    role: str,
+    system_prompt: str,
+    evidence: Mapping[str, Any],
+    preflight: StructuredSchemaPreflight,
+    request_metadata: Mapping[str, Any],
+    default_max_output_tokens: int,
+    effective_timeout_sec: float,
+) -> ProviderExchangeContract:
+    """Freeze the semantic request before transport-specific wire encoding."""
+
+    evidence_json = json.dumps(
+        evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
+    payload = {
+        "version": PROVIDER_EXCHANGE_CONTRACT_VERSION,
+        "role": str(role).strip().lower(),
+        "system_prompt": str(system_prompt),
+        "evidence_json": evidence_json,
+        "schema_name": preflight.schema_name,
+        "schema_fingerprint": preflight.schema_fingerprint,
+        "schema": preflight.schema,
+        "request_id": str(request_metadata.get("request_id") or ""),
+        "request_identity_hash": str(
+            request_metadata.get("request_identity_hash") or ""
+        ),
+        "max_output_tokens": max(
+            1,
+            int(
+                request_metadata.get("max_output_tokens")
+                or default_max_output_tokens
+            ),
+        ),
+        "timeout_sec": float(effective_timeout_sec),
+        "deadline_contract_version": DEADLINE_CONTRACT_VERSION,
+    }
+    return ProviderExchangeContract(
+        **payload,
+        contract_hash=_canonical_hash(payload),
+    )
 
 
 def _terminal_failure_category(errors: Sequence[str]) -> str:
@@ -196,11 +270,20 @@ class ProviderCallError(RuntimeError):
         schema_fingerprint: str = "",
         repair_attempted: bool = False,
         repair_result: str = "not_attempted",
+        provider_call_attempted: bool = True,
+        http_request_sent: bool = True,
     ) -> None:
         self.category = str(category)
         self.status_code = status_code
         self.retryable = bool(retryable)
         self.configuration_block = bool(configuration_block)
+        # Refusals raised *before* the transport is touched must say so. The
+        # gate used to hardcode both flags to true for every ProviderCallError,
+        # so a breaker short-circuit -- which sends nothing -- was logged as
+        # "http_request_sent=true http_status=0", asserting a call that never
+        # happened. Defaults keep real call failures reporting as before.
+        self.provider_call_attempted = bool(provider_call_attempted)
+        self.http_request_sent = bool(http_request_sent)
         self.schema_name = str(schema_name)
         self.schema_fingerprint = str(schema_fingerprint)
         self.repair_attempted = bool(repair_attempted)
@@ -360,6 +443,10 @@ class UnavailableProvider:
 
 
 class _OpenAICompatibleProviderBase:
+    # Cooldown waits are sliced so a worker notices another worker's recovery
+    # (which zeroes ``_circuit_open_until``) instead of sleeping through it.
+    _CIRCUIT_WAIT_SLICE_SEC = 1.0
+
     def __init__(
         self,
         *,
@@ -433,13 +520,27 @@ class _OpenAICompatibleProviderBase:
         }
         if self.base_url:
             kwargs["base_url"] = self.base_url
-        try:
-            self._client = factory(**kwargs)
-        except TypeError:
-            # Test doubles and older factories may not accept max_retries.
-            kwargs.pop("max_retries", None)
-            self._client = factory(**kwargs)
+        default_headers = self._client_default_headers()
+        if default_headers:
+            kwargs["default_headers"] = default_headers
+        # Test doubles and older factories may not accept every keyword.  Drop
+        # the optional ones one at a time; ``api_key``/``timeout`` are required
+        # and a factory rejecting those is a genuine configuration error.
+        for optional in ("default_headers", "max_retries"):
+            try:
+                self._client = factory(**kwargs)
+                return self._client
+            except TypeError:
+                if optional not in kwargs:
+                    continue
+                kwargs.pop(optional, None)
+        self._client = factory(**kwargs)
         return self._client
+
+    def _client_default_headers(self) -> dict[str, str]:
+        """Per-transport headers applied to every request on this client."""
+
+        return {}
 
     def model_for_role(self, role: str) -> str:
         role_key = str(role or "analyst").strip().lower()
@@ -533,6 +634,8 @@ class _OpenAICompatibleProviderBase:
                 "PROVIDER_CONFIGURATION_ERROR",
                 "provider_configuration_block:" + reason,
                 configuration_block=True,
+                provider_call_attempted=False,
+                http_request_sent=False,
             )
 
     def _open_configuration_circuit(self, key: str, reason: str) -> None:
@@ -660,19 +763,116 @@ class _OpenAICompatibleProviderBase:
         self._configuration_circuit_check(key)
         return preflight, key
 
-    def _circuit_check(self) -> None:
-        should_probe = False
-        with self._state_lock:
-            if self._circuit_open_until > time.monotonic():
-                raise RuntimeError("provider_circuit_open")
-            should_probe = self._circuit_open_until > 0.0
-        if should_probe:
-            health = self.healthcheck(probe_structured=False)
-            if not health.healthy:
-                with self._state_lock:
-                    self._circuit_open_until = time.monotonic() + self._circuit_cooldown_sec
-                raise RuntimeError("provider_circuit_recovery_healthcheck_failed:" + health.reason)
-            self._record_success()
+    def _circuit_wait_budget_ms(self, deadline: Any | None) -> int | None:
+        """How long this request may spend waiting out a breaker cooldown.
+
+        ``None`` means the caller supplied no absolute deadline, so nothing
+        proves there is budget to spend; that caller must fail rather than
+        block a worker for an unbounded time.  The reserve is the policy's own
+        ``min_attempt_ms``: waiting until there is no time left to actually
+        call the provider would trade one useless outcome for another.
+        """
+
+        if deadline is None:
+            return None
+        try:
+            remaining_ms = int(deadline.remaining_ms())
+            min_attempt_ms = int(deadline.policy.min_attempt_ms)
+        except Exception:
+            return None
+        return max(0, remaining_ms - min_attempt_ms)
+
+    def _circuit_check(
+        self,
+        *,
+        request_metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        # The breaker only ever opens because provider calls failed, so its
+        # refusals belong to the provider/transport domain. Raising a bare
+        # RuntimeError filed them as LOCAL_PIPELINE_ERROR instead, which read as
+        # a defect in our own pipeline every time the network went down -- a
+        # local label on a provider condition, the mirror of the mislabel fixed
+        # for selected_provider_call_failed.
+        #
+        # An open breaker is a COOLDOWN, not a verdict on this request. It used
+        # to raise immediately, and the gate turns any ProviderCallError into a
+        # terminal DEGRADED_NON_TRADING response -- so a 60s cooldown consumed
+        # every request claimed inside that window, permanently. One record-only
+        # cohort lost 295 requests that way against 77 real connection errors:
+        # the breaker destroyed four times more work than the outage it was
+        # protecting against. Waiting spends time we already own (the request
+        # deadline) instead of spending the request itself.
+        metadata = request_metadata or {}
+        deadline = metadata.get("deadline")
+        request_id = str(metadata.get("request_id") or "")
+        waited_ms = 0
+        while True:
+            with self._state_lock:
+                cooldown_remaining_sec = self._circuit_open_until - time.monotonic()
+                should_probe = (
+                    cooldown_remaining_sec <= 0.0 and self._circuit_open_until > 0.0
+                )
+            if cooldown_remaining_sec > 0.0:
+                cooldown_remaining_ms = int(math.ceil(cooldown_remaining_sec * 1000.0))
+                # Recomputed every pass, so it already accounts for what this
+                # request has spent waiting so far.
+                budget_ms = self._circuit_wait_budget_ms(deadline)
+                if budget_ms is None or budget_ms < cooldown_remaining_ms:
+                    self._log(
+                        "[provider_circuit_wait]"
+                        f" request_id={request_id}"
+                        f" provider={self.provider_id}"
+                        f" cooldown_remaining_ms={cooldown_remaining_ms}"
+                        f" request_budget_ms={-1 if budget_ms is None else budget_ms}"
+                        f" waited_ms={waited_ms}"
+                        " action=fail_deadline_cannot_cover_cooldown"
+                    )
+                    raise ProviderCallError(
+                        "PROVIDER_TRANSPORT_ERROR",
+                        "provider_circuit_open",
+                        retryable=False,
+                        provider_call_attempted=False,
+                        http_request_sent=False,
+                    )
+                if waited_ms == 0:
+                    self._log(
+                        "[provider_circuit_wait]"
+                        f" request_id={request_id}"
+                        f" provider={self.provider_id}"
+                        f" cooldown_remaining_ms={cooldown_remaining_ms}"
+                        f" request_budget_ms={budget_ms}"
+                        " action=wait_for_cooldown"
+                    )
+                slice_sec = min(cooldown_remaining_sec, self._CIRCUIT_WAIT_SLICE_SEC)
+                time.sleep(slice_sec)
+                waited_ms += int(round(slice_sec * 1000.0))
+                continue
+            if should_probe:
+                health = self.healthcheck(probe_structured=False)
+                if not health.healthy:
+                    with self._state_lock:
+                        self._circuit_open_until = (
+                            time.monotonic() + self._circuit_cooldown_sec
+                        )
+                    self._log(
+                        "[provider_circuit_wait]"
+                        f" request_id={request_id}"
+                        f" provider={self.provider_id}"
+                        f" reason=recovery_healthcheck_failed:{health.reason}"
+                        f" waited_ms={waited_ms}"
+                        " action=reopen_and_recheck_within_budget"
+                    )
+                    continue
+                self._record_success()
+            if waited_ms > 0:
+                self._log(
+                    "[provider_circuit_wait]"
+                    f" request_id={request_id}"
+                    f" provider={self.provider_id}"
+                    f" waited_ms={waited_ms}"
+                    " action=cooldown_cleared_proceeding"
+                )
+            return
 
     def _record_success(self) -> None:
         with self._state_lock:
@@ -728,7 +928,9 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             },
             fallback_models=fallback_models,
             timeout_sec=timeout_sec,
-            max_retries=1,
+            # Transport retries are disabled exactly like the browser path.
+            # A schema-only correction remains separately bounded to one turn.
+            max_retries=0,
             max_output_tokens=max_output_tokens,
             temperature=None,
             top_p=None,
@@ -745,6 +947,14 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
         self.prompt_cache_key = prompt_cache_key
         self.prompt_cache_retention = prompt_cache_retention
         self.service_tier = service_tier
+        # Transport flow stays equivalent to the browser path -- one submission
+        # per admitted request. A flex *capacity rejection* is not a second
+        # submission: the tier refused to admit the request at all, so no
+        # output was generated, nothing is running server-side, and no late
+        # result can arrive. Resubmitting it still yields exactly one
+        # authoritative provider call for the request identity.
+        # ``_flex_capacity_rejected`` is what keeps that true -- it excludes
+        # timeouts and generic 5xx, which can mean the call *was* admitted.
         self.flex_unavailable_retry_enable = bool(flex_unavailable_retry_enable)
         self.flex_unavailable_max_retries = max(0, int(flex_unavailable_max_retries))
         self.flex_unavailable_cooldown_sec = max(0.0, float(flex_unavailable_cooldown_sec))
@@ -803,20 +1013,39 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
         return None
 
     @classmethod
-    def _flex_retryable(cls, exc: Exception) -> bool:
-        status = cls._status_code(exc)
-        if status in {408, 409, 425, 429} or (status is not None and status >= 500):
-            return True
+    def _flex_capacity_rejected(cls, exc: Exception) -> bool:
+        """True only when the service tier refused to admit the request.
+
+        The distinction this draws is the whole safety argument for retrying a
+        flex failure at all. A capacity rejection means the request was never
+        accepted: no tokens were produced, nothing is running, nothing can
+        complete late. Resubmitting it keeps the "one authoritative provider
+        call per request identity" invariant intact.
+
+        Timeouts, connection errors and generic 5xx are excluded precisely
+        because they are ambiguous -- the call may have been admitted and still
+        be running server-side, where a resubmission would produce a second
+        billed call and a late result racing the first.
+        """
         text = str(exc).lower()
+        if any(
+            marker in text
+            for marker in ("timeout", "timed out", "connection error", "read error")
+        ):
+            return False
+        if cls._status_code(exc) not in {429, 503}:
+            return False
         return any(
             marker in text
             for marker in (
-                "flex unavailable",
+                "flex",
                 "service tier",
+                "service_tier",
+                "resource_unavailable",
                 "temporarily unavailable",
+                "overloaded",
+                "capacity",
                 "rate limit",
-                "timeout",
-                "connection error",
             )
         )
 
@@ -829,7 +1058,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
         response_schema: type,
         request_metadata: Mapping[str, Any],
     ) -> ProviderResult:
-        self._circuit_check()
+        self._circuit_check(request_metadata=request_metadata)
         errors: list[str] = []
         started = time.perf_counter()
         deadline = request_metadata.get("deadline")
@@ -882,10 +1111,26 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         schema_fingerprint=preflight.schema_fingerprint,
                     )
                 try:
+                    effective_timeout = configured_timeout
+                    if deadline is not None:
+                        # Both the API and browser paths receive the same
+                        # absolute remaining budget; neither may reset it.
+                        effective_timeout = deadline.provider_timeout_sec(
+                            configured_timeout
+                        )
+                    exchange = build_provider_exchange_contract(
+                        role=role,
+                        system_prompt=system_prompt,
+                        evidence=evidence,
+                        preflight=preflight,
+                        request_metadata=request_metadata,
+                        default_max_output_tokens=self.max_output_tokens,
+                        effective_timeout_sec=effective_timeout,
+                    )
                     user_content: list[dict[str, Any]] = [
                         {
                             "type": "input_text",
-                            "text": json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+                            "text": exchange.evidence_json,
                         }
                     ]
                     image_parts = request_metadata.get("image_parts")
@@ -893,41 +1138,52 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         user_content.extend(dict(part) for part in image_parts if isinstance(part, Mapping))
                     kwargs: dict[str, Any] = {
                         "model": model,
-                        "instructions": system_prompt,
+                        "instructions": exchange.system_prompt,
                         "input": [{"role": "user", "content": user_content}],
-                        "max_output_tokens": max(
-                            1,
-                            int(request_metadata.get("max_output_tokens") or self.max_output_tokens),
-                        ),
+                        "max_output_tokens": exchange.max_output_tokens,
                         "store": False,
                         "truncation": "auto",
                         "text": {
                             "format": {
                                 "type": "json_schema",
-                                "name": response_schema.__name__,
+                                "name": exchange.schema_name,
                                 "strict": True,
-                                "schema": preflight.schema,
+                                "schema": exchange.schema,
                             },
                             "verbosity": "low",
                         },
                     }
+                    if deadline is not None:
+                        transport_budget_ms = min(
+                            max(0, deadline.remaining_ms()),
+                            max(1000, int(effective_timeout * 1000.0)),
+                        )
+                        provider_budget_ms = max(1000, transport_budget_ms - 2000)
+                        kwargs["extra_headers"] = {
+                            "X-PO3-Deadline-Epoch-Ms": str(
+                                int(time.time() * 1000.0 + provider_budget_ms)
+                            ),
+                            "X-PO3-Request-Id": request_id,
+                            "X-PO3-Deadline-Contract": DEADLINE_CONTRACT_VERSION,
+                        }
                     if self.reasoning_effort and self.reasoning_effort not in {"auto", "none"}:
                         kwargs["reasoning"] = {"effort": self.reasoning_effort}
                     if self.prompt_cache_enable:
                         kwargs["prompt_cache_key"] = self.prompt_cache_key
-                        kwargs["prompt_cache_retention"] = self.prompt_cache_retention
+                        # openai-python 2.4 exposes ``prompt_cache_key`` but not
+                        # the newer ``prompt_cache_retention`` keyword.  Passing
+                        # it as a top-level SDK argument raises TypeError before
+                        # any HTTP request is sent and was incorrectly consumed
+                        # as a structured-output repair. ``extra_body`` is the
+                        # SDK-supported compatibility path for newer API fields.
+                        if self.prompt_cache_retention:
+                            kwargs["extra_body"] = {
+                                "prompt_cache_retention": self.prompt_cache_retention
+                            }
                     service_tier = str(request_metadata.get("service_tier") or self.service_tier or "auto")
                     if service_tier:
                         kwargs["service_tier"] = service_tier
                     call_client = client
-                    effective_timeout = configured_timeout
-                    if deadline is not None:
-                        # The SDK receives the *remaining* budget, never a fresh
-                        # relative timer.  A deadline is never reset by a retry,
-                        # a model fallback, or a schema repair.
-                        effective_timeout = deadline.provider_timeout_sec(
-                            configured_timeout
-                        )
                     with_options = getattr(client, "with_options", None)
                     if callable(with_options):
                         try:
@@ -937,6 +1193,15 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         except TypeError:
                             call_client = with_options(timeout=effective_timeout)
                     attempt += 1
+                    self._log(
+                        "[provider_exchange_contract]"
+                        f" request_id={exchange.request_id}"
+                        f" request_identity_hash={exchange.request_identity_hash[:16]}"
+                        f" version={exchange.version}"
+                        f" role={exchange.role}"
+                        f" schema_fingerprint={exchange.schema_fingerprint[:16]}"
+                        f" exchange_hash={exchange.contract_hash[:16]}"
+                    )
                     self._log(
                         "[provider_attempt]"
                         f" request_id={request_id}"
@@ -1002,6 +1267,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         (),
                         preflight.schema_fingerprint,
                         schema_retries > 0,
+                        exchange.contract_hash,
                     )
                 except (ValueError, TypeError) as exc:
                     errors.append(f"{model}:schema:{type(exc).__name__}:{exc}")
@@ -1070,7 +1336,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     if (
                         service_tier == "flex"
                         and self.flex_unavailable_retry_enable
-                        and failure.retryable
+                        and self._flex_capacity_rejected(exc)
                         and flex_retries < self.flex_unavailable_max_retries
                         and cooldown_affordable
                     ):
@@ -1079,6 +1345,8 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                             "[ai_provider] flex_unavailable_retry"
                             f" provider_id={self.provider_id} model={model}"
                             f" attempt={flex_retries}/{self.flex_unavailable_max_retries}"
+                            f" http_status={failure.status_code or 0}"
+                            " admitted=false resubmission_safe=true"
                             f" cooldown_sec={cooldown_sec:.1f}"
                             f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
                         )
@@ -1132,16 +1400,19 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
         log: Callable[[str], None],
         client_factory: Callable[..., Any] | None = None,
         health_fetcher: Callable[[str, Mapping[str, str], float], Any] | None = None,
+        provider_mode: str = PROVIDER_MODE_LOCAL,
+        provider_id: str = "local_openai_compatible",
+        max_retries_ceiling: int = 1,
     ) -> None:
         super().__init__(
-            provider_mode=PROVIDER_MODE_LOCAL,
-            provider_id="local_openai_compatible",
+            provider_mode=provider_mode,
+            provider_id=provider_id,
             base_url=base_url,
             api_key=api_key,
             role_models={"analyst": analyst_model, "critic": critic_model, "adjudicator": adjudicator_model},
             fallback_models=fallback_models,
             timeout_sec=timeout_sec,
-            max_retries=min(1, max(0, int(max_retries))),
+            max_retries=min(int(max_retries_ceiling), max(0, int(max_retries))),
             max_output_tokens=max_output_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -1163,6 +1434,34 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
         settings["enable_thinking"] = self.enable_thinking
         settings["context_budget_tokens"] = self.context_budget_tokens
         return settings
+
+    # ---- transport wire hooks -------------------------------------------
+    # The chat-completions request body below is shared by every transport in
+    # this family.  Only these two hooks differ between them, so a new
+    # transport overrides the hooks instead of copying the request loop.
+
+    def _wire_extra_body(self) -> dict[str, Any]:
+        """Vendor-specific ``extra_body``.
+
+        The local server family enables its thinking mode through the
+        vLLM/LM-Studio chat-template keyword.  Returning ``{}`` means no
+        ``extra_body`` key is sent at all.
+        """
+
+        if self.enable_thinking:
+            return {"chat_template_kwargs": {"enable_thinking": True}}
+        return {}
+
+    def _wire_max_tokens(self, requested: int) -> int:
+        """Output-token budget actually sent on the wire.
+
+        The caller sizes ``requested`` from the schema alone.  A transport whose
+        ``max_tokens`` also has to cover server-side reasoning tokens must widen
+        it here, or the reasoning consumes the whole budget and the response
+        comes back truncated with no content at all.
+        """
+
+        return int(requested)
 
     @staticmethod
     def _estimated_tokens(system_prompt: str, evidence: Mapping[str, Any]) -> int:
@@ -1337,7 +1636,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
         # envelope therefore fails locally without touching the configured
         # provider transport.
         fitted_evidence, estimated_context_tokens = self._fit_context(system_prompt, evidence)
-        self._circuit_check()
+        self._circuit_check(request_metadata=request_metadata)
         started = time.perf_counter()
         errors: list[str] = []
         transport_retries = 0
@@ -1408,35 +1707,66 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                         self._record_failure()
                         raise _deadline_stop(STAGE_CONNECT, attempt, " queued=true")
                     try:
+                        effective_timeout = configured_timeout
+                        if deadline is not None:
+                            effective_timeout = deadline.provider_timeout_sec(configured_timeout)
+                        exchange = build_provider_exchange_contract(
+                            role=role,
+                            system_prompt=system_prompt,
+                            evidence=fitted_evidence,
+                            preflight=preflight,
+                            request_metadata=request_metadata,
+                            default_max_output_tokens=self.max_output_tokens,
+                            effective_timeout_sec=effective_timeout,
+                        )
                         kwargs = {
                             "model": model,
                             "messages": [
-                                {"role": "system", "content": system_prompt},
+                                {"role": "system", "content": exchange.system_prompt},
                                 {
                                     "role": "user",
-                                    "content": json.dumps(fitted_evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+                                    "content": exchange.evidence_json,
                                 },
                             ],
-                        "max_tokens": max(
-                            1,
-                            int(request_metadata.get("max_output_tokens") or self.max_output_tokens),
-                        ),
+                        "max_tokens": self._wire_max_tokens(exchange.max_output_tokens),
                         }
+                        if deadline is not None:
+                            # The browser bridge must stop work when the owning
+                            # MT5/Python request expires, not when its own fresh
+                            # relative timer happens to end. Convert the
+                            # monotonic remaining budget to a wall-clock epoch
+                            # only at the HTTP boundary.
+                            # Let the bridge expire a hung browser turn shortly
+                            # before the SDK timeout, leaving time for its 504 to
+                            # reach Python and for Python to write MT5's fail-
+                            # closed response.
+                            transport_budget_ms = min(
+                                max(0, deadline.remaining_ms()),
+                                max(1000, int(effective_timeout * 1000.0)),
+                            )
+                            bridge_budget_ms = max(1000, transport_budget_ms - 2000)
+                            deadline_epoch_ms = int(time.time() * 1000.0 + bridge_budget_ms)
+                            kwargs["extra_headers"] = {
+                                "X-PO3-Deadline-Epoch-Ms": str(deadline_epoch_ms),
+                                "X-PO3-Request-Id": request_id,
+                                "X-PO3-Deadline-Contract": DEADLINE_CONTRACT_VERSION,
+                            }
                         if self.temperature is not None:
                             kwargs["temperature"] = self.temperature
                         if self.top_p is not None:
                             kwargs["top_p"] = self.top_p
                         if self.seed is not None:
                             kwargs["seed"] = self.seed
-                        if self.enable_thinking:
-                            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+                        extra_body = self._wire_extra_body()
+                        if extra_body:
+                            kwargs["extra_body"] = extra_body
                         if self.require_json_schema:
                             kwargs["response_format"] = {
                                 "type": "json_schema",
                                 "json_schema": {
-                                    "name": response_schema.__name__,
+                                    "name": exchange.schema_name,
                                     "strict": True,
-                                    "schema": preflight.schema,
+                                    "schema": exchange.schema,
                                 },
                             }
                         # The SDK receives the *remaining* budget, never a fresh
@@ -1444,9 +1774,6 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                         # timeout outlived a 165s Python response deadline and
                         # left no margin to write an authoritative response.
                         call_client = client
-                        effective_timeout = configured_timeout
-                        if deadline is not None:
-                            effective_timeout = deadline.provider_timeout_sec(configured_timeout)
                         with_options = getattr(client, "with_options", None)
                         if callable(with_options):
                             try:
@@ -1455,6 +1782,15 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                 )
                             except TypeError:
                                 call_client = with_options(timeout=effective_timeout)
+                        self._log(
+                            "[provider_exchange_contract]"
+                            f" request_id={exchange.request_id}"
+                            f" request_identity_hash={exchange.request_identity_hash[:16]}"
+                            f" version={exchange.version}"
+                            f" role={exchange.role}"
+                            f" schema_fingerprint={exchange.schema_fingerprint[:16]}"
+                            f" exchange_hash={exchange.contract_hash[:16]}"
+                        )
                         self._log(
                             "[provider_call_started]"
                             f" request_id={request_metadata.get('request_id', '')}"
@@ -1513,6 +1849,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             tuple(sorted(unsupported)),
                             preflight.schema_fingerprint,
                             schema_retries > 0,
+                            exchange.contract_hash,
                         )
                     except (ValueError, TypeError) as exc:
                         unsupported_parameter = self._unsupported_parameter(exc, kwargs)
@@ -1624,3 +1961,149 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
             repair_attempted=any(":schema:" in error for error in errors),
             repair_result="failed",
         )
+
+
+class OpenRouterProvider(LocalOpenAICompatibleProvider):
+    """OpenRouter chat-completions transport (GLM and every other routed model).
+
+    OpenRouter speaks the same OpenAI chat-completions dialect as the local
+    server family, including ``response_format`` with a strict ``json_schema``,
+    so the whole request/retry/deadline loop is inherited rather than copied.
+    Only three things genuinely differ and each is confined to one hook:
+
+    ``_wire_extra_body``
+        OpenRouter owns reasoning through its own ``reasoning`` object, not
+        through the vLLM chat-template keyword, and it accepts a ``provider``
+        routing block that can *require* an endpoint which actually enforces
+        structured outputs instead of treating the schema as a hint.
+
+    ``_wire_max_tokens``
+        ``max_tokens`` on this transport bounds reasoning tokens *and* content
+        tokens together.  A reasoning model handed a content-sized budget spends
+        all of it thinking and returns ``finish_reason=length`` with empty
+        content, so the reserve is added here rather than by widening the
+        caller's schema-derived budget for every transport.
+
+    ``_client_default_headers``
+        Optional OpenRouter attribution headers.
+
+    The endpoint is remote by construction, so it is deliberately NOT subject to
+    the loopback contract that governs the local provider: it is a separate
+    provider mode with its own credential, and it never reads the OpenAI secret.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        analyst_model: str,
+        critic_model: str,
+        adjudicator_model: str,
+        fallback_models: Sequence[str],
+        healthcheck_path: str,
+        timeout_sec: float,
+        max_retries: int,
+        max_output_tokens: int,
+        temperature: float | None,
+        top_p: float | None,
+        seed: int | None,
+        enable_thinking: bool,
+        reasoning_effort: str,
+        reasoning_token_reserve: int,
+        require_json_schema: bool,
+        require_structured_provider: bool,
+        allowed_providers: Sequence[str],
+        parallelism: int,
+        context_budget_tokens: int,
+        circuit_failure_threshold: int,
+        circuit_cooldown_sec: float,
+        log: Callable[[str], None],
+        app_url: str = "",
+        app_title: str = "",
+        client_factory: Callable[..., Any] | None = None,
+        health_fetcher: Callable[[str, Mapping[str, str], float], Any] | None = None,
+    ) -> None:
+        super().__init__(
+            base_url=base_url,
+            api_key=api_key,
+            analyst_model=analyst_model,
+            critic_model=critic_model,
+            adjudicator_model=adjudicator_model,
+            fallback_models=fallback_models,
+            healthcheck_path=healthcheck_path or "/models",
+            timeout_sec=timeout_sec,
+            max_retries=max_retries,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed,
+            enable_thinking=enable_thinking,
+            require_json_schema=require_json_schema,
+            parallelism=parallelism,
+            context_budget_tokens=context_budget_tokens,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_cooldown_sec=circuit_cooldown_sec,
+            log=log,
+            client_factory=client_factory,
+            health_fetcher=health_fetcher,
+            provider_mode=PROVIDER_MODE_OPENROUTER,
+            provider_id="openrouter_api",
+            max_retries_ceiling=3,
+        )
+        self.reasoning_effort = str(reasoning_effort or "").strip().lower()
+        self.reasoning_token_reserve = max(0, int(reasoning_token_reserve))
+        self.require_structured_provider = bool(require_structured_provider)
+        self.allowed_providers = tuple(
+            str(name).strip() for name in allowed_providers if str(name).strip()
+        )
+        self.app_url = str(app_url or "").strip()
+        self.app_title = str(app_title or "").strip()
+
+    def _generation_settings(self, role: str) -> dict[str, Any]:
+        settings = super()._generation_settings(role)
+        settings["reasoning_effort"] = self.reasoning_effort
+        settings["reasoning_token_reserve"] = self.reasoning_token_reserve
+        settings["require_structured_provider"] = self.require_structured_provider
+        settings["allowed_providers"] = list(self.allowed_providers)
+        return settings
+
+    def _client_default_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.app_url:
+            headers["HTTP-Referer"] = self.app_url
+        if self.app_title:
+            headers["X-Title"] = self.app_title
+        return headers
+
+    def _wire_extra_body(self) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if self.enable_thinking:
+            reasoning: dict[str, Any] = {"enabled": True}
+            if self.reasoning_effort in {"minimal", "low", "medium", "high", "xhigh"}:
+                reasoning["effort"] = self.reasoning_effort
+            body["reasoning"] = reasoning
+        else:
+            # Explicit, not omitted.  A routed reasoning model reasons by
+            # default, and the default is what returned an empty content field
+            # against a schema-sized budget.
+            body["reasoning"] = {"enabled": False}
+        routing: dict[str, Any] = {}
+        if self.require_structured_provider:
+            # OpenRouter decides structured-output support per endpoint, not per
+            # model, and silently routes to an endpoint that treats the schema
+            # as a hint unless the requirement is stated.  Without this a valid
+            # schema can come back unenforced, which is a silent authority
+            # change rather than a visible failure.
+            routing["require_parameters"] = True
+        if self.allowed_providers:
+            routing["order"] = list(self.allowed_providers)
+            routing["allow_fallbacks"] = False
+        if routing:
+            body["provider"] = routing
+        return body
+
+    def _wire_max_tokens(self, requested: int) -> int:
+        if not self.enable_thinking:
+            return int(requested)
+        return int(requested) + self.reasoning_token_reserve

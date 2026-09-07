@@ -20,6 +20,7 @@ from decision_integrity import (
     assessed_execution_fingerprint,
     execution_fingerprint,
     material_execution_changes,
+    normalize_and_freeze_candidates,
     resolved_risk_multiplier,
     response_can_trade,
     validate_broker_execution_identity,
@@ -315,6 +316,14 @@ def broker_fixture() -> tuple[dict, dict, dict, list[dict]]:
 
 
 class DecisionIntegrityTests(unittest.TestCase):
+    def test_sparse_live_cohort_preserves_original_mql_indexes(self) -> None:
+        rows = [candidate(0, "A"), candidate(2, "C"), candidate(3, "D")]
+        frozen = normalize_and_freeze_candidates(rows)
+        self.assertEqual([row["candidate_index"] for row in frozen], [0, 2, 3])
+        self.assertEqual([row["candidate_hash"] for row in frozen], [
+            rows[0]["candidate_hash"], rows[1]["candidate_hash"], rows[2]["candidate_hash"]
+        ])
+
     def _demo_capture(self, order_kind: str) -> dict:
         expected, order, deal, positions = broker_fixture()
         return {
@@ -388,6 +397,22 @@ class DecisionIntegrityTests(unittest.TestCase):
         result = validate_candidate_assessment(item, cand)
         self.assertFalse(result.valid)
         self.assertIn("request_execution_fingerprint_mismatch", result.invalid_fields)
+
+    def test_empty_required_target_text_rejects_before_mql(self) -> None:
+        cand = candidate()
+        item = assessment(cand)
+        item["target_arbitration"]["blocker_class"] = ""
+        item["target_arbitration"]["target_decision_reason"] = "   "
+        result = validate_candidate_assessment(item, cand)
+        self.assertFalse(result.valid)
+        self.assertIn("target_arbitration.blocker_class", result.invalid_fields)
+        self.assertIn("target_arbitration.target_decision_reason", result.invalid_fields)
+
+    def test_mql_accepts_identity_bound_capped_assessment_subset(self) -> None:
+        source = (MQL_INCLUDE / "TradeEngine.mqh").read_text(encoding="utf-8")
+        self.assertIn("assessment_count > plan_count", source)
+        self.assertIn("selected_candidate_not_assessed", source)
+        self.assertNotIn("assessment_count != plan_count", source)
 
     def test_small_rounding_change_is_non_material(self) -> None:
         assessed = candidate()

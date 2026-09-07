@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 ai_gate.py
 ----------
@@ -16,6 +16,7 @@ the final execution authority; Python only reranks, explains, or suggests a veto
 
 from __future__ import annotations
 import argparse
+import atexit
 import base64
 import json
 import math
@@ -32,13 +33,17 @@ from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from tester_replay_provenance import build_replay_provenance
 
 from ai_provider import (
     AIProvider,
     LocalOpenAICompatibleProvider,
+    OpenRouterProvider,
     PROVIDER_CONTRACT_VERSION,
     PROVIDER_MODE_LOCAL,
+    PROVIDER_MODE_OPENROUTER,
     PROVIDER_MODE_REMOTE,
+    PROVIDER_MODES_TRADING,
     ProviderCallError,
     RemoteAPIProvider,
     UnavailableProvider,
@@ -126,10 +131,25 @@ from governance_contracts import (
     classify_setup_taxonomy,
 )
 from openai_usage_logger import (
+    as_token_count,
     log_ai_usage,
+    price_call,
+    response_cached_input_tokens,
+    response_routed_endpoint,
     set_ai_usage_bus,
 )
-from po3_env import load_dotenv, peek_dotenv_value
+from po3_env import (
+    PROVIDER_SECRET_KEYS,
+    PROVIDER_SELECT_LOCAL,
+    PROVIDER_SELECT_OPENAI,
+    PROVIDER_SELECT_OPENROUTER,
+    PROVIDER_SELECT_VALUES,
+    bootstrap_provider_env,
+    excluded_secret_keys,
+    load_dotenv,
+    peek_dotenv_value,
+    resolve_provider_select,
+)
 from runtime_governance import (
     DECISION_NON_REPEATABLE,
     HIERARCHICAL_PRIOR_SCHEMA_VERSION,
@@ -147,6 +167,7 @@ from runtime_governance import (
     audit_prior_artifact,
     canonical_hash,
     evaluate_repeatability,
+    infer_asset_class,
     priors_for_candidate,
     repeatability_authority,
     request_fingerprint,
@@ -158,6 +179,11 @@ from request_lifecycle import (
     REQUEST_LIFECYCLE_VERSION,
     RequestHeartbeat,
     RequestIdempotencyLedger,
+)
+from transport_failure_requeue import (
+    TRANSPORT_REQUEUE_CONTRACT_VERSION,
+    apply_transport_failure_requeue,
+    plan_transport_failure_requeue,
 )
 from pipeline_integrity import (
     FROZEN_REQUEST_MUTATION,
@@ -197,6 +223,7 @@ from repeatability_state import (
 )
 from structured_models import (
     CONFIDENCE_BANDS,
+    HISTORICAL_EVIDENCE_STATES,
     AIGateEnvelope,
     CandidateAssessment,
     ModelAIGateOutput,
@@ -205,31 +232,22 @@ from structured_models import (
     strict_structured_schema,
 )
 
-# Read only the provider selector before importing the rest of the private env.
-# In local/invalid mode the remote secret keys are never parsed from .env and
-# any stale parent-process values are removed before provider construction.
+# Provider selection is a three-way choice.  ``AI_PROVIDER_SELECT`` is the
+# authority; ``AI_USE_REMOTE_API`` remains readable so existing private .env
+# files keep working unchanged.  Both may be present only while they agree --
+# a contradiction is a configuration defect and fails closed rather than
+# silently preferring one of them.
+# The selection constants, the secret map and the resolver live in ``po3_env``
+# so that every module which bootstraps the environment shares one authority.
+# They are re-exported here because this module is their public surface.
+_PROVIDER_SECRET_KEYS: Dict[str, Tuple[str, ...]] = PROVIDER_SECRET_KEYS
+
+# Read only the provider selector before importing the rest of the private env,
+# then keep exactly the selected provider's secrets.
+_DOTENV_PROVIDER_SELECT = peek_dotenv_value(None, "AI_PROVIDER_SELECT")
 _DOTENV_PROVIDER_SWITCH = peek_dotenv_value(None, "AI_USE_REMOTE_API")
-_BOOTSTRAP_PROVIDER_SWITCH = (
-    _DOTENV_PROVIDER_SWITCH
-    if _DOTENV_PROVIDER_SWITCH is not None
-    else os.environ.get("AI_USE_REMOTE_API")
-)
-_BOOTSTRAP_REMOTE = str(_BOOTSTRAP_PROVIDER_SWITCH or "").strip().lower() == "true"
-_BOOTSTRAP_EXCLUDED_KEYS = (
-    ("LOCAL_AI_API_KEY", "LOCAL_AI_MODEL_PATH")
-    if _BOOTSTRAP_REMOTE
-    else ("OPENAI_API_KEY", "OPENAI_BASE_URL")
-)
-load_dotenv(
-    override=True,
-    exclude_keys=_BOOTSTRAP_EXCLUDED_KEYS,
-)
-if _BOOTSTRAP_REMOTE:
-    os.environ.pop("LOCAL_AI_API_KEY", None)
-    os.environ.pop("LOCAL_AI_MODEL_PATH", None)
-else:
-    os.environ.pop("OPENAI_API_KEY", None)
-    os.environ.pop("OPENAI_BASE_URL", None)
+_BOOTSTRAP_SELECT, _BOOTSTRAP_SELECT_ERROR = bootstrap_provider_env()
+_BOOTSTRAP_EXCLUDED_KEYS = excluded_secret_keys(_BOOTSTRAP_SELECT)
 
 try:
     from expectancy_report import run_analytics_suite, set_expectancy_ai_provider
@@ -325,6 +343,11 @@ def _env_float(
 
 @dataclass(frozen=True)
 class AIGateRuntimeConfig:
+    # ``provider_select`` is the authority.  ``use_remote_api`` is kept as the
+    # narrow legacy question "is the official OpenAI remote API selected", so
+    # every existing remote-only branch keeps its exact previous meaning and
+    # OpenRouter never satisfies a test that was written to mean OpenAI.
+    provider_select: str | None
     use_remote_api: bool | None
     provider_config_valid: bool
     provider_config_errors: tuple[str, ...]
@@ -357,6 +380,8 @@ class AIGateRuntimeConfig:
     flex_unavailable_retry_enable: bool
     flex_unavailable_max_retries: int
     flex_unavailable_cooldown_sec: float
+    panel_shortcircuit_enable: bool
+    panel_shortcircuit_margin: float
     require_runtime_inputs_live: bool
     reject_on_missing_runtime_inputs_live: bool
     hard_pre_gate_before_openai: bool
@@ -400,6 +425,30 @@ class AIGateRuntimeConfig:
     local_context_budget_tokens: int
     local_retrieval_top_k: int
     local_allow_non_loopback_ack: bool
+    openrouter_base_url: str
+    openrouter_api_key: str
+    openrouter_model: str
+    openrouter_analyst_model: str
+    openrouter_critic_model: str
+    openrouter_adjudicator_model: str
+    openrouter_fallback_models: list[str]
+    openrouter_healthcheck_path: str
+    openrouter_timeout_sec: float
+    openrouter_max_retries: int
+    openrouter_max_output_tokens: int
+    openrouter_temperature: float
+    openrouter_top_p: float
+    openrouter_seed: int
+    openrouter_enable_thinking: bool
+    openrouter_reasoning_effort: str
+    openrouter_reasoning_token_reserve: int
+    openrouter_require_json_schema: bool
+    openrouter_require_structured_provider: bool
+    openrouter_allowed_providers: list[str]
+    openrouter_parallelism: int
+    openrouter_context_budget_tokens: int
+    openrouter_app_url: str
+    openrouter_app_title: str
     shadow_compare_providers: bool
     trade_memory_file: Path
     provider_circuit_failure_threshold: int
@@ -411,15 +460,20 @@ class AIGateRuntimeConfig:
         env = os.environ if env is None else env
         warnings: list[str] = []
         provider_errors: list[str] = []
-        switch_raw = env.get("AI_USE_REMOTE_API")
-        switch_text = str(switch_raw or "").strip().lower()
-        if switch_text == "true":
-            use_remote_api: bool | None = True
-        elif switch_text == "false":
-            use_remote_api = False
-        else:
-            use_remote_api = None
-            provider_errors.append("AI_USE_REMOTE_API=missing_or_invalid")
+        provider_select, select_error = resolve_provider_select(
+            env.get("AI_PROVIDER_SELECT"), env.get("AI_USE_REMOTE_API")
+        )
+        if select_error:
+            provider_errors.append(select_error)
+        # Stays strictly "official OpenAI remote API selected".  OpenRouter is a
+        # remote transport but a different provider mode, and every branch that
+        # reads this flag encodes an OpenAI-only assumption (the OpenAI secret,
+        # the Responses API, service tiers, the Batch API, prompt caching).
+        use_remote_api: bool | None = (
+            None if provider_select is None else provider_select == PROVIDER_SELECT_OPENAI
+        )
+        is_local = provider_select == PROVIDER_SELECT_LOCAL
+        is_openrouter = provider_select == PROVIDER_SELECT_OPENROUTER
 
         # Preserve the existing Version Z remote defaults. The new provider
         # switch changes transport selection, never the configured model.
@@ -430,10 +484,22 @@ class AIGateRuntimeConfig:
             "gpt-5.4-mini,gpt-5.4-nano",
         )
         local_model = _env_lookup(env, ("LOCAL_AI_MODEL",), "qwen3.5-9b") or "qwen3.5-9b"
-        selected_model = remote_model if use_remote_api is not False else (
-            _env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model
+        openrouter_model = (
+            _env_lookup(env, ("OPENROUTER_MODEL",), "z-ai/glm-5.3-flash")
+            or "z-ai/glm-5.3-flash"
         )
-        fallback_raw = remote_fallback_raw if use_remote_api is not False else _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "")
+        if is_local:
+            selected_model = _env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model
+            fallback_raw = _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "")
+        elif is_openrouter:
+            selected_model = (
+                _env_lookup(env, ("OPENROUTER_ANALYST_MODEL",), openrouter_model)
+                or openrouter_model
+            )
+            fallback_raw = _env_lookup(env, ("OPENROUTER_FALLBACK_MODELS",), "")
+        else:
+            selected_model = remote_model
+            fallback_raw = remote_fallback_raw
         fallback_models: list[str] = []
         for item in fallback_raw.split(","):
             name = item.strip()
@@ -478,7 +544,7 @@ class AIGateRuntimeConfig:
         # read local shadow settings only when the explicit non-authoritative
         # research comparison switch is enabled; local mode never reads the
         # remote API secret under any circumstance.
-        read_local_settings = use_remote_api is False or shadow_compare_providers
+        read_local_settings = is_local or shadow_compare_providers
         local_base_url = (
             _env_lookup(env, ("LOCAL_AI_BASE_URL",), "http://127.0.0.1:1234/v1")
             if read_local_settings
@@ -492,35 +558,84 @@ class AIGateRuntimeConfig:
             warnings,
             safe_default=False,
         )
+        openrouter_base_url = (
+            _env_lookup(env, ("OPENROUTER_BASE_URL",), "https://openrouter.ai/api/v1")
+            or "https://openrouter.ai/api/v1"
+        ) if is_openrouter else "https://openrouter.ai/api/v1"
+        openrouter_enable_thinking = _env_bool(
+            env, "OPENROUTER_ENABLE_THINKING", False, warnings, safe_default=False
+        )
+        openrouter_reasoning_effort = _env_lookup(
+            env, ("OPENROUTER_REASONING_EFFORT",), "low"
+        ).strip().lower()
+        if openrouter_reasoning_effort not in {"", "minimal", "low", "medium", "high", "xhigh"}:
+            warnings.append("OPENROUTER_REASONING_EFFORT=invalid")
+            openrouter_reasoning_effort = "low"
+
         if use_remote_api is True:
             if not str(env.get("OPENAI_API_KEY") or "").strip():
                 provider_errors.append("OPENAI_API_KEY=missing_remote")
             if not remote_model:
                 provider_errors.append("AI_GATE_MODEL=missing_remote")
-        elif use_remote_api is False:
+        elif is_local:
             if local_endpoint_class == "invalid":
                 provider_errors.append("LOCAL_AI_BASE_URL=invalid")
             elif local_endpoint_class != "loopback" and not local_allow_non_loopback_ack:
                 provider_errors.append("LOCAL_AI_BASE_URL=non_loopback_without_ack")
             if not local_model:
                 provider_errors.append("LOCAL_AI_MODEL=missing")
+        elif is_openrouter:
+            if not str(env.get("OPENROUTER_API_KEY") or "").strip():
+                provider_errors.append("OPENROUTER_API_KEY=missing")
+            if not openrouter_model:
+                provider_errors.append("OPENROUTER_MODEL=missing")
+            if endpoint_class(openrouter_base_url) == "invalid":
+                provider_errors.append("OPENROUTER_BASE_URL=invalid")
+            if not _env_bool(
+                env, "OPENROUTER_REQUIRE_JSON_SCHEMA", True, warnings, safe_default=True
+            ):
+                # The whole decision contract is a strict json_schema.  Running
+                # this transport without it would downgrade a validated envelope
+                # to a best-effort JSON blob, which is an authority change.
+                provider_errors.append("OPENROUTER_REQUIRE_JSON_SCHEMA=must_be_true")
 
         local_fallback_models: list[str] = []
         for item in _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "").split(","):
             name = item.strip()
             if name and name not in local_fallback_models:
                 local_fallback_models.append(name)
-        local_parallelism = _env_int(env, "LOCAL_AI_PARALLELISM", 1, warnings, min_value=1, max_value=1)
+        # The browser bridge owns one isolated conversation lane per tab.  It is
+        # therefore safe to run up to three local transports concurrently: each
+        # provider call is pinned to a different tab by request_id, while the
+        # per-lane worker remains strictly serial.
+        local_parallelism = _env_int(env, "LOCAL_AI_PARALLELISM", 1, warnings, min_value=1, max_value=3)
+
+        openrouter_parallelism = _env_int(
+            env, "OPENROUTER_PARALLELISM", 2, warnings, min_value=1, max_value=8
+        )
+        openrouter_fallback_models: list[str] = []
+        for item in _env_lookup(env, ("OPENROUTER_FALLBACK_MODELS",), "").split(","):
+            name = item.strip()
+            if name and name not in openrouter_fallback_models:
+                openrouter_fallback_models.append(name)
+        openrouter_allowed_providers: list[str] = []
+        for item in _env_lookup(env, ("OPENROUTER_ALLOWED_PROVIDERS",), "").split(","):
+            name = item.strip()
+            if name and name not in openrouter_allowed_providers:
+                openrouter_allowed_providers.append(name)
 
         return cls(
+            provider_select=provider_select,
             use_remote_api=use_remote_api,
             provider_config_valid=not provider_errors,
             provider_config_errors=tuple(provider_errors),
             model=selected_model,
             expectancy_model=(
-                _env_lookup(env, ("EXPECTANCY_AI_MODEL",), "gpt-5.5") or "gpt-5.5"
-                if use_remote_api is not False
-                else (_env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model)
+                (_env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model)
+                if is_local
+                else selected_model
+                if is_openrouter
+                else (_env_lookup(env, ("EXPECTANCY_AI_MODEL",), "gpt-5.5") or "gpt-5.5")
             ),
             fallback_models=fallback_models,
             reasoning_effort=effort,
@@ -540,21 +655,38 @@ class AIGateRuntimeConfig:
             allow_flex_for_live=_env_bool(env, "AI_ALLOW_FLEX_FOR_LIVE", False, warnings, safe_default=False),
             flex_live_ack=_env_bool(env, "AI_FLEX_LIVE_ACK", False, warnings, safe_default=False),
             service_tier=service_tier,
-            openai_timeout_sec=_env_float(env, "AI_OPENAI_TIMEOUT_SEC", 180.0, warnings, min_value=10.0, max_value=1800.0),
-            openai_flex_timeout_sec=_env_float(env, "AI_OPENAI_FLEX_TIMEOUT_SEC", 600.0, warnings, min_value=30.0, max_value=1800.0),
+            openai_timeout_sec=_env_float(env, "AI_OPENAI_TIMEOUT_SEC", 1800.0, warnings, min_value=10.0, max_value=9000.0),
+            openai_flex_timeout_sec=_env_float(env, "AI_OPENAI_FLEX_TIMEOUT_SEC", 1800.0, warnings, min_value=30.0, max_value=9000.0),
             # Mirrors the MQL InpAiWaitTimeoutRealMin terminal deadline.  The
             # request payload overrides it when MT5 publishes its own value.
-            mt5_terminal_timeout_sec=_env_float(env, "AI_MT5_TERMINAL_TIMEOUT_SEC", 120.0, warnings, min_value=5.0, max_value=3600.0),
+            mt5_terminal_timeout_sec=_env_float(env, "AI_MT5_TERMINAL_TIMEOUT_SEC", 1800.0, warnings, min_value=5.0, max_value=18000.0),
+            # Subtractive reserve for the response write, not a wait budget:
+            # raising it shortens provider time, so it is not scaled with the
+            # timeouts above.
             response_write_margin_sec=_env_float(env, "AI_RESPONSE_WRITE_MARGIN_SEC", 15.0, warnings, min_value=1.0, max_value=600.0),
+            # A refusal floor, not a wait: the provider call is abandoned before
+            # it starts when less than this remains.  Raising it denies attempts
+            # that would have finished, so it is not scaled with the timeouts.
             min_provider_attempt_sec=_env_float(env, "AI_MIN_PROVIDER_ATTEMPT_SEC", 10.0, warnings, min_value=1.0, max_value=600.0),
             # Benchmarked live cohort ceiling: 3 candidates completed in 64.8s
             # against a 90s provider deadline while 6 candidates reached 87.9s
             # and timed out on 3 of 4 attempts.  Offline record/cache processing
             # is not subject to this budget.
             live_candidate_budget=_env_int(env, "AI_LIVE_CANDIDATE_BUDGET", 3, warnings, min_value=1, max_value=12),
-            flex_unavailable_retry_enable=_env_bool(env, "AI_FLEX_UNAVAILABLE_RETRY_ENABLE", True, warnings, safe_default=True),
-            flex_unavailable_max_retries=_env_int(env, "AI_FLEX_UNAVAILABLE_MAX_RETRIES", 20, warnings, min_value=0, max_value=100),
+            flex_unavailable_retry_enable=_env_bool(env, "AI_FLEX_UNAVAILABLE_RETRY_ENABLE", False, warnings, safe_default=False),
+            flex_unavailable_max_retries=_env_int(env, "AI_FLEX_UNAVAILABLE_MAX_RETRIES", 0, warnings, min_value=0, max_value=100),
+            # Slept inside the request budget, so a longer cooldown buys the
+            # model less time, not more.  Not scaled.
             flex_unavailable_cooldown_sec=_env_float(env, "AI_FLEX_UNAVAILABLE_COOLDOWN_SEC", 30.0, warnings, min_value=0.0, max_value=3600.0),
+            # The critic/adjudicator panel only ever demotes, so it cannot
+            # rescue an analyst verdict that already cannot approve.  Measured
+            # over 1687 live candidates the median score was 5.80 against a 6.80
+            # gate, and the panel was 34.8% of provider spend.  The margin keeps
+            # the panel for anything near the gate; only the hopeless tail is
+            # skipped.  safe_default False so a malformed value convenes the
+            # panel rather than silently skipping it.
+            panel_shortcircuit_enable=_env_bool(env, "AI_PANEL_SHORTCIRCUIT_ENABLE", True, warnings, safe_default=False),
+            panel_shortcircuit_margin=_env_float(env, "AI_PANEL_SHORTCIRCUIT_MARGIN", 2.0, warnings, min_value=0.0, max_value=10.0),
             require_runtime_inputs_live=_env_bool(env, "AI_REQUIRE_RUNTIME_INPUTS_LIVE", True, warnings, safe_default=True),
             reject_on_missing_runtime_inputs_live=_env_bool(env, "AI_REJECT_ON_MISSING_RUNTIME_INPUTS_LIVE", True, warnings, safe_default=True),
             hard_pre_gate_before_openai=_env_bool(env, "AI_HARD_PRE_GATE_BEFORE_OPENAI", True, warnings, safe_default=True),
@@ -596,8 +728,8 @@ class AIGateRuntimeConfig:
             local_fallback_models=local_fallback_models,
             local_model_path=_env_lookup(env, ("LOCAL_AI_MODEL_PATH",), ""),
             local_healthcheck_path=_env_lookup(env, ("LOCAL_AI_HEALTHCHECK_PATH",), "/models") or "/models",
-            local_timeout_sec=_env_float(env, "LOCAL_AI_TIMEOUT_SEC", 180.0, warnings, min_value=10.0, max_value=1800.0),
-            local_max_retries=_env_int(env, "LOCAL_AI_MAX_RETRIES", 1, warnings, min_value=0, max_value=1),
+            local_timeout_sec=_env_float(env, "LOCAL_AI_TIMEOUT_SEC", 1800.0, warnings, min_value=10.0, max_value=9000.0),
+            local_max_retries=_env_int(env, "LOCAL_AI_MAX_RETRIES", 0, warnings, min_value=0, max_value=1),
             local_max_output_tokens=_env_int(env, "LOCAL_AI_MAX_OUTPUT_TOKENS", 4096, warnings, min_value=512, max_value=32768),
             local_temperature=_env_float(env, "LOCAL_AI_TEMPERATURE", 0.15, warnings, min_value=0.0, max_value=2.0),
             local_top_p=_env_float(env, "LOCAL_AI_TOP_P", 0.85, warnings, min_value=0.0, max_value=1.0),
@@ -608,23 +740,81 @@ class AIGateRuntimeConfig:
             local_context_budget_tokens=_env_int(env, "LOCAL_AI_CONTEXT_BUDGET_TOKENS", 7000, warnings, min_value=2048, max_value=131072),
             local_retrieval_top_k=_env_int(env, "LOCAL_AI_RETRIEVAL_TOP_K", 7, warnings, min_value=5, max_value=10),
             local_allow_non_loopback_ack=local_allow_non_loopback_ack,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_api_key=(
+                _env_lookup(env, ("OPENROUTER_API_KEY",), "") if is_openrouter else ""
+            ),
+            openrouter_model=openrouter_model,
+            openrouter_analyst_model=_env_lookup(env, ("OPENROUTER_ANALYST_MODEL",), openrouter_model) or openrouter_model,
+            openrouter_critic_model=_env_lookup(env, ("OPENROUTER_CRITIC_MODEL",), openrouter_model) or openrouter_model,
+            openrouter_adjudicator_model=_env_lookup(env, ("OPENROUTER_ADJUDICATOR_MODEL",), openrouter_model) or openrouter_model,
+            openrouter_fallback_models=openrouter_fallback_models,
+            openrouter_healthcheck_path=_env_lookup(env, ("OPENROUTER_HEALTHCHECK_PATH",), "/models") or "/models",
+            openrouter_timeout_sec=_env_float(env, "OPENROUTER_TIMEOUT_SEC", 900.0, warnings, min_value=10.0, max_value=9000.0),
+            # Routed free/shared endpoints answer 429 from the upstream pool far
+            # more often than a dedicated one, and that is a retryable transport
+            # condition, not a decision.  The absolute request deadline still
+            # bounds every attempt.
+            openrouter_max_retries=_env_int(env, "OPENROUTER_MAX_RETRIES", 2, warnings, min_value=0, max_value=3),
+            openrouter_max_output_tokens=_env_int(env, "OPENROUTER_MAX_OUTPUT_TOKENS", 25000, warnings, min_value=1024, max_value=128000),
+            openrouter_temperature=_env_float(env, "OPENROUTER_TEMPERATURE", 0.15, warnings, min_value=0.0, max_value=2.0),
+            openrouter_top_p=_env_float(env, "OPENROUTER_TOP_P", 0.85, warnings, min_value=0.0, max_value=1.0),
+            openrouter_seed=_env_int(env, "OPENROUTER_SEED", 42, warnings, min_value=0, max_value=2147483647),
+            openrouter_enable_thinking=openrouter_enable_thinking,
+            openrouter_reasoning_effort=openrouter_reasoning_effort,
+            # Headroom for server-side reasoning tokens, which share max_tokens
+            # with the content on this transport.  Measured: a 10,800-token
+            # schema budget was consumed entirely by 10,798 reasoning tokens and
+            # returned finish_reason=length with no content at all.
+            openrouter_reasoning_token_reserve=_env_int(
+                env, "OPENROUTER_REASONING_TOKEN_RESERVE", 24000, warnings, min_value=0, max_value=120000
+            ),
+            openrouter_require_json_schema=_env_bool(env, "OPENROUTER_REQUIRE_JSON_SCHEMA", True, warnings, safe_default=True),
+            openrouter_require_structured_provider=_env_bool(
+                env, "OPENROUTER_REQUIRE_STRUCTURED_PROVIDER", True, warnings, safe_default=True
+            ),
+            openrouter_allowed_providers=openrouter_allowed_providers,
+            openrouter_parallelism=openrouter_parallelism,
+            openrouter_context_budget_tokens=_env_int(
+                env, "OPENROUTER_CONTEXT_BUDGET_TOKENS", 131072, warnings, min_value=2048, max_value=1000000
+            ),
+            openrouter_app_url=_env_lookup(env, ("OPENROUTER_APP_URL",), ""),
+            openrouter_app_title=_env_lookup(env, ("OPENROUTER_APP_TITLE",), "PO3_AIGate"),
             shadow_compare_providers=shadow_compare_providers,
             trade_memory_file=resolve_project_path(_env_lookup(env, ("AI_TRADE_MEMORY_FILE",), "data/ai_trade_memory.sqlite3")),
             provider_circuit_failure_threshold=_env_int(env, "AI_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", 3, warnings, min_value=1, max_value=100),
+            # How long the provider stays refused after tripping the breaker.
+            # Scaling it up denies later requests rather than granting time, so
+            # it stays where it was.
             provider_circuit_cooldown_sec=_env_float(env, "AI_PROVIDER_CIRCUIT_COOLDOWN_SEC", 60.0, warnings, min_value=5.0, max_value=3600.0),
             validation_warnings=tuple(warnings),
         )
 
+    @property
+    def is_local_provider(self) -> bool:
+        return self.provider_select == PROVIDER_SELECT_LOCAL
+
+    @property
+    def is_openrouter_provider(self) -> bool:
+        return self.provider_select == PROVIDER_SELECT_OPENROUTER
+
+    @property
+    def provider_mode(self) -> str:
+        if self.provider_select == PROVIDER_SELECT_OPENAI:
+            return PROVIDER_MODE_REMOTE
+        if self.provider_select == PROVIDER_SELECT_LOCAL:
+            return PROVIDER_MODE_LOCAL
+        if self.provider_select == PROVIDER_SELECT_OPENROUTER:
+            return PROVIDER_MODE_OPENROUTER
+        return "UNAVAILABLE"
+
     def safe_log_dict(self) -> Dict[str, Any]:
         return {
+            "provider_select": self.provider_select or "invalid",
             "use_remote_api": self.use_remote_api,
             "provider_config_valid": self.provider_config_valid,
             "provider_config_errors": list(self.provider_config_errors),
-            "provider_mode": (
-                PROVIDER_MODE_REMOTE if self.use_remote_api is True
-                else PROVIDER_MODE_LOCAL if self.use_remote_api is False
-                else "UNAVAILABLE"
-            ),
+            "provider_mode": self.provider_mode,
             "model": self.model,
             "expectancy_model": self.expectancy_model,
             "fallback_models": self.fallback_models,
@@ -654,6 +844,8 @@ class AIGateRuntimeConfig:
             "flex_unavailable_retry_enable": self.flex_unavailable_retry_enable,
             "flex_unavailable_max_retries": self.flex_unavailable_max_retries,
             "flex_unavailable_cooldown_sec": self.flex_unavailable_cooldown_sec,
+            "panel_shortcircuit_enable": self.panel_shortcircuit_enable,
+            "panel_shortcircuit_margin": self.panel_shortcircuit_margin,
             "require_runtime_inputs_live": self.require_runtime_inputs_live,
             "reject_on_missing_runtime_inputs_live": self.reject_on_missing_runtime_inputs_live,
             "hard_pre_gate_before_openai": self.hard_pre_gate_before_openai,
@@ -677,25 +869,46 @@ class AIGateRuntimeConfig:
             "shadow_repeat_min_target_choice_agreement": self.shadow_repeat_min_target_choice_agreement,
             "shadow_repeat_artifact_file": str(self.shadow_repeat_artifact_file),
             "local_base_url_class": endpoint_class(self.local_base_url),
-            "local_model": self.local_model if self.use_remote_api is False else "",
-            "local_analyst_model": self.local_analyst_model if self.use_remote_api is False else "",
-            "local_critic_model": self.local_critic_model if self.use_remote_api is False else "",
-            "local_adjudicator_model": self.local_adjudicator_model if self.use_remote_api is False else "",
-            "local_fallback_models": self.local_fallback_models if self.use_remote_api is False else [],
-            "local_model_path_configured": bool(self.local_model_path) if self.use_remote_api is False else False,
-            "local_healthcheck_path": self.local_healthcheck_path if self.use_remote_api is False else "",
-            "local_timeout_sec": self.local_timeout_sec if self.use_remote_api is False else 0.0,
-            "local_max_retries": self.local_max_retries if self.use_remote_api is False else 0,
-            "local_max_output_tokens": self.local_max_output_tokens if self.use_remote_api is False else 0,
-            "local_temperature": self.local_temperature if self.use_remote_api is False else 0.0,
-            "local_top_p": self.local_top_p if self.use_remote_api is False else 0.0,
-            "local_seed": self.local_seed if self.use_remote_api is False else 0,
-            "local_enable_thinking": self.local_enable_thinking if self.use_remote_api is False else False,
-            "local_require_json_schema": self.local_require_json_schema if self.use_remote_api is False else False,
-            "local_parallelism": self.local_parallelism if self.use_remote_api is False else 0,
-            "local_context_budget_tokens": self.local_context_budget_tokens if self.use_remote_api is False else 0,
+            "local_model": self.local_model if self.is_local_provider else "",
+            "local_analyst_model": self.local_analyst_model if self.is_local_provider else "",
+            "local_critic_model": self.local_critic_model if self.is_local_provider else "",
+            "local_adjudicator_model": self.local_adjudicator_model if self.is_local_provider else "",
+            "local_fallback_models": self.local_fallback_models if self.is_local_provider else [],
+            "local_model_path_configured": bool(self.local_model_path) if self.is_local_provider else False,
+            "local_healthcheck_path": self.local_healthcheck_path if self.is_local_provider else "",
+            "local_timeout_sec": self.local_timeout_sec if self.is_local_provider else 0.0,
+            "local_max_retries": self.local_max_retries if self.is_local_provider else 0,
+            "local_max_output_tokens": self.local_max_output_tokens if self.is_local_provider else 0,
+            "local_temperature": self.local_temperature if self.is_local_provider else 0.0,
+            "local_top_p": self.local_top_p if self.is_local_provider else 0.0,
+            "local_seed": self.local_seed if self.is_local_provider else 0,
+            "local_enable_thinking": self.local_enable_thinking if self.is_local_provider else False,
+            "local_require_json_schema": self.local_require_json_schema if self.is_local_provider else False,
+            "local_parallelism": self.local_parallelism if self.is_local_provider else 0,
+            "local_context_budget_tokens": self.local_context_budget_tokens if self.is_local_provider else 0,
             "local_retrieval_top_k": self.local_retrieval_top_k,
             "local_non_loopback_ack": self.local_allow_non_loopback_ack,
+            # Never logs the key itself, only whether one is configured.
+            "openrouter_base_url": self.openrouter_base_url if self.is_openrouter_provider else "",
+            "openrouter_api_key_configured": bool(self.openrouter_api_key) if self.is_openrouter_provider else False,
+            "openrouter_analyst_model": self.openrouter_analyst_model if self.is_openrouter_provider else "",
+            "openrouter_critic_model": self.openrouter_critic_model if self.is_openrouter_provider else "",
+            "openrouter_adjudicator_model": self.openrouter_adjudicator_model if self.is_openrouter_provider else "",
+            "openrouter_fallback_models": self.openrouter_fallback_models if self.is_openrouter_provider else [],
+            "openrouter_timeout_sec": self.openrouter_timeout_sec if self.is_openrouter_provider else 0.0,
+            "openrouter_max_retries": self.openrouter_max_retries if self.is_openrouter_provider else 0,
+            "openrouter_max_output_tokens": self.openrouter_max_output_tokens if self.is_openrouter_provider else 0,
+            "openrouter_temperature": self.openrouter_temperature if self.is_openrouter_provider else 0.0,
+            "openrouter_top_p": self.openrouter_top_p if self.is_openrouter_provider else 0.0,
+            "openrouter_seed": self.openrouter_seed if self.is_openrouter_provider else 0,
+            "openrouter_enable_thinking": self.openrouter_enable_thinking if self.is_openrouter_provider else False,
+            "openrouter_reasoning_effort": self.openrouter_reasoning_effort if self.is_openrouter_provider else "",
+            "openrouter_reasoning_token_reserve": self.openrouter_reasoning_token_reserve if self.is_openrouter_provider else 0,
+            "openrouter_require_json_schema": self.openrouter_require_json_schema if self.is_openrouter_provider else False,
+            "openrouter_require_structured_provider": self.openrouter_require_structured_provider if self.is_openrouter_provider else False,
+            "openrouter_allowed_providers": self.openrouter_allowed_providers if self.is_openrouter_provider else [],
+            "openrouter_parallelism": self.openrouter_parallelism if self.is_openrouter_provider else 0,
+            "openrouter_context_budget_tokens": self.openrouter_context_budget_tokens if self.is_openrouter_provider else 0,
             "shadow_compare_providers": self.shadow_compare_providers,
             "trade_memory_file": str(self.trade_memory_file),
             "provider_circuit_failure_threshold": self.provider_circuit_failure_threshold,
@@ -734,7 +947,7 @@ REQUEST_LOCK_STALE_SEC = max(
 )
 REQUEST_STABLE_MS = max(20, int(os.getenv("AI_REQUEST_STABLE_MS", "120")))
 PRODUCER_LOCK_TIMEOUT_SEC = max(
-    5.0, float(os.getenv("AI_PRODUCER_LOCK_TIMEOUT_SEC", "60"))
+    5.0, float(os.getenv("AI_PRODUCER_LOCK_TIMEOUT_SEC", "300"))
 )
 RESP_ENCODING = os.getenv("AI_RESPONSE_ENCODING", "utf-16")
 ANALYTICS_AUTO_ACTIVATE = os.getenv("ANALYTICS_AUTO_ACTIVATE", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -798,8 +1011,42 @@ def log(msg: str) -> None:
 
 def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
     cfg = config or AI_CONFIG
-    if not cfg.provider_config_valid or cfg.use_remote_api is None:
+    if not cfg.provider_config_valid or cfg.provider_select is None:
         return UnavailableProvider(";".join(cfg.provider_config_errors) or "provider_configuration_invalid")
+    if cfg.is_openrouter_provider:
+        # Reads only the OpenRouter credential.  The OpenAI secret has already
+        # been stripped from the environment for this selection.
+        router_key = os.environ.get("OPENROUTER_API_KEY", "").strip() or cfg.openrouter_api_key
+        if not router_key:
+            return UnavailableProvider("OPENROUTER_API_KEY=missing")
+        return OpenRouterProvider(
+            base_url=cfg.openrouter_base_url,
+            api_key=router_key,
+            analyst_model=cfg.openrouter_analyst_model,
+            critic_model=cfg.openrouter_critic_model,
+            adjudicator_model=cfg.openrouter_adjudicator_model,
+            fallback_models=cfg.openrouter_fallback_models,
+            healthcheck_path=cfg.openrouter_healthcheck_path,
+            timeout_sec=cfg.openrouter_timeout_sec,
+            max_retries=cfg.openrouter_max_retries,
+            max_output_tokens=cfg.openrouter_max_output_tokens,
+            temperature=cfg.openrouter_temperature,
+            top_p=cfg.openrouter_top_p,
+            seed=cfg.openrouter_seed,
+            enable_thinking=cfg.openrouter_enable_thinking,
+            reasoning_effort=cfg.openrouter_reasoning_effort,
+            reasoning_token_reserve=cfg.openrouter_reasoning_token_reserve,
+            require_json_schema=cfg.openrouter_require_json_schema,
+            require_structured_provider=cfg.openrouter_require_structured_provider,
+            allowed_providers=cfg.openrouter_allowed_providers,
+            parallelism=cfg.openrouter_parallelism,
+            context_budget_tokens=cfg.openrouter_context_budget_tokens,
+            circuit_failure_threshold=cfg.provider_circuit_failure_threshold,
+            circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
+            app_url=cfg.openrouter_app_url,
+            app_title=cfg.openrouter_app_title,
+            log=log,
+        )
     if cfg.use_remote_api:
         # This is the only branch allowed to read the remote secret.
         remote_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -910,7 +1157,11 @@ def _refresh_provider_health(*, force: bool = False) -> Dict[str, Any]:
     if not force and _PROVIDER_STARTUP_HEALTH and now - _PROVIDER_HEALTH_CHECKED_MONOTONIC < 60.0:
         return dict(_PROVIDER_STARTUP_HEALTH)
     provider = _provider()
-    probe = provider.provider_mode == PROVIDER_MODE_LOCAL
+    # OpenRouter decides structured-output enforcement per endpoint, not per
+    # model, so a listing GET alone cannot tell whether the strict schema will
+    # actually be honoured.  It is probed for the same reason the local server
+    # is: the answer is not knowable from configuration.
+    probe = provider.provider_mode in {PROVIDER_MODE_LOCAL, PROVIDER_MODE_OPENROUTER}
     health = provider.healthcheck(probe_structured=probe)
     _PROVIDER_STARTUP_HEALTH = asdict(health)
     _PROVIDER_HEALTH_CHECKED_MONOTONIC = now
@@ -1157,7 +1408,7 @@ def _ensure_repeatability_artifact_container() -> bool:
 
 
 @contextmanager
-def _repeatability_update_lock(timeout_sec: float = 10.0):
+def _repeatability_update_lock(timeout_sec: float = 50.0):
     """Cross-process lock for the repeatability artifact.
 
     The bridge can be restarted while an older process is still draining the
@@ -1900,6 +2151,8 @@ def _bucket_prior_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> Dic
             "hierarchy": {},
         }
     po3 = _as_dict(payload.get("po3"))
+    explicit_asset_class = str(_get_any(item, ["asset_class"], "") or "")
+    candidate_asset_class = infer_asset_class(symbol, explicit_asset_class)
     merged = {
         **item,
         "symbol": symbol,
@@ -1908,17 +2161,48 @@ def _bucket_prior_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> Dic
         "session": _get_any(item, ["session_name", "session_code"], _get_any(po3, ["session_name", "session_code"], "OFF")),
         "killzone": _get_any(item, ["killzone_code"], "K" if _boolish(_get_any(po3, ["in_killzone"], False), False) else "NK"),
         "entry_branch": _get_any(item, ["entry_branch", "entry_model"], "unknown"),
-        "asset_class": _get_any(item, ["asset_class"], ""),
+        "asset_class": candidate_asset_class,
     }
     result = priors_for_candidate(artifact, merged)
+    levels = artifact.get("levels") if isinstance(artifact.get("levels"), Mapping) else {}
+    asset_buckets = levels.get("asset_class") if isinstance(levels.get("asset_class"), Mapping) else {}
+    artifact_asset_classes = sorted(str(key) for key in asset_buckets)
+    asset_class_match = candidate_asset_class in asset_buckets
+    mixed_asset_artifact = len(artifact_asset_classes) > 1
+    hierarchy = result.get("hierarchy") if isinstance(result.get("hierarchy"), dict) else {}
+    asset_safe_levels = {"asset_class", "symbol", "family_symbol"}
+    for level, row in hierarchy.items():
+        if not isinstance(row, dict):
+            continue
+        cross_asset_unsafe = not asset_class_match or (
+            mixed_asset_artifact and level not in asset_safe_levels
+        )
+        if cross_asset_unsafe:
+            row["available"] = False
+            row["prior"] = {}
+            row["unavailable_reason"] = (
+                "candidate_asset_class_not_present"
+                if not asset_class_match
+                else "aggregate_crosses_asset_classes"
+            )
     result.update(
         {
             "available": True,
             "setup_code": setup_code,
             "session_bucket": session_bucket,
             "symbol": symbol,
+            "asset_class": candidate_asset_class,
+            "asset_class_match": asset_class_match,
+            "artifact_asset_classes": artifact_asset_classes,
+            "cross_asset_fallback_blocked": True,
+            "prior_applicability": (
+                "ASSET_CLASS_MATCHED"
+                if asset_class_match
+                else "INSUFFICIENT_SAMPLE_FOR_ASSET_CLASS"
+            ),
         }
     )
+    result["candidate_prior_hash"] = canonical_hash(result)
     return result
 
 def _bucket_prior_hash_for_item(item: Dict[str, Any], payload: Dict[str, Any]) -> str:
@@ -2375,6 +2659,33 @@ def analyst_output_token_budget(candidate_count: int, configured_max: int) -> in
     return max(1024, min(int(configured_max), needed))
 
 
+_LOCAL_ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
+    "analyst": 900.0,
+    "critic": 450.0,
+    "adjudicator": 300.0,
+}
+
+
+def _provider_role_timeout_sec(provider: AIProvider, role: str, configured_timeout: float) -> float:
+    """Apply identical per-role budgets to browser and official API transports."""
+
+    configured = max(1.0, float(configured_timeout))
+    role_name = str(role or "").strip().lower()
+    default = _LOCAL_ROLE_TIMEOUT_DEFAULTS.get(role_name, configured)
+    generic_env_name = f"AI_PROVIDER_{role_name.upper()}_TIMEOUT_SEC"
+    legacy_env_name = f"LOCAL_AI_{role_name.upper()}_TIMEOUT_SEC"
+    try:
+        requested = float(
+            os.getenv(
+                generic_env_name,
+                os.getenv(legacy_env_name, str(default)),
+            )
+        )
+    except (TypeError, ValueError):
+        requested = default
+    return max(30.0, min(configured, requested))
+
+
 def select_live_candidate_cohort(
     candidates: Sequence[Mapping[str, Any]],
     enriched: Sequence[Mapping[str, Any]],
@@ -2424,6 +2735,66 @@ def select_live_candidate_cohort(
     return chosen, deferred, "live_latency_budget_rule_score_family_diverse"
 
 
+def _apply_live_candidate_budget(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Seal at most the configured live cohort into the provider request.
+
+    This must run before ``freeze_ai_request`` because candidate count and
+    ordering are identity-bound. Candidate indexes themselves remain the
+    sparse/original MQL indexes, so a selected candidate still maps back to the
+    original plan by both index and hash.
+    """
+
+    live_or_wait = (
+        canonical_workload_mode(payload) == LIVE_FORWARD
+        or _tester_workflow_source(payload) == "live_wait_debug"
+    )
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    budget = int(AI_CONFIG.live_candidate_budget or 0)
+    if not live_or_wait or budget <= 0 or len(candidates) <= budget:
+        return payload
+
+    enriched: list[Dict[str, Any]] = []
+    for position, candidate in enumerate(candidates):
+        row = dict(candidate) if isinstance(candidate, Mapping) else {}
+        single = dict(payload)
+        single["candidates"] = [row]
+        single["plan"] = row
+        rule_score, _notes = _rule_score(single)
+        enriched.append({**row, "rule_score": float(rule_score)})
+    chosen, deferred, reason = select_live_candidate_cohort(
+        candidates,
+        enriched,
+        budget=budget,
+    )
+    selected_positions = sorted(
+        chosen,
+        key=lambda position: int(candidates[position].get("candidate_index", position)),
+    )
+    selected = [candidates[position] for position in selected_positions]
+    payload["candidates"] = selected
+    # These values described the pre-budget MQL list and have no authority
+    # after Python selects the provider cohort. The freeze below rebuilds them.
+    for field in (
+        "candidate_count",
+        "ordered_candidate_identities",
+        "request_identity",
+        "request_identity_hash",
+    ):
+        payload.pop(field, None)
+    log(
+        "[live_candidate_cohort]"
+        f" request_id={str(payload.get('id') or '')}"
+        f" configured_budget={budget}"
+        f" original_count={len(candidates)}"
+        f" selected_count={len(selected)}"
+        f" ranked_selected_indexes={[int(candidates[p].get('candidate_index', p)) for p in chosen]}"
+        f" provider_candidate_indexes={[int(candidates[p].get('candidate_index', p)) for p in selected_positions]}"
+        f" deferred_indexes={[int(candidates[p].get('candidate_index', p)) for p in deferred]}"
+        f" reason={reason}"
+    )
+    return payload
+
+
 def _compact_model_evidence_payload(
     envelope: Mapping[str, Any],
     catalog: EvidenceCatalog,
@@ -2471,11 +2842,30 @@ def _compact_model_evidence_payload(
     section = compact.get("entry_and_invalidation")
     rows = section.get("candidates") if isinstance(section, Mapping) else None
     if isinstance(rows, list):
+        provider_catalog_rows = catalog.provider_rows()
+        global_evidence_ids = [
+            int(item["id"])
+            for item in provider_catalog_rows
+            if item.get("c") is None
+        ]
         slim_rows: list[Dict[str, Any]] = []
-        for row in rows:
+        for position, row in enumerate(rows):
             if not isinstance(row, Mapping):
                 continue
             slim = dict(row)
+            candidate_index = int(slim.get("candidate_index", position))
+            # Put the exact legal citation set next to the candidate being
+            # assessed.  Remote models otherwise have to correlate the compact
+            # ``c`` scope across a long shared catalog and can accidentally cite
+            # a neighbouring candidate even though the JSON is schema-valid.
+            slim["allowed_evidence_ref_ids"] = [
+                *global_evidence_ids,
+                *[
+                    int(item["id"])
+                    for item in provider_catalog_rows
+                    if item.get("c") == candidate_index
+                ],
+            ]
             numbers = slim.get("authoritative_numbers")
             if isinstance(numbers, Mapping):
                 # Keep the values the model reasons over; the unit/source/
@@ -2540,6 +2930,32 @@ def _resolve_evidence_reference_ids(
     if legacy_diagnostics:
         diagnostics["legacy"] = legacy_diagnostics
     if not resolution.valid:
+        # A cross-candidate ID is a *mis-scoped* citation, not a fabricated one:
+        # it names a real catalog entry that belongs to a sibling candidate, and
+        # ``resolved_paths`` already excludes it.  Dropping those surplus IDs is a
+        # contractually allowed Python-side normalization that can only shrink the
+        # evidence set, never manufacture support for an approval.  Unknown or
+        # duplicate IDs stay fail-closed, and an empty remainder stays fail-closed,
+        # so this cannot turn an unsupported decision into a supported one.
+        # This previously cost a second provider call that still failed.
+        only_cross_candidate = (
+            bool(resolution.cross_candidate_ids)
+            and not resolution.unknown_ids
+            and not resolution.duplicate_ids
+            and bool(resolution.resolved_paths)
+        )
+        if only_cross_candidate:
+            diagnostics["valid"] = True
+            diagnostics["normalization"] = "cross_candidate_ids_dropped"
+            diagnostics["dropped_ids"] = list(resolution.cross_candidate_ids)
+            log(
+                "[evidence_reference_normalized]"
+                f" candidate_index={candidate_index} field={field_name}"
+                f" dropped_cross_candidate_ids={list(resolution.cross_candidate_ids)}"
+                f" retained_paths={len(resolution.resolved_paths)}"
+                " authority=python_owned_normalization"
+            )
+            return list(resolution.resolved_paths), diagnostics
         raise EvidenceReferenceError(
             f"evidence_reference_invalid:{field_name}", diagnostics
         )
@@ -2556,6 +2972,7 @@ def _bind_python_owned_analyst_envelope(
     ordered_candidate_identities: list[Dict[str, Any]],
     provider_result: Any,
     evidence_catalog: EvidenceCatalog,
+    request_is_buy: bool | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Map analytical indexes to the immutable request and attach identity."""
 
@@ -2597,13 +3014,35 @@ def _bind_python_owned_analyst_envelope(
         "duplicate_candidate_indexes": sorted(set(duplicate_indexes)),
         "unknown_candidate_indexes": sorted(set(unknown_indexes)),
     }
-    if missing_indexes or duplicate_indexes or unknown_indexes or len(raw_assessments) != len(candidates):
+    selected_index = int(model_output.get("selected_candidate_index", -1))
+    # The live provider sometimes echoes assessments for candidates that were
+    # deliberately deferred by the three-candidate latency budget.  When every
+    # frozen candidate is present exactly once and the selected candidate is in
+    # the frozen cohort, those out-of-cohort rows have no request identity and
+    # can be discarded safely.  This never fills a missing row, changes a
+    # verdict, or promotes an out-of-cohort selection.
+    safe_extra_rows_only = bool(
+        unknown_indexes
+        and not missing_indexes
+        and not duplicate_indexes
+        and selected_index in candidate_by_index
+        and len(assessment_by_index) == len(candidates)
+    )
+    if safe_extra_rows_only:
+        mapping_diagnostics["ignored_out_of_cohort_candidate_indexes"] = sorted(
+            set(unknown_indexes)
+        )
+        mapping_diagnostics["normalized_count"] = len(assessment_by_index)
+        unknown_indexes = []
+        mapping_diagnostics["unknown_candidate_indexes"] = []
+    if missing_indexes or duplicate_indexes or unknown_indexes or (
+        len(raw_assessments) != len(candidates) and not safe_extra_rows_only
+    ):
         raise ValueError(
             "model_candidate_index_mapping_invalid:"
             + json.dumps(mapping_diagnostics, sort_keys=True, separators=(",", ":"))
         )
 
-    selected_index = int(model_output.get("selected_candidate_index", -1))
     if selected_index not in candidate_by_index:
         raise ValueError(f"model_selected_candidate_index_out_of_range:{selected_index}")
     quality_tier = str(model_output.get("decision_quality_tier") or "")
@@ -2675,6 +3114,48 @@ def _bind_python_owned_analyst_envelope(
         analyst_veto["evidence_fields"] = veto_refs
         analytical["veto"] = analyst_veto
 
+        decision_state = str(analytical.get("decision_state") or "")
+        verdict = str(analytical.get("verdict") or "")
+        if decision_state != verdict:
+            raise ValueError(
+                f"model_decision_state_verdict_conflict:candidate_index={index}"
+            )
+        model_risk_hint = float(analytical.get("suggested_risk_multiplier") or 0.0)
+        if decision_state in {"ABSTAIN", "REJECT"}:
+            # A non-trading decision can never spend a size hint.  Zeroing an
+            # accidental positive value is a fail-closed safety normalization;
+            # it cannot promote or enlarge a trade and keeps cache/export
+            # validation aligned with the final terminal decision.
+            if model_risk_hint != 0.0:
+                echo_diagnostics.append(
+                    f"candidate[{index}].suggested_risk_multiplier_zeroed_for_{decision_state.lower()}"
+                )
+            analytical["suggested_risk_multiplier"] = 0.0
+        if decision_state == "ABSTAIN":
+            if bool(analytical.get("raw_allow")) or bool(analyst_veto.get("enabled")):
+                raise ValueError(
+                    f"model_abstain_contract_invalid:candidate_index={index}"
+                )
+        elif decision_state == "REJECT":
+            if bool(analytical.get("raw_allow")) or not bool(analyst_veto.get("enabled")):
+                raise ValueError(
+                    f"model_reject_contract_invalid:candidate_index={index}"
+                )
+        elif decision_state == "APPROVE":
+            if (
+                not bool(analytical.get("raw_allow"))
+                or not bool(analytical.get("thesis_supported"))
+                or bool(analyst_veto.get("enabled"))
+                or model_risk_hint <= 0.0
+            ):
+                raise ValueError(
+                    f"model_approve_contract_invalid:candidate_index={index}"
+                )
+        else:
+            raise ValueError(
+                f"model_decision_state_invalid:candidate_index={index}"
+            )
+
         rule_value = rule_by_index[index]
         quality = float(analytical["llm_quality_score"])
         blended = max(0.0, min(10.0, 0.72 * rule_value + 0.28 * quality))
@@ -2688,13 +3169,162 @@ def _bind_python_owned_analyst_envelope(
             ),
         )
         arbitration = _as_dict(analytical.get("target_arbitration"))
+        blocker_class = str(arbitration.get("blocker_class") or "").strip()
+        target_reason = str(arbitration.get("target_decision_reason") or "").strip()
+        if not blocker_class:
+            if decision_state == DECISION_APPROVE:
+                raise ValueError(
+                    f"model_target_blocker_class_missing:candidate_index={index}"
+                )
+            # UNKNOWN is the contract's explicit no-observed-blocker value.  It
+            # only normalizes a non-trading assessment and cannot grant trade
+            # authority.
+            blocker_class = "UNKNOWN"
+            echo_diagnostics.append(
+                f"candidate[{index}].target_arbitration.blocker_class=unknown_for_{decision_state.lower()}"
+            )
+        if not target_reason:
+            if decision_state == DECISION_APPROVE:
+                raise ValueError(
+                    f"model_target_decision_reason_missing:candidate_index={index}"
+                )
+            target_reason = (
+                f"{decision_state.lower()} preserves the current MQL target plan"
+            )
+            echo_diagnostics.append(
+                f"candidate[{index}].target_arbitration.target_decision_reason="
+                f"fail_closed_for_{decision_state.lower()}"
+            )
+        arbitration["blocker_class"] = blocker_class
+        arbitration["target_decision_reason"] = target_reason
         chosen_model = str(arbitration.get("chosen_target_model") or "")
         chosen_tp1 = float(arbitration.get("chosen_tp1") or 0.0)
         chosen_tp2 = float(arbitration.get("chosen_tp2") or 0.0)
         entry = float(candidate.get("entry_est") or candidate.get("entry") or 0.0)
         sl = float(candidate.get("sl") or 0.0)
+        deterministic_arbitration_required = bool(
+            candidate.get("target_arbitration_required")
+        )
+        if not chosen_model:
+            if deterministic_arbitration_required and decision_state == DECISION_APPROVE:
+                # An approval must contain the model's explicit target choice;
+                # Python must never manufacture trade authority or silently
+                # choose a route on the provider's behalf.
+                raise ValueError(
+                    f"model_target_arbitration_choice_missing:candidate_index={index}"
+                )
+            # A non-trading ABSTAIN/REJECT cannot spend any target choice.  If
+            # the provider leaves this analytical echo empty, preserve the
+            # immutable current MQL plan so the response remains a valid
+            # fail-closed advisory instead of degrading the whole envelope.
+            # The same fallback is used when arbitration is not required.
+            chosen_model = str(
+                candidate.get("target_source")
+                or candidate.get("target_model")
+                or candidate.get("tp_model")
+                or ""
+            )
+            if deterministic_arbitration_required:
+                echo_diagnostics.append(
+                    f"candidate[{index}].target_arbitration.chosen_target_model"
+                    f"=current_plan_for_{decision_state.lower()}"
+                )
+        if not chosen_model:
+            raise ValueError(
+                f"deterministic_target_identity_missing:candidate_index={index}"
+            )
         tp1 = chosen_tp1 if chosen_tp1 > 0.0 else float(candidate.get("tp1") or 0.0)
         tp2 = chosen_tp2 if chosen_tp2 > 0.0 else float(candidate.get("tp2") or 0.0)
+        risk_distance = abs(entry - sl)
+        if "is_buy" in candidate:
+            is_buy = bool(candidate.get("is_buy"))
+        else:
+            direction = str(candidate.get("direction") or "").strip().lower()
+            if direction in {"buy", "long"}:
+                is_buy = True
+            elif direction in {"sell", "short"}:
+                is_buy = False
+            elif request_is_buy is not None:
+                is_buy = bool(request_is_buy)
+            else:
+                # A valid structural stop is below entry for buys and above it
+                # for sells.  This is only a compatibility fallback for direct
+                # unit fixtures; production requests always supply is_buy.
+                is_buy = sl < entry
+
+        if not all(math.isfinite(value) for value in (entry, sl, tp1, tp2)):
+            raise ValueError(
+                f"deterministic_rr_price_non_finite:candidate_index={index}"
+            )
+        if entry <= 0.0 or sl <= 0.0 or risk_distance <= 0.0:
+            raise ValueError(
+                f"deterministic_rr_risk_invalid:candidate_index={index}"
+            )
+        if (is_buy and sl >= entry) or (not is_buy and sl <= entry):
+            raise ValueError(
+                f"deterministic_rr_stop_direction_invalid:candidate_index={index}"
+            )
+
+        # A target that sits on the wrong side of entry is a defect in *this*
+        # candidate only.  Raising here used to abort the whole envelope, so one
+        # bad candidate discarded every valid sibling assessment and surfaced as
+        # `structured_response_invalid` for the entire request.  Collect the
+        # violations instead and demote just the offending candidate below.
+        rr_violations: list[str] = []
+
+        def canonical_rr(target: float, field_name: str) -> float:
+            if target <= 0.0:
+                if decision_state == DECISION_APPROVE:
+                    rr_violations.append(
+                        f"deterministic_rr_target_missing:field={field_name}"
+                    )
+                return 0.0
+            reward = (target - entry) if is_buy else (entry - target)
+            value = round(reward / risk_distance, 6)
+            if value <= 0.0:
+                if decision_state == DECISION_APPROVE:
+                    rr_violations.append(
+                        f"deterministic_rr_non_positive:field={field_name}"
+                    )
+                return 0.0
+            return value
+
+        for field_name, target in (("chosen_rr1", tp1), ("chosen_rr2", tp2)):
+            reported_rr = float(arbitration.get(field_name) or 0.0)
+            deterministic_rr = canonical_rr(target, field_name)
+            if abs(reported_rr - deterministic_rr) > 1.0e-5:
+                echo_diagnostics.append(
+                    f"candidate[{index}].target_arbitration.{field_name}"
+                    f"={deterministic_rr:.6f}_deterministic_recalculation"
+                )
+            arbitration[field_name] = deterministic_rr
+
+        if rr_violations:
+            # Fail closed for this candidate: an APPROVE whose own geometry does
+            # not produce a positive reward can never carry trade authority.
+            # Demote to ABSTAIN with an explicit, evidence-bearing reason rather
+            # than destroying the request's other candidates.
+            decision_state = DECISION_ABSTAIN
+            analytical["decision_state"] = DECISION_ABSTAIN
+            analytical["verdict"] = DECISION_ABSTAIN
+            analytical["raw_allow"] = False
+            analytical["suggested_risk_multiplier"] = 0.0
+            for violation in rr_violations:
+                echo_diagnostics.append(
+                    f"candidate[{index}].demoted_to_abstain:{violation}"
+                )
+            log(
+                "[deterministic_rr_demotion]"
+                f" candidate_index={index}"
+                f" reasons={','.join(rr_violations)}"
+                f" entry={entry} sl={sl} tp1={tp1} tp2={tp2} is_buy={is_buy}"
+                " authority=candidate_scoped_fail_closed"
+            )
+        arbitration["arbitration_required"] = deterministic_arbitration_required
+        arbitration["chosen_target_model"] = chosen_model
+        arbitration["chosen_tp1"] = tp1
+        arbitration["chosen_tp2"] = tp2
+        analytical["target_arbitration"] = arbitration
         canonical = {
             **analytical,
             "request_id": request_id,
@@ -2898,6 +3528,12 @@ def _score_setup_ai(
         row = dict(candidate)
         row["candidate_index"] = int(candidate.get("candidate_index", index))
         row["rule_score"] = float(enriched_candidates[index]["rule_score"])
+        # The hierarchical prior is Python-owned context.  MQL cannot include
+        # it in the frozen request, so carry the value calculated for the
+        # compact candidate into the canonical evidence envelope explicitly.
+        # Without this assignment the later envelope rebuild silently dropped
+        # the prior and the model was instructed to use evidence it never saw.
+        row["bucket_prior"] = _bucket_prior_for_item(candidate, payload)
         retrieval = retrieval_by_hash.get(str(candidate.get("candidate_hash") or ""))
         row["historical_evidence_state"] = retrieval.state if retrieval is not None else "INSUFFICIENT_SAMPLE"
         row["retrieved_analogue_ids"] = list(retrieval.analogue_ids) if retrieval is not None else []
@@ -2939,25 +3575,42 @@ def _score_setup_ai(
     snapshots_required = _runtime_bool(runtime.get("require_snapshots"), False)
     system_msg = f"""You are the independent Analyst in a disciplined PO3 + FVG trade audit. Assess every candidate independently. Never copy a score, veto, target choice, confidence, or risk multiplier between candidates. Reference candidates only by the supplied candidate_index. Python exclusively owns request IDs, hashes, provider/model identity, candidate IDs/hashes, execution fingerprints, schema versions, and final plan prices; do not return or reconstruct those fields.
 
+WHAT THIS STRATEGY IS. PO3 is Power of Three: accumulation, then manipulation, then distribution. Price builds a range, sweeps liquidity on one side, and expands away in the opposite direction. The deterministic engine reports the events it actually observed, including sweep, displacement, HTF BOS, and LTF BOS/MSS/CHOCH fields with timestamps. Do not assume an event that is false or absent. The attached family_profile is authoritative for which events are mandatory for this candidate: full PO3 families require the complete sweep-displacement-BOS sequence, while micro and Tier-B families may define a deterministic displacement/FVG, reclaim, range, session, breaker, or LTF-shift sequence without requiring HTF BOS. Read each candidate's family_requirement_contract before judging missing evidence. It is a deterministic Python projection of the taxonomy, not an LLM opinion.
+
+WHAT WE ARE LOOKING FOR. A setup worth capital has the complete, correctly ordered sequence declared by its family_profile, with no profile-required event inferred or missing; displacement/reclaim quality appropriate to that family; an FVG or breaker whose supplied mitigation state is still tradable; compatible regime and higher-timeframe context; viable session timing; a clean path to a supplied feasible target; execution cost small relative to the risk unit; and structural invalidation. Never reject a micro or Tier-B candidate merely because HTF BOS is absent when its family_profile does not require HTF BOS. When family_requirement_contract.htf_bos_required=false, absence of HTF BOS must not appear in missing_required_evidence, missing_confirmations, material_contradictions, major_risks, reasons, narrative_state, rejection_codes, or veto. Only events actually named in family_requirement_contract.required_event_sequence may be classified as missing mandatory family evidence. LTF BOS/MSS/CHOCH is a valid substitute only when the family_profile and structured fields explicitly allow it. Conversely, never waive BOS for a full PO3 family.
+
+THE SETUP FAMILIES AND THEIR THESES. Each candidate carries a setup_taxonomy_enum, and each name is a claim about why price should move. Judge the claim against the evidence, because the single most valuable thing you do is catch a setup whose own thesis is contradicted by the supplied market state. MICRO_FVG_MID_REVERSAL and MICRO_OTE_REVERSAL claim a retracement into the mid of the imbalance or the optimal trade entry zone reverses. MICRO_FVG_EDGE_REVERSAL claims the reaction comes at the gap edge. MICRO_BREAKER_RETEST claims a broken level now holds as the opposite polarity. MICRO_CONTINUATION_FVG and MICRO_NESTED_CONTINUATION claim an established expansion resumes after a shallow pullback, so they need trend and expansion, not balance. MICRO_RANGE_REENTRY and MICRO_SESSION_REENTRY claim price rejects back inside a range or session boundary, so they need compression and containment; an expansion-dominant regime contradicts them outright. FAILED_BREAKOUT_RECLAIM claims a breakout failed and reclaimed, so it needs evidence the break was rejected, not merely that price returned. FULL_PO3_REVERSAL and FULL_PO3_CONTINUATION are the same logic on the higher-timeframe leg. UNKNOWN_UNCLASSIFIED is never tradeable.
+
+WHY THIS MATTERS. These decisions move real capital in a live account that a person depends on for their income. That does not mean you should find reasons to approve; it means the opposite. The cost is asymmetric: a setup you decline costs nothing but a missed opportunity, and another one appears within hours, while a setup you wave through on thin or contradicted evidence costs money that has to be earned back. There is no quota and no expectation that any given batch contains a trade. Approving nothing across an entire session is a normal and correct outcome when the evidence does not support a trade. Your value to this trader is precision and honesty about what the evidence does and does not show, never encouragement, optimism, or the appearance of usefulness. Be the reviewer who protects the account.
+
 For each candidate return candidate_index and verdict equal to decision_state. Fill thesis_supported, material_contradictions, missing_required_evidence, historical_evidence_state, major_risks, evidence_ref_ids, confidence_band, and summary. Historical evidence state must be SUPPORTIVE, MIXED, ADVERSE, or INSUFFICIENT_SAMPLE. confidence_band must be exactly {" or ".join(CONFIDENCE_BANDS)}. Do not request or reveal hidden chain-of-thought; provide only concise auditable conclusions.
 
-Evidence citation is by integer id only. The payload contains evidence_catalog.items, where each item has id, p (the Python-owned canonical path), v (the observed value), and optionally c (the candidate index it belongs to). Items without c are global. In evidence_ref_ids and veto.evidence_ref_ids return only ids taken from that catalog. A candidate may cite its own items and global items; citing another candidate's item is invalid. Never invent an id, never return a path string, and never construct a canonical path yourself: Python owns all canonical paths, value hashes, and authority labels.
+Evidence citation is by integer id only. The payload contains evidence_catalog.items, where each item has id, p (the Python-owned canonical path), v (the observed value), and optionally c (the candidate index it belongs to). Items without c are global. Every candidate row also contains allowed_evidence_ref_ids: for that candidate, both evidence_ref_ids and veto.evidence_ref_ids may contain only distinct integers copied from that exact list. A candidate may cite its own items and global items; citing another candidate's item is invalid. Never invent an id, never return a path string, and never construct a canonical path yourself: Python owns all canonical paths, value hashes, and authority labels.
 
 Return analytical content only. Python exclusively owns and injects every internal contract version, schema version, prompt contract version, target arbitration schema version, request identity, and candidate identity. Never emit, guess, or echo those constants.
 
 Structured MT5 fields are primary evidence; chart snapshots are supporting evidence. Missing or failed chart captures are not a rejection when runtime.require_snapshots is false. The field opposing_clearance_score is favorable when high and means a nearby obstruction when low.
 
-Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is mixed, timing/follow-through is unclear, data is incomplete, a prior is statistically weak, target choice is unstable, or the assessed plan may not survive execution. ABSTAIN is never a reduced-risk approval. raw_allow must agree with decision_state: true only for APPROVE.
+Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is mixed, timing/follow-through is unclear, data is incomplete, a prior is statistically weak, target choice is unstable, or the assessed plan may not survive execution. ABSTAIN is never a reduced-risk approval.
+
+DECISION STATE CONTRACT. Python validates this per candidate and discards the entire response, including every other candidate, if any one candidate breaks any rule below. Emit each candidate in exactly one of these three shapes and never blend them.
+APPROVE requires verdict=APPROVE, raw_allow=true, thesis_supported=true, veto.enabled=false, veto.code="", veto.evidence_ref_ids=[], veto.reason="", and suggested_risk_multiplier strictly greater than 0.0 and at most 1.0.
+REJECT requires verdict=REJECT, raw_allow=false, veto.enabled=true, veto.code set to one of the allowed veto codes, veto.evidence_ref_ids non-empty, veto.reason non-empty, and suggested_risk_multiplier=0.0.
+ABSTAIN requires verdict=ABSTAIN, raw_allow=false, veto.enabled=false, veto.code="", veto.evidence_ref_ids=[], veto.reason="", and suggested_risk_multiplier exactly 0.0.
+suggested_risk_multiplier is a position-size hint that only an APPROVE may spend. It is not a confidence score, not a conviction score, and not a quality score. On ABSTAIN it must be the number 0.0 and on REJECT it must be the number 0.0: never 0.9, never 0.95, never 1.0, and never omitted. An ABSTAIN carrying a non-zero suggested_risk_multiplier is the most frequent cause of a discarded response; check every ABSTAIN candidate for this before answering.
+verdict and decision_state must be the identical string on the same candidate. veto.enabled=true is permitted only on a REJECT; a veto attached to an APPROVE or an ABSTAIN is invalid. When veto.enabled=false all three of veto.code, veto.evidence_ref_ids, and veto.reason must be empty.
 
 Score semantics are strict. rule_score is supplied deterministic evidence and must not be returned. llm_quality_score is your 0..10 technical-quality assessment. llm_self_reported_confidence is your uncertainty report, not a probability. Do not return calibrated probability, expected R, blended scores, or transport identity. Never fabricate probability or expected R.
 
-Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_ref_ids must list the exact evidence_catalog ids that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, empty evidence_ref_ids, and empty reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. A zero suggested_risk_multiplier means reject; never replace zero with one. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
+Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_ref_ids must list the exact evidence_catalog ids that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, empty evidence_ref_ids, and empty reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. Set suggested_risk_multiplier strictly per the decision state contract above, and never substitute a non-zero size hint where that contract requires exactly 0.0. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use a hierarchy row only when its available field is true. cross_asset_fallback_blocked is authoritative: when prior_applicability is INSUFFICIENT_SAMPLE_FOR_ASSET_CLASS, Gold/metals global or family history is not evidence for FX, indices, energy, or any other asset class and must not support a rejection, abstention, score penalty, or veto. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported same-asset hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
 
-Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Compare liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
+Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Compare keep_current_target, liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. keep_current_target is the target the deterministic engine already selected; when it is marked feasible and no alternative is clearly better, answer chosen_target_model=keep_current with its exact tp2 rather than moving to a different route. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
 The deterministic setup taxonomy is evidence, not a model output. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
 
-Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and selected_candidate_index identifying one item. Assessment order may differ from request order; Python normalizes it by candidate_index. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score is not compressed or capped. Scores above 8 should be rare but must be returned unchanged. Keep text concise ASCII and return strict JSON only."""
+FIELD BOUNDS. Every bound below is enforced and one violation anywhere discards the whole response. Numeric ranges: llm_quality_score, structure_quality_score, entry_timing_score, and final_trade_expectancy_score are numbers from 0.0 to 10.0; llm_self_reported_confidence, follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and suggested_risk_multiplier are numbers from 0.0 to 1.0; blocker_severity is from -1.0 to 10.0 and is exactly -1 when blocker evidence is absent; candidate_index is a non-negative integer. Maximum text lengths in characters: summary 240, the per-candidate reasons 240, the top-level reasons 240, veto.reason 160, why_not_liquidity_target 160, why_not_partial_before_obstacle 160, why_not_capped_before_obstacle 160, why_not_synthetic_fallback 160, target_decision_reason 160, bucket_prior_override_justification 180, narrative_state 48, blocker_kind 64, blocker_class 24. Aim near 200 characters on summary and reasons so neither can overflow. Maximum list lengths in items: evidence_ref_ids 16 and it must never be empty, material_contradictions 12, missing_required_evidence 12, major_risks 12, veto.evidence_ref_ids 12, rejection_codes 8, invalidation_risks 8, missing_confirmations 8, rejected_target_models 6. historical_evidence_state must be exactly one of {" or ".join(HISTORICAL_EVIDENCE_STATES)}. Return every field on every candidate: a null, an omitted field, or a field not defined in the schema is invalid. Emit plain ASCII, no NaN, and no Infinity.
+
+Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and selected_candidate_index identifying one item. Assessment order may differ from request order; Python normalizes it by candidate_index. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score is not compressed or capped. Scores above 8 should be rare but must be returned unchanged. Keep text concise ASCII and make the response content strict JSON only. Deliver that JSON exactly as the transport section of this request requires: when the request asks for a downloadable file, the JSON must be written into that attached file rather than typed as chat text."""
     snapshot_status = ", ".join(snapshot_notes) if snapshot_notes else "none"
     errors: list[str] = []
     # A single provider call owns its same-provider model fallback and bounded
@@ -2982,7 +3635,11 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         "image_parts": snapshot_parts,
                         "snapshot_status": snapshot_status,
                         "service_tier": service_tier if provider.provider_mode == PROVIDER_MODE_REMOTE else "auto",
-                        "timeout_sec": _provider_request_metadata(payload, provider)["timeout_sec"],
+                        "timeout_sec": _provider_role_timeout_sec(
+                            provider,
+                            "analyst",
+                            _provider_request_metadata(payload, provider)["timeout_sec"],
+                        ),
                         "workload_mode": _payload_workload_mode(payload),
                         "non_trading_shadow": bool(non_authoritative_shadow),
                         "deadline": request_deadline,
@@ -3032,6 +3689,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     model_fingerprint=provider_result.model_fingerprint,
                     tokens_per_second=provider_result.tokens_per_second,
                     estimated_context_tokens=provider_result.estimated_context_tokens,
+                    service_tier=service_tier,
                     extra={
                         "symbol": symbol,
                         "snapshot_count": len(snapshot_parts),
@@ -3085,6 +3743,11 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             ordered_candidate_identities=ordered_candidate_identities,
                             provider_result=provider_result,
                             evidence_catalog=evidence_catalog,
+                            request_is_buy=(
+                                bool(payload.get("is_buy"))
+                                if "is_buy" in payload
+                                else None
+                            ),
                         )
                     )
                 except EvidenceReferenceError as evidence_error:
@@ -3111,20 +3774,324 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             f" first_missing_token={_ascii_compact(str(entry.get('first_missing_token')))}"
                             f" nearest_valid_paths={entry.get('nearest_valid_paths')}"
                         )
-                    return _degraded_non_trading_decision(
+                    # Structured Outputs validates types and bounds, but the
+                    # candidate-specific catalog scope is a semantic contract.
+                    # Give the same provider one bounded correction pass with
+                    # the exact offending scope.  The original invalid answer
+                    # never gains authority and is never edited locally.
+                    repair_prompt = (
+                        system_msg
+                        + "\n\nEVIDENCE CITATION CORRECTION PASS. Your previous complete response "
+                        "was rejected before trading authority because it cited evidence outside "
+                        "the candidate-specific allowed_evidence_ref_ids list. Return the entire "
+                        "response again, not a patch. For every candidate, copy distinct IDs only "
+                        "from that candidate row's allowed_evidence_ref_ids. Do not reuse any "
+                        "candidate-scoped ID for a different candidate. "
+                        f"The detected failure was candidate_index={diag.get('candidate_index')}, "
+                        f"field={diag.get('field')}, unknown_ids={diag.get('unknown_ids')}, "
+                        f"cross_candidate_ids={diag.get('cross_candidate_ids')}, "
+                        f"duplicate_ids={diag.get('duplicate_ids')}."
+                    )
+                    log(
+                        "[evidence_reference_repair]"
+                        f" request_id={request_id}"
+                        " attempt=1"
+                        f" candidate_index={diag.get('candidate_index')}"
+                        f" field={diag.get('field')}"
+                        " provider_same=true authoritative_previous=false"
+                    )
+                    repaired_result = provider.generate_structured(
+                        role="analyst",
+                        system_prompt=repair_prompt,
+                        evidence=model_payload,
+                        response_schema=ModelAIGateOutput,
+                        request_metadata={
+                            "request_id": request_id,
+                            "request_identity_hash": request_identity_hash,
+                            "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+                            "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+                            "symbol": symbol,
+                            "image_parts": snapshot_parts,
+                            "snapshot_status": snapshot_status,
+                            "service_tier": service_tier if provider.provider_mode == PROVIDER_MODE_REMOTE else "auto",
+                            "timeout_sec": _provider_role_timeout_sec(
+                                provider,
+                                "analyst",
+                                _provider_request_metadata(payload, provider)["timeout_sec"],
+                            ),
+                            "workload_mode": _payload_workload_mode(payload),
+                            "non_trading_shadow": bool(non_authoritative_shadow),
+                            "deadline": request_deadline,
+                            "max_output_tokens": analyst_output_token_budget(
+                                len(candidates), AI_CONFIG.max_output_tokens
+                            ),
+                        },
+                    )
+                    if request_deadline.expired():
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "evidence citation repair arrived after the absolute request deadline",
+                            invalid=["provider_deadline_exceeded"],
+                            source="provider_deadline_exceeded",
+                        )
+                    repaired_response = repaired_result.raw_response
+                    repaired_model = repaired_result.actual_model
+                    repaired_reasoning = (
+                        _reasoning_config_for_model(repaired_model)
+                        if repaired_result.provider_mode == PROVIDER_MODE_REMOTE
+                        else None
+                    )
+                    log_ai_usage(
+                        source="ai_gate",
+                        operation="trade_gate.provider_neutral_analyst_evidence_repair",
+                        model=repaired_model,
+                        response=repaired_response,
+                        request_id=request_id,
+                        reasoning_effort=repaired_reasoning.get("effort", "") if repaired_reasoning else "",
+                        max_output_tokens=budget,
+                        provider_mode=repaired_result.provider_mode,
+                        provider_id=repaired_result.provider_id,
+                        endpoint_class=repaired_result.endpoint_class,
+                        model_fingerprint=repaired_result.model_fingerprint,
+                        tokens_per_second=repaired_result.tokens_per_second,
+                        estimated_context_tokens=repaired_result.estimated_context_tokens,
+                        service_tier=service_tier,
+                        extra={
+                            "symbol": symbol,
+                            "snapshot_count": len(snapshot_parts),
+                            "service_tier": service_tier,
+                            "flex_used": flex_used,
+                            "semantic_repair": "evidence_reference_ids",
+                        },
+                    )
+                    _write_ai_cost_report(
                         payload,
-                        "Analyst cited an evidence reference outside the Python-owned catalog",
-                        invalid=[str(diag.get("field") or "evidence_refs")],
-                        source="decision_evidence_reference_reject",
+                        request_id=request_id,
+                        decision_source="ai_provider_evidence_reference_repair",
+                        model=repaired_model,
+                        reasoning_effort=repaired_reasoning.get("effort", "") if repaired_reasoning else "",
+                        service_tier=service_tier,
+                        prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
+                        cache_status="provider_semantic_repair",
+                        batch_used=False,
+                        flex_used=flex_used,
+                        response=repaired_response,
+                        openai_called=repaired_result.provider_mode == PROVIDER_MODE_REMOTE,
+                        skip_reason="",
+                    )
+                    frozen_request.assert_unchanged(
+                        payload,
+                        stage="after_evidence_reference_repair",
+                        provider_call_attempted=True,
+                        http_request_sent=True,
+                    )
+                    repaired_model_output = repaired_result.parsed.model_dump()
+                    try:
+                        raw_envelope, mapping_diagnostics = (
+                            _bind_python_owned_analyst_envelope(
+                                model_output=repaired_model_output,
+                                candidates=candidates,
+                                enriched_candidates=enriched_candidates,
+                                request_id=request_id,
+                                request_identity_hash=request_identity_hash,
+                                ordered_candidate_identities=ordered_candidate_identities,
+                                provider_result=repaired_result,
+                                evidence_catalog=evidence_catalog,
+                                request_is_buy=(
+                                    bool(payload.get("is_buy"))
+                                    if "is_buy" in payload
+                                    else None
+                                ),
+                            )
+                        )
+                    except EvidenceReferenceError as repaired_error:
+                        repaired_diag = repaired_error.diagnostics
+                        log(
+                            "[evidence_reference_repair]"
+                            f" request_id={request_id}"
+                            " attempt=1 result=failed"
+                            f" candidate_index={repaired_diag.get('candidate_index')}"
+                            f" field={repaired_diag.get('field')}"
+                            f" unknown_ids={repaired_diag.get('unknown_ids')}"
+                            f" cross_candidate_ids={repaired_diag.get('cross_candidate_ids')}"
+                            f" duplicate_ids={repaired_diag.get('duplicate_ids')}"
+                        )
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "Analyst evidence citation repair remained outside the Python-owned catalog",
+                            invalid=[str(repaired_diag.get("field") or "evidence_refs")],
+                            source="decision_evidence_reference_reject",
+                        )
+                    provider_result = repaired_result
+                    resp = repaired_response
+                    out = repaired_result.parsed
+                    model_name = repaired_model
+                    reasoning = repaired_reasoning
+                    log(
+                        "[evidence_reference_repair]"
+                        f" request_id={request_id}"
+                        " attempt=1 result=valid authoritative=true"
                     )
                 except Exception as mapping_error:
-                    if str(mapping_error).startswith("model_confidence_band_invalid:"):
+                    mapping_error_text = str(mapping_error)
+                    if mapping_error_text.startswith(
+                        "model_candidate_index_mapping_invalid:"
+                    ) and not request_deadline.expired():
+                        expected_indexes = [
+                            int(candidate.get("candidate_index", position))
+                            for position, candidate in enumerate(candidates)
+                        ]
+                        repair_prompt = (
+                            system_msg
+                            + "\n\nCANDIDATE COHORT CORRECTION PASS. Your previous complete "
+                            "response was rejected before trading authority because its "
+                            "candidate_assessments did not match the frozen provider cohort. "
+                            "Return the entire response again, not a patch. Return exactly one "
+                            "assessment for each of these candidate_index values and no others: "
+                            f"{expected_indexes}. candidate_assessments must contain exactly "
+                            f"{len(expected_indexes)} rows. selected_candidate_index must be one "
+                            "of those exact values. Do not assess or mention any deferred candidate. "
+                            f"The detected failure was: {_ascii_compact(mapping_error_text)}"
+                        )
+                        log(
+                            "[candidate_mapping_repair]"
+                            f" request_id={request_id}"
+                            " attempt=1 provider_same=true authoritative_previous=false"
+                            f" expected_indexes={expected_indexes}"
+                        )
+                        try:
+                            repaired_result = provider.generate_structured(
+                                role="analyst",
+                                system_prompt=repair_prompt,
+                                evidence=model_payload,
+                                response_schema=ModelAIGateOutput,
+                                request_metadata={
+                                    "request_id": request_id,
+                                    "request_identity_hash": request_identity_hash,
+                                    "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+                                    "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+                                    "symbol": symbol,
+                                    "image_parts": snapshot_parts,
+                                    "snapshot_status": snapshot_status,
+                                    "service_tier": service_tier if provider.provider_mode == PROVIDER_MODE_REMOTE else "auto",
+                                    "timeout_sec": _provider_role_timeout_sec(
+                                        provider,
+                                        "analyst",
+                                        _provider_request_metadata(payload, provider)["timeout_sec"],
+                                    ),
+                                    "workload_mode": _payload_workload_mode(payload),
+                                    "non_trading_shadow": bool(non_authoritative_shadow),
+                                    "deadline": request_deadline,
+                                    "max_output_tokens": analyst_output_token_budget(
+                                        len(candidates), AI_CONFIG.max_output_tokens
+                                    ),
+                                },
+                            )
+                            if request_deadline.expired():
+                                return _degraded_non_trading_decision(
+                                    payload,
+                                    "candidate mapping repair arrived after the absolute request deadline",
+                                    invalid=["provider_deadline_exceeded"],
+                                    source="provider_deadline_exceeded",
+                                )
+                            repaired_response = repaired_result.raw_response
+                            repaired_model = repaired_result.actual_model
+                            repaired_reasoning = (
+                                _reasoning_config_for_model(repaired_model)
+                                if repaired_result.provider_mode == PROVIDER_MODE_REMOTE
+                                else None
+                            )
+                            log_ai_usage(
+                                source="ai_gate",
+                                operation="trade_gate.provider_neutral_analyst_candidate_mapping_repair",
+                                model=repaired_model,
+                                response=repaired_response,
+                                request_id=request_id,
+                                reasoning_effort=repaired_reasoning.get("effort", "") if repaired_reasoning else "",
+                                max_output_tokens=budget,
+                                provider_mode=repaired_result.provider_mode,
+                                provider_id=repaired_result.provider_id,
+                                endpoint_class=repaired_result.endpoint_class,
+                                model_fingerprint=repaired_result.model_fingerprint,
+                                tokens_per_second=repaired_result.tokens_per_second,
+                                estimated_context_tokens=repaired_result.estimated_context_tokens,
+                                service_tier=service_tier,
+                                extra={
+                                    "symbol": symbol,
+                                    "service_tier": service_tier,
+                                    "semantic_repair": "candidate_mapping",
+                                },
+                            )
+                            _write_ai_cost_report(
+                                payload,
+                                request_id=request_id,
+                                decision_source="ai_provider_candidate_mapping_repair",
+                                model=repaired_model,
+                                reasoning_effort=repaired_reasoning.get("effort", "") if repaired_reasoning else "",
+                                service_tier=service_tier,
+                                prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
+                                cache_status="provider_semantic_repair",
+                                batch_used=False,
+                                flex_used=flex_used,
+                                response=repaired_response,
+                                openai_called=repaired_result.provider_mode == PROVIDER_MODE_REMOTE,
+                                skip_reason="",
+                            )
+                            frozen_request.assert_unchanged(
+                                payload,
+                                stage="after_candidate_mapping_repair",
+                                provider_call_attempted=True,
+                                http_request_sent=True,
+                            )
+                            repaired_model_output = repaired_result.parsed.model_dump()
+                            raw_envelope, mapping_diagnostics = (
+                                _bind_python_owned_analyst_envelope(
+                                    model_output=repaired_model_output,
+                                    candidates=candidates,
+                                    enriched_candidates=enriched_candidates,
+                                    request_id=request_id,
+                                    request_identity_hash=request_identity_hash,
+                                    ordered_candidate_identities=ordered_candidate_identities,
+                                    provider_result=repaired_result,
+                                    evidence_catalog=evidence_catalog,
+                                    request_is_buy=(
+                                        bool(payload.get("is_buy"))
+                                        if "is_buy" in payload
+                                        else None
+                                    ),
+                                )
+                            )
+                            provider_result = repaired_result
+                            resp = repaired_response
+                            out = repaired_result.parsed
+                            model_name = repaired_model
+                            reasoning = repaired_reasoning
+                            log(
+                                "[candidate_mapping_repair]"
+                                f" request_id={request_id}"
+                                " attempt=1 result=valid authoritative=true"
+                                f" normalized_indexes={mapping_diagnostics.get('expected_order', [])}"
+                            )
+                        except Exception as repaired_mapping_error:
+                            log(
+                                "[candidate_mapping_repair]"
+                                f" request_id={request_id}"
+                                " attempt=1 result=failed"
+                                f" error={_ascii_compact(str(repaired_mapping_error))}"
+                            )
+                            return _degraded_non_trading_decision(
+                                payload,
+                                "provider candidate mapping repair did not match the frozen cohort",
+                                invalid=[str(repaired_mapping_error)],
+                                source="structured_response_invalid",
+                            )
+                    elif mapping_error_text.startswith("model_confidence_band_invalid:"):
                         log(
                             "[raw_model_schema_validation] valid=false"
                             f" request_id={request_id}"
                             f" request_identity_hash={request_identity_hash[:16]}"
                             " invalid_fields=confidence_band"
-                            f" detail={_ascii_compact(str(mapping_error))}"
+                            f" detail={_ascii_compact(mapping_error_text)}"
                         )
                         return _degraded_non_trading_decision(
                             payload,
@@ -3132,19 +4099,20 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             invalid=["confidence_band"],
                             source="structured_response_invalid",
                         )
-                    log(
-                        "[identity_validation] valid=false"
-                        f" request_id={request_id}"
-                        f" request_identity_hash={request_identity_hash[:16]}"
-                        " reason=model_candidate_mapping_invalid"
-                        f" error={_ascii_compact(str(mapping_error))}"
-                    )
-                    return _degraded_non_trading_decision(
-                        payload,
-                        "provider analytical response could not be bound to frozen candidates",
-                        invalid=[str(mapping_error)],
-                        source="structured_response_invalid",
-                    )
+                    else:
+                        log(
+                            "[identity_validation] valid=false"
+                            f" request_id={request_id}"
+                            f" request_identity_hash={request_identity_hash[:16]}"
+                            " reason=model_candidate_mapping_invalid"
+                            f" error={_ascii_compact(mapping_error_text)}"
+                        )
+                        return _degraded_non_trading_decision(
+                            payload,
+                            "provider analytical response could not be bound to frozen candidates",
+                            invalid=[mapping_error_text],
+                            source="structured_response_invalid",
+                        )
                 identity_echo = validate_request_identity_echo(
                     raw_envelope,
                     {
@@ -3433,6 +4401,8 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 decision = Decision(
                     allow=allow,
                     raw_allow=bool(selected["raw_allow"]),
+                    model_raw_allow=bool(selected["raw_allow"]),
+                    python_final_allow=allow,
                     score=float(selected["llm_quality_score"]),
                     chosen_index=selected_index,
                     confidence=float(selected["llm_self_reported_confidence"]),
@@ -3537,14 +4507,40 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     evidence_catalog=evidence_catalog,
                     request_metadata={
                         **_provider_request_metadata(payload, provider, deadline=request_deadline),
+                        "critic_timeout_sec": _provider_role_timeout_sec(
+                            provider,
+                            "critic",
+                            _provider_request_metadata(payload, provider)["timeout_sec"],
+                        ),
+                        "adjudicator_timeout_sec": _provider_role_timeout_sec(
+                            provider,
+                            "adjudicator",
+                            _provider_request_metadata(payload, provider)["timeout_sec"],
+                        ),
                         "request_id": request_id,
                         "symbol": symbol,
                         "non_trading_shadow": bool(
                             non_authoritative_shadow
                             or _as_dict(payload.get("shadow_repeat")).get("trading_authority") is False
                         ),
+                        # Adjudicator-only cost control. The critic can never be
+                        # skipped: both `_mql_tester_cache_skip_reason` and
+                        # AIGateBridge.mqh:1626 require a non-empty
+                        # critic_response_fingerprint on every response, while
+                        # the adjudicator fingerprint is optional on both sides.
+                        "adjudication_skip_enable": bool(AI_CONFIG.panel_shortcircuit_enable),
+                        "adjudication_skip_floor": (
+                            _runtime_threshold_float(payload, "ai_min_final_expectancy_score", 6.80)
+                            - float(AI_CONFIG.panel_shortcircuit_margin)
+                        ),
+                        "analyst_expectancy_score": float(decision.final_trade_expectancy_score),
+                        "analyst_can_approve": bool(
+                            decision.allow or decision.python_final_allow or decision.raw_allow
+                        ),
+                        "live_workload": bool(_is_live_payload(payload)),
                     },
                     near_deterministic_boundary=False,
+                    event_logger=log,
                 )
                 frozen_request.assert_unchanged(
                     payload,
@@ -3560,14 +4556,23 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 )
                 decision.final_resolver_reason = consensus.reason
                 decision.role_latencies = dict(decision.role_latencies or {})
-                decision.role_latencies["critic"] = consensus.critic_result.latency_sec
+                if consensus.critic_result is not None:
+                    decision.role_latencies["critic"] = consensus.critic_result.latency_sec
                 if consensus.adjudicator_result is not None:
                     decision.role_latencies["adjudicator"] = consensus.adjudicator_result.latency_sec
                 decision.provider_retry_counts = dict(decision.provider_retry_counts or {})
                 decision.provider_retry_counts.update(
                     {
-                        "critic_transport": consensus.critic_result.transport_retry_count,
-                        "critic_schema": consensus.critic_result.schema_retry_count,
+                        "critic_transport": (
+                            consensus.critic_result.transport_retry_count
+                            if consensus.critic_result is not None
+                            else 0
+                        ),
+                        "critic_schema": (
+                            consensus.critic_result.schema_retry_count
+                            if consensus.critic_result is not None
+                            else 0
+                        ),
                         "adjudicator_transport": (
                             consensus.adjudicator_result.transport_retry_count
                             if consensus.adjudicator_result is not None
@@ -3581,12 +4586,13 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     }
                 )
                 decision.provider_usage = dict(decision.provider_usage or {})
-                decision.provider_usage["critic"] = {
-                    "prompt_tokens": consensus.critic_result.prompt_tokens,
-                    "completion_tokens": consensus.critic_result.completion_tokens,
-                    "total_tokens": consensus.critic_result.total_tokens,
-                    "tokens_per_second": consensus.critic_result.tokens_per_second,
-                }
+                if consensus.critic_result is not None:
+                    decision.provider_usage["critic"] = {
+                        "prompt_tokens": consensus.critic_result.prompt_tokens,
+                        "completion_tokens": consensus.critic_result.completion_tokens,
+                        "total_tokens": consensus.critic_result.total_tokens,
+                        "tokens_per_second": consensus.critic_result.tokens_per_second,
+                    }
                 if consensus.adjudicator_result is not None:
                     decision.provider_usage["adjudicator"] = {
                         "prompt_tokens": consensus.adjudicator_result.prompt_tokens,
@@ -3622,10 +4628,21 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         model_fingerprint=role_result.model_fingerprint,
                         tokens_per_second=role_result.tokens_per_second,
                         estimated_context_tokens=role_result.estimated_context_tokens,
-                        extra={"symbol": symbol, "role": role_name},
+                        # The critic and adjudicator ride the same service tier
+                        # as the analyst -- one ``_effective_service_tier`` call
+                        # governs the whole panel.  Omitting it here billed two
+                        # of every three calls at standard rates on a flex run.
+                        service_tier=service_tier,
+                        extra={
+                            "symbol": symbol,
+                            "role": role_name,
+                            "service_tier": service_tier,
+                            "flex_used": flex_used,
+                        },
                     )
                 unsupported = set(decision.unsupported_generation_parameters or [])
-                unsupported.update(consensus.critic_result.unsupported_generation_parameters)
+                if consensus.critic_result is not None:
+                    unsupported.update(consensus.critic_result.unsupported_generation_parameters)
                 if consensus.adjudicator_result is not None:
                     unsupported.update(consensus.adjudicator_result.unsupported_generation_parameters)
                 decision.unsupported_generation_parameters = sorted(unsupported)
@@ -3704,9 +4721,22 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     f" error={type(e).__name__}:{e}"
                 )
                 errors.append(msg)
-                log(f"[ai_gate] selected_provider_call_failed {msg} cross_provider_fallback=false")
+                # Only a real transport/HTTP/provider fault may be reported as a
+                # provider failure.  Deterministic validation of the model's own
+                # output (contract violations, evidence references, RR recomputation)
+                # fails *locally* -- labelling it as a provider call failure sends
+                # every downstream reader, dashboard and incident triage to the wrong
+                # subsystem.  Keep the real category.
                 if isinstance(e, ProviderCallError):
+                    log(
+                        f"[ai_gate] selected_provider_call_failed {msg}"
+                        " failure_domain=provider cross_provider_fallback=false"
+                    )
                     raise
+                log(
+                    f"[ai_gate] selected_local_validation_failed {msg}"
+                    " failure_domain=local_validation cross_provider_fallback=false"
+                )
 
     raise RuntimeError("selected_ai_provider_failed_closed: " + " | ".join(errors))
 
@@ -3979,6 +5009,9 @@ def _compact_target_candidates(candidates: Dict[str, Any]) -> Dict[str, Any]:
         "capped_before_obstacle",
         "synthetic_rr_fallback",
         "synthetic_rr_capped_to_max_distance",
+        # The incumbent deterministic target.  This is a whitelist, so a route
+        # missing from it is silently dropped before the model ever sees it.
+        "keep_current_target",
     ):
         option = candidates.get(key)
         if isinstance(option, dict):
@@ -3989,6 +5022,12 @@ def _compact_target_candidates(candidates: Dict[str, Any]) -> Dict[str, Any]:
                 "tp1": option.get("tp1"),
                 "rr": option.get("rr"),
                 "rr1": option.get("rr1"),
+                # The first leg's own economics.  Without these the model could see
+                # that a partial-before-obstacle route was infeasible but not why,
+                # and the numbers are what distinguish "obstacle too close to bank a
+                # leg" from "runner RR too low".
+                "tp1_reward_price": option.get("tp1_reward_price"),
+                "tp1_min_required_reward": option.get("tp1_min_required_reward"),
                 "tp2": option.get("tp2"),
                 "rr2": option.get("rr2"),
                 "configured_rr": option.get("configured_rr"),
@@ -4095,13 +5134,30 @@ def _reject_no_feasible_target(decision: Decision) -> Decision:
 
 def _validate_ai_target_choice_against_feasibility(payload: Dict[str, Any], decision: Decision, chosen_index: int) -> Decision:
     candidates_list = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
-    item = candidates_list[chosen_index] if 0 <= chosen_index < len(candidates_list) and isinstance(candidates_list[chosen_index], dict) else _as_dict(payload.get("plan"))
+    item = _candidate_with_index(candidates_list, chosen_index) or _as_dict(payload.get("plan"))
     tc = _target_candidates(payload, item)
     if not tc:
         return decision
     chosen = _norm_text(decision.chosen_target_model)
-    if not chosen or chosen in {"current", "current_plan", "keep_current"}:
+    if not chosen:
         return decision
+    if chosen in {"current", "current_plan", "keep_current"}:
+        # Keeping the incumbent is now an advertised arbitration route, so it is
+        # validated like every other choice instead of being waved through.  A
+        # payload built before the route existed carries no keep_current_target
+        # entry; those keep the original unconditional skip so replayed and
+        # cached cohorts behave exactly as they did.
+        incumbent = _target_candidate_option(tc, "keep_current_target")
+        if not incumbent:
+            return decision
+        if _target_option_feasible(incumbent):
+            log("[ai_target_choice_validation] chosen=keep_current feasible=true")
+            return decision
+        log(
+            "[ai_target_choice_validation] chosen=keep_current feasible=false"
+            f" infeasible_reason={str(incumbent.get('infeasible_reason') or '') or 'unspecified'}"
+        )
+        return _reject_no_feasible_target(decision)
     feasible_by_key: Dict[str, Dict[str, Any]] = {}
     for key, option in tc.items():
         if isinstance(option, dict) and _target_option_feasible(option):
@@ -4166,11 +5222,95 @@ def _synchronize_selected_assessment_contract(payload: Dict[str, Any], decision:
         decision.llm_quality_reject_reason = "ai_quality_schema_incomplete"
         return decision
 
+    arbitration = decision.target_arbitration if isinstance(decision.target_arbitration, dict) else {}
+    arbitration_tp1 = _floatish(arbitration.get("chosen_tp1"), 0.0)
+    arbitration_tp2 = _floatish(arbitration.get("chosen_tp2"), 0.0)
+    arbitration_rr1 = _floatish(arbitration.get("chosen_rr1"), 0.0)
+    arbitration_rr2 = _floatish(arbitration.get("chosen_rr2"), 0.0)
+    arbitration_model = str(arbitration.get("chosen_target_model") or "")
+    if decision.chosen_tp1 <= 0.0 and arbitration_tp1 > 0.0:
+        decision.chosen_tp1 = arbitration_tp1
+    if decision.chosen_tp2 <= 0.0 and arbitration_tp2 > 0.0:
+        decision.chosen_tp2 = arbitration_tp2
+    if decision.chosen_rr1 <= 0.0 and arbitration_rr1 > 0.0:
+        decision.chosen_rr1 = arbitration_rr1
+    if decision.chosen_rr2 <= 0.0 and arbitration_rr2 > 0.0:
+        decision.chosen_rr2 = arbitration_rr2
+    if not decision.chosen_target_model and arbitration_model:
+        decision.chosen_target_model = arbitration_model
+
+    # candidate_assessments carries the evidence-backed per-candidate verdict
+    # that MQL validates. A later resolver may still keep Python final authority
+    # false, but it must not relabel an ABSTAIN as REJECT without also supplying
+    # the assessment-level veto required by the shared schema.
+    # ``Decision.allow`` is computed from the analyst schema, risk multiplier,
+    # veto, and qualitative consensus.  Older construction paths left the
+    # explicit Python-stage alias as None until final serialization.  Reading
+    # that None as False here silently demoted a valid APPROVE/PASS result to
+    # ABSTAIN.  Materialize the alias before it participates in state logic;
+    # an explicit downstream False still remains authoritative.
+    if decision.python_final_allow is None:
+        decision.python_final_allow = bool(decision.allow)
+    selected_state = str(selected.get("decision_state") or selected.get("verdict") or "").upper()
+    selected_veto = selected.get("veto") if isinstance(selected.get("veto"), dict) else {}
+    selected_has_reject_veto = selected_state == DECISION_REJECT and bool(selected_veto.get("enabled"))
+    if selected_state in {DECISION_APPROVE, DECISION_REJECT, DECISION_ABSTAIN}:
+        if selected_state == DECISION_APPROVE and bool(decision.python_final_allow):
+            canonical_state = DECISION_APPROVE
+        elif selected_has_reject_veto:
+            canonical_state = DECISION_REJECT
+        else:
+            # A policy-blocked APPROVE or an evidence-incomplete ABSTAIN remains
+            # fail-closed without inventing an assessment-level rejection veto.
+            canonical_state = DECISION_ABSTAIN
+        decision.decision_state = canonical_state
+        decision.raw_allow = canonical_state == DECISION_APPROVE and bool(selected.get("raw_allow"))
+        decision.model_raw_allow = canonical_state == DECISION_APPROVE and bool(
+            selected.get("model_raw_allow", decision.raw_allow)
+        )
+        if canonical_state == DECISION_ABSTAIN:
+            decision.allow = False
+            decision.raw_allow = False
+            decision.model_raw_allow = False
+            decision.python_final_allow = False
+            decision.suggested_risk_multiplier = 0.0
+            if decision.decision_source in {"ai_rejected", "ai_approved"}:
+                decision.decision_source = "ai_abstained"
+        elif canonical_state == DECISION_REJECT:
+            # REJECT, like ABSTAIN, has no position-size authority.  Keep the
+            # top-level decision and the selected assessment on the same
+            # zero-risk contract even when the qualitative resolver changed
+            # the analyst's original verdict.
+            decision.allow = False
+            decision.raw_allow = False
+            decision.model_raw_allow = False
+            decision.python_final_allow = False
+            decision.suggested_risk_multiplier = 0.0
+
     entry = float(candidate.get("entry_est") or 0.0)
     sl = float(candidate.get("sl") or 0.0)
     tp1 = float(decision.chosen_tp1 if decision.chosen_tp1 > 0.0 else candidate.get("tp1") or 0.0)
     tp2 = float(decision.chosen_tp2 if decision.chosen_tp2 > 0.0 else candidate.get("tp2") or 0.0)
     target_identity = str(decision.chosen_target_model or selected.get("selected_target_identity") or "")
+    # The MQL validator compares the top-level target fields, the top-level
+    # arbitration object, and the selected assessment byte-for-byte.  When the
+    # model legitimately chooses ``current_plan`` its arbitration prices may be
+    # zero and Python falls back to the immutable candidate plan.  Promote that
+    # resolved plan to every authoritative representation before serialization.
+    decision.chosen_target_model = target_identity
+    decision.chosen_tp1 = tp1
+    decision.chosen_tp2 = tp2
+    if isinstance(decision.target_arbitration, dict):
+        decision.target_arbitration.update(
+            {
+                "chosen_target_model": target_identity,
+                "chosen_tp1": tp1,
+                "chosen_tp2": tp2,
+                "chosen_rr1": float(decision.chosen_rr1),
+                "chosen_rr2": float(decision.chosen_rr2),
+                "target_decision_reason": str(decision.target_decision_reason or ""),
+            }
+        )
     request_fingerprint = str(candidate.get("request_execution_fingerprint") or "")
     selected.update(
         {
@@ -4178,6 +5318,20 @@ def _synchronize_selected_assessment_contract(payload: Dict[str, Any], decision:
             "candidate_id": decision.selected_candidate_id,
             "candidate_hash": decision.selected_candidate_hash,
             "request_execution_fingerprint": request_fingerprint,
+            "verdict": decision.decision_state,
+            "decision_state": decision.decision_state,
+            "raw_allow": decision.raw_allow,
+            "model_raw_allow": bool(decision.model_raw_allow),
+            "python_final_allow": bool(decision.python_final_allow),
+            # A later critic/adjudicator can demote an analyst APPROVE to
+            # ABSTAIN/REJECT.  Do not leave the analyst's positive size hint
+            # behind: the shared Python/MQL validator correctly treats that as
+            # a contradictory candidate assessment.
+            "suggested_risk_multiplier": (
+                float(decision.suggested_risk_multiplier or 0.0)
+                if decision.decision_state == DECISION_APPROVE
+                else 0.0
+            ),
             "selected_target_identity": target_identity,
             "selected_target_price": tp2,
             "entry": entry,
@@ -4309,6 +5463,8 @@ def _synchronize_candidate_authority_fields(decision: Decision) -> Decision:
 def _runtime_threshold_float(payload: Dict[str, Any], key: str, default: float) -> float:
     runtime_inputs = _runtime_inputs(payload)
     return _floatish(runtime_inputs.get(key), default)
+
+
 
 def _apply_ai_veto_gate(payload: Dict[str, Any], decision: Decision) -> Decision:
     runtime_inputs = _runtime_inputs(payload)
@@ -4551,6 +5707,20 @@ def _write_ai_cost_report(
         if input_tokens is None and output_tokens is None and response is not None:
             input_tokens, output_tokens = _response_usage_tokens(response)
         provider_identity = _provider().identity("analyst")
+        # ``estimated_cost`` was hardcoded to None, so the report named after
+        # cost never carried one.  It is priced through the usage logger rather
+        # than re-derived here: two independent rate tables would drift, and a
+        # drifting cost report is worse than an empty one.  ``None`` is kept for
+        # the genuinely unpriceable cases so "free" and "unknown" stay distinct.
+        cost_usd, cost_pricing_status = price_call(
+            model=str(model or ""),
+            provider_mode=str(provider_identity.get("provider_mode") or ""),
+            input_tokens=as_token_count(input_tokens),
+            cached_input_tokens=response_cached_input_tokens(response),
+            output_tokens=as_token_count(output_tokens),
+            routed_endpoint=response_routed_endpoint(response),
+            service_tier=str(service_tier or ""),
+        )
         row = {
             "timestamp": int(time.time()),
             "request_id": str(request_id or payload.get("id") or ""),
@@ -4572,7 +5742,8 @@ def _write_ai_cost_report(
             "flex_used": bool(flex_used),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "estimated_cost": None,
+            "estimated_cost": cost_usd,
+            "cost_pricing_status": cost_pricing_status,
             "openai_called": bool(openai_called),
             "provider_called": bool(response is not None or openai_called),
             "remote_cost_applicable": bool(
@@ -4745,7 +5916,7 @@ def _cache_payload_parts(payload: Dict[str, Any], best_index: int) -> tuple[Dict
     po3 = _as_dict(payload.get("po3"))
     fvg = _as_dict(payload.get("fvg"))
     cands = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
-    cand = cands[best_index] if 0 <= best_index < len(cands) and isinstance(cands[best_index], dict) else {}
+    cand = _candidate_with_index(cands, best_index)
     merged = {**plan, **fvg, **cand}
     return merged, po3
 
@@ -5173,7 +6344,7 @@ class AIDecisionCache:
         self.ttl_sec = ttl_sec
         self._lock = Lock()
 
-    def _acquire_write_lock(self, timeout_sec: float = 3.0) -> Path:
+    def _acquire_write_lock(self, timeout_sec: float = 15.0) -> Path:
         lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         deadline = time.monotonic() + max(0.1, timeout_sec)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6058,6 +7229,19 @@ def _best_candidate(cands: Any) -> Tuple[Dict[str, Any], int, float]:
     return best_candidate, best_index, best_score
 
 
+def _candidate_with_index(candidates: Any, candidate_index: int) -> Dict[str, Any]:
+    """Resolve an immutable MQL candidate index without using it as a list offset."""
+
+    if not isinstance(candidates, list):
+        return {}
+    for position, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            continue
+        if int(candidate.get("candidate_index", position)) == int(candidate_index):
+            return candidate
+    return {}
+
+
 def _setup_family_from_payload(payload: Dict[str, Any], plan: Dict[str, Any] | None = None, cands: Any = None) -> str:
     plan = plan if isinstance(plan, dict) else _as_dict(payload.get("plan"))
     if cands is None:
@@ -6646,8 +7830,8 @@ def _threshold_identity(payload: Dict[str, Any], chosen_index: int | None = None
     plan = _as_dict(payload.get("plan"))
     cand: Dict[str, Any] = {}
     cands = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
-    if chosen_index is not None and 0 <= chosen_index < len(cands) and isinstance(cands[chosen_index], dict):
-        cand = cands[chosen_index]
+    if chosen_index is not None:
+        cand = _candidate_with_index(cands, chosen_index)
     merged = {**plan, **cand}
     family = _norm_text(_get_any(merged, ["setup_family"], payload.get("setup_family")))
     setup_class = _norm_text(_get_any(merged, ["setup_class"], payload.get("setup_class")))
@@ -7355,11 +8539,20 @@ def _score_setup_impl(
             if provider_failure
             else local_failure.stage
         )
+        # A ProviderCallError is not proof that a call was made: the breaker and
+        # the configuration circuit both refuse before the transport is touched.
+        # Hardcoding True logged "http_request_sent=true http_status=0" for a
+        # request that never left the process. The error now carries the truth
+        # and defaults to True, so genuine call failures report as before.
         provider_call_attempted = (
-            True if provider_failure else local_failure.provider_call_attempted
+            bool(getattr(e, "provider_call_attempted", True))
+            if provider_failure
+            else local_failure.provider_call_attempted
         )
         http_request_sent = (
-            True if provider_failure else local_failure.http_request_sent
+            bool(getattr(e, "http_request_sent", True))
+            if provider_failure
+            else local_failure.http_request_sent
         )
         source = category.lower()
         rejection_code = {
@@ -8157,6 +9350,12 @@ def _write_error_response(
     write_debug_json(resp_dir.parent / "response_debug" / f"{req_id}.json", debug_obj)
 
 def _tester_workflow_source(payload: Dict[str, Any]) -> str:
+    # Tester mode inputs are serialized in live requests as part of the shared
+    # runtime contract, but they have no authority outside Strategy Tester.
+    # Classify the workload first so a live demo/real request is never labelled
+    # (or audited) as record-only merely because the dormant tester enum is 0.
+    if canonical_workload_mode(payload) == LIVE_FORWARD:
+        return "live_forward"
     runtime_inputs = _runtime_inputs(payload)
     raw_mode = _get_any(runtime_inputs, ["tester_ai_mode", "inp_tester_ai_mode"], payload.get("tester_ai_mode"))
     mode_name = _norm_text(_get_any(runtime_inputs, ["tester_ai_mode_name", "tester_mode_name"], payload.get("tester_ai_mode_name")))
@@ -8296,7 +9495,7 @@ def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
         return "legacy_role_contract"
     if str(resp.get("consensus_resolver_version") or "") != CONSENSUS_RESOLVER_VERSION:
         return "legacy_consensus_resolver"
-    if str(resp.get("provider_mode") or "") not in {PROVIDER_MODE_REMOTE, PROVIDER_MODE_LOCAL}:
+    if str(resp.get("provider_mode") or "") not in set(PROVIDER_MODES_TRADING):
         return "invalid_provider_mode"
     for field_name in (
         "provider_id",
@@ -8357,8 +9556,76 @@ def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
         if not assessment_hash or assessment_hash in seen_hashes:
             return "duplicate_candidate_assessment"
         seen_hashes.add(assessment_hash)
-    if str(resp.get("selected_candidate_hash") or "") not in seen_hashes:
+    selected_hash = str(resp.get("selected_candidate_hash") or "")
+    if selected_hash not in seen_hashes:
         return "selected_candidate_not_assessed"
+    selected = next(
+        (
+            item
+            for item in assessments
+            if isinstance(item, dict) and str(item.get("candidate_hash") or "") == selected_hash
+        ),
+        None,
+    )
+    if selected is None:
+        return "selected_candidate_not_assessed"
+    if str(selected.get("decision_state") or "").upper() != str(resp.get("decision_state") or "").upper():
+        return "decision_state_assessment_mismatch"
+    if bool(selected.get("raw_allow")) != bool(resp.get("raw_allow")):
+        return "raw_allow_assessment_mismatch"
+    if str(resp.get("decision_state") or "").upper() == DECISION_APPROVE:
+        try:
+            risk_multiplier = float(resp.get("suggested_risk_multiplier"))
+            entry = float(selected.get("entry"))
+            sl = float(selected.get("sl"))
+            tp1 = float(selected.get("tp1") or 0.0)
+            tp2 = float(selected.get("tp2"))
+            chosen_rr1 = float(resp.get("chosen_rr1"))
+            chosen_rr2 = float(resp.get("chosen_rr2"))
+        except (TypeError, ValueError, OverflowError):
+            return "approval_state_inconsistent"
+        if not (
+            bool(resp.get("allow"))
+            and bool(resp.get("raw_allow"))
+            and bool(resp.get("model_raw_allow"))
+            and bool(resp.get("python_final_allow"))
+            and math.isfinite(risk_multiplier)
+            and risk_multiplier > 0.0
+        ):
+            return "approval_state_inconsistent"
+        if not all(
+            math.isfinite(value)
+            for value in (entry, sl, tp1, tp2, chosen_rr1, chosen_rr2)
+        ):
+            return "approval_rr_non_finite"
+        risk_distance = abs(entry - sl)
+        if entry <= 0.0 or sl <= 0.0 or tp2 <= 0.0 or risk_distance <= 0.0:
+            return "approval_rr_plan_invalid"
+        is_buy = sl < entry
+        reward2 = (tp2 - entry) if is_buy else (entry - tp2)
+        expected_rr2 = reward2 / risk_distance
+        if (
+            expected_rr2 <= 0.0
+            or chosen_rr2 <= 0.0
+            or abs(expected_rr2 - chosen_rr2) > 1.0e-5
+        ):
+            return "approval_rr2_mismatch"
+        if tp1 > 0.0:
+            reward1 = (tp1 - entry) if is_buy else (entry - tp1)
+            expected_rr1 = reward1 / risk_distance
+            if (
+                expected_rr1 <= 0.0
+                or chosen_rr1 <= 0.0
+                or abs(expected_rr1 - chosen_rr1) > 1.0e-5
+            ):
+                return "approval_rr1_mismatch"
+    selected_arbitration = selected.get("target_arbitration")
+    if isinstance(selected_arbitration, dict):
+        if str(selected_arbitration.get("chosen_target_model") or "") != str(resp.get("chosen_target_model") or ""):
+            return "chosen_target_model_assessment_mismatch"
+        for field_name in ("chosen_tp1", "chosen_tp2", "chosen_rr1", "chosen_rr2"):
+            if abs(_floatish(selected_arbitration.get(field_name), 0.0) - _floatish(resp.get(field_name), 0.0)) > 1.0e-8:
+                return f"{field_name}_assessment_mismatch"
     source = str(resp.get("decision_source") or "").lower()
     codes = {str(code).lower() for code in resp.get("rejection_codes") or []}
     if source == "bridge_error" or "bridge_error" in codes:
@@ -8380,6 +9647,56 @@ def _mql_tester_cache_skip_reason(resp: Dict[str, Any]) -> str:
     if "invalid_ai_target_arbitration_response" in codes:
         return "invalid_schema_decision"
     return ""
+
+
+def _fail_closed_invalid_final_response(
+    resp: Dict[str, Any],
+    validation_reason: str,
+) -> Dict[str, Any]:
+    """Demote an internally inconsistent final response before bus writing.
+
+    The analyst envelope is validated before qualitative consensus, but the
+    critic/adjudicator can change the selected decision afterwards.  The final
+    transport object therefore needs the shared Python/MQL validation once
+    more.  Demotion preserves diagnostics while ensuring an inconsistent
+    object can never advertise FULL_STRUCTURED trade authority.
+    """
+
+    reason = str(validation_reason or "invalid_final_response_contract")
+    invalid_fields = [
+        str(item)
+        for item in (resp.get("invalid_mandatory_fields") or [])
+        if str(item).strip()
+    ]
+    marker = f"final_response_contract:{reason}"
+    if marker not in invalid_fields:
+        invalid_fields.append(marker)
+    rejection_codes = [
+        str(item)
+        for item in (resp.get("rejection_codes") or [])
+        if str(item).strip()
+    ]
+    if "final_response_contract_invalid" not in rejection_codes:
+        rejection_codes.append("final_response_contract_invalid")
+    resp.update(
+        {
+            "decision_quality_tier": DECISION_QUALITY_DEGRADED_NON_TRADING,
+            "response_quality": DECISION_QUALITY_DEGRADED_NON_TRADING,
+            "mandatory_fields_complete": False,
+            "invalid_mandatory_fields": invalid_fields,
+            "decision_state": DECISION_REJECT,
+            "allow": False,
+            "raw_allow": False,
+            "model_raw_allow": False,
+            "python_final_allow": False,
+            "mql_final_allow": None,
+            "suggested_risk_multiplier": 0.0,
+            "decision_source": "final_response_contract_invalid",
+            "rejection_codes": rejection_codes,
+            "narrative_state": "final_contract_invalid",
+        }
+    )
+    return resp
 
 def _mql_tester_cache_contract_current(resp: Dict[str, Any]) -> bool:
     return (
@@ -8411,6 +9728,20 @@ def _export_mql_tester_replay_cache(payload: Dict[str, Any], resp: Dict[str, Any
     # This is the MQL Strategy Tester replay cache. It is intentionally separate
     # from Python's AI_DECISION_CACHE_FILE signature cache; MQL provides the key.
     workflow_source = _tester_workflow_source(payload)
+    if workflow_source == "live_forward" and not _boolish(
+        _get_any(
+            _runtime_inputs(payload),
+            ["tester_ai_cache", "inp_tester_ai_cache"],
+            False,
+        ),
+        False,
+    ):
+        log(
+            "[tester_cache_export] skipped"
+            " reason=live_forward_tester_cache_disabled"
+            f" request_id={str(payload.get('id') or '')}"
+        )
+        return "skipped:live_forward_tester_cache_disabled"
     if workflow_source == "live_wait_debug":
         log(
             "[tester_cache_export] skipped"
@@ -8433,6 +9764,12 @@ def _export_mql_tester_replay_cache(payload: Dict[str, Any], resp: Dict[str, Any
     cache_obj["cache_signature"] = signature
     cache_obj["decision_quality_tier"] = DECISION_QUALITY_CACHE_FULL_STRUCTURED
     cache_obj["response_quality"] = DECISION_QUALITY_CACHE_FULL_STRUCTURED
+    try:
+        cache_obj["replay_provenance"] = build_replay_provenance(payload, resp)
+    except (KeyError, TypeError, ValueError) as exc:
+        # Older request schemas may lack the cost vector. Exact-fingerprint
+        # replay remains valid; semantic cost rebinding requires full provenance.
+        log(f"[tester_cache_provenance] available=false reason={exc} key={key}")
     # The quality tier is part of both bindings. Recompute after promotion to a
     # replay-cache record; retaining the live-response hashes would make the
     # cache internally inconsistent and MQL must reject it.
@@ -8585,6 +9922,8 @@ def process_one(
                 for item in taxonomy_failures
             )
         )
+
+    payload = _apply_live_candidate_budget(payload)
 
     prior_artifact = _load_live_bucket_priors()
     selected_provider = _provider()
@@ -9108,6 +10447,28 @@ def process_one(
         "target_comparison": _json_object_from_text(dec.target_comparison_json),
     }
 
+    if str(resp.get("decision_quality_tier") or "") in {
+        DECISION_QUALITY_FULL_STRUCTURED,
+        DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+    }:
+        final_validation_reason = _mql_tester_cache_skip_reason(resp)
+        if final_validation_reason:
+            log(
+                "[final_response_validation]"
+                f" valid=false request_id={req_id}"
+                f" reason={final_validation_reason}"
+                " action=degraded_non_trading"
+            )
+            resp = _fail_closed_invalid_final_response(
+                resp,
+                final_validation_reason,
+            )
+        else:
+            log(
+                "[final_response_validation]"
+                f" valid=true request_id={req_id}"
+            )
+
     resp["response_binding_hash"] = response_binding_hash(resp)
 
     response_contract = response_fingerprint(resp)
@@ -9290,7 +10651,14 @@ def _process_claimed_request(
     stale_dir: Path,
     lock_path: Path,
 ) -> None:
-    req_id = req_path.stem
+    # Processing artifacts are prefixed with the Python lifecycle session.  The
+    # terminal registry and the idempotency ledger are keyed by the original
+    # MQL request ID, never by that storage-only prefix.
+    req_id = (
+        req_path.stem.split("__", 1)[1]
+        if "__" in req_path.stem
+        else req_path.stem
+    )
     try:
         process_one(
             req_path,
@@ -9371,15 +10739,167 @@ def _process_claimed_request(
         if not moved and move_reason not in {"missing", "permission_denied"}:
             log(f"[ai_gate] request cleanup deferred {req_path.name}: {move_reason}")
     finally:
+        # A worker can return after Ctrl+C has terminalized its request.  Keep
+        # the immutable request for offline diagnosis, but move it out of the
+        # active processing queue immediately.  Leaving it there allowed a
+        # later startup recovery to re-submit a live request whose MT5 waiter no
+        # longer existed, spending another provider call for an unusable reply.
+        interrupted_outcome = REQUEST_TERMINAL_REGISTRY.terminal_outcome(
+            str(req_id)
+        )
+        if (
+            interrupted_outcome is not None
+            and interrupted_outcome.state == TERMINAL_TEST_END_INTERRUPTED
+            and req_path.exists()
+        ):
+            moved, move_reason = _archive_request_terminal(
+                req_path,
+                "shutdown",
+                interrupted_outcome.reason or "ai_gate_shutdown_with_pending_requests",
+            )
+            if moved and REQUEST_IDEMPOTENCY_LEDGER is not None:
+                try:
+                    REQUEST_IDEMPOTENCY_LEDGER.transition(
+                        str(req_id),
+                        "ARCHIVED",
+                        extra={
+                            "archive_state": "shutdown",
+                            "terminal_state": TERMINAL_TEST_END_INTERRUPTED,
+                            "terminal_reason": interrupted_outcome.reason,
+                        },
+                    )
+                except Exception as archive_exc:
+                    log(
+                        "[test_end_interrupted] ledger_archive_failed"
+                        f" request_id={req_id} error={archive_exc}"
+                    )
+            log(
+                "[test_end_interrupted] request_archived"
+                f" request_id={req_id} archive_state=shutdown"
+                f" moved={str(moved).lower()} reason={move_reason}"
+            )
         REQUEST_TERMINAL_REGISTRY.release(str(req_id))
         _release_request_claim(lock_path)
 
-def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
+def _tester_request_primary_family(payload: Mapping[str, Any]) -> str:
+    """Return the family of the highest-ranked candidate in a tester request."""
+    candidates = payload.get("candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            family = str(candidate.get("setup_family") or "").strip().lower()
+            if family:
+                return family
+    candidate = payload.get("candidate")
+    if isinstance(candidate, Mapping):
+        family = str(candidate.get("setup_family") or "").strip().lower()
+        if family:
+            return family
+    family = str(payload.get("setup_family") or "").strip().lower()
+    return family or "unknown"
+
+
+def _select_tester_cache_requests(
+    request_paths: Sequence[Path],
+    *,
+    max_requests: int = 0,
+    max_per_family: int = 0,
+) -> tuple[list[Path], Dict[str, Any]]:
+    """Select a deterministic, family-balanced subset for expensive AI review.
+
+    The stable SHA-256 ordering spreads the selection across the recorded run
+    instead of taking only its first days.  Round-robin family selection keeps a
+    high-volume family from consuming the whole bounded review budget.  A zero
+    limit preserves the historical unbounded behavior.
+    """
+    paths = sorted(Path(path) for path in request_paths)
+    total_limit = max(0, int(max_requests or 0))
+    family_limit = max(0, int(max_per_family or 0))
+    if total_limit == 0 and family_limit == 0:
+        return paths, {
+            "selection_policy": "unbounded_sorted_v1",
+            "requests_available": len(paths),
+            "requests_selected": len(paths),
+            "requests_deferred": 0,
+            "selected_primary_families": {},
+        }
+
+    buckets: Dict[str, list[tuple[str, Path]]] = {}
+    unreadable = 0
+    for req_path in paths:
+        try:
+            payload = _normalize_request_payload(read_json_any_encoding(req_path))
+            family = _tester_request_primary_family(payload)
+            identity = str(
+                payload.get("tester_cache_signature")
+                or payload.get("tester_cache_key")
+                or req_path.stem
+            )
+        except Exception:
+            family = "unknown"
+            identity = req_path.stem
+            unreadable += 1
+        stable_order = sha256(f"{family}|{identity}|{req_path.name}".encode("utf-8")).hexdigest()
+        buckets.setdefault(family, []).append((stable_order, req_path))
+
+    for rows in buckets.values():
+        rows.sort(key=lambda row: (row[0], row[1].name))
+
+    selected: list[Path] = []
+    selected_counts: Dict[str, int] = {family: 0 for family in buckets}
+    offsets: Dict[str, int] = {family: 0 for family in buckets}
+    families = sorted(buckets)
+    while True:
+        progressed = False
+        for family in families:
+            if total_limit > 0 and len(selected) >= total_limit:
+                break
+            if family_limit > 0 and selected_counts[family] >= family_limit:
+                continue
+            offset = offsets[family]
+            rows = buckets[family]
+            if offset >= len(rows):
+                continue
+            selected.append(rows[offset][1])
+            offsets[family] = offset + 1
+            selected_counts[family] += 1
+            progressed = True
+        if total_limit > 0 and len(selected) >= total_limit:
+            break
+        if not progressed:
+            break
+
+    nonzero_counts = {family: count for family, count in selected_counts.items() if count > 0}
+    return selected, {
+        "selection_policy": "deterministic_primary_family_round_robin_sha256_v1",
+        "requests_available": len(paths),
+        "requests_selected": len(selected),
+        "requests_deferred": max(0, len(paths) - len(selected)),
+        "max_requests": total_limit,
+        "max_per_family": family_limit,
+        "selected_primary_families": nonzero_counts,
+        "unreadable_request_metadata": unreadable,
+    }
+
+
+def fill_tester_cache_once(
+    bus: Path,
+    *,
+    max_requests: int = 0,
+    max_per_family: int = 0,
+    selection_only: bool = False,
+) -> Dict[str, Any]:
     req_dir = bus / "requests"
     resp_dir = bus / "responses"
     stale_dir = bus / "stale"
     lock_dir = bus / "locks"
-    summary = {
+    request_paths, selection = _select_tester_cache_requests(
+        sorted(req_dir.glob("*.json")),
+        max_requests=max_requests,
+        max_per_family=max_per_family,
+    )
+    summary: Dict[str, Any] = {
         "requests_seen": 0,
         "processed_new": 0,
         "repaired_existing_response": 0,
@@ -9388,9 +10908,15 @@ def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
         "skipped": 0,
         "errors": 0,
         "moved_to_stale": 0,
+        **selection,
     }
 
-    for req_path in sorted(req_dir.glob("*.json")):
+    log("[tester_cache_selection] " + json.dumps(selection, sort_keys=True, separators=(",", ":")))
+    if selection_only:
+        log("[tester_cache_export_summary] mode=selection_only " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
+        return summary
+
+    for req_path in request_paths:
         stable, stability_reason = _stable_input_status(req_path)
         if not stable:
             _quarantine_unstable_input_if_terminal(req_path, stability_reason)
@@ -9440,10 +10966,7 @@ def fill_tester_cache_once(bus: Path) -> Dict[str, int]:
             summary["errors"] += 1
             log(f"[tester_cache_export] fill_once_error request={req_path.name} error={exc}")
 
-    log(
-        "[tester_cache_export_summary] mode=fill_once "
-        + " ".join(f"{key}={value}" for key, value in summary.items())
-    )
+    log("[tester_cache_export_summary] mode=fill_once " + json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return summary
 
 
@@ -9537,6 +11060,13 @@ def _deployment_manifest_state(bus: Path) -> Dict[str, Any]:
     """
 
     manifest_path = bus / "config" / "deployment_manifest.json"
+    existing_manifest: Dict[str, Any] = {}
+    try:
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict) and loaded.get("schema_version") == DEPLOYMENT_MANIFEST_SCHEMA_VERSION:
+            existing_manifest = loaded
+    except (OSError, ValueError, TypeError):
+        existing_manifest = {}
     mql_include = MQL_DEPLOYED_INCLUDE_DIR
     components: list[Dict[str, Any]] = []
     for name in ("Config.mqh", "AIGateBridge.mqh", "TradeEngine.mqh", "Types.mqh", "StateStore.mqh"):
@@ -9573,6 +11103,21 @@ def _deployment_manifest_state(bus: Path) -> Dict[str, Any]:
         "mql_deployment_complete": deployed,
         "status": "generated" if deployed else "incomplete_mql_deployment",
     }
+    # The explicit generator binds the deployed code to the exact Git tree and
+    # .set file.  Preserve those authoritative facts when the Python bridge adds
+    # its component/contract inventory at startup; otherwise startup used to
+    # erase the cohort identity that the EA requires for learning eligibility.
+    for key in (
+        "git_commit",
+        "dirty_tree_status",
+        "set_file_hash",
+        "set_file_path",
+        "source_root",
+        "identity_source",
+    ):
+        value = existing_manifest.get(key)
+        if value not in (None, ""):
+            manifest[key] = value
     try:
         governance_atomic_write_json(manifest_path, manifest)
         manifest["path"] = str(manifest_path)
@@ -9936,6 +11481,90 @@ def _validate_runtime_authority(bus: Path) -> tuple[bool, Dict[str, Any]]:
 
 # ---------- Main loop ----------
 
+_GATE_INSTANCE_LEASE: Dict[str, Any] | None = None
+
+
+def _release_gate_single_instance() -> None:
+    """Release the process-wide daemon lease (mainly useful for tests)."""
+
+    global _GATE_INSTANCE_LEASE
+    lease = _GATE_INSTANCE_LEASE
+    _GATE_INSTANCE_LEASE = None
+    if not lease:
+        return
+    if lease.get("backend") == "windows_named_mutex":
+        try:
+            lease["kernel32"].CloseHandle(lease["handle"])
+        except Exception:
+            pass
+    elif lease.get("backend") == "posix_flock":
+        try:
+            import fcntl
+
+            fcntl.flock(lease["file"].fileno(), fcntl.LOCK_UN)
+            lease["file"].close()
+        except Exception:
+            pass
+
+
+def _acquire_gate_single_instance(bus: Path) -> tuple[bool, str]:
+    """Acquire one daemon lease per canonical MT5 bus.
+
+    File moves make individual requests exactly-once, but two daemon processes
+    still split one MQL run across different Python run manifests and multiply
+    the intended worker budget.  An OS-owned lease is released automatically
+    on crashes, so it blocks duplicates without creating stale PID files.
+    """
+
+    global _GATE_INSTANCE_LEASE
+    if _GATE_INSTANCE_LEASE is not None:
+        return False, "lease_already_held_by_this_process"
+    identity = sha256(str(bus.resolve()).lower().encode("utf-8")).hexdigest()[:32]
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_mutex = kernel32.CreateMutexW
+        create_mutex.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+        create_mutex.restype = wintypes.HANDLE
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        mutex_name = f"Local\\PO3_AI_GATE_{identity}"
+        ctypes.set_last_error(0)
+        handle = create_mutex(None, False, mutex_name)
+        error_code = ctypes.get_last_error()
+        if not handle:
+            return False, f"windows_mutex_create_failed:{error_code}"
+        if error_code == 183:  # ERROR_ALREADY_EXISTS
+            close_handle(handle)
+            return False, f"existing_gate_for_bus:{identity}"
+        _GATE_INSTANCE_LEASE = {
+            "backend": "windows_named_mutex",
+            "handle": handle,
+            "kernel32": kernel32,
+            "identity": identity,
+        }
+    else:
+        import fcntl
+
+        lock_path = bus / "locks" / "ai_gate.instance.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = lock_path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            lock_file.close()
+            return False, f"existing_gate_for_bus:{identity}"
+        _GATE_INSTANCE_LEASE = {
+            "backend": "posix_flock",
+            "file": lock_file,
+            "identity": identity,
+        }
+    atexit.register(_release_gate_single_instance)
+    return True, identity
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -9949,6 +11578,8 @@ def main() -> None:
             "archive-incompatible-cohorts",
             "bus-cohort-inventory",
             "bus-cohort-migrate",
+            "requeue-transport-failures-inventory",
+            "requeue-transport-failures",
         ),
         default="run",
         help="Run the bridge or execute one maintenance command.",
@@ -9968,6 +11599,32 @@ def main() -> None:
         "--fill-tester-cache-once",
         action="store_true",
         help="Process current RECORD_ONLY tester requests into the MQL tester replay cache, then exit.",
+    )
+    ap.add_argument(
+        "--tester-cache-max-requests",
+        type=int,
+        default=0,
+        help="Bound cache-fill work to this many requests; 0 keeps the unbounded behavior.",
+    )
+    ap.add_argument(
+        "--tester-cache-max-per-family",
+        type=int,
+        default=0,
+        help="Bound cache-fill work per primary setup family; 0 keeps the family unbounded.",
+    )
+    ap.add_argument(
+        "--plan-tester-cache-selection",
+        action="store_true",
+        help="Print the deterministic family-balanced cache-fill selection without calling AI or moving requests.",
+    )
+    ap.add_argument(
+        "--cohort",
+        type=str,
+        default="",
+        help=(
+            "Restrict a requeue command to one run cohort (field 3 of the "
+            "request id). Empty means every cohort in the bus."
+        ),
     )
     args = ap.parse_args()
 
@@ -10008,6 +11665,22 @@ def main() -> None:
     LOG_FILE = bus / "logs" / "ai_gate.log"
     set_ai_usage_bus(bus)
 
+    if args.command == "run":
+        acquired, lease_detail = _acquire_gate_single_instance(bus)
+        if not acquired:
+            message = (
+                "[single_instance] acquired=false"
+                f" bus={bus} reason={lease_detail}"
+                " action=exit"
+            )
+            log(message)
+            print(message)
+            raise SystemExit(3)
+        log(
+            "[single_instance] acquired=true"
+            f" bus={bus} lease={lease_detail} pid={os.getpid()}"
+        )
+
     # Cohort inventory/migration must run before file-bus recovery. Recovery
     # walks every artifact in the bus, so on a contaminated bus (the incident
     # bus held 50,867 files) the very command intended to diagnose and clean
@@ -10023,6 +11696,49 @@ def main() -> None:
         log("[bus_cohort_migration] " + json.dumps(report, sort_keys=True, separators=(",", ":")))
         governance_atomic_write_json(
             bus / "logs" / f"bus_cohort_{'inventory' if summary.dry_run else 'migration'}.json",
+            report,
+        )
+        print(json.dumps(report, indent=2, sort_keys=True))
+        raise SystemExit(0)
+
+    # Recovery of transport-burned requests reads and rewrites bus artifacts
+    # only. Like the cohort commands it runs before file-bus recovery, so a
+    # cohort that a transport outage half-consumed can be repaired without the
+    # recovery pass first re-archiving what is about to be restored.
+    if args.command in {
+        "requeue-transport-failures-inventory",
+        "requeue-transport-failures",
+    }:
+        dry_run = args.command.endswith("-inventory")
+        requeue_ledger = RequestIdempotencyLedger(
+            bus / "request_ledger",
+            worker_id=f"requeue_{os.getpid()}_{int(time.time())}",
+        )
+        if dry_run:
+            _candidates, summary = plan_transport_failure_requeue(
+                bus,
+                ledger=requeue_ledger,
+                stale_after_sec=REQUEST_LOCK_STALE_SEC,
+                cohort=args.cohort,
+            )
+        else:
+            summary = apply_transport_failure_requeue(
+                bus,
+                ledger=requeue_ledger,
+                stale_after_sec=REQUEST_LOCK_STALE_SEC,
+                cohort=args.cohort,
+                log=log,
+            )
+        report = summary.as_dict()
+        log("[transport_failure_requeue] " + json.dumps(report, sort_keys=True, separators=(",", ":")))
+        governance_atomic_write_json(
+            bus
+            / "logs"
+            / (
+                "transport_failure_requeue_inventory.json"
+                if dry_run
+                else "transport_failure_requeue_result.json"
+            ),
             report,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -10066,6 +11782,15 @@ def main() -> None:
     if args.command == "validate-runtime":
         valid, _ = _validate_runtime_authority(bus)
         raise SystemExit(0 if valid else 2)
+    if args.plan_tester_cache_selection:
+        summary = fill_tester_cache_once(
+            bus,
+            max_requests=args.tester_cache_max_requests,
+            max_per_family=args.tester_cache_max_per_family,
+            selection_only=True,
+        )
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return
     selected_provider = _provider()
     if set_expectancy_ai_provider is not None:
         set_expectancy_ai_provider(selected_provider)
@@ -10073,7 +11798,11 @@ def main() -> None:
     AI_CONFIG_WORKERS = max(1, min(16, args.workers))
     worker_count = AI_CONFIG_WORKERS
     if selected_provider.provider_mode == PROVIDER_MODE_LOCAL:
-        worker_count = 1
+        worker_count = min(worker_count, AI_CONFIG.local_parallelism)
+    elif selected_provider.provider_mode == PROVIDER_MODE_OPENROUTER:
+        # Routed endpoints publish a per-key concurrency ceiling; exceeding it
+        # turns into upstream 429s that spend the request deadline on retries.
+        worker_count = min(worker_count, AI_CONFIG.openrouter_parallelism)
     request_pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ai-gate")
 
     log(f"[ai_gate] Bus root: {bus}")
@@ -10136,7 +11865,11 @@ def main() -> None:
     _log_repeatability_state(repeatability_artifact, selected_provider)
     if args.fill_tester_cache_once:
         try:
-            fill_tester_cache_once(bus)
+            fill_tester_cache_once(
+                bus,
+                max_requests=args.tester_cache_max_requests,
+                max_per_family=args.tester_cache_max_per_family,
+            )
         finally:
             request_pool.shutdown(wait=True)
             _log_file_bus_summary()

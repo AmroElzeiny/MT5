@@ -314,6 +314,27 @@ class CapturedRequestFixtureTests(unittest.TestCase):
                 compact["evidence_catalog"]["catalog_hash"], catalog.catalog_hash
             )
 
+    def test_compaction_places_exact_allowed_ids_on_each_candidate(self) -> None:
+        for payload in self.payloads:
+            envelope = build_decision_evidence_envelope(payload).envelope
+            catalog = build_evidence_catalog(envelope)
+            compact = ai_gate._compact_model_evidence_payload(envelope, catalog)
+            rows = compact["entry_and_invalidation"]["candidates"]
+            for position, row in enumerate(rows):
+                candidate_index = int(row.get("candidate_index", position))
+                expected = [
+                    item.evidence_id
+                    for item in catalog.items
+                    if item.candidate_index in (None, candidate_index)
+                ]
+                self.assertEqual(row["allowed_evidence_ref_ids"], expected)
+                self.assertTrue(
+                    catalog.resolve(
+                        row["allowed_evidence_ref_ids"],
+                        candidate_index=candidate_index,
+                    ).valid
+                )
+
 
 class LatencyBudgetTests(unittest.TestCase):
     def test_observed_six_candidate_latency_exceeded_the_safe_margin(self) -> None:

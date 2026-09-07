@@ -540,6 +540,12 @@ A trade must not be forced. A genuine AI or execution rejection is acceptable. A
 
 ## Required Final Report
 
+**Language: the entire report must be written in pure Egyptian Arabic (العامية المصرية),
+with no English words and no Latin letters at all, unless the user explicitly asks
+otherwise. Technical names are transliterated into Arabic script or described in Arabic;
+digits and punctuation are allowed. See section 0 of [../CLAUDE.md](../CLAUDE.md) — that
+rule is authoritative and governs every reply, not only this report.**
+
 Every implementation response must include:
 
 1. Confirmed root causes.

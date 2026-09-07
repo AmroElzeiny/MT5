@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ai_provider import AIProvider, ProviderResult
 from evidence_catalog import EvidenceCatalog, resolve_legacy_references
@@ -38,6 +38,36 @@ class ConsensusResult:
     adjudicator: dict[str, Any]
     critic_result: ProviderResult
     adjudicator_result: ProviderResult | None
+    adjudication_skipped: bool = False
+
+
+def _adjudication_is_pointless(request_metadata: Mapping[str, Any]) -> bool:
+    """True when adjudicating a hopeless abstain could only cost money.
+
+    The critic is deliberately NOT skippable. Both
+    ``ai_gate._mql_tester_cache_skip_reason`` and ``AIGateBridge.mqh:1626``
+    require a non-empty ``critic_response_fingerprint`` on every response, so a
+    response without a critic is rejected as an invalid contract on both sides.
+    The adjudicator fingerprint is optional on both sides, which is exactly why
+    the adjudicator is the only role this may drop.
+
+    The saving is safe because the caller's resolver only ever demotes: there is
+    no branch that turns a non-approving analyst verdict into an approval. When
+    the analyst cannot approve and its own expectancy sits a full margin under
+    the gate, the adjudicator can change the cost of the decision but not the
+    decision.
+    """
+    if not bool(request_metadata.get("adjudication_skip_enable")):
+        return False
+    if not bool(request_metadata.get("live_workload")):
+        return False
+    if bool(request_metadata.get("analyst_can_approve")):
+        return False
+    floor = request_metadata.get("adjudication_skip_floor")
+    expectancy = request_metadata.get("analyst_expectancy_score")
+    if floor is None or expectancy is None:
+        return False
+    return float(expectancy) <= float(floor)
 
 
 def _dump(value: Any) -> dict[str, Any]:
@@ -203,6 +233,7 @@ def run_qualitative_consensus(
     request_metadata: Mapping[str, Any],
     evidence_catalog: "EvidenceCatalog",
     near_deterministic_boundary: bool = False,
+    event_logger: Callable[[str], None] | None = None,
 ) -> ConsensusResult:
     candidate_id = str(analyst_assessment.get("candidate_id") or "")
     candidate_hash = str(analyst_assessment.get("candidate_hash") or "")
@@ -235,28 +266,110 @@ def run_qualitative_consensus(
             ],
         },
     }
+    critic_allowed_ids = [
+        int(row["id"])
+        for row in critic_evidence["evidence_catalog"]["items"]
+    ]
+    critic_evidence["allowed_evidence_ref_ids"] = critic_allowed_ids
     critic_prompt = (
         "You are the independent Critic. You have not received the Analyst verdict. "
         "Audit only the supplied canonical evidence. Do not calculate prices, risk, probability, expectancy, SL, TP, or size. "
         f"Use {', '.join(CRITIC_VERDICTS)}. BLOCK requires at least one blocking objection whose code is one of: "
         f"{objection_code_vocabulary_prompt()}. PASS requires an empty blocking_objections list. "
-        "Every objection needs evidence_ref_ids. "
-        "Cite evidence only by integer id from evidence_catalog.items; never return a path string and never invent an id. "
+        "The top-level evidence_ref_ids list is mandatory, and every objection needs evidence_ref_ids. "
+        "Every such list must contain distinct integers copied only from allowed_evidence_ref_ids; "
+        "never return a path string, duplicate an id, or invent an id. "
+        f"For this candidate the complete allowed id set is: {critic_allowed_ids}. "
         "Use ABSTAIN for uncertainty or insufficient evidence. Return strict JSON only and do not expose hidden reasoning. "
         "Reference only the supplied candidate_index; Python owns all request, "
         "candidate, provider, model, and schema identity."
     )
+    critic_metadata = dict(request_metadata)
+    if request_metadata.get("critic_timeout_sec") is not None:
+        critic_metadata["timeout_sec"] = float(request_metadata["critic_timeout_sec"])
     critic_result = provider.generate_structured(
         role="critic",
         system_prompt=critic_prompt,
         evidence=critic_evidence,
         response_schema=ModelCriticDecision,
-        request_metadata=request_metadata,
+        request_metadata=critic_metadata,
     )
     model_critic = _dump(critic_result.parsed)
     if int(model_critic.get("candidate_index", -1)) != candidate_index:
         raise ValueError("critic_candidate_index_mismatch")
-    _resolve_critic_evidence(model_critic, evidence_catalog, candidate_index=candidate_index)
+    try:
+        _resolve_critic_evidence(
+            model_critic,
+            evidence_catalog,
+            candidate_index=candidate_index,
+        )
+    except ValueError as critic_evidence_error:
+        error_text = str(critic_evidence_error)
+        if not error_text.startswith("critic_") or not error_text.endswith(
+            "_evidence_ref_invalid"
+        ):
+            raise
+        # Structured output constrains the ID type but cannot enforce the
+        # candidate-specific subset.  Give the same provider one bounded
+        # correction pass.  The invalid first answer never reaches consensus
+        # and Python still resolves every returned ID against the frozen
+        # catalog before it can carry authority.
+        repair_prompt = (
+            critic_prompt
+            + "\n\nCRITIC EVIDENCE CITATION CORRECTION PASS. Your previous "
+            "complete Critic response was rejected before consensus because an "
+            "evidence_ref_ids list was outside the allowed set. Return the entire "
+            "Critic response again, not a patch. Every top-level and objection "
+            "evidence_ref_ids list must contain distinct integers copied only "
+            f"from this exact allowed set: {critic_allowed_ids}. The detected "
+            f"failure was {error_text}."
+        )
+        if event_logger is not None:
+            event_logger(
+                "[critic_evidence_reference_repair]"
+                f" request_id={request_metadata.get('request_id') or ''}"
+                " attempt=1 provider_same=true authoritative_previous=false"
+                f" reason={error_text}"
+            )
+        repaired_critic_result = provider.generate_structured(
+            role="critic",
+            system_prompt=repair_prompt,
+            evidence=critic_evidence,
+            response_schema=ModelCriticDecision,
+            request_metadata=critic_metadata,
+        )
+        repaired_model_critic = _dump(repaired_critic_result.parsed)
+        if int(repaired_model_critic.get("candidate_index", -1)) != candidate_index:
+            if event_logger is not None:
+                event_logger(
+                    "[critic_evidence_reference_repair]"
+                    f" request_id={request_metadata.get('request_id') or ''}"
+                    " attempt=1 result=failed reason=critic_candidate_index_mismatch"
+                )
+            raise ValueError("critic_candidate_index_mismatch")
+        try:
+            _resolve_critic_evidence(
+                repaired_model_critic,
+                evidence_catalog,
+                candidate_index=candidate_index,
+            )
+        except ValueError as repaired_evidence_error:
+            if event_logger is not None:
+                event_logger(
+                    "[critic_evidence_reference_repair]"
+                    f" request_id={request_metadata.get('request_id') or ''}"
+                    " attempt=1 result=failed"
+                    f" reason={str(repaired_evidence_error)}"
+                )
+            raise
+        critic_result = repaired_critic_result
+        model_critic = repaired_model_critic
+        if event_logger is not None:
+            event_logger(
+                "[critic_evidence_reference_repair]"
+                f" request_id={request_metadata.get('request_id') or ''}"
+                " attempt=1 result=valid authoritative=true"
+            )
     critic = CriticDecision.model_validate(
         {
             **model_critic,
@@ -293,11 +406,37 @@ def run_qualitative_consensus(
         or analyst_missing
         or near_deterministic_boundary
     )
-    if not requires_adjudication:
+    skip_adjudication = requires_adjudication and _adjudication_is_pointless(request_metadata)
+    if skip_adjudication and event_logger is not None:
+        event_logger(
+            "[adjudication_skipped]"
+            f" request_id={request_metadata.get('request_id') or ''}"
+            f" symbol={request_metadata.get('symbol') or ''}"
+            f" analyst_state={analyst_state}"
+            f" critic_verdict={critic_verdict}"
+            f" expectancy={float(request_metadata.get('analyst_expectancy_score') or 0.0):.4f}"
+            f" floor={float(request_metadata.get('adjudication_skip_floor') or 0.0):.4f}"
+            " role_skipped=adjudicator critic_ran=true outcome_changed=false"
+        )
+
+    if not requires_adjudication or skip_adjudication:
         if analyst_state == DECISION_APPROVE and critic_verdict == "PASS":
             return ConsensusResult(DECISION_APPROVE, True, "analyst_approve_critic_pass", critic, {}, critic_result, None)
         if analyst_state == DECISION_REJECT:
             return ConsensusResult(DECISION_REJECT, False, "analyst_reject", critic, {}, critic_result, None)
+        if skip_adjudication:
+            # Named for what actually happened, so a skipped adjudication is
+            # never read back as an unresolved one.
+            return ConsensusResult(
+                DECISION_ABSTAIN,
+                False,
+                "analyst_abstain_below_adjudication_floor",
+                critic,
+                {},
+                critic_result,
+                None,
+                adjudication_skipped=True,
+            )
         return ConsensusResult(DECISION_ABSTAIN, False, "unresolved_analyst_state", critic, {}, critic_result, None)
 
     adjudicator_evidence = {
@@ -318,21 +457,34 @@ def run_qualitative_consensus(
             ],
         },
     }
+    adjudicator_allowed_ids = [
+        int(row["id"])
+        for row in adjudicator_evidence["evidence_catalog"]["items"]
+    ]
     adjudicator_prompt = (
         "You are the conditional Adjudicator. Resolve only qualitative disputes using evidence_catalog ids. "
         "You cannot override hard blockers, missing required fields, invalid taxonomy, data-lineage failure, risk limits, "
         "broker constraints, target infeasibility, or repeatability authority. You cannot invent numerical probability, expectancy, "
         "prices, SL, TP, or size. Use UPHOLD_APPROVE only when every Critic blocking objection is explicitly resolved; otherwise "
         "use UPHOLD_BLOCK or ABSTAIN. Return strict JSON only and no hidden reasoning. "
+        "evidence_ref_ids is mandatory and must contain between 1 and 16 distinct integers. "
+        "Use only ids visibly supplied in evidence_catalog.items, never duplicate an id, never invent an id, "
+        "and never cite evidence belonging to another candidate. "
+        f"For this candidate the complete allowed id set is: {adjudicator_allowed_ids}. "
         "Reference only the supplied candidate_index; Python owns all request, "
         "candidate, provider, model, and schema identity."
     )
+    adjudicator_metadata = dict(request_metadata)
+    if request_metadata.get("adjudicator_timeout_sec") is not None:
+        adjudicator_metadata["timeout_sec"] = float(
+            request_metadata["adjudicator_timeout_sec"]
+        )
     adjudicator_result = provider.generate_structured(
         role="adjudicator",
         system_prompt=adjudicator_prompt,
         evidence=adjudicator_evidence,
         response_schema=ModelAdjudicatorDecision,
-        request_metadata=request_metadata,
+        request_metadata=adjudicator_metadata,
     )
     model_adjudicator = _dump(adjudicator_result.parsed)
     if int(model_adjudicator.get("candidate_index", -1)) != candidate_index:

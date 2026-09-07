@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -18,15 +19,24 @@ if str(ROOT) not in sys.path:
 from runtime_governance import (  # noqa: E402
     HIERARCHICAL_PRIOR_SCHEMA_VERSION,
     build_hierarchical_prior_artifact,
+    canonical_hash,
     resolve_project_path,
 )
+from compatibility_manifest import compatibility_manifest_hash  # noqa: E402
+from decision_integrity import AI_DECISION_SCHEMA_VERSION  # noqa: E402
+from governance_contracts import SETUP_TAXONOMY_VERSION  # noqa: E402
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not path.exists():
         return rows
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    payload = path.read_bytes()
+    if payload.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = payload.decode("utf-16", errors="strict")
+    else:
+        text = payload.decode("utf-8-sig", errors="strict")
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -37,6 +47,90 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             rows.append(item)
     return rows
+
+
+def _read_completed_memory(path: Path) -> list[dict[str, Any]]:
+    """Read authoritative completed trades from the live memory database.
+
+    Completed memory stores the lifecycle envelope in ``payload_json`` and the
+    actual analytics record under ``completed_trade``.  The old analyzer read a
+    JSONL export that is not produced by the current bridge, which made startup
+    governance report no completed history even while the database was full.
+    """
+
+    if not path.is_file():
+        return []
+    connection = sqlite3.connect(str(path))
+    try:
+        records = connection.execute(
+            """
+            SELECT trade_key, candidate_hash, setup_taxonomy, setup_family,
+                   entry_branch, direction, asset_class, session_code,
+                   killzone_code, data_quality_status, resolved_at,
+                   schema_version, payload_json
+            FROM completed_memory
+            ORDER BY resolved_at, memory_id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        try:
+            payload = json.loads(record[12])
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        completed = payload.get("completed_trade")
+        row = dict(completed) if isinstance(completed, dict) else {}
+        row.setdefault("trade_key", record[0])
+        row.setdefault("candidate_hash", record[1])
+        row.setdefault("setup_taxonomy_enum", record[2])
+        row.setdefault("setup_family", record[3])
+        row.setdefault("entry_branch", record[4])
+        row.setdefault("direction", record[5])
+        row.setdefault("asset_class", record[6])
+        row.setdefault("session", record[7])
+        row.setdefault("killzone", record[8])
+        row["data_quality_status"] = str(record[9] or "")
+        row.setdefault("resolved_at", record[10])
+        row.setdefault("memory_schema_version", record[11])
+        rows.append(row)
+    return rows
+
+
+def _ledger_report(rows: list[dict[str, Any]], *, source: Path) -> dict[str, Any]:
+    clean_states = {"clean", "verified_clean", "reconciled_clean"}
+    clean = [
+        row
+        for row in rows
+        if str(row.get("data_quality_status") or "").strip().lower() in clean_states
+        and str(row.get("ledger_integrity_status") or "").strip().lower()
+        in clean_states
+        and bool(row.get("learning_eligible"))
+    ]
+    material = [
+        {
+            "trade_key": str(row.get("trade_key") or ""),
+            "candidate_hash": str(row.get("candidate_hash") or ""),
+            "closed_at": int(row.get("closed_at") or 0),
+            "ledger_integrity_status": str(row.get("ledger_integrity_status") or ""),
+            "data_quality_status": str(row.get("data_quality_status") or ""),
+        }
+        for row in rows
+    ]
+    ledger_hash = canonical_hash(material)
+    return {
+        "schema_version": "20260812_completed_memory_ledger_audit_v1",
+        "source": str(source.resolve()),
+        "global_status": "CLEAN" if rows and len(clean) == len(rows) else "QUARANTINED",
+        "clean_count": len(clean),
+        "completed_count": len(rows),
+        "rejected_count": len(rows) - len(clean),
+        "ledger_hash": ledger_hash,
+    }
 
 
 def _merge_counterfactual_updates(
@@ -230,6 +324,7 @@ def build_priors(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", default="logs/completed_ai_trades.jsonl")
+    ap.add_argument("--memory-db", default="data/ai_trade_memory.sqlite3")
     ap.add_argument("--threshold-pct", type=float, default=0.1)
     ap.add_argument("--priors-out", default="data/live_bucket_priors.json")
     ap.add_argument(
@@ -238,8 +333,14 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    jsonl_rows = _read_jsonl(resolve_project_path(args.file))
+    memory_path = resolve_project_path(args.memory_db)
+    memory_rows = _read_completed_memory(memory_path)
+    # The SQLite lifecycle store is authoritative for the current bridge.  Keep
+    # JSONL as a compatibility fallback for archived installations only.
+    source_rows = memory_rows if memory_rows else jsonl_rows
     rows = _merge_counterfactual_updates(
-        _read_jsonl(resolve_project_path(args.file)),
+        source_rows,
         _read_jsonl(resolve_project_path(args.counterfactual_updates)),
     )
     winners = [r for r in rows if _num(r, "full_close_pct") > args.threshold_pct]
@@ -300,13 +401,30 @@ def main() -> int:
             rows, lambda r: str(r.get("management_transition_reason") or "none")
         ),
     }
+    ledger_report = _ledger_report(rows, source=memory_path)
     priors = build_priors(rows)
+    priors.update(
+        {
+            "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+            "taxonomy_version": SETUP_TAXONOMY_VERSION,
+            "contract_manifest_hash": compatibility_manifest_hash(),
+            "ledger_hash": ledger_report["ledger_hash"],
+            "completed_trade_count": ledger_report["completed_count"],
+        }
+    )
+    priors.pop("artifact_hash", None)
+    priors["artifact_hash"] = canonical_hash(priors)
     out_path = resolve_project_path(args.priors_out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(priors, indent=2, sort_keys=True), encoding="utf-8")
+    ledger_path = resolve_project_path("data/ledger_integrity_report.json")
+    ledger_path.write_text(
+        json.dumps(ledger_report, indent=2, sort_keys=True), encoding="utf-8"
+    )
     print(json.dumps(report, indent=2, sort_keys=True))
     print(f"live_bucket_priors_written={out_path}")
     print(f"live_bucket_priors_schema={HIERARCHICAL_PRIOR_SCHEMA_VERSION}")
+    print(f"ledger_integrity_report_written={ledger_path}")
     return 0
 
 

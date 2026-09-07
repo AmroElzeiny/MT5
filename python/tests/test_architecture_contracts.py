@@ -87,6 +87,12 @@ def _clean_row(index: int, *, symbol: str, asset_class: str, target: bool) -> di
 
 
 class ArchitectureContractsTests(unittest.TestCase):
+    def test_mql_bus_logs_are_rooted_under_po3_bus(self) -> None:
+        mql_root = Path(__file__).resolve().parents[2] / "MT5_PO3_Codex Include"
+        for name in ("TradeEngine.mqh", "PenaltyWatcher.mqh"):
+            source = (mql_root / name).read_text(encoding="utf-8-sig")
+            self.assertNotIn('m_bus.AppendText("logs\\\\', source)
+
     def test_deployment_manifest_requires_explicit_git_and_set_identity(self) -> None:
         module_path = Path(__file__).resolve().parents[1] / "tools" / "generate_deployment_manifest.py"
         spec = importlib.util.spec_from_file_location("generate_deployment_manifest", module_path)
@@ -300,6 +306,7 @@ class ArchitectureContractsTests(unittest.TestCase):
             "id": "req-1",
             "session_id": "session-1",
             "request_nonce": "nonce-1",
+            "contract_manifest_hash": "manifest-1",
             "workload_mode": LIVE_FORWARD,
             "decision_schema_version": "decision-v1",
             "selected_candidate_hash": "candidate-a",
@@ -320,6 +327,17 @@ class ArchitectureContractsTests(unittest.TestCase):
         self.assertTrue(valid, reasons)
         response["python_final_allow"] = False
         valid, reasons = validate_response_binding(response, request_id="req-1", session_id="session-1", request_nonce="nonce-1")
+        self.assertFalse(valid)
+        self.assertIn("response_hash_mismatch", reasons)
+
+        response["python_final_allow"] = True
+        response["contract_manifest_hash"] = "manifest-2"
+        valid, reasons = validate_response_binding(
+            response,
+            request_id="req-1",
+            session_id="session-1",
+            request_nonce="nonce-1",
+        )
         self.assertFalse(valid)
         self.assertIn("response_hash_mismatch", reasons)
 

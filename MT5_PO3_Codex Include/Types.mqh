@@ -413,6 +413,35 @@ struct PriceLevelCandidate {
    bool   obstacle;
 };
 
+// One evaluated target route considered by the obstacle-aware selector.
+//
+// The selector used to accept the first target that passed its checks, which let
+// a synthetic fallback that crosses a major obstacle win over a clean target that
+// merely sat one notch under the RR floor.  Every route is now scored into this
+// struct first, so crossing a major obstacle is a hard demotion rather than a
+// tie-break, and the whole ranking can be journalled for diagnosis.
+struct TargetRankCandidate {
+   string kind;                 // target model name written to tp_model/target_source
+   double price;                // tp2
+   double partial_tp;           // >0 only for partial-then-liquidity routing (tp1 leg)
+   double rr;                   // reward-to-risk measured to `price`
+   // The first leg has to be scored on its own terms.  Admitting and ranking a
+   // partial-then-liquidity route on the *runner* alone let a 0.0108R partial win
+   // on the strength of a 45.67R leg it was never going to take, and the reject
+   // reason named after the partial leg never measured it.
+   double partial_rr;           // reward-to-risk of `partial_tp` (0 when no partial leg)
+   bool   partial_meets_floor;  // partial leg clears the execution layer's minimum TP1 reward
+   bool   crosses_obstacle;     // reward path passes through an opposing obstacle
+   double obstacle_severity;    // _ObstacleSeverity of the obstacle on the path
+   string obstacle_kind;
+   double obstacle_price;
+   bool   meets_rr_floor;
+   bool   meets_min_distance;
+   bool   truncated_by_obstacle;// price was clamped back to the obstacle
+   int    order;                // insertion order, preserves original priority
+   string reject_reason;        // "" when eligible
+};
+
 struct ActivePolicySnapshot {
    bool     valid;
    string   policy_id;
@@ -480,6 +509,17 @@ struct TradePlan {
    double sl;
    double tp2;
    double tp1;
+   // True when the selected target model owns the first leg (partial-before-obstacle,
+   // an AI-arbitrated tp1, or an approved assessed plan).  _BuildPlanPrices' generic
+   // R-multiple TP1 builder must then leave tp1 alone: its 0.65R floor used to move a
+   // partial that existed to stop *in front of* an obstacle to a price *beyond* it,
+   // so the shipped plan contradicted its own tp_model and its own target_candidates.
+   bool   tp1_from_target_model;
+   // Minimum reward the execution layer will accept for a first leg, published by
+   // _MinTp1Reward so route selection, price building AND the AI target-candidate
+   // payload all judge a partial leg by the same number.  Three independent places
+   // used to decide this; only one of them actually measured the leg.
+   double min_tp1_reward;
 
    // Context
    PO3Context po3;
@@ -594,6 +634,10 @@ struct TradePlan {
    bool   liquidity_target_blocked_by_obstacle;
    double obstacle_distance_r;
    string obstacle_tf;
+   // The numeric severity behind obstacle_strength_features.  Kept as a number so
+   // the execution contract can compare "is the live blocker worse than the one the
+   // AI approved?" without parsing the display string.
+   double obstacle_severity;
    string obstacle_strength_features;
    double fallback_tp;
    double fallback_rr;
@@ -732,6 +776,13 @@ struct TradePlan {
    string assessed_obstacle_kind;
    string assessed_obstacle_tf;
    double assessed_obstacle_price;
+   double assessed_obstacle_severity;
+   //--- What the live landscape scan saw while the plan was locked.  Recorded
+   //--- instead of overwriting the approved obstacle, so the revalidation can
+   //--- compare the two rather than the fingerprint tripping on the label.
+   string live_obstacle_kind;
+   double live_obstacle_price;
+   double live_obstacle_severity;
    string assessed_decision_input_hash;
    string assessed_strategy_schema_version;
    //--- AssessedTradePlan lock -------------------------------------------
@@ -760,6 +811,11 @@ struct TradePlan {
    int    execution_order_construction_attempts;
    int    execution_attempts_suppressed;
    datetime execution_retry_not_before;
+   // The spread measured at the last spread rejection, and how many consecutive
+   // rejections have carried that same value.  A spread is only "transient" while
+   // it is actually moving; retrying an unchanged one reproduces the rejection.
+   double execution_failure_spread;
+   int    execution_spread_unchanged_attempts;
    string ai_decision_id;
    string policy_version;
    string risk_version;

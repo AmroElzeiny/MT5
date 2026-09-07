@@ -1,0 +1,14 @@
+Autonomous Quant R&D Factory validation
+Date: 2026-08-10
+
+- Python compileall: PASS
+- Unit/integration tests: 16/16 PASS
+- Synthetic installed-layout smoke test: PASS
+  - python -m rnd_factory validate-config
+  - python -m rnd_factory init
+  - python -m rnd_factory investigate --last-trades 100 --mode no-ai
+- Full Local AI quick-mode integration with simulated external responder: PASS
+- Remote Responses-style transport against local HTTP test server: PASS
+- Production-file no-write assertion: PASS
+
+No paid API calls were used by the test suite.

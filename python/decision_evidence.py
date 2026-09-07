@@ -4,16 +4,132 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Mapping, Sequence
 
 from family_context import FAMILY_PROFILE_VERSION, family_context_for
-from governance_contracts import SETUP_TAXONOMY_VERSION
+from governance_contracts import SETUP_TAXONOMY_VERSION, SetupTaxonomy
 
 
 EVIDENCE_ENVELOPE_VERSION = "20260718_decision_evidence_v1"
+PROVIDER_DECISION_CONTEXT_VERSION = "20260814_provider_decision_context_v3"
+
+
+_FULL_PO3_TAXONOMIES = {
+    SetupTaxonomy.FULL_PO3_REVERSAL.value,
+    SetupTaxonomy.FULL_PO3_CONTINUATION.value,
+}
+
+
+# Global PO3 sequence flags that a provider can see in `sequence` but that are only
+# *mandatory* when the family names them in required_event_sequence.  Each entry is
+# (contract_name, sequence_field, regex matched against required_event_sequence).
+#
+# Scope is deliberately limited to flags whose mapping is unambiguous.  `BOS` appears
+# only in the two FULL_PO3 sequences, and follow-through appears in none of them, so
+# both map exactly.  `sweep`/`displacement` are intentionally NOT inferred: the wording
+# varies across families ("liquidity sweep" vs "liquidity event") and guessing there
+# would invent or erase a requirement rather than report one.
+_SEQUENCE_FLAG_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("htf_bos", "htf_bos", r"\bbos\b"),
+    ("follow_through", "has_follow_through", r"follow[\s\-]?through"),
+)
+
+_ABSENCE_PRESENT = "NOT_ABSENT_OBSERVED_PRESENT"
+_ABSENCE_MANDATORY = "MANDATORY_MISSING"
+_ABSENCE_OPTIONAL = "OPTIONAL_CONTEXT_ONLY"
+
+
+def _classify_sequence_flag(observed: Any, required: bool) -> tuple[bool, str]:
+    """Classify one global sequence flag.
+
+    Returns (observed_present, absence_classification).  An unknown/None observation is
+    NOT treated as present, so a missing field still fails closed into the required
+    branch rather than silently reading as satisfied.
+    """
+
+    present = bool(observed) if observed is not None else False
+    if present:
+        return present, _ABSENCE_PRESENT
+    return present, (_ABSENCE_MANDATORY if required else _ABSENCE_OPTIONAL)
+
+
+def _sequence_flag_requirements(
+    required_sequence: Sequence[str], observed_flags: Mapping[str, Any]
+) -> dict[str, dict[str, Any]]:
+    haystack = [str(entry or "").strip().lower() for entry in required_sequence]
+    out: dict[str, dict[str, Any]] = {}
+    for name, field, pattern in _SEQUENCE_FLAG_SPECS:
+        matched = next((entry for entry in haystack if re.search(pattern, entry)), None)
+        required = matched is not None
+        observed = observed_flags.get(field)
+        present, classification = _classify_sequence_flag(observed, required)
+        out[name] = {
+            "sequence_field": f"sequence.{field}",
+            "observed": present,
+            "required": required,
+            "required_by": matched,
+            "absence_classification": classification,
+        }
+    return out
+
+
+def _family_requirement_contract(
+    taxonomy: str, profile: Any, observed_flags: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Make the family evidence boundary explicit for every provider.
+
+    The family profile is intentionally descriptive.  Smaller remote models
+    were treating the globally reported HTF BOS field as mandatory for every
+    setup, even when a micro-family profile never required it.  This is a
+    deterministic interpretation of the existing taxonomy, not a new trading
+    rule and not model-generated context.
+
+    An ``*_absence_classification`` classifies an *absence*, so it must read the
+    observed value.  ``htf_bos_absence_classification`` previously derived only
+    from the family, which made it emit ``MANDATORY_MISSING`` for every full-PO3
+    candidate even when ``sequence.htf_bos`` was true.  Providers correctly
+    reported that as ``ai_veto_data_integrity_failure`` /
+    ``ai_veto_sequence_contradiction``: one field said the HTF BOS existed while
+    another said it was mandatorily missing.
+
+    ``sequence_field_requirements`` generalises the same treatment so the next
+    optional global flag does not repeat the defect.  ``follow_through`` was the
+    second instance: it is named in no family's required_event_sequence, yet with
+    no explicit contract entry the model fell back to its own judgement and
+    abstained on its absence -- which ``optional_absence_rule`` forbids.
+    """
+
+    normalized = str(taxonomy or "").strip().upper()
+    full_po3 = normalized in _FULL_PO3_TAXONOMIES
+    required_sequence = list(getattr(profile, "required_event_sequence", ()) or ())
+    flags = _sequence_flag_requirements(required_sequence, observed_flags or {})
+    bos = flags["htf_bos"]
+    follow = flags["follow_through"]
+    return {
+        "context_version": PROVIDER_DECISION_CONTEXT_VERSION,
+        "family_scope": "FULL_PO3" if full_po3 else "MICRO_OR_TIER_B",
+        "full_po3_sequence_required": full_po3,
+        "sequence_field_requirements": flags,
+        "htf_bos_required": bos["required"],
+        "htf_bos_observed": bos["observed"],
+        "htf_bos_absence_classification": bos["absence_classification"],
+        "follow_through_required": follow["required"],
+        "follow_through_observed": follow["observed"],
+        "follow_through_absence_classification": follow["absence_classification"],
+        "required_event_sequence": required_sequence,
+        "mandatory_evidence_rule": (
+            "Only an absent event named by family_profile.required_event_sequence "
+            "may be reported as missing mandatory family evidence."
+        ),
+        "optional_absence_rule": (
+            "Do not reject, abstain, lower a score, or add missing evidence solely "
+            "because an optional global PO3 field is false or absent."
+        ),
+    }
 
 
 def canonical_hash(value: Any) -> str:
@@ -69,7 +185,13 @@ class EvidenceBuildResult:
     hard_blockers: tuple[str, ...]
 
 
-def _candidate_evidence(candidate: Mapping[str, Any], index: int, request_time: int, now: int) -> tuple[dict[str, Any], list[str], list[str]]:
+def _candidate_evidence(
+    candidate: Mapping[str, Any],
+    index: int,
+    request_time: int,
+    now: int,
+    observed_flags: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[str], list[str]]:
     item = dict(candidate)
     missing: list[str] = []
     invalid: list[str] = []
@@ -174,6 +296,42 @@ def _candidate_evidence(candidate: Mapping[str, Any], index: int, request_time: 
             "fvg_touched",
             "fvg_retested",
             "structure_state",
+            "po3_state",
+            "po3_state_id",
+            "po3_state_reason",
+            "po3_scope",
+            "source_context_tier",
+            "structure_type",
+            "final_setup_class",
+            "fvg_execution_class",
+            "fvg_mitigation_state",
+            "fvg_invalidation_reason",
+            "fvg_continuation",
+            "fvg_reversal",
+            "fvg_context_type",
+            "fvg_mid_mitigated",
+            "fvg_fully_filled",
+            "fvg_invalidated",
+            "fvg_entry_invalid",
+            "fvg_structure_invalidated",
+            "fvg_score",
+            "origin_score",
+            "cleanliness_score",
+            "freshness_score",
+            "retest_quality_score",
+            "continuation_score",
+            "reversal_score",
+            "displacement_candle_score",
+            "opposing_obstruction_score",
+            "stop_model",
+            "configured_stop_model",
+            "stop_quality_score",
+            "target_arbitration_required",
+            "liquidity_target_valid_structurally",
+            "liquidity_target_blocked_by_obstacle",
+            "historical_evidence_state",
+            "retrieved_analogue_ids",
+            "rule_score",
             "target_candidates",
             "bucket_prior",
         )
@@ -182,6 +340,21 @@ def _candidate_evidence(candidate: Mapping[str, Any], index: int, request_time: 
     compact["candidate_index"] = int(item.get("candidate_index", index))
     compact["authoritative_numbers"] = authoritative_numbers
     compact["family_profile"] = profile.as_payload() if profile is not None else {}
+    compact["family_requirement_contract"] = _family_requirement_contract(
+        taxonomy, profile, observed_flags
+    )
+    contract = compact["family_requirement_contract"]
+    compact["family_scope"] = contract["family_scope"]
+    compact["full_po3_sequence_required"] = contract["full_po3_sequence_required"]
+    for name in (
+        "htf_bos_required",
+        "htf_bos_observed",
+        "htf_bos_absence_classification",
+        "follow_through_required",
+        "follow_through_observed",
+        "follow_through_absence_classification",
+    ):
+        compact[name] = contract[name]
     compact["family_profile_version"] = FAMILY_PROFILE_VERSION
     compact["candidate_evidence_hash"] = canonical_hash(compact)
     return compact, missing, invalid
@@ -214,7 +387,13 @@ def build_decision_evidence_envelope(
         if not isinstance(candidate, Mapping):
             invalid.append(f"candidates[{index}]_not_object")
             continue
-        row, row_missing, row_invalid = _candidate_evidence(candidate, index, request_time, now)
+        row, row_missing, row_invalid = _candidate_evidence(
+            candidate,
+            index,
+            request_time,
+            now,
+            {field: po3.get(field) for _, field, _ in _SEQUENCE_FLAG_SPECS},
+        )
         candidate_rows.append(row)
         missing.extend(row_missing)
         invalid.extend(row_invalid)
@@ -260,12 +439,42 @@ def build_decision_evidence_envelope(
             "family_profile_version": FAMILY_PROFILE_VERSION,
         },
         "sequence": {
+            "po3_state": po3.get("po3_state"),
+            "po3_state_reason": po3.get("po3_state_reason"),
+            "po3_scope": po3.get("po3_scope"),
+            "context_tier": po3.get("context_tier"),
+            "sweep_side": po3.get("sweep_side"),
+            "structure_type": po3.get("structure_type"),
+            "htf_structure_type": po3.get("htf_structure_type"),
+            "ltf_structure_type": po3.get("ltf_structure_type"),
             "has_sweep": po3.get("has_sweep"),
             "has_displacement": po3.get("has_displacement"),
             "has_bos": po3.get("has_bos"),
+            "has_follow_through": po3.get("has_follow_through"),
+            "developing_bos": po3.get("developing_bos"),
+            "htf_bos": po3.get("htf_bos"),
+            "htf_internal_bos": po3.get("htf_internal_bos"),
+            "htf_swing_bos": po3.get("htf_swing_bos"),
+            "htf_mss": po3.get("htf_mss"),
+            "htf_choch": po3.get("htf_choch"),
+            "ltf_bos": po3.get("ltf_bos"),
+            "ltf_internal_bos": po3.get("ltf_internal_bos"),
+            "ltf_swing_bos": po3.get("ltf_swing_bos"),
+            "ltf_mss": po3.get("ltf_mss"),
+            "ltf_choch": po3.get("ltf_choch"),
             "t_sweep": po3.get("t_sweep"),
             "t_disp": po3.get("t_disp"),
             "t_bos": po3.get("t_bos"),
+            "t_follow": po3.get("t_follow"),
+            "ltf_structure_time": po3.get("ltf_structure_time"),
+            "ltf_structure_level": po3.get("ltf_structure_level"),
+            "displacement_score": po3.get("displacement_score"),
+            "displacement_body_frac": po3.get("displacement_body_frac"),
+            "displacement_range_atr": po3.get("displacement_range_atr"),
+            "displacement_volume_ratio": po3.get("displacement_volume_ratio"),
+            "daily_bias_dir": po3.get("daily_bias_dir"),
+            "h4_bias_dir": po3.get("h4_bias_dir"),
+            "h1_bias_dir": po3.get("h1_bias_dir"),
         },
         "market_regime": regime,
         "htf_context": _mapping(payload.get("htf_context")),
@@ -293,6 +502,37 @@ def build_decision_evidence_envelope(
             "invalid_fields": sorted(set(invalid)),
             "hard_blockers": sorted(set(hard_blockers)),
             "deterministic_numbers_authoritative": True,
+        },
+        "provider_decision_context": {
+            "context_version": PROVIDER_DECISION_CONTEXT_VERSION,
+            "source": "deterministic_projection_of_frozen_mql_request",
+            "purpose": "navigation_and_family_requirement_disambiguation",
+            "authority": (
+                "Observed values remain authoritative in the canonical sections; "
+                "this block only explains how to interpret them."
+            ),
+            "rules": [
+                "Evaluate each candidate against its own family_requirement_contract.",
+                "Do not apply the full PO3 sweep-displacement-HTF-BOS sequence to a micro family.",
+                "False or absent optional context is neutral, not missing mandatory evidence.",
+                (
+                    "family_requirement_contract.sequence_field_requirements resolves every "
+                    "global PO3 sequence flag for this candidate. Each entry mirrors the "
+                    "sequence field it names: observed is the value you can read there, "
+                    "required says whether required_event_sequence names it, and "
+                    "absence_classification is NOT_ABSENT_OBSERVED_PRESENT when it was "
+                    "observed, MANDATORY_MISSING when it is absent and required, or "
+                    "OPTIONAL_CONTEXT_ONLY when it is absent and not required."
+                ),
+                (
+                    "OPTIONAL_CONTEXT_ONLY is resolved, not unresolved. Do not abstain, "
+                    "lower confidence, or record a missing confirmation because such a flag "
+                    "is false; follow_through in particular is optional for every family, "
+                    "so its absence alone is not a reason to withhold a decision."
+                ),
+                "Use historical evidence only when its asset-class applicability is sufficient.",
+                "Use only supplied feasible targets and never invent a price.",
+            ],
         },
         "historical_analogues": [dict(row) for row in historical_analogues],
         "authority_manifest": {

@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+data/*.sqlite3
+data/reports/*
+data/source_index.json
+data/local_ai_bridge/requests/*
+data/local_ai_bridge/responses/*
+data/local_ai_bridge/processing/*
+data/local_ai_bridge/archive/*
+data/local_ai_bridge/quarantine/*
+data/experiment_jobs/pending/*
+data/experiment_jobs/results/*

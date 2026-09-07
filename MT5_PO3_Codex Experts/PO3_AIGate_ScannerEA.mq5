@@ -38,6 +38,7 @@ bool _TesterLiveAiWaitMode() {
 }
 
 string _TesterAiModeName(const TesterAiMode mode) {
+   if(mode == TESTER_AI_BOOTSTRAP_RULE_ONLY) return "TESTER_AI_BOOTSTRAP_RULE_ONLY";
    if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "TESTER_AI_LIVE_WAIT_DEBUG";
    if(mode == TESTER_AI_CACHE_ONLY) return "TESTER_AI_CACHE_ONLY";
    if(mode == TESTER_AI_RECORD_ONLY) return "TESTER_AI_RECORD_ONLY";
@@ -45,6 +46,7 @@ string _TesterAiModeName(const TesterAiMode mode) {
 }
 
 string _TesterAiModeLabel(const TesterAiMode mode) {
+   if(mode == TESTER_AI_BOOTSTRAP_RULE_ONLY) return "bootstrap_rule_only";
    if(mode == TESTER_AI_CACHE_ONLY) return "cache_only";
    if(mode == TESTER_AI_RECORD_ONLY) return "record_only";
    if(mode == TESTER_AI_LIVE_WAIT_DEBUG) return "live_wait_debug";
@@ -181,7 +183,9 @@ int OnInit() {
       _JournalEA("[tester_ai_workflow] Step 1: run RECORD_ONLY to export requests.");
       _JournalEA("[tester_ai_workflow] Step 2: run python ai_gate.py / batch processor to fill cache.");
       _JournalEA("[tester_ai_workflow] Step 3: rerun with CACHE_ONLY and InpTesterAiCache=true.");
-      if(InpTesterAiMode == TESTER_AI_CACHE_ONLY){
+      if(InpTesterAiMode == TESTER_AI_BOOTSTRAP_RULE_ONLY){
+         _JournalEA("[tester_ai_mode] bootstrap_rule_only=true live_ai_calls=false wall_clock_wait=false simulated_trading=true tester_only=true");
+      } else if(InpTesterAiMode == TESTER_AI_CACHE_ONLY){
          _JournalEA("[tester_ai_mode] mode=cache_only"
                     + " cache_enabled=" + (InpTesterAiCache ? "true" : "false")
                     + " live_ai_calls=false backtest_safe=true");

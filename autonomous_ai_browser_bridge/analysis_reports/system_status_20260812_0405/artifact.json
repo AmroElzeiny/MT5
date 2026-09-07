@@ -1,0 +1,154 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "PO3 Live Demo System Status",
+    "description": "Diagnostic snapshot of AI requests, response validation, and trading outcomes during the latest three-hour window.",
+    "generatedAt": "2026-08-12T04:05:33+03:00",
+    "sources": [
+      {
+        "id": "request-ledger",
+        "label": "PO3 AI request ledger",
+        "path": "PO3_AI_BUS/request_ledger/*.json",
+        "query": {
+          "engine": "sqlite-in-memory",
+          "language": "sql",
+          "sql": "SELECT COUNT(*) AS decisions FROM request_ledger WHERE updated_at >= 1786485900 AND updated_at <= 1786496733;",
+          "description": "Count unique completed request-ledger records in the fixed three-hour snapshot window.",
+          "executed_at": "2026-08-12T04:15:00+03:00",
+          "tables_used": ["request_ledger"]
+        }
+      },
+      {
+        "id": "api-usage",
+        "label": "PO3 OpenAI usage log",
+        "path": "PO3_AI_BUS/logs/openai_usage.ndjson",
+        "query": {
+          "engine": "sqlite-in-memory",
+          "language": "sql",
+          "sql": "SELECT COUNT(*) AS api_calls FROM api_usage WHERE ts_utc >= '2026-08-11T22:05:00+00:00' AND ts_utc <= '2026-08-12T01:05:33+00:00';",
+          "description": "Count remote API usage events in the fixed three-hour snapshot window.",
+          "executed_at": "2026-08-12T04:15:00+03:00",
+          "tables_used": ["api_usage"]
+        }
+      },
+      {
+        "id": "mql-journal",
+        "label": "MT5 PO3 MQL journal",
+        "path": "MetaTrader/MQL5/Logs/20260812.log",
+        "query": {
+          "engine": "sqlite-in-memory",
+          "language": "sql",
+          "sql": "SELECT CASE valid WHEN 1 THEN 'Schema valid' ELSE 'Schema invalid' END AS outcome, COUNT(*) AS count FROM mql_validation WHERE event_time >= '01:05:00' AND event_time <= '04:05:33' GROUP BY valid ORDER BY valid;",
+          "description": "Group terminal-side schema validation outcomes for returned advisories.",
+          "executed_at": "2026-08-12T04:15:00+03:00",
+          "tables_used": ["mql_validation"]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "decisions-card",
+        "description": "Unique terminal requests with a terminal decision during the three-hour window.",
+        "dataset": "headline",
+        "sourceId": "request-ledger",
+        "metrics": [{"label": "Terminal decisions", "field": "decisions", "format": "number"}]
+      },
+      {
+        "id": "calls-card",
+        "description": "Remote API role calls generated while resolving those decisions.",
+        "dataset": "headline",
+        "sourceId": "api-usage",
+        "metrics": [{"label": "API calls", "field": "api_calls", "format": "number"}]
+      },
+      {
+        "id": "trades-card",
+        "description": "Trades opened by the EA in the reviewed window.",
+        "dataset": "headline",
+        "sourceId": "mql-journal",
+        "metrics": [{"label": "Trades opened", "field": "trades", "format": "number"}]
+      }
+    ],
+    "charts": [
+      {
+        "id": "mql-validation-chart",
+        "title": "MQL response validation outcomes",
+        "subtitle": "Most returned advisories were downgraded by the terminal-side contract validator.",
+        "type": "bar",
+        "dataset": "mql_validation",
+        "sourceId": "mql-journal",
+        "encodings": {
+          "x": {"field": "outcome", "type": "nominal", "label": "Validation outcome"},
+          "y": {"field": "count", "type": "quantitative", "label": "Advisories"},
+          "tooltip": [
+            {"field": "outcome", "type": "text", "label": "Outcome"},
+            {"field": "count", "type": "quantitative", "label": "Count"}
+          ]
+        },
+        "valueFormat": "number",
+        "layout": "full",
+        "maxRows": 2,
+        "labels": {"values": "all"},
+        "legend": {"show": false},
+        "settings": {"showValues": true, "sort": "descending"},
+        "surface": {"surface": "report", "compact": false, "showControls": false, "viewMode": "both"}
+      }
+    ],
+    "tables": [
+      {
+        "id": "diagnostic-table",
+        "title": "Verified blocking conditions",
+        "subtitle": "Observed counts and their direct effect on trade authority.",
+        "dataset": "diagnostics",
+        "sourceId": "mql-journal",
+        "defaultSort": {"field": "observed", "direction": "desc"},
+        "density": "spacious",
+        "layout": "full",
+        "columns": [
+          {"field": "condition", "label": "Condition", "type": "text"},
+          {"field": "observed", "label": "Observed", "format": "number"},
+          {"field": "effect", "label": "Effect", "type": "text"}
+        ]
+      }
+    ],
+    "blocks": [
+      {"id": "title", "type": "markdown", "body": "# PO3 Live Demo System Status"},
+      {"id": "summary", "type": "markdown", "body": "## Technical summary\n\nThe remote API path is operational, but the terminal is currently unable to grant trading authority. All 17 completed decisions ended with `allow=false`. Thirteen were genuine AI abstentions and four were Python-side degraded responses. Separately, MQL accepted only 5 of 17 advisory schemas and downgraded the other 12. Therefore zero trades is expected under the current contract state."},
+      {"id": "headline-metrics", "type": "metric-strip", "cardIds": ["decisions-card", "calls-card", "trades-card"]},
+      {"id": "validation-heading", "type": "markdown", "body": "## Terminal validation is the immediate technical blocker\n\nPython successfully produced many structured responses, but the MQL validator rejected empty target-decision explanations and, in some cases, target blocker values. The terminal also compares the three AI assessments retained after the live candidate cap with the original four-to-six MQL plans, producing `candidate_assessment_count_mismatch`. An eventual AI approval could therefore still be rejected by MQL."},
+      {"id": "validation-chart-block", "type": "chart", "chartId": "mql-validation-chart"},
+      {"id": "decision-heading", "type": "markdown", "body": "## The AI also found no approvable setup\n\nEven without the MQL contract mismatch, none of the reviewed model decisions approved a trade. Most abstentions cited insufficient or mixed historical evidence and returned a zero risk multiplier. Two Gold requests had supportive history and scores of 7.0–7.5, but the model still abstained rather than approving."},
+      {"id": "diagnostic-table-block", "type": "table", "tableId": "diagnostic-table"},
+      {"id": "scope", "type": "markdown", "body": "## Scope and definitions\n\nThe review covers approximately 01:05–04:05 Moscow time on 12 August 2026. A terminal decision is one unique completed request ledger record. An API call is one analyst, repair, critic, or adjudicator provider invocation, so several calls per trading decision are expected. A trade means an order recorded as opened by the EA."},
+      {"id": "method", "type": "markdown", "body": "## Method\n\nThe request ledger was reconciled with the OpenAI usage NDJSON and the MT5 MQL journal. Counts were grouped by terminal reason, decision quality, provider operation, and MQL schema result. Current process and queue state were checked separately."},
+      {"id": "limitations", "type": "markdown", "body": "## Limitations and robustness\n\nFour additional requests were queued near shutdown boundaries but did not become completed advisories in this window; they are excluded from the 17-decision denominator. The usage log also contains six `identity-e2e` development-test calls that are excluded from the decision count but remain part of the raw 51-call total only if they occurred in the selected time window. No claim here treats absence of a trade as proof that the market offered no valid setup."},
+      {"id": "next", "type": "markdown", "body": "## Recommended next steps\n\n1. Align Python and MQL target-arbitration validation so required strings are populated consistently.\n2. Make MQL validate the exact sparse three-candidate cohort sent to the AI instead of the original plan count.\n3. Compile the EA and run one controlled request whose response is `FULL_STRUCTURED` on both Python and MQL.\n4. Only then assess whether the model's abstention policy and asset-class priors are too conservative."},
+      {"id": "questions", "type": "markdown", "body": "## Further questions\n\nAfter the contract fix, the next measurement should distinguish: model approval rate, terminal acceptance rate, order-attempt rate, and broker execution rate. That funnel will show whether any remaining zero-trade period is caused by strategy selectivity rather than integration failure."}
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-12T04:06:28+03:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [{"decisions": 17, "api_calls": 51, "trades": 0}],
+      "mql_validation": [
+        {"outcome": "Schema invalid", "count": 12},
+        {"outcome": "Schema valid", "count": 5}
+      ],
+      "diagnostics": [
+        {"condition": "MQL schema invalid", "observed": 12, "effect": "Response downgraded to non-trading"},
+        {"condition": "AI abstention", "observed": 13, "effect": "Risk multiplier zero and no approval"},
+        {"condition": "Python degraded response", "observed": 4, "effect": "Fails closed"},
+        {"condition": "API transport error", "observed": 0, "effect": "No transport blocker observed"},
+        {"condition": "Final approvals", "observed": 0, "effect": "No order can be attempted"}
+      ]
+    }
+  },
+  "sources": [
+    {"id": "request-ledger", "label": "PO3 AI request ledger", "path": "PO3_AI_BUS/request_ledger/*.json", "query": {"engine": "sqlite-in-memory", "language": "sql", "sql": "SELECT COUNT(*) AS decisions FROM request_ledger WHERE updated_at >= 1786485900 AND updated_at <= 1786496733;", "tables_used": ["request_ledger"]}},
+    {"id": "api-usage", "label": "PO3 OpenAI usage log", "path": "PO3_AI_BUS/logs/openai_usage.ndjson", "query": {"engine": "sqlite-in-memory", "language": "sql", "sql": "SELECT COUNT(*) AS api_calls FROM api_usage WHERE ts_utc >= '2026-08-11T22:05:00+00:00' AND ts_utc <= '2026-08-12T01:05:33+00:00';", "tables_used": ["api_usage"]}},
+    {"id": "mql-journal", "label": "MT5 PO3 MQL journal", "path": "MetaTrader/MQL5/Logs/20260812.log", "query": {"engine": "sqlite-in-memory", "language": "sql", "sql": "SELECT CASE valid WHEN 1 THEN 'Schema valid' ELSE 'Schema invalid' END AS outcome, COUNT(*) AS count FROM mql_validation WHERE event_time >= '01:05:00' AND event_time <= '04:05:33' GROUP BY valid ORDER BY valid;", "tables_used": ["mql_validation"]}}
+  ]
+}

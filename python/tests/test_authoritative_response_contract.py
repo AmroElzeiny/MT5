@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -31,6 +32,7 @@ from architecture_contracts import (
     COMPAT_INCOMPATIBLE,
     COMPAT_MATCHED,
     COMPAT_NOT_APPLICABLE,
+    FileBusLifecycle,
     RUNTIME_AUTHORITY_PENDING,
     PolicySpec,
     _compatibility_state,
@@ -144,6 +146,22 @@ class ProviderSchemaOwnershipTests(unittest.TestCase):
             )
         self.assertIn("extra_forbidden", str(captured.exception))
 
+    def test_model_schema_rejects_negative_reward_risk(self) -> None:
+        row = model_assessment(candidate())
+        row["target_arbitration"]["target_comparison"] = _comparison()
+        row["target_arbitration"]["chosen_rr2"] = -2.0
+        with self.assertRaises(Exception) as captured:
+            ModelAIGateOutput.model_validate(
+                {
+                    "decision_quality_tier": "FULL_STRUCTURED",
+                    "response_quality": "FULL_STRUCTURED",
+                    "selected_candidate_index": row["candidate_index"],
+                    "candidate_assessments": [row],
+                    "reasons": "analysis only",
+                }
+            )
+        self.assertIn("chosen_rr2", str(captured.exception))
+
     def test_prompt_does_not_ask_the_model_for_constants(self) -> None:
         source = Path(ai_gate.__file__).read_text(encoding="utf-8")
         self.assertNotIn(
@@ -161,6 +179,222 @@ class ProviderSchemaOwnershipTests(unittest.TestCase):
         self.assertTrue(validate_candidate_assessment(auth).valid)
 
 
+class ProviderDecisionContextTests(unittest.TestCase):
+    """Remote and local providers receive the same explicit family boundary."""
+
+    def test_micro_family_does_not_require_htf_bos(self) -> None:
+        cand = candidate()
+        cand.update(
+            {
+                "setup_code": "MBC",
+                "setup_family": "micro_continuation_fvg",
+                "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+                "entry_branch": "continuation_fvg",
+                "source_t_bos": 0,
+                "fvg_continuation": True,
+                "fvg_mitigation_state": "virgin",
+                "historical_evidence_state": "SUPPORTIVE",
+            }
+        )
+        payload = _payload([cand])
+        payload["po3"].update(
+            {
+                "has_bos": False,
+                "t_bos": 0,
+                "htf_bos": False,
+                "ltf_bos": True,
+                "ltf_structure_time": 103,
+                "displacement_score": 7.4,
+            }
+        )
+
+        envelope = build_decision_evidence_envelope(payload).envelope
+        row = envelope["entry_and_invalidation"]["candidates"][0]
+        contract = row["family_requirement_contract"]
+        self.assertEqual(contract["family_scope"], "MICRO_OR_TIER_B")
+        self.assertFalse(contract["full_po3_sequence_required"])
+        self.assertFalse(contract["htf_bos_required"])
+        self.assertEqual(
+            contract["htf_bos_absence_classification"], "OPTIONAL_CONTEXT_ONLY"
+        )
+        self.assertTrue(envelope["sequence"]["ltf_bos"])
+        self.assertFalse(envelope["sequence"]["htf_bos"])
+        self.assertEqual(row["fvg_mitigation_state"], "virgin")
+        self.assertEqual(row["historical_evidence_state"], "SUPPORTIVE")
+
+        catalog = build_evidence_catalog(envelope)
+        item = catalog.by_path(
+            "entry_and_invalidation.candidates.0.family_requirement_contract.htf_bos_required"
+        )
+        self.assertIsNotNone(item)
+        self.assertFalse(item.value)
+
+    def test_full_po3_family_still_requires_htf_bos(self) -> None:
+        envelope = build_decision_evidence_envelope(_payload([candidate()])).envelope
+        contract = envelope["entry_and_invalidation"]["candidates"][0][
+            "family_requirement_contract"
+        ]
+        self.assertEqual(contract["family_scope"], "FULL_PO3")
+        self.assertTrue(contract["full_po3_sequence_required"])
+        self.assertTrue(contract["htf_bos_required"])
+        self.assertIn("BOS", contract["required_event_sequence"])
+
+    def _contract_for(
+        self, *, htf_bos: bool, micro: bool, follow_through: bool = False
+    ) -> dict:
+        cand = candidate()
+        if micro:
+            cand.update(
+                {
+                    "setup_code": "MBC",
+                    "setup_family": "micro_continuation_fvg",
+                    "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+                    "entry_branch": "continuation_fvg",
+                }
+            )
+        payload = _payload([cand])
+        payload["po3"].update(
+            {
+                "htf_bos": htf_bos,
+                "has_bos": htf_bos,
+                "has_follow_through": follow_through,
+            }
+        )
+        envelope = build_decision_evidence_envelope(payload).envelope
+        row = envelope["entry_and_invalidation"]["candidates"][0]
+        self.assertEqual(envelope["sequence"]["htf_bos"], htf_bos)
+        return row["family_requirement_contract"]
+
+    def test_absence_classification_reports_present_bos_as_not_absent(self) -> None:
+        # Regression: the classification described an *absence* but was derived only
+        # from the family, so a full-PO3 candidate whose HTF BOS was observed true was
+        # still labelled MANDATORY_MISSING.  Providers reported that self-contradiction
+        # as ai_veto_data_integrity_failure / ai_veto_sequence_contradiction and vetoed
+        # every BOS-confirmed full-PO3 candidate.
+        contract = self._contract_for(htf_bos=True, micro=False)
+        self.assertTrue(contract["htf_bos_required"])
+        self.assertTrue(contract["htf_bos_observed"])
+        self.assertEqual(
+            contract["htf_bos_absence_classification"], "NOT_ABSENT_OBSERVED_PRESENT"
+        )
+
+    def test_follow_through_is_optional_for_every_family(self) -> None:
+        # follow_through is named in no family's required_event_sequence, so its absence
+        # must resolve to OPTIONAL_CONTEXT_ONLY rather than being left for the model to
+        # judge.  With no explicit contract entry the provider abstained on it anyway --
+        # "complete PO3 sequence supports the thesis, but absent follow-through" -- which
+        # optional_absence_rule forbids.
+        for micro in (False, True):
+            with self.subTest(micro=micro):
+                contract = self._contract_for(
+                    htf_bos=True, micro=micro, follow_through=False
+                )
+                self.assertFalse(contract["follow_through_required"])
+                self.assertFalse(contract["follow_through_observed"])
+                self.assertEqual(
+                    contract["follow_through_absence_classification"],
+                    "OPTIONAL_CONTEXT_ONLY",
+                )
+
+    def test_follow_through_present_is_reported_as_present(self) -> None:
+        contract = self._contract_for(htf_bos=True, micro=False, follow_through=True)
+        self.assertTrue(contract["follow_through_observed"])
+        self.assertEqual(
+            contract["follow_through_absence_classification"],
+            "NOT_ABSENT_OBSERVED_PRESENT",
+        )
+
+    def test_sequence_field_requirements_never_contradict_the_sequence_block(self) -> None:
+        # The general invariant behind both bugs: for every resolved global flag, the
+        # contract may never report MANDATORY_MISSING while the observation is true.
+        for micro in (False, True):
+            for htf_bos in (False, True):
+                for follow in (False, True):
+                    with self.subTest(micro=micro, htf_bos=htf_bos, follow=follow):
+                        contract = self._contract_for(
+                            htf_bos=htf_bos, micro=micro, follow_through=follow
+                        )
+                        flags = contract["sequence_field_requirements"]
+                        self.assertEqual(flags["htf_bos"]["observed"], htf_bos)
+                        self.assertEqual(flags["follow_through"]["observed"], follow)
+                        for entry in flags.values():
+                            if entry["observed"]:
+                                self.assertEqual(
+                                    entry["absence_classification"],
+                                    "NOT_ABSENT_OBSERVED_PRESENT",
+                                )
+                            elif not entry["required"]:
+                                self.assertEqual(
+                                    entry["absence_classification"],
+                                    "OPTIONAL_CONTEXT_ONLY",
+                                )
+
+    def test_htf_bos_requirement_still_matches_the_full_po3_family_set(self) -> None:
+        # The requirement is now derived by matching required_event_sequence instead of
+        # the taxonomy set.  Assert the two agree for every taxonomy so the rewrite did
+        # not quietly add or drop a family.
+        from decision_evidence import _FULL_PO3_TAXONOMIES, _family_requirement_contract
+        from family_context import family_context_for
+        from governance_contracts import SetupTaxonomy
+
+        for tax in SetupTaxonomy:
+            try:
+                profile = family_context_for(tax.value)
+            except ValueError:
+                continue
+            with self.subTest(taxonomy=tax.value):
+                contract = _family_requirement_contract(tax.value, profile, {})
+                self.assertEqual(
+                    contract["htf_bos_required"], tax.value in _FULL_PO3_TAXONOMIES
+                )
+                self.assertFalse(contract["follow_through_required"])
+
+    def test_absence_classification_still_flags_required_and_absent(self) -> None:
+        contract = self._contract_for(htf_bos=False, micro=False)
+        self.assertTrue(contract["htf_bos_required"])
+        self.assertFalse(contract["htf_bos_observed"])
+        self.assertEqual(contract["htf_bos_absence_classification"], "MANDATORY_MISSING")
+
+    def test_absence_classification_optional_when_family_does_not_require_it(self) -> None:
+        contract = self._contract_for(htf_bos=False, micro=True)
+        self.assertFalse(contract["htf_bos_required"])
+        self.assertFalse(contract["htf_bos_observed"])
+        self.assertEqual(
+            contract["htf_bos_absence_classification"], "OPTIONAL_CONTEXT_ONLY"
+        )
+
+    def test_absence_classification_never_contradicts_observed_sequence(self) -> None:
+        # The invariant the providers were enforcing: the classification may never say
+        # "missing" while sequence.htf_bos is true, for any family.
+        for micro in (False, True):
+            for htf_bos in (False, True):
+                with self.subTest(micro=micro, htf_bos=htf_bos):
+                    contract = self._contract_for(htf_bos=htf_bos, micro=micro)
+                    self.assertEqual(contract["htf_bos_observed"], htf_bos)
+                    if htf_bos:
+                        self.assertNotEqual(
+                            contract["htf_bos_absence_classification"],
+                            "MANDATORY_MISSING",
+                        )
+
+    def test_present_bos_classification_is_citable_evidence(self) -> None:
+        cand = candidate()
+        payload = _payload([cand])
+        payload["po3"].update({"htf_bos": True, "has_bos": True})
+        envelope = build_decision_evidence_envelope(payload).envelope
+        catalog = build_evidence_catalog(envelope)
+        base = "entry_and_invalidation.candidates.0.family_requirement_contract"
+        observed = catalog.by_path(f"{base}.htf_bos_observed")
+        classification = catalog.by_path(f"{base}.htf_bos_absence_classification")
+        self.assertIsNotNone(observed)
+        self.assertIsNotNone(classification)
+        self.assertTrue(observed.value)
+        self.assertEqual(classification.value, "NOT_ABSENT_OBSERVED_PRESENT")
+        follow = catalog.by_path(f"{base}.follow_through_absence_classification")
+        self.assertIsNotNone(follow)
+        self.assertEqual(follow.value, "OPTIONAL_CONTEXT_ONLY")
+
+
 class PythonOwnedInjectionTests(unittest.TestCase):
     """Python injects the active constants; a wrong echo has no authority."""
 
@@ -170,20 +404,28 @@ class PythonOwnedInjectionTests(unittest.TestCase):
         *,
         evidence_ref_ids: list[int] | None = None,
         confidence_band: str | None = None,
+        candidate_overrides: dict | None = None,
+        state: str = "APPROVE",
+        suggested_risk_multiplier: float | None = None,
     ):
         cand = candidate()
+        if candidate_overrides:
+            cand.update(candidate_overrides)
         payload = _payload([cand])
         catalog = build_evidence_catalog(
             build_decision_evidence_envelope(payload).envelope
         )
         row = model_assessment(
             cand,
+            state=state,
             evidence_ref_ids=(
                 evidence_ref_ids
                 if evidence_ref_ids is not None
                 else [item.evidence_id for item in catalog.items[:2]]
             ),
         )
+        if suggested_risk_multiplier is not None:
+            row["suggested_risk_multiplier"] = suggested_risk_multiplier
         if confidence_band is not None:
             row["confidence_band"] = confidence_band
         row["target_arbitration"]["target_comparison"] = _comparison()
@@ -226,6 +468,142 @@ class PythonOwnedInjectionTests(unittest.TestCase):
             provider_result=provider_result,
             evidence_catalog=catalog,
         )
+
+    def test_python_restores_current_target_when_no_arbitration_is_required(self) -> None:
+        envelope, _diagnostics = self._bind(
+            {
+                "arbitration_required": False,
+                "chosen_target_model": "",
+                "chosen_tp1": 0.0,
+                "chosen_tp2": 0.0,
+                "chosen_rr1": 0.0,
+                "chosen_rr2": 0.0,
+            },
+            candidate_overrides={"target_arbitration_required": False},
+        )
+        row = envelope["candidate_assessments"][0]
+        self.assertEqual(row["selected_target_identity"], "liquidity")
+        self.assertEqual(row["selected_target_price"], 102.0)
+        self.assertEqual(row["target_arbitration"]["chosen_target_model"], "liquidity")
+        self.assertEqual(row["target_arbitration"]["chosen_tp2"], 102.0)
+
+    def test_python_recalculates_rr_as_unsigned_deterministic_magnitude(self) -> None:
+        envelope, diagnostics = self._bind(
+            {
+                "chosen_rr1": 0.25,
+                "chosen_rr2": 0.50,
+            }
+        )
+        arbitration = envelope["candidate_assessments"][0]["target_arbitration"]
+        self.assertEqual(arbitration["chosen_rr1"], 1.0)
+        self.assertEqual(arbitration["chosen_rr2"], 2.0)
+        self.assertTrue(
+            any(
+                "chosen_rr2=2.000000_deterministic_recalculation" in item
+                for item in diagnostics["python_owned_field_echoes"]
+            )
+        )
+
+    def test_python_rejects_approval_with_target_on_loss_side(self) -> None:
+        """A loss-side target must lose trade authority -- for that candidate only.
+
+        This used to raise, which discarded every sibling assessment in the same
+        response and surfaced as ``structured_response_invalid`` for the whole
+        request.  The safety invariant is unchanged and asserted directly here:
+        the offending candidate carries no approval, no positive RR and no size.
+        """
+
+        envelope, diagnostics = self._bind(
+            {"chosen_tp2": 98.0, "chosen_rr2": 2.0},
+            candidate_overrides={"tp2": 98.0},
+        )
+
+        row = envelope["candidate_assessments"][0]
+        self.assertEqual(row["decision_state"], "ABSTAIN")
+        self.assertFalse(row["raw_allow"])
+        self.assertEqual(row["suggested_risk_multiplier"], 0.0)
+        # A loss-side target can never yield a positive reward-to-risk ratio.
+        self.assertLessEqual(row["target_arbitration"]["chosen_rr2"], 0.0)
+        self.assertTrue(
+            any(
+                "demoted_to_abstain:deterministic_rr_non_positive" in item
+                for item in diagnostics["python_owned_field_echoes"]
+            ),
+            "the demotion must be recorded as an explicit, auditable echo",
+        )
+
+    def test_missing_choice_still_fails_when_arbitration_is_required(self) -> None:
+        with self.assertRaisesRegex(ValueError, "model_target_arbitration_choice_missing"):
+            self._bind(
+                {
+                    "arbitration_required": True,
+                    "chosen_target_model": "",
+                    "chosen_tp1": 0.0,
+                    "chosen_tp2": 0.0,
+                    "chosen_rr1": 0.0,
+                    "chosen_rr2": 0.0,
+                },
+                candidate_overrides={"target_arbitration_required": True},
+            )
+
+    def test_missing_required_choice_on_abstain_preserves_current_plan_fail_closed(self) -> None:
+        envelope, diagnostics = self._bind(
+            {
+                "arbitration_required": True,
+                "chosen_target_model": "",
+                "chosen_tp1": 0.0,
+                "chosen_tp2": 0.0,
+                "chosen_rr1": 0.0,
+                "chosen_rr2": 0.0,
+            },
+            candidate_overrides={"target_arbitration_required": True},
+            state="ABSTAIN",
+            suggested_risk_multiplier=0.0,
+        )
+        row = envelope["candidate_assessments"][0]
+        self.assertEqual(row["decision_state"], "ABSTAIN")
+        self.assertFalse(row["raw_allow"])
+        self.assertEqual(row["suggested_risk_multiplier"], 0.0)
+        self.assertEqual(row["target_arbitration"]["chosen_target_model"], "liquidity")
+        self.assertIn(
+            "candidate[0].target_arbitration.chosen_target_model=current_plan_for_abstain",
+            diagnostics["python_owned_field_echoes"],
+        )
+
+    def test_positive_risk_hint_on_abstain_is_zeroed_fail_closed(self) -> None:
+        envelope, diagnostics = self._bind(
+            state="ABSTAIN",
+            suggested_risk_multiplier=0.8,
+        )
+        row = envelope["candidate_assessments"][0]
+        self.assertEqual(row["decision_state"], "ABSTAIN")
+        self.assertEqual(row["suggested_risk_multiplier"], 0.0)
+        self.assertIn(
+            "candidate[0].suggested_risk_multiplier_zeroed_for_abstain",
+            diagnostics["python_owned_field_echoes"],
+        )
+
+    def test_empty_target_text_on_abstain_is_normalized_fail_closed(self) -> None:
+        envelope, diagnostics = self._bind(
+            {"blocker_class": "", "target_decision_reason": ""},
+            state="ABSTAIN",
+            suggested_risk_multiplier=0.0,
+        )
+        row = envelope["candidate_assessments"][0]
+        arbitration = row["target_arbitration"]
+        self.assertEqual(arbitration["blocker_class"], "UNKNOWN")
+        self.assertIn("abstain", arbitration["target_decision_reason"])
+        self.assertTrue(validate_candidate_assessment(row).valid)
+        self.assertTrue(
+            any(
+                "target_decision_reason=fail_closed_for_abstain" in item
+                for item in diagnostics["python_owned_field_echoes"]
+            )
+        )
+
+    def test_empty_target_text_on_approval_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "model_target_blocker_class_missing"):
+            self._bind({"blocker_class": "", "target_decision_reason": ""})
 
     def test_python_injects_exact_active_versions(self) -> None:
         envelope, diagnostics = self._bind()
@@ -299,6 +677,90 @@ class PythonOwnedInjectionTests(unittest.TestCase):
         self.assertEqual(entry["unknown_ids"], [])
         self.assertEqual(entry["cross_candidate_ids"], [])
         self.assertTrue(entry["catalog_hash"])
+
+    def _bind_sparse_cohort(self, returned_indexes: list[int], selected_index: int):
+        candidates = [candidate(2, "C"), candidate(3, "D"), candidate(4, "E")]
+        payload = _payload(candidates)
+        evidence = build_decision_evidence_envelope(payload).envelope
+        catalog = build_evidence_catalog(evidence)
+        candidate_by_index = {item["candidate_index"]: item for item in candidates}
+        # Deferred rows intentionally have distinct identities but use the same
+        # analytical shape a provider sees in a larger pre-budget cohort.
+        all_candidates = {
+            **candidate_by_index,
+            0: candidate(0, "A"),
+            1: candidate(1, "B"),
+        }
+        rows = []
+        global_ids = [
+            item.evidence_id
+            for item in catalog.items
+            if item.candidate_index is None
+        ][:2]
+        for index in returned_indexes:
+            row = model_assessment(
+                all_candidates[index],
+                evidence_ref_ids=global_ids,
+            )
+            row["target_arbitration"]["target_comparison"] = _comparison()
+            rows.append(row)
+        provider_result = type(
+            "R",
+            (),
+            {
+                "provider_id": "identity-test-provider",
+                "actual_model": "identity-test-model",
+                "schema_fingerprint": "fingerprint",
+            },
+        )()
+        identities = [
+            {
+                "candidate_index": item["candidate_index"],
+                "candidate_id": item["candidate_id"],
+                "candidate_hash": item["candidate_hash"],
+                "request_execution_fingerprint": item[
+                    "request_execution_fingerprint"
+                ],
+                "setup_snapshot_time": int(item.get("setup_snapshot_time") or 0),
+                "setup_taxonomy_enum": item["setup_taxonomy_enum"],
+            }
+            for item in candidates
+        ]
+        return ai_gate._bind_python_owned_analyst_envelope(
+            model_output={
+                "decision_quality_tier": "FULL_STRUCTURED",
+                "response_quality": "FULL_STRUCTURED",
+                "selected_candidate_index": selected_index,
+                "candidate_assessments": rows,
+                "reasons": "cohort mapping test",
+            },
+            candidates=candidates,
+            enriched_candidates=[{"rule_score": 7.0} for _ in candidates],
+            request_id="request-sparse",
+            request_identity_hash="REQUESTIDENTITYSPARSE123",
+            ordered_candidate_identities=identities,
+            provider_result=provider_result,
+            evidence_catalog=catalog,
+        )
+
+    def test_out_of_cohort_assessments_are_dropped_when_frozen_cohort_is_complete(self) -> None:
+        envelope, diagnostics = self._bind_sparse_cohort(
+            [0, 1, 2, 3, 4], selected_index=2
+        )
+        self.assertEqual(
+            [row["candidate_index"] for row in envelope["candidate_assessments"]],
+            [2, 3, 4],
+        )
+        self.assertEqual(
+            diagnostics["ignored_out_of_cohort_candidate_indexes"], [0, 1]
+        )
+        self.assertEqual(diagnostics["normalized_count"], 3)
+
+    def test_missing_frozen_candidate_still_requires_provider_repair(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, "model_candidate_index_mapping_invalid"
+        ):
+            self._bind_sparse_cohort([2], selected_index=2)
 
 
 class ConfidenceBandContractTests(unittest.TestCase):
@@ -558,6 +1020,21 @@ class TerminalStateTests(unittest.TestCase):
 
 
 class WorkerModeTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        ai_gate._release_gate_single_instance()
+
+    def test_single_instance_guard_rejects_duplicate_for_same_bus(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bus = Path(tmp) / "PO3_AI_BUS"
+            acquired, _ = ai_gate._acquire_gate_single_instance(bus)
+            self.assertTrue(acquired)
+            duplicate, reason = ai_gate._acquire_gate_single_instance(bus)
+            self.assertFalse(duplicate)
+            self.assertIn("lease_already_held", reason)
+            ai_gate._release_gate_single_instance()
+            reacquired, _ = ai_gate._acquire_gate_single_instance(bus)
+            self.assertTrue(reacquired)
+
     def test_live_wait_debug_uses_one_effective_worker(self) -> None:
         self.assertEqual(ai_gate.effective_worker_count(4, "live_wait_debug"), 1)
 
@@ -570,9 +1047,138 @@ class WorkerModeTests(unittest.TestCase):
         self.assertEqual(ai_gate.effective_worker_count(0, "tester"), 1)
         self.assertEqual(ai_gate.effective_worker_count(99, "tester"), 16)
 
+    def test_interrupted_processing_request_is_archived_to_shutdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bus = Path(tmp) / "PO3_AI_BUS"
+            lifecycle = FileBusLifecycle(bus, "python-new")
+            lifecycle.ensure()
+            request_id = "mql-request-1"
+            processing = lifecycle.directories["processing"] / (
+                f"python-old__{request_id}.json"
+            )
+            processing.write_text("{}", encoding="utf-8")
+            lock_path = bus / "locks" / f"{request_id}.json.lock"
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path.write_text("{}", encoding="utf-8")
+            registry = RequestTerminalRegistry()
+            registry.register_deadline(
+                RequestDeadline.start(
+                    request_id,
+                    DeadlinePolicy(
+                        mt5_terminal_timeout_ms=10_000,
+                        response_write_margin_ms=1_000,
+                        min_attempt_ms=100,
+                    ),
+                )
+            )
+            registry.mark_pending_test_end_interrupted("gate_shutdown")
+            with patch.object(ai_gate, "FILE_BUS_LIFECYCLE", lifecycle), patch.object(
+                ai_gate, "REQUEST_TERMINAL_REGISTRY", registry
+            ), patch.object(ai_gate, "REQUEST_IDEMPOTENCY_LEDGER", None), patch(
+                "ai_gate.process_one", return_value=None
+            ):
+                ai_gate._process_claimed_request(
+                    processing,
+                    lifecycle.directories["responses"],
+                    lifecycle.directories["stale"],
+                    lock_path,
+                )
+            self.assertFalse(processing.exists())
+            archived = [
+                path
+                for path in lifecycle.directories["shutdown"].glob("*.json")
+                if not path.name.endswith(".meta.json")
+            ]
+            self.assertEqual(len(archived), 1)
+            self.assertIn(request_id, archived[0].name)
+
+
+class AssetClassPriorIsolationTests(unittest.TestCase):
+    def _metals_only_artifact(self) -> dict:
+        return {
+            "schema_version": ai_gate.HIERARCHICAL_PRIOR_SCHEMA_VERSION,
+            "prior_version": ai_gate.HIERARCHICAL_PRIOR_SCHEMA_VERSION,
+            "artifact_hash": "metals-only",
+            "ledger_integrity_status": "clean_only",
+            "data_window": {},
+            "levels": {
+                "global": {"ALL": {"clean_sample_size": 81, "shrunk_estimate": -0.2}},
+                "asset_class": {"metals": {"clean_sample_size": 81, "shrunk_estimate": -0.2}},
+                "symbol": {"GOLD": {"clean_sample_size": 81, "shrunk_estimate": -0.2}},
+                "family": {},
+                "branch": {},
+                "session": {},
+                "killzone": {},
+                "family_symbol": {},
+                "family_session": {},
+            },
+        }
+
+    def test_gold_prior_cannot_be_negative_evidence_for_fx(self) -> None:
+        with patch("ai_gate._load_live_bucket_priors", return_value=self._metals_only_artifact()):
+            prior = ai_gate._bucket_prior_for_item({}, {"symbol": "EURUSD"})
+        self.assertEqual(prior["asset_class"], "fx")
+        self.assertFalse(prior["asset_class_match"])
+        self.assertEqual(prior["prior_applicability"], "INSUFFICIENT_SAMPLE_FOR_ASSET_CLASS")
+        self.assertTrue(prior["cross_asset_fallback_blocked"])
+        self.assertTrue(all(not row["available"] for row in prior["hierarchy"].values()))
+
+    def test_same_asset_prior_remains_available(self) -> None:
+        with patch("ai_gate._load_live_bucket_priors", return_value=self._metals_only_artifact()):
+            prior = ai_gate._bucket_prior_for_item({}, {"symbol": "GOLD"})
+        self.assertTrue(prior["asset_class_match"])
+        self.assertEqual(prior["prior_applicability"], "ASSET_CLASS_MATCHED")
+        self.assertTrue(prior["hierarchy"]["global"]["available"])
+        self.assertTrue(prior["hierarchy"]["asset_class"]["available"])
+
 
 class EndToEndAuthoritativeResponseTests(unittest.TestCase):
     """A mocked provider returning analysis only must reach FULL_STRUCTURED."""
+
+    def test_python_owned_bucket_prior_reaches_analyst_evidence(self) -> None:
+        """The canonical envelope must not drop the prior during its rebuild."""
+
+        candidates = [candidate(0, "A"), candidate(1, "B")]
+
+        class CapturingProvider(ReverseAssessmentProvider):
+            def __init__(self, rows: list[dict]) -> None:
+                super().__init__(rows)
+                self.analyst_evidence: dict = {}
+
+            def generate_structured(self, **kwargs: object):
+                if kwargs.get("role") == "analyst":
+                    self.analyst_evidence = copy.deepcopy(
+                        kwargs.get("evidence") or {}
+                    )
+                return super().generate_structured(**kwargs)
+
+        provider = CapturingProvider(candidates)
+        expected_prior = {
+            "available": True,
+            "artifact_hash": "prior-regression",
+            "candidate_prior_hash": "candidate-prior-regression",
+            "hierarchy": {
+                "global": {
+                    "clean_sample_size": 81,
+                    "shrunk_estimate": 0.42,
+                    "selected_hierarchy_path": ["global"],
+                }
+            },
+        }
+        with patch("ai_gate._trade_memory_store", return_value=EmptyMemory()), patch(
+            "ai_gate.log_ai_usage", return_value={}
+        ), patch("ai_gate._write_ai_cost_report", return_value=None), patch(
+            "ai_gate._bucket_prior_for_item", return_value=expected_prior
+        ):
+            ai_gate._score_setup_ai(
+                _payload(candidates),
+                provider_override=provider,
+            )
+
+        rows = provider.analyst_evidence["entry_and_invalidation"]["candidates"]
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertEqual(row["bucket_prior"], expected_prior)
 
     def test_multi_candidate_response_stays_full_structured(self) -> None:
         candidates = [candidate(0, "A"), candidate(1, "B")]
@@ -650,6 +1256,7 @@ class EndToEndAuthoritativeResponseTests(unittest.TestCase):
         # Genuine model analysis preserved, not fail-closed defaults.
         self.assertEqual(decision.decision_quality_tier, "FULL_STRUCTURED")
         self.assertTrue(decision.allow, decision.reasons)
+        self.assertTrue(decision.python_final_allow, decision.reasons)
         self.assertTrue(decision.raw_allow)
         self.assertGreater(decision.llm_quality_score, 0.0)
         self.assertGreater(decision.suggested_risk_multiplier, 0.0)
@@ -788,6 +1395,159 @@ class ReplayCacheAuthorityTests(unittest.TestCase):
             "decision_quality_alias_conflict",
         )
 
+    def test_selected_assessment_is_synchronized_to_final_resolver_and_arbitration(self) -> None:
+        candidate = {
+            "candidate_id": "candidate-1",
+            "candidate_hash": "HASH-1",
+            "request_execution_fingerprint": "REQUEST-FP-1",
+            "entry_est": 100.0,
+            "sl": 101.0,
+            "tp1": 99.0,
+            "tp2": 98.0,
+        }
+        assessment = {
+            "candidate_hash": "HASH-1",
+            "decision_state": "ABSTAIN",
+            "raw_allow": False,
+            "selected_target_identity": "current_plan",
+            "target_arbitration": {
+                "chosen_target_model": "current_plan",
+                "chosen_tp1": 99.25,
+                "chosen_tp2": 98.50,
+                "chosen_rr1": 0.75,
+                "chosen_rr2": 1.50,
+            },
+        }
+        decision = ai_gate.Decision(
+            allow=False,
+            score=6.0,
+            raw_allow=False,
+            model_raw_allow=False,
+            python_final_allow=False,
+            decision_state="REJECT",
+            suggested_risk_multiplier=0.5,
+            selected_candidate_id="candidate-1",
+            selected_candidate_hash="HASH-1",
+            candidate_assessments=[assessment],
+            target_arbitration=dict(assessment["target_arbitration"]),
+            chosen_target_model="current_plan",
+        )
+        with patch("ai_gate.deterministic_assessed_execution_fingerprint", return_value="ASSESSED-FP-1"):
+            result = ai_gate._synchronize_selected_assessment_contract(
+                {"candidates": [candidate]}, decision
+            )
+        selected = result.candidate_assessments[0]
+        self.assertEqual(result.decision_state, "ABSTAIN")
+        self.assertEqual(selected["verdict"], "ABSTAIN")
+        self.assertEqual(selected["decision_state"], "ABSTAIN")
+        self.assertEqual(result.suggested_risk_multiplier, 0.0)
+        self.assertEqual(selected["suggested_risk_multiplier"], 0.0)
+        self.assertEqual(result.chosen_tp1, 99.25)
+        self.assertEqual(result.chosen_tp2, 98.50)
+        self.assertEqual(selected["target_arbitration"]["chosen_tp1"], 99.25)
+        self.assertEqual(selected["target_arbitration"]["chosen_tp2"], 98.50)
+
+    def test_none_python_final_allow_inherits_valid_consensus_allow(self) -> None:
+        candidate_row = {
+            "candidate_id": "candidate-approve",
+            "candidate_hash": "HASH-APPROVE",
+            "request_execution_fingerprint": "REQUEST-FP-APPROVE",
+            "entry_est": 100.0,
+            "sl": 99.0,
+            "tp1": 101.0,
+            "tp2": 102.0,
+        }
+        assessment_row = {
+            "candidate_hash": "HASH-APPROVE",
+            "decision_state": "APPROVE",
+            "verdict": "APPROVE",
+            "raw_allow": True,
+            "suggested_risk_multiplier": 0.75,
+            "selected_target_identity": "current_plan",
+            "target_arbitration": {
+                "chosen_target_model": "current_plan",
+                "chosen_tp1": 101.0,
+                "chosen_tp2": 102.0,
+                "chosen_rr1": 1.0,
+                "chosen_rr2": 2.0,
+            },
+        }
+        decision = ai_gate.Decision(
+            allow=True,
+            score=8.2,
+            raw_allow=True,
+            model_raw_allow=True,
+            python_final_allow=None,
+            decision_state="APPROVE",
+            suggested_risk_multiplier=0.75,
+            selected_candidate_id="candidate-approve",
+            selected_candidate_hash="HASH-APPROVE",
+            candidate_assessments=[assessment_row],
+            target_arbitration=dict(assessment_row["target_arbitration"]),
+            chosen_target_model="current_plan",
+            chosen_rr1=1.0,
+            chosen_rr2=2.0,
+        )
+        with patch(
+            "ai_gate.deterministic_assessed_execution_fingerprint",
+            return_value="ASSESSED-FP-APPROVE",
+        ):
+            result = ai_gate._synchronize_selected_assessment_contract(
+                {"candidates": [candidate_row]}, decision
+            )
+        self.assertTrue(result.allow)
+        self.assertTrue(result.python_final_allow)
+        self.assertEqual(result.decision_state, "APPROVE")
+        self.assertEqual(result.suggested_risk_multiplier, 0.75)
+
+    def test_current_plan_fallback_updates_top_level_and_assessment_targets(self) -> None:
+        candidate = {
+            "candidate_id": "candidate-1",
+            "candidate_hash": "HASH-1",
+            "request_execution_fingerprint": "REQUEST-FP-1",
+            "entry_est": 100.0,
+            "sl": 101.0,
+            "tp1": 99.0,
+            "tp2": 98.0,
+        }
+        assessment = {
+            "candidate_hash": "HASH-1",
+            "decision_state": "ABSTAIN",
+            "raw_allow": False,
+            "selected_target_identity": "current_plan",
+            "target_arbitration": {
+                "chosen_target_model": "current_plan",
+                "chosen_tp1": 0.0,
+                "chosen_tp2": 0.0,
+                "chosen_rr1": 0.0,
+                "chosen_rr2": 0.0,
+            },
+        }
+        decision = ai_gate.Decision(
+            allow=False,
+            score=6.0,
+            raw_allow=False,
+            model_raw_allow=False,
+            python_final_allow=False,
+            decision_state="ABSTAIN",
+            selected_candidate_id="candidate-1",
+            selected_candidate_hash="HASH-1",
+            candidate_assessments=[assessment],
+            target_arbitration=dict(assessment["target_arbitration"]),
+            chosen_target_model="current_plan",
+        )
+        with patch("ai_gate.deterministic_assessed_execution_fingerprint", return_value="ASSESSED-FP-1"):
+            result = ai_gate._synchronize_selected_assessment_contract(
+                {"candidates": [candidate]}, decision
+            )
+        selected = result.candidate_assessments[0]
+        self.assertEqual(result.chosen_tp1, 99.0)
+        self.assertEqual(result.chosen_tp2, 98.0)
+        self.assertEqual(result.target_arbitration["chosen_tp1"], 99.0)
+        self.assertEqual(result.target_arbitration["chosen_tp2"], 98.0)
+        self.assertEqual(selected["target_arbitration"]["chosen_tp1"], 99.0)
+        self.assertEqual(selected["target_arbitration"]["chosen_tp2"], 98.0)
+
     def test_live_wait_debug_is_not_replay_authoritative(self) -> None:
         payload = {
             "id": "req",
@@ -811,6 +1571,50 @@ class ReplayCacheAuthorityTests(unittest.TestCase):
             with self.subTest(name=name):
                 payload = {"runtime_inputs": {"tester_ai_mode_name": name}}
                 self.assertEqual(ai_gate._tester_workflow_source(payload), expected)
+
+    def test_live_forward_ignores_dormant_tester_mode_zero(self) -> None:
+        payload = {
+            "workload_mode": "LIVE_FORWARD",
+            "runtime_inputs": {
+                "tester_ai_mode": 0,
+                "tester_ai_mode_name": "tester_ai_record_only",
+            },
+        }
+        self.assertEqual(ai_gate._tester_workflow_source(payload), "live_forward")
+
+    def test_live_forward_does_not_export_tester_cache_when_disabled(self) -> None:
+        payload = {
+            "id": "live-request",
+            "workload_mode": "LIVE_FORWARD",
+            "runtime_inputs": {"tester_ai_mode": 0, "tester_ai_cache": False},
+        }
+        with patch("ai_gate.log"):
+            result = ai_gate._export_mql_tester_replay_cache(
+                payload, self._response(), Path("/nonexistent-bus")
+            )
+        self.assertEqual(
+            result, "skipped:live_forward_tester_cache_disabled"
+        )
+
+    def test_invalid_final_full_response_is_demoted_fail_closed(self) -> None:
+        response = self._response()
+        response["candidate_assessments"][0]["decision_state"] = "ABSTAIN"
+        response["candidate_assessments"][0]["verdict"] = "ABSTAIN"
+        response["candidate_assessments"][0]["raw_allow"] = False
+        response["candidate_assessments"][0]["suggested_risk_multiplier"] = 0.5
+        reason = ai_gate._mql_tester_cache_skip_reason(response)
+        self.assertEqual(reason, "invalid_candidate_assessment")
+        demoted = ai_gate._fail_closed_invalid_final_response(response, reason)
+        self.assertEqual(
+            demoted["decision_quality_tier"], "DEGRADED_NON_TRADING"
+        )
+        self.assertFalse(demoted["mandatory_fields_complete"])
+        self.assertFalse(demoted["allow"])
+        self.assertEqual(demoted["suggested_risk_multiplier"], 0.0)
+        self.assertIn(
+            "final_response_contract:invalid_candidate_assessment",
+            demoted["invalid_mandatory_fields"],
+        )
 
 
 class PolicyClassificationTests(unittest.TestCase):
@@ -965,6 +1769,35 @@ class DeploymentManifestTests(unittest.TestCase):
             else:
                 self.assertEqual(component["sha256"], "")
 
+    def test_bridge_startup_preserves_explicit_git_and_set_identity(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw, patch("ai_gate.log"):
+            bus = Path(raw)
+            path = bus / "config" / "deployment_manifest.json"
+            path.parent.mkdir(parents=True)
+            expected = {
+                "schema_version": ai_gate.DEPLOYMENT_MANIFEST_SCHEMA_VERSION,
+                "git_commit": "a" * 40,
+                "dirty_tree_status": "DIRTY",
+                "set_file_hash": "b" * 64,
+                "set_file_path": "C:/tester/AUG2.set",
+                "source_root": "C:/repo",
+                "identity_source": "explicit_git_toplevel_and_explicit_set_file",
+            }
+            path.write_text(json.dumps(expected), encoding="utf-8")
+            manifest = ai_gate._deployment_manifest_state(bus)
+
+        for key in (
+            "git_commit",
+            "dirty_tree_status",
+            "set_file_hash",
+            "set_file_path",
+            "source_root",
+            "identity_source",
+        ):
+            self.assertEqual(manifest[key], expected[key])
+
 
 class MqlParityTests(unittest.TestCase):
     """Python and MQL must agree on the same authoritative constants."""
@@ -988,6 +1821,24 @@ class MqlParityTests(unittest.TestCase):
     def test_mql_publishes_its_terminal_wait_budget(self) -> None:
         bridge = self._read("AIGateBridge.mqh")
         self.assertIn("ai_wait_timeout_ms", bridge)
+
+    def test_mql_cache_binding_matches_python_manifest_contract(self) -> None:
+        bridge = self._read("AIGateBridge.mqh")
+        engine = self._read("TradeEngine.mqh")
+        self.assertIn('+ "|" + dec.contract_manifest_hash', bridge)
+        self.assertIn('JsonKVStr("contract_manifest_hash", dec.contract_manifest_hash)', engine)
+        self.assertIn('JsonGetStringStrict(txt, "contract_manifest_hash", contract_manifest_hash)', engine)
+        self.assertIn('+ contract_manifest_hash + "|"', engine)
+        self.assertIn('_ReplaceTopLevelJsonStringField', engine)
+        self.assertIn('string spaced = "\\\"" + key + "\\\": \\\""', engine)
+        self.assertNotIn('_ReplaceUniqueJsonStringField', engine)
+        self.assertIn('existing_cache_artifact_preserved', engine)
+        self.assertNotIn('_AiDecisionJson("cached", signature, dec)', engine)
+        self.assertIn('selected.req_id = req_ids[r];', engine)
+        self.assertNotIn('selected.req_id = "";', engine)
+        self.assertIn('live_wait_debug_trading_explicitly_acknowledged=true', engine)
+        self.assertIn('authoritative_historical_backtest=false', engine)
+        self.assertIn('!InpTesterFreezeAiExecutionSnapshot', engine)
 
     def test_python_derives_terminal_timeout_from_the_payload(self) -> None:
         payload = {"runtime_inputs": {"ai_wait_timeout_ms": 90_000}}
