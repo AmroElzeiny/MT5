@@ -1,0 +1,752 @@
+{
+  "session": "591813800_1788837043_120154281",
+  "response_count": 196,
+  "request_artifacts": 207,
+  "candidate_assessments": 533,
+  "decision_state": {
+    "ABSTAIN": 147,
+    "REJECT": 44,
+    "APPROVE": 5
+  },
+  "decision_source": {
+    "ai_abstained": 147,
+    "hard_pre_gate": 11,
+    "ai_rejected": 28,
+    "ai_approved": 5,
+    "provider_transport_error": 4,
+    "local_pipeline_error": 1
+  },
+  "python_final_allow": {
+    "False": 191,
+    "True": 5
+  },
+  "raw_allow": {
+    "False": 191,
+    "True": 5
+  },
+  "model_raw_allow": {
+    "False": 191,
+    "True": 5
+  },
+  "final_resolver_reason": {
+    "analyst_abstain_below_adjudication_floor": 57,
+    "": 16,
+    "qualitative_block_upheld": 67,
+    "analyst_reject": 28,
+    "qualitative_dispute_unresolved": 23,
+    "adjudicator_resolved_qualitative_dispute": 1,
+    "analyst_approve_critic_pass": 4
+  },
+  "repeatability_status": {
+    "INSUFFICIENT_SAMPLE": 176,
+    "UNAVAILABLE": 20
+  },
+  "repeatability_required_live": {
+    "False": 196
+  },
+  "historical_evidence_state": {
+    "AVAILABLE": 173,
+    "INSUFFICIENT_SAMPLE": 23
+  },
+  "response_quality": {
+    "FULL_STRUCTURED": 180,
+    "DEGRADED_NON_TRADING": 16
+  },
+  "veto_code": {
+    "": 168,
+    "ai_veto_missing_mandatory_evidence": 13,
+    "ai_veto_structural_contradiction": 13,
+    "ai_veto_target_arbitration_incoherent": 1,
+    "ai_veto_sequence_contradiction": 1
+  },
+  "llm_quality_threshold_passed": {
+    "False": 175,
+    "True": 21
+  },
+  "rejection_codes": {
+    "ai_qualitative_consensus_abstain": 80,
+    "ai_abstain": 80,
+    "resolved_risk_multiplier_zero": 175,
+    "synthetic_fallback_crossed_obstacle_blocked": 11,
+    "ai_qualitative_consensus_reject": 95,
+    "missing_mandatory_evidence": 5,
+    "ai_veto": 28,
+    "ai_veto_missing_mandatory_evidence": 13,
+    "missing_trend_context": 1,
+    "adverse_history": 1,
+    "provider_transport_error": 4,
+    "degraded_ai_response_non_trading": 5,
+    "MISSING_REQUIRED_SEQUENCE": 1,
+    "SEQUENCE_UNRESOLVED": 2,
+    "MAJOR_OPPOSING_OBSTACLE": 1,
+    "ai_veto_structural_contradiction": 13,
+    "STRUCTURAL_CONTRADICTION": 2,
+    "TARGET_INFEASIBLE": 1,
+    "TARGET_PATH_UNCERTAIN": 2,
+    "HTF_OBSTACLE_PROXIMITY": 1,
+    "weak_retest": 1,
+    "nearby_major_obstacle": 1,
+    "TARGET_OBSTACLE": 1,
+    "INSUFFICIENT_LIQUIDITY_RR": 1,
+    "ai_veto_target_arbitration_incoherent": 1,
+    "family_branch_mismatch": 1,
+    "continuation_reversal_conflict": 1,
+    "ADVERSE_HISTORY": 2,
+    "branch_not_permitted": 1,
+    "thesis_contradiction": 2,
+    "THESIS_CONTRADICTION": 3,
+    "branch_profile_mismatch": 1,
+    "structural_thesis_contradiction": 1,
+    "adverse_historical_evidence": 1,
+    "missing_entry_confirmation": 1,
+    "local_pipeline_error": 1,
+    "structural_contradiction": 1,
+    "MISSING_ENTRY_CONFIRMATION": 1,
+    "MISSING_STRUCTURE_CONFIRMATION": 1,
+    "weak_breaker_origin": 1,
+    "weak_retest_quality": 1,
+    "STRUCTURAL_THESIS_CONTRADICTION": 1,
+    "NO_CONTINUATION_CONFIRMATION": 1,
+    "sequence_contradiction": 2,
+    "missing_mandatory_sequence": 1,
+    "UNRESOLVED_FOLLOW_THROUGH": 1,
+    "ADVERSE_SPARSE_HISTORY": 1,
+    "missing_required_sequence": 1,
+    "missing_structure_confirmation": 1,
+    "major_nearby_obstacle": 1,
+    "ai_veto_sequence_contradiction": 1,
+    "missing_ote_retracement": 1,
+    "MISSING_MANDATORY_EVIDENCE": 2,
+    "POOR_RETEST_QUALITY": 1
+  },
+  "families": {
+    "FAILED_BREAKOUT_RECLAIM": {
+      "n": 26,
+      "states": {
+        "REJECT": 26
+      },
+      "history": {
+        "INSUFFICIENT_SAMPLE": 26
+      },
+      "missing_required_evidence": 26,
+      "codes": {
+        "MISSING_REQUIRED_SEQUENCE": 3,
+        "SEQUENCE_UNRESOLVED": 3,
+        "missing_reclaim_sequence": 1,
+        "weak_sequence_quality": 1,
+        "missing_entry_confirmation": 4,
+        "missing_mandatory_evidence": 7,
+        "structural_contradiction": 3,
+        "MISSING_ENTRY_CONFIRMATION": 3,
+        "MISSING_STRUCTURE_CONFIRMATION": 4,
+        "missing_reclaim": 1,
+        "missing_structure_confirmation": 4,
+        "sequence_contradiction": 8,
+        "MISSING_MANDATORY_SEQUENCE": 1,
+        "missing_mandatory_sequence": 4,
+        "missing_required_sequence": 3,
+        "major_nearby_obstacle": 2,
+        "unmitigated_entry_risk": 1
+      }
+    },
+    "MICRO_BREAKER_RETEST": {
+      "n": 91,
+      "states": {
+        "ABSTAIN": 73,
+        "REJECT": 18
+      },
+      "history": {
+        "MIXED": 57,
+        "INSUFFICIENT_SAMPLE": 7,
+        "SUPPORTIVE": 27
+      },
+      "missing_required_evidence": 18,
+      "codes": {
+        "missing_mandatory_evidence": 6,
+        "WEAK_RETEST": 3,
+        "NEARBY_OBSTACLE": 1,
+        "MISSING_MANDATORY_EVIDENCE": 3,
+        "MAJOR_OPPOSING_OBSTACLE": 1,
+        "TARGET_PATH_UNCERTAIN": 1,
+        "HTF_OBSTACLE_PROXIMITY": 1,
+        "weak_retest": 1,
+        "nearby_major_obstacle": 1,
+        "missing_clean_retest": 1,
+        "weak_retest_quality": 2,
+        "SEQUENCE_UNRESOLVED": 1,
+        "missing_mandatory_family_evidence": 1,
+        "target_path_obstruction": 1,
+        "MANDATORY_EVIDENCE_MISSING": 1,
+        "RETEST_UNRESOLVED": 1,
+        "weak_breaker_origin": 1,
+        "NEAR_OBSTACLE": 1,
+        "missing_breaker_sequence": 1,
+        "POOR_RETEST_QUALITY": 1
+      }
+    },
+    "MICRO_CONTINUATION_FVG": {
+      "n": 183,
+      "states": {
+        "ABSTAIN": 162,
+        "REJECT": 19,
+        "APPROVE": 2
+      },
+      "history": {
+        "MIXED": 21,
+        "INSUFFICIENT_SAMPLE": 130,
+        "ADVERSE": 32
+      },
+      "missing_required_evidence": 18,
+      "codes": {
+        "missing_trend_context": 3,
+        "adverse_history": 4,
+        "obstacle_conflict": 2,
+        "STRUCTURAL_CONTRADICTION": 4,
+        "missing_mandatory_evidence": 1,
+        "sequence_contradiction": 1,
+        "WEAK_CONTINUATION_CONFIRMATION": 1,
+        "TARGET_QUALITY_FAILURE": 1,
+        "TARGET_OBSTACLE": 1,
+        "INSUFFICIENT_LIQUIDITY_RR": 1,
+        "family_branch_mismatch": 1,
+        "continuation_reversal_conflict": 1,
+        "branch_not_permitted": 1,
+        "thesis_contradiction": 3,
+        "THESIS_CONTRADICTION": 4,
+        "ADVERSE_HISTORY": 2,
+        "branch_profile_mismatch": 1,
+        "structural_thesis_contradiction": 1,
+        "adverse_historical_evidence": 1,
+        "MISSING_MANDATORY_EVIDENCE": 1,
+        "SEQUENCE_CONTRADICTION": 1
+      }
+    },
+    "MICRO_FVG_EDGE_REVERSAL": {
+      "n": 10,
+      "states": {
+        "ABSTAIN": 6,
+        "APPROVE": 4
+      },
+      "history": {
+        "INSUFFICIENT_SAMPLE": 8,
+        "MIXED": 2
+      },
+      "missing_required_evidence": 0,
+      "codes": {}
+    },
+    "MICRO_FVG_MID_REVERSAL": {
+      "n": 27,
+      "states": {
+        "ABSTAIN": 23,
+        "APPROVE": 2,
+        "REJECT": 2
+      },
+      "history": {
+        "ADVERSE": 16,
+        "INSUFFICIENT_SAMPLE": 4,
+        "MIXED": 7
+      },
+      "missing_required_evidence": 0,
+      "codes": {
+        "TARGET_PATH_UNCERTAIN": 2,
+        "OBSTACLE_PROXIMITY": 1,
+        "ADVERSE_HISTORY": 1,
+        "REGIME_THESIS_CONTRADICTION": 1,
+        "TARGET_ROUTE_CONSTRAINED": 1,
+        "THESIS_CONTRADICTION": 1,
+        "REGIME_MISMATCH": 1,
+        "UNRESOLVED_FOLLOW_THROUGH": 1,
+        "ADVERSE_SPARSE_HISTORY": 1
+      }
+    },
+    "MICRO_NESTED_CONTINUATION": {
+      "n": 74,
+      "states": {
+        "REJECT": 71,
+        "ABSTAIN": 3
+      },
+      "history": {
+        "MIXED": 27,
+        "ADVERSE": 41,
+        "INSUFFICIENT_SAMPLE": 4,
+        "SUPPORTIVE": 2
+      },
+      "missing_required_evidence": 5,
+      "codes": {
+        "THESIS_CONTRADICTION": 30,
+        "structural_thesis_contradiction": 8,
+        "STRUCTURAL_CONTRADICTION": 6,
+        "thesis_contradiction": 7,
+        "continuation_state_conflict": 1,
+        "WEAK_CONTINUATION": 3,
+        "MAJOR_OBSTACLE": 2,
+        "ai_veto_structural_contradiction": 5,
+        "ADVERSE_HISTORY": 6,
+        "structural_contradiction": 6,
+        "adverse_history": 2,
+        "weak_continuation": 3,
+        "zero_continuation_score": 1,
+        "nearby_major_obstacle": 1,
+        "continuation_reversal_conflict": 2,
+        "structural_thesis_conflict": 1,
+        "STRUCTURAL_THESIS_CONTRADICTION": 3,
+        "missing_mandatory_sequence": 1,
+        "THESIS_EVIDENCE_CONFLICT": 1,
+        "continuation_not_supported": 1,
+        "adverse_historical_evidence": 1,
+        "major_opposing_obstacle": 1,
+        "near_obstacle": 1,
+        "target_arbitration_incoherent": 1,
+        "thesis_contradicted": 1,
+        "no_continuation_evidence": 1,
+        "CONTINUATION_UNSUPPORTED": 1,
+        "NO_CONTINUATION_CONFIRMATION": 1,
+        "STRUCTURAL_OBSTACLE": 1,
+        "major_target_obstacle": 1,
+        "NEAR_OBSTACLE": 1,
+        "continuation_thesis_contradicted": 1,
+        "SEQUENCE_CONTRADICTION": 1,
+        "MISSING_MANDATORY_EVIDENCE": 1,
+        "sequence_contradiction": 1
+      }
+    },
+    "MICRO_OTE_REVERSAL": {
+      "n": 25,
+      "states": {
+        "ABSTAIN": 23,
+        "APPROVE": 1,
+        "REJECT": 1
+      },
+      "history": {
+        "ADVERSE": 3,
+        "MIXED": 21,
+        "INSUFFICIENT_SAMPLE": 1
+      },
+      "missing_required_evidence": 1,
+      "codes": {
+        "missing_ote_retracement": 1
+      }
+    },
+    "MICRO_RANGE_REENTRY": {
+      "n": 64,
+      "states": {
+        "REJECT": 63,
+        "ABSTAIN": 1
+      },
+      "history": {
+        "MIXED": 19,
+        "SUPPORTIVE": 2,
+        "INSUFFICIENT_SAMPLE": 8,
+        "ADVERSE": 35
+      },
+      "missing_required_evidence": 17,
+      "codes": {
+        "THESIS_CONTRADICTION": 11,
+        "SEQUENCE_UNRESOLVED": 1,
+        "structural_contradiction": 13,
+        "missing_mandatory_evidence": 4,
+        "REGIME_CONTRADICTION": 4,
+        "RANGE_NOT_ESTABLISHED": 1,
+        "STRUCTURAL_THESIS_CONTRADICTION": 5,
+        "REGIME_CONFLICT": 1,
+        "RANGE_THESIS_CONTRADICTED": 2,
+        "MANDATORY_SEQUENCE_MISSING": 1,
+        "thesis_contradiction": 2,
+        "expansion_dominant_regime": 1,
+        "STRUCTURAL_CONTRADICTION": 11,
+        "MISSING_MANDATORY_EVIDENCE": 8,
+        "MANDATORY_RANGE_SEQUENCE_MISSING": 1,
+        "ADVERSE_HISTORY": 4,
+        "structural_thesis_conflict": 2,
+        "MISSING_MANDATORY_SEQUENCE": 1,
+        "REGIME_THESIS_CONTRADICTION": 1,
+        "TARGET_INFEASIBLE": 1,
+        "adverse_history": 3,
+        "expansion_regime_contradiction": 1,
+        "missing_range_sequence": 1,
+        "range_expansion_conflict": 1,
+        "structural_thesis_contradiction": 4,
+        "adverse_historical_evidence": 1,
+        "poor_clearance": 1,
+        "OBSTACLE_CLEARANCE": 1,
+        "near_obstacle_failure_risk": 1,
+        "THESIS_CONTRADICTED": 1,
+        "ai_veto_structural_contradiction": 1,
+        "regime_contradiction": 1,
+        "missing_mandatory_sequence": 1,
+        "regime_thesis_conflict": 1,
+        "REGIME_THESIS_CONFLICT": 1,
+        "range_thesis_contradiction": 1,
+        "expansion_regime_conflict": 1,
+        "poor_target_clearance": 2,
+        "range_thesis_contradicted": 1,
+        "expansion_regime": 1
+      }
+    },
+    "MICRO_SESSION_REENTRY": {
+      "n": 33,
+      "states": {
+        "REJECT": 30,
+        "ABSTAIN": 3
+      },
+      "history": {
+        "ADVERSE": 11,
+        "MIXED": 18,
+        "INSUFFICIENT_SAMPLE": 4
+      },
+      "missing_required_evidence": 10,
+      "codes": {
+        "THESIS_CONTRADICTION": 8,
+        "SEQUENCE_UNRESOLVED": 1,
+        "structural_contradiction": 4,
+        "missing_mandatory_evidence": 2,
+        "MISSING_MANDATORY_EVIDENCE": 5,
+        "MISSING_REQUIRED_EVIDENCE": 1,
+        "SESSION_SEQUENCE_MISSING": 1,
+        "REGIME_CONTRADICTION": 1,
+        "structural_thesis_contradiction": 7,
+        "adverse_historical_evidence": 1,
+        "EXPANSION_REGIME": 1,
+        "adverse_historical_context": 1,
+        "ai_veto_structural_contradiction": 1,
+        "ADVERSE_HISTORY": 1,
+        "session_timing_risk": 1,
+        "near_obstacle": 1,
+        "STRUCTURAL_CONTRADICTION": 2,
+        "STRUCTURAL_THESIS_CONTRADICTION": 1,
+        "REGIME_THESIS_CONTRADICTION": 1,
+        "INSUFFICIENT_OPPOSING_CLEARANCE": 1,
+        "REGIME_MISMATCH": 1,
+        "ADJACENT_OBSTACLE": 1,
+        "TARGET_INFEASIBILITY": 1,
+        "regime_contradiction": 1,
+        "adverse_history": 1,
+        "OBSTACLE_PROXIMITY": 1,
+        "MANDATORY_EVIDENCE_UNRESOLVED": 1
+      }
+    }
+  },
+  "selected_missing_evidence": 20,
+  "analyst_selected_states": {
+    "ABSTAIN": 112,
+    "null": 16,
+    "APPROVE": 40,
+    "REJECT": 28
+  },
+  "analyst_approvals_lost_in_consensus": 35,
+  "lost_approval_objections": {
+    "ai_veto_target_arbitration_incoherent": 14,
+    "ai_veto_data_integrity_failure": 12,
+    "ai_veto_execution_plan_mismatch": 1,
+    "ai_veto_missing_mandatory_evidence": 10
+  },
+  "critic_objections": {
+    "ai_veto_sequence_contradiction": 5,
+    "ai_veto_target_arbitration_incoherent": 51,
+    "ai_veto_missing_mandatory_evidence": 26,
+    "ai_veto_data_integrity_failure": 38,
+    "ai_veto_execution_plan_mismatch": 7,
+    "ai_veto_structural_contradiction": 5
+  },
+  "analyst_families": {
+    "FAILED_BREAKOUT_RECLAIM": {
+      "n": 26,
+      "states": {
+        "REJECT": 26
+      },
+      "history": {
+        "INSUFFICIENT_SAMPLE": 26
+      },
+      "missing_required_evidence": 26
+    },
+    "MICRO_BREAKER_RETEST": {
+      "n": 91,
+      "states": {
+        "ABSTAIN": 52,
+        "REJECT": 18,
+        "APPROVE": 21
+      },
+      "history": {
+        "MIXED": 57,
+        "INSUFFICIENT_SAMPLE": 7,
+        "SUPPORTIVE": 27
+      },
+      "missing_required_evidence": 18
+    },
+    "MICRO_CONTINUATION_FVG": {
+      "n": 183,
+      "states": {
+        "ABSTAIN": 159,
+        "APPROVE": 5,
+        "REJECT": 19
+      },
+      "history": {
+        "MIXED": 21,
+        "INSUFFICIENT_SAMPLE": 130,
+        "ADVERSE": 32
+      },
+      "missing_required_evidence": 18
+    },
+    "MICRO_FVG_EDGE_REVERSAL": {
+      "n": 10,
+      "states": {
+        "ABSTAIN": 6,
+        "APPROVE": 4
+      },
+      "history": {
+        "INSUFFICIENT_SAMPLE": 8,
+        "MIXED": 2
+      },
+      "missing_required_evidence": 0
+    },
+    "MICRO_FVG_MID_REVERSAL": {
+      "n": 27,
+      "states": {
+        "ABSTAIN": 21,
+        "APPROVE": 4,
+        "REJECT": 2
+      },
+      "history": {
+        "ADVERSE": 16,
+        "INSUFFICIENT_SAMPLE": 4,
+        "MIXED": 7
+      },
+      "missing_required_evidence": 0
+    },
+    "MICRO_NESTED_CONTINUATION": {
+      "n": 74,
+      "states": {
+        "REJECT": 71,
+        "ABSTAIN": 3
+      },
+      "history": {
+        "MIXED": 27,
+        "ADVERSE": 41,
+        "INSUFFICIENT_SAMPLE": 4,
+        "SUPPORTIVE": 2
+      },
+      "missing_required_evidence": 5
+    },
+    "MICRO_OTE_REVERSAL": {
+      "n": 25,
+      "states": {
+        "ABSTAIN": 15,
+        "APPROVE": 9,
+        "REJECT": 1
+      },
+      "history": {
+        "ADVERSE": 3,
+        "MIXED": 21,
+        "INSUFFICIENT_SAMPLE": 1
+      },
+      "missing_required_evidence": 1
+    },
+    "MICRO_RANGE_REENTRY": {
+      "n": 64,
+      "states": {
+        "REJECT": 63,
+        "APPROVE": 1
+      },
+      "history": {
+        "MIXED": 19,
+        "SUPPORTIVE": 2,
+        "INSUFFICIENT_SAMPLE": 8,
+        "ADVERSE": 35
+      },
+      "missing_required_evidence": 17
+    },
+    "MICRO_SESSION_REENTRY": {
+      "n": 33,
+      "states": {
+        "REJECT": 30,
+        "ABSTAIN": 3
+      },
+      "history": {
+        "ADVERSE": 11,
+        "MIXED": 18,
+        "INSUFFICIENT_SAMPLE": 4
+      },
+      "missing_required_evidence": 10
+    }
+  },
+  "filter_projection": {
+    "total": 533,
+    "would_filter": 89,
+    "filtered_raw_approvals": 0,
+    "filtered_final_approvals": 0,
+    "stale": 0,
+    "empty_request_groups": 21
+  },
+  "approved": [
+    {
+      "id": "591813800_1788837043_120154281_1788841277_#Germany40_5208",
+      "setup_family": "micro_breaker_retest",
+      "entry_branch": "breaker_retest",
+      "repeatability_status": "INSUFFICIENT_SAMPLE",
+      "repeatability_required_live": false,
+      "historical_evidence_state": "AVAILABLE",
+      "llm_quality_score": 6.5,
+      "llm_quality_score_threshold": 7.2,
+      "llm_quality_threshold_passed": false,
+      "reasons": "{'ai_reasons': 'provider=openai_remote_api; model=gpt-5.6-luna; tokens=25000; snapshots=0; The required FVG edge sequence is supported: displacement/FVG is deterministic, the edge remains virgin and valid, and the feasible current target passes minimum RR.', 'repeatability_authority': {'status': 'INSUFFICIENT_SAMPLE', 'score_threshold_authority': False, 'trading_eligible': False, 'reason': 'repeatability_insufficient_sample', 'group_key': '7796ace93c34b44c9f1768a34c6392c71...",
+      "selected_candidate_id": "#Germany40|1788775200|1788793200|0|fvg_edge|25963.55|fvg_edge|0",
+      "chosen_rr2": 1.846812,
+      "audited_selected_taxonomy": "MICRO_FVG_EDGE_REVERSAL"
+    },
+    {
+      "id": "591813800_1788837043_120154281_1788843091_#Germany40_7893",
+      "setup_family": "micro_breaker_retest",
+      "entry_branch": "breaker_retest",
+      "repeatability_status": "INSUFFICIENT_SAMPLE",
+      "repeatability_required_live": false,
+      "historical_evidence_state": "AVAILABLE",
+      "llm_quality_score": 5.9,
+      "llm_quality_score_threshold": 7.2,
+      "llm_quality_threshold_passed": false,
+      "reasons": "{'ai_reasons': 'provider=openai_remote_api; model=gpt-5.6-luna; tokens=25000; snapshots=0; The mandatory displacement/FVG and edge-entry sequence is supported, the FVG remains virgin and valid, and LTF confirmation is present. HTF BOS is optional for this family.', 'repeatability_authority': {'status': 'INSUFFICIENT_SAMPLE', 'score_threshold_authority': False, 'trading_eligible': False, 'reason': 'repeatability_insufficient_sample', 'group_key': '7796ace93c34b44c9f1768a34c...",
+      "selected_candidate_id": "#Germany40|1788775200|1788793200|0|fvg_edge|25963.55|fvg_edge|0",
+      "chosen_rr2": 2.022998,
+      "audited_selected_taxonomy": "MICRO_FVG_EDGE_REVERSAL"
+    },
+    {
+      "id": "591813800_1788837043_120154281_1788844299_#Germany40_9560",
+      "setup_family": "micro_breaker_retest",
+      "entry_branch": "breaker_retest",
+      "repeatability_status": "INSUFFICIENT_SAMPLE",
+      "repeatability_required_live": false,
+      "historical_evidence_state": "AVAILABLE",
+      "llm_quality_score": 5.8,
+      "llm_quality_score_threshold": 7.2,
+      "llm_quality_threshold_passed": false,
+      "reasons": "{'ai_reasons': 'provider=openai_remote_api; model=gpt-5.6-luna; tokens=25000; snapshots=0; Approve cautiously: the required displacement/FVG and edge-entry sequence is present, the FVG remains virgin, and keep-current target is feasible despite moderate obstruction.', 'repeatability_authority': {'status': 'INSUFFICIENT_SAMPLE', 'score_threshold_authority': False, 'trading_eligible': False, 'reason': 'repeatability_insufficient_sample', 'group_key': '7796ace93c34b44c9f1768a...",
+      "selected_candidate_id": "#Germany40|1788775200|1788793200|0|fvg_edge|25963.55|fvg_edge|0",
+      "chosen_rr2": 2.022998,
+      "audited_selected_taxonomy": "MICRO_FVG_EDGE_REVERSAL"
+    },
+    {
+      "id": "591813800_1788837043_120154281_1788848530_GOLD_5856",
+      "setup_family": "micro_po3_reversal",
+      "entry_branch": "ote_inside_fvg",
+      "repeatability_status": "INSUFFICIENT_SAMPLE",
+      "repeatability_required_live": false,
+      "historical_evidence_state": "AVAILABLE",
+      "llm_quality_score": 7.4,
+      "llm_quality_score_threshold": 7.2,
+      "llm_quality_threshold_passed": true,
+      "reasons": "{'ai_reasons': 'provider=openai_remote_api; model=gpt-5.6-luna; tokens=25000; snapshots=0; Approve: required source context, displacement, and OTE retracement are evidenced; FVG remains valid and target arbitration has one feasible current target.', 'repeatability_authority': {'status': 'INSUFFICIENT_SAMPLE', 'score_threshold_authority': False, 'trading_eligible': False, 'reason': 'repeatability_insufficient_sample', 'group_key': '7796ace93c34b44c9f1768a34c6392c71e2aeba87e...",
+      "selected_candidate_id": "GOLD|1788789600|1788793200|1788836400|ote_inside_fvg|4399.80|ote_inside_fvg|0",
+      "chosen_rr2": 2.178635,
+      "audited_selected_taxonomy": "MICRO_OTE_REVERSAL"
+    },
+    {
+      "id": "591813800_1788837043_120154281_1788878753_GBPUSD_12399",
+      "setup_family": "micro_nested_continuation",
+      "entry_branch": "breaker_retest",
+      "repeatability_status": "INSUFFICIENT_SAMPLE",
+      "repeatability_required_live": false,
+      "historical_evidence_state": "AVAILABLE",
+      "llm_quality_score": 7.1,
+      "llm_quality_score_threshold": 7.2,
+      "llm_quality_threshold_passed": false,
+      "reasons": "{'ai_reasons': 'provider=openai_remote_api; model=gpt-5.6-luna; tokens=25000; snapshots=0; Midpoint reversal evidence is coherent: strong displacement, valid mitigated FVG, intact structure, and feasible current target. Moderate alignment and nearby obstruction warrant reduced size.', 'repeatability_authority': {'status': 'INSUFFICIENT_SAMPLE', 'score_threshold_authority': False, 'trading_eligible': False, 'reason': 'repeatability_insufficient_sample', 'group_key': '7796ac...",
+      "selected_candidate_id": "GBPUSD|1788840000|1788843600|1788847200|fvg_mid|1.35423|fvg_mid|0",
+      "chosen_rr2": 3.226087,
+      "audited_selected_taxonomy": "MICRO_FVG_MID_REVERSAL"
+    }
+  ],
+  "distinct_candidate_ids": 153,
+  "usage": {
+    "rows": 487,
+    "operations": {
+      "trade_gate.provider_neutral_analyst": 196,
+      "trade_gate.provider_neutral_critic": 192,
+      "trade_gate.provider_neutral_adjudicator": 97,
+      "trade_gate.provider_neutral_analyst_evidence_repair": 2
+    },
+    "status": {
+      "ok": 487
+    },
+    "unique_requests": 196,
+    "models": {
+      "gpt-5.6-luna": 487
+    }
+  },
+  "journal_final": [
+    "MM\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] scans_total=1976 po3_context_created_total=1401 fvg_candidates_created_total=1996 plans_valid_total=7933",
+    "MK\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] ai_cache_hits_total=0 ai_cache_misses_total=0 ai_cache_miss_due_to_schema_version_total=0 tester_ai_cache_miss_total=0 ai_cache_miss_no_artifact_total=0 record_only_requests_exported=0 record_only_duplicate_signatures_skipped=0",
+    "PN\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] decision_input_hash=603435229 decision_identity_frozen=true decision_identity_drift_events=0 cache_cohort=unprobed cache_cohort_match=false",
+    "RL\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] ai_requests_queued_total=207 tester_ai_wait_started_total=0 tester_ai_wait_completed_total=0 tester_ai_wait_timeout_total=0 ai_results_rejected_stale_total=0 ai_results_accepted_after_blocking_wait_total=0 ai_advisories_total=196 ai_final_allow_true_total=5 watchlist_added_total=5 orders_placed_total=3 trades_opened_total=1",
+    "NQ\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] target_choice.synthetic_rr_fallback=0 target_choice.synthetic_rr_capped_to_max_distance=0 target_choice.partial_before_obstacle_then_liquidity=0 target_choice.liquidity_target=5 target_choice.capped_before_obstacle=0 target_choice.cap_before_opposing_imbalance=0 target_choice.capped_before_opposing_imbalance=0 target_choice.capped_before_htf_opposing_imbalance=0",
+    "OE\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] blocker_class.minor=0 blocker_class.moderate=5 blocker_class.major=0 blocker_class.killer=0 blocker_class.unknown=0",
+    "CN\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] watchlist_precheck.reject.price_broke_fvg_high=0 watchlist_precheck.reject.price_broke_fvg_low=0 watchlist_precheck.reject.opposite_confirmed_po3=0 watchlist_precheck.reject.structural_invalidation_high=0 tester_ai.live_wait_debug.non_tradeable_due_to_sim_time_jump=0 tester_ai.live_wait_debug.trading_disabled=0",
+    "RL\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] target_feasibility.synthetic_infeasible_max_distance=436 target_feasibility.synthetic_capped_to_max_distance=73 reject.ai_chosen_target_exceeds_max_distance=15 reject.ai_chose_infeasible_target=0 reject.tester_ai_cache_miss=0",
+    "JD\t0\t15:48:12.889\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] mpc_candidates_blocked_total=0 mpc_ai_calls_saved_total=0 mpc_watchlist_blocks_total=0 mpc_execution_blocks_total=0",
+    "RO\t0\t15:48:12.890\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] broker_cost_cache_hits_total=53166 broker_cost_cache_misses_total=187 broker_cost_history_epoch=3 broker_cost_cache_seconds=3600 broker_cost_compute_seconds=0.011 broker_cost_compute_us_per_call=58.2",
+    "PE\t0\t15:48:12.890\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] trade_meta_writes_total=8467 trade_meta_writes_skipped_identical=133208 trade_meta_parses_total=1883 trade_meta_parses_skipped_identical=26070 trade_meta_memo_entries=256 trade_meta_write_seconds=26.949 trade_meta_parse_seconds=8.067 trade_meta_parse_us_per_call=4284.1",
+    "LL\t0\t15:48:12.890\tPO3_AIGate_ScannerEA (GBPUSD,M30)\t[PO3_AIGate] [final_summary] maintain_positions_calls_total=44944 maintain_positions_seconds=75.302 maintain_positions_us_per_call=1675.5"
+  ],
+  "journal_reasons": {
+    "none": 1,
+    "policy_disabled": 6,
+    "runtime_input_incompatible": 1,
+    "policy_file_missing": 4,
+    "feasible_priority_target": 1387,
+    "ok": 2123,
+    "ai_chosen_target_rr_too_low": 144,
+    "target_already_reached": 76,
+    "no_closed_sweep": 302,
+    "price_broke_fvg_high": 73,
+    "slope_against_trade": 311,
+    "degraded_ai_response_non_trading": 16,
+    "{'ai_reasons':": 147,
+    "ai_abstain": 147,
+    "ai_chosen_target_already_reached": 232,
+    "synthetic_fallback_exceeds_max_target_distance": 119,
+    "ai_veto_missing_mandatory_evidence:Breaker": 1,
+    "ai_raw_allow_false": 28,
+    "ai_veto_missing_mandatory_evidence:Required": 7,
+    "no_feasible_target": 968,
+    "target_model_tp1_below_min_reward": 53,
+    "structural_invalidation_high": 42,
+    "ai_chosen_target_exceeds_max_distance": 38,
+    "synthetic_fallback_target_already_reached": 189,
+    "execution_fingerprint_mismatch:sl_drift_exceeds_contract": 6,
+    "timeout": 16,
+    "all_final_pending_execution_gates_passed_broker_not_yet_called": 2,
+    "pending_order_method_invoked": 2,
+    "pending_order_accepted_awaiting_fill": 2,
+    "structural_invalidation_low": 54,
+    "price_broke_fvg_low": 68,
+    "pending_waited_3_bars": 1,
+    "ai_veto_structural_contradiction:A": 2,
+    "ai_veto_structural_contradiction:Range-reentry": 1,
+    "ai_veto_structural_contradiction:Weak": 1,
+    "too_far_from_vwap": 1,
+    "displacement_quality_failed": 4,
+    "ai_veto_target_arbitration_incoherent:The": 1,
+    "stop_distance_exceeds_max_frac_of_price": 7,
+    "ai_veto_structural_contradiction:The": 4,
+    "ai_veto_missing_mandatory_evidence:The": 2,
+    "ai_veto_structural_contradiction:MICRO_CONTINUATION_FVG": 1,
+    "ai_veto_structural_contradiction:Breaker-retest": 1,
+    "ai_veto_structural_contradiction:Continuation": 1,
+    "max_distance_after_entry_change": 15,
+    "ai_veto_missing_mandatory_evidence:Mandatory": 2,
+    "ai_veto_structural_contradiction:Zero": 1,
+    "ai_veto_structural_contradiction:MICRO_NESTED_CONTINUATION": 1,
+    "ai_veto_sequence_contradiction:Required": 1,
+    "all_final_market_execution_gates_passed_broker_not_yet_called": 1,
+    "market_order_method_invoked": 1,
+    "market_order_accepted_by_broker": 1,
+    "market_fill_exact_identity_verified": 1,
+    "entry_fill_exact_identity_verified": 1,
+    "ai_veto_missing_mandatory_evidence:Breaker-retest": 1,
+    "stuck_no_mfe": 3,
+    "management_close_submitted_to_broker": 1,
+    "broker_result_and_position_volume_verified": 1,
+    "position_identifier_still_open": 1,
+    "awaiting_completed_trade_ledger": 1,
+    "position_identifier_closed": 1,
+    "awaiting_original_policy_horizon": 2
+  }
+}

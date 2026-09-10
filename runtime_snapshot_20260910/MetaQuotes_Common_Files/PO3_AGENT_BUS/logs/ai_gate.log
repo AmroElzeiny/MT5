@@ -1,0 +1,334 @@
+[ai_gate] Bus root: C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AGENT_BUS
+[ai_gate] Watching requests:  C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AGENT_BUS\requests
+[ai_gate] Writing responses: C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AGENT_BUS\responses
+[ai_gate] Stale/bin:         C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AGENT_BUS\stale
+[ai_gate] Model chain:       gpt-5-nano, gpt-5-mini
+[ai_gate] Analytics jobs:    C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AGENT_BUS\logs\analytics_jobs
+[ai_gate] Processing scan_1740370833_GOLD_11236.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740370833_GOLD_11236.json -> scan_1740370833_GOLD_11236.json allow=True score=7.73 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740655628_GOLD_20081.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740655628_GOLD_20081.json -> scan_1740655628_GOLD_20081.json allow=True score=7.05 conf=0.68 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740376741_GOLD_14728.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740376741_GOLD_14728.json -> watch_manage_1740376741_GOLD_14728.json allow=True score=7.76 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740377928_GOLD_29163.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740377928_GOLD_29163.json -> scan_1740377928_GOLD_29163.json allow=True score=7.81 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740382382_GOLD_19916.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740382382_GOLD_19916.json -> watch_manage_1740382382_GOLD_19916.json allow=False score=6.85 conf=0.41 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740390181_GOLD_26026.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740390181_GOLD_26026.json -> scan_1740390181_GOLD_26026.json allow=True score=7.42 conf=0.73 chosen=1 cand=3 missing=0
+[ai_gate] Processing watch_manage_1740396301_GOLD_13476.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740396301_GOLD_13476.json -> watch_manage_1740396301_GOLD_13476.json allow=True score=7.42 conf=0.73 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740397505_GOLD_3074.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740397505_GOLD_3074.json -> scan_1740397505_GOLD_3074.json allow=True score=7.3 conf=0.65 chosen=0 cand=3 missing=0
+[ai_gate] Processing scan_1740405568_GOLD_15498.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740405568_GOLD_15498.json -> scan_1740405568_GOLD_15498.json allow=False score=6.83 conf=0.57 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1740410761_GOLD_11469.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740410761_GOLD_11469.json -> watch_manage_1740410761_GOLD_11469.json allow=True score=6.34 conf=0.67 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740429089_GOLD_15243.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740429089_GOLD_15243.json -> scan_1740429089_GOLD_15243.json allow=True score=7.64 conf=0.74 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1740435301_GOLD_16728.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740435301_GOLD_16728.json -> watch_manage_1740435301_GOLD_16728.json allow=True score=7.68 conf=0.73 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740445494_GOLD_11476.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740445494_GOLD_11476.json -> scan_1740445494_GOLD_11476.json allow=True score=7.95 conf=0.67 chosen=0 cand=3 missing=0
+[ai_gate] Processing scan_1740468193_GOLD_970.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740468193_GOLD_970.json -> scan_1740468193_GOLD_970.json allow=True score=7.95 conf=0.64 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740475026_GOLD_16739.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740475026_GOLD_16739.json -> watch_manage_1740475026_GOLD_16739.json allow=True score=7.95 conf=0.61 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740475322_GOLD_5772.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740475322_GOLD_5772.json -> scan_1740475322_GOLD_5772.json allow=True score=7.95 conf=0.64 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740482041_GOLD_27095.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740482041_GOLD_27095.json -> watch_manage_1740482041_GOLD_27095.json allow=True score=7.95 conf=0.64 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740483250_GOLD_21513.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740483250_GOLD_21513.json -> scan_1740483250_GOLD_21513.json allow=True score=7.95 conf=0.59 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740490141_GOLD_28923.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740490141_GOLD_28923.json -> watch_manage_1740490141_GOLD_28923.json allow=True score=7.95 conf=0.6 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740498234_GOLD_31338.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740498234_GOLD_31338.json -> scan_1740498234_GOLD_31338.json allow=False score=7.89 conf=0.53 chosen=1 cand=3 missing=0
+[ai_gate] Processing scan_1740561699_GOLD_32379.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740561699_GOLD_32379.json -> scan_1740561699_GOLD_32379.json allow=True score=7.67 conf=0.66 chosen=1 cand=3 missing=0
+[ai_gate] Processing watch_manage_1740568261_GOLD_13983.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740568261_GOLD_13983.json -> watch_manage_1740568261_GOLD_13983.json allow=True score=7.45 conf=0.73 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740569465_GOLD_24502.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740569465_GOLD_24502.json -> scan_1740569465_GOLD_24502.json allow=True score=7.54 conf=0.7 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740576541_GOLD_16281.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740576541_GOLD_16281.json -> watch_manage_1740576541_GOLD_16281.json allow=True score=7.44 conf=0.74 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740589165_GOLD_27475.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740589165_GOLD_27475.json -> scan_1740589165_GOLD_27475.json allow=True score=7.49 conf=0.74 chosen=0 cand=2 missing=0
+[ai_gate] Processing watch_manage_1740595321_GOLD_27017.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740595321_GOLD_27017.json -> watch_manage_1740595321_GOLD_27017.json allow=False score=6.54 conf=0.43 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740597102_GOLD_26081.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740597102_GOLD_26081.json -> scan_1740597102_GOLD_26081.json allow=True score=7.48 conf=0.75 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1740603841_GOLD_31428.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740603841_GOLD_31428.json -> watch_manage_1740603841_GOLD_31428.json allow=True score=7.46 conf=0.72 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740655453_GOLD_15614.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740655453_GOLD_15614.json -> scan_1740655453_GOLD_15614.json allow=True score=7.33 conf=0.72 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740662041_GOLD_10010.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740662041_GOLD_10010.json -> watch_manage_1740662041_GOLD_10010.json allow=True score=7.65 conf=0.62 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1740967163_GOLD_26438.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1740967163_GOLD_26438.json -> scan_1740967163_GOLD_26438.json allow=True score=7.95 conf=0.66 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1740973741_GOLD_5009.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1740973741_GOLD_5009.json -> watch_manage_1740973741_GOLD_5009.json allow=False score=7.57 conf=0.57 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741008518_GOLD_9964.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741008518_GOLD_9964.json -> scan_1741008518_GOLD_9964.json allow=True score=7.4 conf=0.58 chosen=0 cand=2 missing=0
+[ai_gate] Processing scan_1741088775_GOLD_15167.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741088775_GOLD_15167.json -> scan_1741088775_GOLD_15167.json allow=True score=7.57 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741095895_GOLD_27066.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741095895_GOLD_27066.json -> scan_1741095895_GOLD_27066.json allow=True score=7.54 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1741101601_GOLD_24631.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741101601_GOLD_24631.json -> watch_manage_1741101601_GOLD_24631.json allow=True score=7.57 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741195527_GOLD_13918.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741195527_GOLD_13918.json -> scan_1741195527_GOLD_13918.json allow=True score=7.7 conf=0.69 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1741201921_GOLD_12941.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741201921_GOLD_12941.json -> watch_manage_1741201921_GOLD_12941.json allow=True score=7.7 conf=0.7 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741206421_GOLD_29094.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741206421_GOLD_29094.json -> scan_1741206421_GOLD_29094.json allow=True score=7.55 conf=0.67 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1741212601_GOLD_9962.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741212601_GOLD_9962.json -> watch_manage_1741212601_GOLD_9962.json allow=True score=7.6 conf=0.69 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741233029_GOLD_28834.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741233029_GOLD_28834.json -> scan_1741233029_GOLD_28834.json allow=True score=7.48 conf=0.74 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1741239781_GOLD_31358.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741239781_GOLD_31358.json -> watch_manage_1741239781_GOLD_31358.json allow=True score=7.52 conf=0.73 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741262585_GOLD_5335.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741262585_GOLD_5335.json -> scan_1741262585_GOLD_5335.json allow=True score=7.65 conf=0.62 chosen=0 cand=2 missing=0
+[ai_gate] Processing watch_manage_1741268701_GOLD_31607.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741268701_GOLD_31607.json -> watch_manage_1741268701_GOLD_31607.json allow=False score=7.69 conf=0.59 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741282495_GOLD_9542.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741282495_GOLD_9542.json -> scan_1741282495_GOLD_9542.json allow=False score=7.95 conf=0.56 chosen=0 cand=2 missing=0
+[ai_gate] Processing scan_1741294285_GOLD_20871.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741294285_GOLD_20871.json -> scan_1741294285_GOLD_20871.json allow=True score=7.95 conf=0.64 chosen=0 cand=2 missing=0
+[ai_gate] Processing watch_manage_1741301161_GOLD_32420.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741301161_GOLD_32420.json -> watch_manage_1741301161_GOLD_32420.json allow=True score=7.95 conf=0.64 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741367152_GOLD_11865.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741367152_GOLD_11865.json -> scan_1741367152_GOLD_11865.json allow=True score=7.44 conf=0.74 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741594153_GOLD_23453.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741594153_GOLD_23453.json -> scan_1741594153_GOLD_23453.json allow=False score=7.95 conf=0.6 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741628030_GOLD_6873.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741628030_GOLD_6873.json -> scan_1741628030_GOLD_6873.json allow=True score=7.75 conf=0.69 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741689937_GOLD_9994.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741689937_GOLD_9994.json -> scan_1741689937_GOLD_9994.json allow=True score=7.86 conf=0.68 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1741695961_GOLD_4257.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741695961_GOLD_4257.json -> watch_manage_1741695961_GOLD_4257.json allow=True score=7.89 conf=0.68 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741696844_GOLD_10203.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741696844_GOLD_10203.json -> scan_1741696844_GOLD_10203.json allow=True score=7.72 conf=0.73 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1741700581_GOLD_14480.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741700581_GOLD_14480.json -> watch_manage_1741700581_GOLD_14480.json allow=True score=7.76 conf=0.72 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741707153_GOLD_9466.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741707153_GOLD_9466.json -> scan_1741707153_GOLD_9466.json allow=True score=7.72 conf=0.73 chosen=0 cand=2 missing=0
+[ai_gate] Processing watch_manage_1741713541_GOLD_1177.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741713541_GOLD_1177.json -> watch_manage_1741713541_GOLD_1177.json allow=True score=7.76 conf=0.72 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741728532_GOLD_2577.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741728532_GOLD_2577.json -> scan_1741728532_GOLD_2577.json allow=True score=7.65 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741758581_GOLD_29985.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741758581_GOLD_29985.json -> scan_1741758581_GOLD_29985.json allow=True score=7.95 conf=0.72 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1741764901_GOLD_7218.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741764901_GOLD_7218.json -> watch_manage_1741764901_GOLD_7218.json allow=True score=7.73 conf=0.7 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741911326_GOLD_2999.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741911326_GOLD_2999.json -> scan_1741911326_GOLD_2999.json allow=True score=7.95 conf=0.75 chosen=0 cand=2 missing=0
+[ai_gate] Processing watch_manage_1741917661_GOLD_7794.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741917661_GOLD_7794.json -> watch_manage_1741917661_GOLD_7794.json allow=True score=7.92 conf=0.68 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741923989_GOLD_6285.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741923989_GOLD_6285.json -> scan_1741923989_GOLD_6285.json allow=True score=7.95 conf=0.73 chosen=0 cand=2 missing=0
+[ai_gate] Processing watch_manage_1741930983_GOLD_16094.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1741930983_GOLD_16094.json -> watch_manage_1741930983_GOLD_16094.json allow=True score=8.67 conf=0.76 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1741942086_GOLD_628.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741942086_GOLD_628.json -> scan_1741942086_GOLD_628.json allow=True score=7.35 conf=0.59 chosen=0 cand=2 missing=0
+[ai_gate] Processing scan_1741969590_GOLD_22967.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741969590_GOLD_22967.json -> scan_1741969590_GOLD_22967.json allow=True score=7.95 conf=0.63 chosen=0 cand=2 missing=0
+[ai_gate] Processing scan_1741976467_GOLD_25763.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1741976467_GOLD_25763.json -> scan_1741976467_GOLD_25763.json allow=True score=7.95 conf=0.66 chosen=1 cand=2 missing=0
+[ai_gate] Processing scan_1742200648_GOLD_1957.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1742200648_GOLD_1957.json -> scan_1742200648_GOLD_1957.json allow=True score=7.74 conf=0.68 chosen=0 cand=2 missing=0
+[ai_gate] Processing scan_1742212706_GOLD_16913.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1742212706_GOLD_16913.json -> scan_1742212706_GOLD_16913.json allow=True score=7.63 conf=0.72 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1742219161_GOLD_9130.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1742219161_GOLD_9130.json -> watch_manage_1742219161_GOLD_9130.json allow=True score=7.67 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1742231741_GOLD_24735.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1742231741_GOLD_24735.json -> scan_1742231741_GOLD_24735.json allow=True score=7.95 conf=0.77 chosen=1 cand=2 missing=0
+[ai_gate] Processing watch_manage_1742237941_GOLD_32332.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1742237941_GOLD_32332.json -> watch_manage_1742237941_GOLD_32332.json allow=True score=7.68 conf=0.7 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1742248719_GOLD_13036.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1742248719_GOLD_13036.json -> scan_1742248719_GOLD_13036.json allow=True score=7.56 conf=0.69 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1742255027_GOLD_30800.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1742255027_GOLD_30800.json -> watch_manage_1742255027_GOLD_30800.json allow=True score=7.59 conf=0.71 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1742920699_GOLD_1193.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1742920699_GOLD_1193.json -> scan_1742920699_GOLD_1193.json allow=True score=7.87 conf=0.67 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1743057611_GOLD_21757.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1743057611_GOLD_21757.json -> scan_1743057611_GOLD_21757.json allow=True score=7.95 conf=0.71 chosen=0 cand=2 missing=0
+[ai_gate] Processing scan_1743067544_GOLD_29963.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1743067544_GOLD_29963.json -> scan_1743067544_GOLD_29963.json allow=True score=7.95 conf=0.59 chosen=0 cand=1 missing=0
+[ai_gate] Processing watch_manage_1743073981_GOLD_13782.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1743073981_GOLD_13782.json -> watch_manage_1743073981_GOLD_13782.json allow=True score=7.95 conf=0.62 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1743085084_GOLD_7549.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1743085084_GOLD_7549.json -> scan_1743085084_GOLD_7549.json allow=True score=8.92 conf=0.74 chosen=1 cand=3 missing=0
+[ai_gate] Processing scan_1743092606_GOLD_31665.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1743092606_GOLD_31665.json -> scan_1743092606_GOLD_31665.json allow=True score=7.95 conf=0.6 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1743099061_GOLD_13903.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1743099061_GOLD_13903.json -> watch_manage_1743099061_GOLD_13903.json allow=True score=7.95 conf=0.62 chosen=0 cand=1 missing=0
+[ai_gate] Processing scan_1743110476_GOLD_30695.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK scan_1743110476_GOLD_30695.json -> scan_1743110476_GOLD_30695.json allow=True score=7.95 conf=0.64 chosen=0 cand=3 missing=0
+[ai_gate] Processing watch_manage_1743116686_GOLD_1802.json
+[ai_gate] snapshot status for GOLD: htf=capture_failed; ltf=capture_failed
+[ai_gate] Using model=gpt-5-nano reasoning_effort=minimal
+[ai_gate] OK watch_manage_1743116686_GOLD_1802.json -> watch_manage_1743116686_GOLD_1802.json allow=True score=7.95 conf=0.63 chosen=0 cand=1 missing=0

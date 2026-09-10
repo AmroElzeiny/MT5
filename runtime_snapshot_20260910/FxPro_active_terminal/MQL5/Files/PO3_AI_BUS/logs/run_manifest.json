@@ -1,0 +1,23 @@
+{
+  "contract_manifest_hash": "1024838206",
+  "decision_schema_version": "20260724_canonical_frozen_request_v10",
+  "ea_name": "",
+  "ex5_bytes": 0,
+  "ex5_hash": "",
+  "ex5_path": "",
+  "host": "WIN-FOVCL5KBJ2M",
+  "model": "harness-deterministic-v1",
+  "mql_session_id": "",
+  "prompt_contract_version": "20260724_canonical_frozen_request_v12",
+  "provider_id": "local_openai_compatible",
+  "provider_mode": "LOCAL_OPENAI_COMPATIBLE",
+  "provider_process_id": 26900,
+  "python_session_id": "python_26900_1785502702",
+  "run_manifest_version": "20260731_correlated_run_manifest_v1",
+  "runtime_input_hash": "",
+  "started_at": 1785502702.2139726,
+  "test_period_from": "",
+  "test_period_to": "",
+  "test_run_id": "run_9efc6a58e614abd6",
+  "tester_mode": ""
+}

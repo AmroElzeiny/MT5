@@ -2108,6 +2108,389 @@ addressable by this build.
 
 ---
 
+## 4aa. Live run 16:33–21:29 (2026-09-07) — 429 admission retry + deferral spin fixed
+
+The run produced 1 pending order, 1 filled position and 1 management penalty, then no new
+approval for five hours. Audited on request; both healthy parts and two real defects found.
+
+### Healthy — the execution path is clean end to end
+
+| | evidence |
+|---|---|
+| pending | `#Japan225` BUY_LIMIT ticket 325185007, 16:00:14, `state=ORDER_ACCEPTED_PENDING` retcode 10009; reattached after the 16:35 EA restart; never filled, `pending_orders_expired=0` |
+| filled | `EURCAD` MARKET_BUY ticket 325229449 / deal 299785123, 16:36:29 @ 1.60636, `state=POSITION_FILLED_IDENTITY_VERIFIED attribution_verified=true quarantine=false` — **no quarantine, no PENDING_SETTLEMENT**, so §4x behaves correctly here |
+| penalty | 18:36:28 `management_transition HEALTHY→WARNING reason=stuck_no_mfe`; PARTIAL_CLOSE 0.30 of 1.21 lots @ 1.60600, `next_state=SUCCEEDED reason=broker_result_and_position_volume_verified`. Justified: `mfe_r=0.0054` against `penalty_stuck_min_mfe_r=0.35` after 120 minutes, `mae_r=0.1888` |
+
+### The decision mix — 33 decisions after the approval, none allowed
+
+| n | outcome | class |
+|---:|---|---|
+| 12 | `ai_rejected` | genuine |
+| 12 | `ai_abstained` | genuine |
+| **9** | **`provider_transport_error`** | **infrastructure — 27%** |
+
+24 of 33 are evidence-backed AI judgement and are the gate working. The other 9 are not.
+
+### Defect 1 — a retryable 429 was terminal on its first occurrence
+
+```
+[provider_attempt]     attempt=1 transport_retry=0 remaining_ms=2675344 sdk_max_retries=0
+[provider_call_failed] error_category=PROVIDER_TRANSPORT_ERROR
+  Error code: 429 - {'error': {'message': "We're currently processing too many requests
+  please try again later.", 'code': 'rate_limit_exceeded'}}
+  final_quality_tier=DEGRADED_NON_TRADING
+```
+
+Nine decisions died this way with **~44 minutes of request budget unspent**.
+
+Root cause, and why it is not simply "retries were off": `RemoteAPIProvider` hardcodes
+`max_retries=0` (`ai_provider.py:964`) and that is **correct** — an ambiguous transport failure
+may mean the call *was* admitted and is still running, where a resubmission would produce a
+second billed call and a late result racing the first. The only retry that existed was
+`_flex_capacity_rejected`, gated on the flex service tier.
+
+Two independent holes let the live 429 through even though the tier **was** flex:
+
+1. `_flex_capacity_rejected` matches the marker `"rate limit"` **with a space**. The live body
+   says `rate_limit_exceeded` with an underscore and never says "capacity" or "overloaded", so
+   the classifier returned False. Pinned by
+   `test_live_rate_limit_body_was_missed_by_the_flex_classifier`.
+2. Tying the retry to a service tier at all is the wrong axis. What makes a resubmission safe is
+   **non-admission**, not which tier refused.
+
+**Fix** — a tier-independent admission retry, using exactly the safety argument the flex retry
+already relies on and no wider:
+
+| Where | Change |
+|---|---|
+| `ai_provider.py` `_admission_rejected` | New classifier. 429/503 **and** an explicit refusal marker; excludes timeouts/connection errors/generic 5xx (ambiguous — may have been admitted) and excludes `insufficient_quota` (a 429 waiting cannot clear). |
+| `ai_provider.py` `_retry_after_sec` | Honours the provider's `Retry-After` verbatim; the deadline check, not a cap, decides affordability. |
+| `ai_provider.py` `_admission_backoff_sec` | Exponential 2s→30s with jitter derived from the **request id**, so a replay sleeps identically while concurrent workers decorrelate instead of re-triggering the limit in lockstep. |
+| `ai_provider.py` retry branch | Separate `admission_retries` budget; never merged into `max_retries`. Guarded by `flex_owns_failure` so the flex path keeps exactly its previous budget. The wait plus the next attempt must both fit inside `remaining_ms`, else `action=skipped_insufficient_budget`. New `[provider_admission_retry]` log; `admission_retry=` added to `[provider_attempt]`. |
+| `ai_gate.py` | `AI_ADMISSION_RETRY_ENABLE` (default true), `AI_ADMISSION_MAX_RETRIES` (3), `AI_ADMISSION_BACKOFF_INITIAL_SEC` (2.0), `AI_ADMISSION_BACKOFF_MAX_SEC` (30.0); echoed in the active-config banner. |
+
+The exactly-once invariant is preserved **by construction**, not by configuration: only failures
+`_admission_rejected` proves were never admitted are ever resubmitted.
+
+### Defect 2 — a stable state journaled once per second for two hours
+
+`[trade_completion_deferred] reason=position_identifier_still_open … partial_exit_not_final=true`
+fired **6,874 times** between 18:36:29 and 20:34, one per `MaintainPositions` tick.
+
+`_FinalizeClosedTrades` rescans the immutable deal history every tick. The 18:36 partial-exit OUT
+deal legitimately cannot finalize its position, `_WriteClosedTradeOutcome` correctly returns
+false, and the deal is never added to `processed_keys` — so the same permanent history record was
+re-evaluated and re-journaled forever. The decision was right; only its reporting was wrong.
+Same family as §4c/§4j, inverted: there a correct decision was undiagnosable, here it buries
+everything else (116 MB journal, `writes=42190`, `write_seconds=204.691`,
+`maintain_positions_seconds=474.944`).
+
+**Fix** (`TradeEngine.mqh`): new `m_completion_deferred_position_ids[]` plus
+`_CompletionDeferralJournaled` / `_MarkCompletionDeferralJournaled` /
+`_ClearCompletionDeferralJournaled`. The line is emitted on the **transition** only
+(`journal_mode=once_per_position_until_closed`) and re-armed when the identifier actually closes,
+which also emits a new `[trade_completion_resumed]`. **The deferral itself is unchanged** — it
+still returns false and still refuses to finalize an open position. Per-position, not a global
+flag, so a second managed position cannot silence the first.
+
+### Defect 3 — the "duplicate gate process" was never a duplicate
+
+§4b/§4k repeatedly recorded two `ai_gate.py` processes and advised killing the idle 4 MB one.
+**That reading was wrong.** The 4 MB `.venv\Scripts\python.exe` is the venv **launcher parent**
+that re-execs `C:\Program Files\Python311\python.exe`; the two share a start time to the second
+and a Windows job object. Killing the "duplicate" (pid 20840) took the working gate (pid 2164)
+down with it. Proven on restart: pid 8944 (`.venv`) is the parent of pid 23964 (Python311), and
+23964 is what logs `[single_instance] acquired=true`.
+
+**There is no duplicate-instance problem and never was.** The single-instance guard is working —
+the log carries a real `acquired=false … reason=existing_gate_for_bus … action=exit` from an
+actual second instance. Do not kill the low-memory process.
+
+### Verification
+
+- Python suite: **888 passed, 10 skipped, 549 subtests**.
+- `python/tests/test_admission_retry_contract.py` — 16 new tests. Falsified against a
+  reverse-applied pre-fix `ai_provider.py`: **15 of 16 fail**; the one that passes
+  (`…missed_by_the_flex_classifier`) asserts a gap present in both trees, by design.
+- `test_governance_contracts.py::test_mql_partial_exit_deferral_is_journaled_once_per_position` —
+  new; failed against the un-synced pre-fix deployed `TradeEngine.mqh` before the sync.
+- Compile (FxPro MetaEditor): **0 errors, 0 warnings**. `.ex5` 21:29:15 > newest source
+  `TradeEngine.mqh` 21:16:51. Repo and deployed `TradeEngine.mqh` hashes match.
+- Gate restarted and holding the lease (pid 23964); banner confirms
+  `admission_retry_enable=true admission_max_retries=3 admission_backoff_initial_sec=2.0
+  admission_backoff_max_sec=30.0`. Live `service_tier=flex`, which is exactly the case
+  `test_flex_tier_still_gets_admission_retries_for_bodies_flex_cannot_classify` pins.
+
+### Not yet verified by a run, and the user action required
+
+**MT5 did not reload the EA after the recompile** — the journal shows the 1 Hz deferral loop still
+running at 21:29:23 under the old binary, with no `removed` / `loaded successfully` pair. The
+Python fix is live from the gate restart; the **MQL fix is on disk but not loaded**. Applying it
+means removing and re-attaching `PO3_AIGate_ScannerEA` to its chart (GUI-only, see §4f), which
+restarts the EA against the open EURCAD position and the pending `#Japan225` order — the restart
+path is proven (16:35 reattach) but this is the user's call, not something to do unattended.
+
+Acceptance criteria to watch once it is loaded:
+`[trade_completion_deferred] … journal_mode=once_per_position_until_closed` exactly **once** per
+position, `[trade_completion_resumed]` when it closes, and `[provider_admission_retry] …
+admitted=false resubmission_safe=true` followed by a `FULL_STRUCTURED` completion instead of
+`source=provider_transport_error`.
+
+---
+
+## 4ab. Session 18:26 (2026-09-08) — every call died before the provider; route moved to OpenRouter
+
+### Root cause: one MQL constant left behind by a Python version bump
+
+```
+[contract_compatibility] compatible=false manifest_hash=1068509530
+    mismatched_fields=family_profile_version,contract_manifest_hash
+[pipeline_failure] stage=local_pipeline category=LOCAL_PIPELINE_ERROR
+    provider_call_attempted=false http_request_sent=false
+    exception_message=contract_manifest_incompatible:family_profile_version,contract_manifest_hash
+[ai_gate_final_summary] requests_processed=8 ai_approvals=0 ai_abstentions=0 ai_rejections=0
+```
+
+`family_context.py` moved to `20260908_family_context_v4` (it split each family's
+`required_event_sequence` into approval evidence and `deferred_execution_triggers`);
+`Config.mqh:16` stayed on `20260818_family_context_v3`. That constant is one of the
+eighteen fields hashed into `PO3ContractManifestHash()`, so **both** reported fields
+come from one edit: MQL sent hash `1823865419`, Python expected `1068509530`.
+8 of 8 requests were quarantined before any provider call.
+
+Fixed by bumping `AI_FAMILY_PROFILE_VERSION`. Proven, not assumed: re-stamping an
+archived request with only that constant makes `validate_mql_contract` return
+`compatible=True` and reproduces `1068509530` exactly.
+
+**The suite already caught it and had not been run.** Same lesson as §4q.
+`test_mql_and_python_manifest_material_are_synchronized` was red, but it was a bare
+`assertIn` over the whole file — it could not name the drifted field and answered with
+a 20 KB dump. Replaced with a per-field comparison read out of
+`PO3ContractManifestMaterial` itself, plus a field-order test (the hash is
+order-dependent) and a test that reproduces the MQL hash in Python. Falsified against
+the real file: the detector names `family_profile_version` and prints
+`'1823865419' != '1068509530'`.
+
+### Two more red tests, both stale fixtures for the internal-identity change
+
+`candidate_id` / `candidate_hash` / the execution fingerprints are now catalogued with
+`authority=internal_identity`, withheld from `provider_rows()` and refused by
+`resolve()`. Two tests still counted or cited them:
+`test_call_log_records_every_provider_call` compared the harness's received-row count
+against `len(catalog)`, and `test_cross_candidate_ids_are_dropped_not_rejected` took
+"the owner's first three ids" from `catalog.items` — which are exactly the withheld
+rows, so it tested *unknown id* while claiming to test *mis-scoped id*. Both now use
+`provider_rows()`, matching the convention `test_evidence_catalog_contract.py` already
+established, and the harness test additionally asserts `citable < total` so the
+withholding itself is pinned.
+
+### AI route moved to OpenRouter, and the transport gap that came with it
+
+`.env` `AI_PROVIDER_SELECT` was `openai_remote`. Now `openrouter`
+(`openai/gpt-5.6-luna`, routing order `openai/flex` → `openai`,
+`require_parameters=true`, temperature/top_p omitted per the 2026-09-08 live finding).
+
+**`OpenRouterProvider` had no admission handling at all.** It extends
+`LocalOpenAICompatibleProvider`, so it inherited the loopback retry posture: a 429 was
+retried **immediately**, twice, with no `Retry-After` and no backoff — the behaviour
+§4aa identified as what re-triggers a rate limit — while an ambiguous timeout was also
+resubmitted, which on a billed endpoint can be a second charge racing a late first
+result.
+
+| Change | Effect |
+|---|---|
+| `_admission_rejected` / `_retry_after_sec` / `_admission_backoff_sec` moved to `_OpenAICompatibleProviderBase` | one definition of "never admitted" for every paid transport; they were duplicated on `RemoteAPIProvider` and absent everywhere else |
+| new `_admission_wait_plan` + retry branch in the local/OpenRouter loop | `Retry-After` honoured verbatim, else exponential backoff with request-derived jitter, both bounded by the absolute deadline |
+| inner loop `for attempt in range(...)` → `while attempt <= max_retries` | the admission budget is genuinely separate; it no longer eats the schema-repair budget |
+| new class flag `resubmit_ambiguous_transport_failures` — `True` on the local server, **`False` on OpenRouter** | an ambiguous failure on a billed endpoint is never resubmitted; new `[provider_ambiguous_failure_not_resubmitted]` log |
+
+### Three shadow-tracker defects, all found in the runtime ledger
+
+| Defect | Evidence | Fix |
+|---|---|---|
+| An infrastructure envelope recorded as an AI `REJECT` | **89 of 89** decision events were `python_not_selected assessment_found=false decision_state=REJECT`, all from the `contract_manifest_incompatible` envelopes | per-candidate attribution is now `NOT_ASSESSED` unless the candidate was actually assessed; `request_decision_state`, `decision_state_authority`, `decision_quality_tier`, `trading_tier`, `candidate_selected_by_python` added to both the decision event and the terminal resolution |
+| `DATA_LOSS` for history that was never requested | **103 of 106** non-BITCOIN terminals were `DATA_LOSS`; BITCOIN, the one symbol whose M1 the terminal already held, had **0** | new `_ShadowEnsureM1History` issues the positional `CopyRates` that starts the build; the wait is reported as `m1_history_not_synchronized_awaiting_download` and the terminal reason is now `m1_series_not_synchronized_after_retries`; counters `history_requests_total` / `history_pending_total` |
+| Untrackable observations with no terminal | 243 observations, 0 resolutions | resolved at observation time as `UNTRACKABLE` / `EXCLUDED_INVALID_CONTRACT`, making "one terminal per observed variant" checkable |
+
+Also: the observe-once index was persisted only when a *pending* tracker changed, so a
+scan producing nothing but untrackable or deduplicated observations left its identities
+in memory only. `_MaintainShadowCandidateOutcomes` now persists on the empty-queue path.
+
+Python consumer: `NOT_ASSESSED` is not in `DECISION_STATES`, and `historical_evidence`
+refuses `trading_tier=False` rows for a named decision state, reporting
+`excluded_non_trading_tier_decision`. `trading_tier=None` (a pre-fix ledger) stays
+eligible so old rows are not silently dropped.
+
+### Verification
+
+- Python suite **982 passed, 11 skipped, 584 subtests** (baseline this session:
+  960 passed / **3 failed** / 577 subtests).
+- 11 new admission tests; 8 fail against the reverted behaviour. 7 new MQL mutations in
+  the shadow falsification table, all caught. 5 new attribution tests; the tier
+  exclusion falsified by disabling the guard.
+- Compile (FxPro MetaEditor): **0 errors, 0 warnings**. `.ex5` 21:20:39 > newest `.mqh`
+  21:12:19. Repo and deployed differ on **0** files.
+- `validate-runtime`: `provider_mode=OPENROUTER_API`, `provider_config_valid=true`,
+  `blocking_reasons=[]`, `valid_for_live_authority=true`, `admission_retry_enable=true
+  admission_max_retries=3`, `[ai_provider_health] healthy=true model_available=true
+  structured_output_available=true`.
+- **End-to-end on a real request that had died** (`…_AUDUSD_1301`, 3 candidates, run
+  against a temporary bus so the production ledger was untouched):
+
+```
+as archived (pre-fix .ex5) -> compatible=False mismatches=('family_profile_version','contract_manifest_hash')
+re-stamped as the fixed .ex5 emits -> compatible=True mismatches=() hash=1068509530
+[contract_compatibility] compatible=true mismatched_fields=none
+[hard_pre_gate] passed=true provider_call_permitted=true
+[provider_call_completed] provider=openrouter_api model=openai/gpt-5.6-luna role=analyst
+    quality_tier=FULL_STRUCTURED latency_sec=77.223 transport_retries=0 schema_repairs=0
+[provider_call_completed] role=critic      quality_tier=FULL_STRUCTURED latency_sec=12.078
+[provider_call_completed] role=adjudicator quality_tier=FULL_STRUCTURED latency_sec=7.858
+[identity_validation] valid=true expected_count=3 actual_count=3 order=[0,1,2]
+[evidence_reference_validation] valid=true unknown_ids=[] cross_candidate_ids=[]   (all 3 candidates)
+[authoritative_envelope_validation] valid=true
+[ai_schema_validation] valid=true candidate_count=3 selected_candidate_hash=F09FA2386716EC14
+[response_written] quality_tier=FULL_STRUCTURED
+decision_state=ABSTAIN decision_source=ai_abstained candidate_assessments=3
+```
+
+A genuine AI abstain — the acceptable outcome. Cost `$0.00627`,
+`cost_pricing_status=provider_reported`. The model cited
+`shadow_historical_evidence.clean_samples` and `.state`, so the counterfactual feedback
+loop into the prompt is live.
+
+### Consequence the user must know
+
+The manifest hash moved `1823865419 → 1068509530`, so **every recorded replay artifact
+is now unaddressable**: `tester_cache` 1758 invalid `contract_manifest_mismatch`,
+`python_decision_cache` 1542 invalid `cache_miss_due_to_schema_version`. This is the
+correct fail-closed behaviour — those decisions were made under a different contract —
+and it is the same situation as §4y/§4z: **a cohort is not re-keyable.** A CACHE_ONLY
+replay will produce 0 hits until a fresh `TESTER_AI_RECORD_ONLY` cohort is recorded,
+which costs provider calls. Live/forward trading is unaffected.
+
+### Not verified by a live run
+
+The MQL fixes are backed by the compile, the falsified regression tests and the
+end-to-end replay above, but **no EA session has exercised them**: the EA is attached to
+no chart (GUI-only, see §4f). Acceptance criteria to watch once it is:
+`[shadow_tracker] … history_requests_total=… history_pending_total=…` non-zero with
+`data_loss_total` far below its previous 24.6% share, terminal resolutions carrying
+`decision_state` other than `PENDING_DECISION`, and `[contract_compatibility]
+compatible=true` on every request.
+
+---
+
+
+---
+
+## 4ac. OpenCode Go activated in `.env` (2026-09-09) — four wire facts no test double could reach
+
+`AI_PROVIDER_SELECT=opencode`. The transport was implemented earlier the same day against the
+documented contract and verified only through transport doubles. The first call to the real
+endpoint failed, and so did the next three. **Every one of the four was a fact about the live
+wire that no double could have produced**, which is the whole argument for replaying real
+requests before trusting a provider integration.
+
+Backup: `python/.env.bak_pre_opencode_20260909`. `.env` is gitignored (`python/.gitignore:6`).
+
+### The four failures, in the order they appeared
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | `HTTP 403 error code: 1010` on every call | Cloudflare refuses urllib's default `User-Agent`. `curl`, `node`, `openai-python` and `opencode` are all accepted, so it is an agent **denylist** | Raw urllib transport sends `opencode/1.0.0`; the OpenAI SDK keeps its own agent |
+| 2 | `HTTP 400 MissingSessionID` on **both** endpoints | `x-opencode-session` is mandatory. Any opaque value is accepted | Derived from the request id, so one request names one session and a replay names the same one |
+| 3 | `HTTP 400 truncation value auto is not supported` — **every Muse call**, 100% | The shared Responses loop sends `truncation="auto"`; this API accepts only `disabled` | Restated to `disabled` in the OpenCode hook only. Also the value this project wants: `auto` lets the upstream silently drop evidence out of an over-long context and answer anyway |
+| 4 | `structured_response_missing_json` on **the analyst role only** | `max_output_tokens` bounds reasoning AND content together. Muse at `effort=high` spent all 25,000 on reasoning and returned `status=incomplete incomplete_reason=max_output_tokens` with an empty message. The smaller critic/adjudicator roles completed on the same budget | `OPENCODE_MUSE_REASONING_TOKEN_RESERVE=24000` added **on top of** the schema budget — the same shape as `OPENROUTER_REASONING_TOKEN_RESERVE`, and for the identical reason already recorded in §4d/`.env` |
+
+Failure 4 was diagnosable only after fixing the diagnostic itself: `_extract_responses_value`
+raised a bare `structured_response_missing_json`, a correct fail-closed verdict carrying no
+evidence for **why** — the same defect class as §4c, §4j and §4h. It now appends
+`status`, `incomplete_reason`, `output_tokens` and `reasoning_tokens` from the envelope.
+Diagnostic only; the failure and its category are unchanged.
+
+Also measured and pinned: **`/messages` rejects `tool_choice`** — `{"type":"tool"}` and
+`{"type":"any"}` alike answer HTTP 400 with an opaque `{"model": ...}`. Sending it does not make
+the Qwen leg strict, it makes every Qwen call fail. The tool is declared as the only tool and the
+obligation is stated in the system text instead; the model chose it in 3 of 3 live runs against a
+prompt that invited prose, each time with a schema-conforming `input`. Strictness is still
+enforced downstream by the same validator, which routes a non-conforming answer to Luna.
+`qwen3.8-flash` is **not** routable on `/responses` (`not supported for format openai`), which is
+why that leg speaks the Anthropic dialect at all.
+
+### Replay of two real archived approvals — the acceptance evidence
+
+Both requests were **`python_final_allow_true`** under OpenRouter/Luna at 10:55 and 11:05 the same
+morning, replayed against an isolated bus (`%TEMP%\po3rep4`) so the production ledger was never
+touched — verified after: `requests/processing=0`, `completed` unchanged at 302.
+
+```
+4 provider calls, all provider=opencode_go_responses model=muse-spark-1.3-contributor
+  quality_tier=FULL_STRUCTURED   transport_retries=0   schema_repairs=0   fallback_used=false
+identity_validation            valid=true   expected_order=[0,1,3] == model_assessment_order
+evidence_reference_validation  valid=true   unknown_ids=[]  cross_candidate_ids=[]  (every candidate)
+authoritative_envelope_validation valid=true      ai_schema_validation valid=true
+response_written               quality_tier=FULL_STRUCTURED   (both)
+```
+
+**Zero infrastructure rejections.** The adjudicator role never ran on either request — the
+`AI_PANEL_SHORTCIRCUIT` fired because the analyst verdict already could not approve.
+
+| | AUDJPY_32618 | USDCHF_19925 |
+|---|---|---|
+| original (luna) | APPROVE, quality 7.8 | APPROVE, quality 7.1 |
+| replay (muse) | **ABSTAIN, quality 6.4** | **ABSTAIN, quality 6.2** |
+| `selected_candidate_hash` | `9943864CD7C43AE0` — **identical** | `50117FCF406E6163` — **identical** |
+| per-candidate agreement | 2 of 3 identical | 2 of 3 identical |
+
+Muse selected the same candidate as Luna on both, and agreed on every candidate it did not
+approve — including a HIGH-confidence REJECT on each. It differs only at the approval boundary,
+where it scores ~0.9–1.4 lower and lands below the ~6.8 threshold. The abstains are
+evidence-cited, not vague:
+
+> AUDJPY: "confirmed sweep-displacement-OTE overlap with strong HTF alignment, **but immediate
+> LTF obstacle at 0.27R, OFF-hours NK timing, weak retest, and zero usable FX history**"
+> `missing: ['No usable same-asset history shadow 0 samples', 'No killzone follow-through confirmation']`
+
+> USDCHF: "Breaker retest confirmed with strong displacement **but weak retest, stale freshness,
+> and LTF imbalance 0.03R ahead blocking TP1**"
+
+Luna's own USDCHF summary had already named the same facts — "Retest quality and nearby opposing
+imbalance warrant reduced risk" — and approved anyway. **Muse is more conservative on identical
+evidence.** That is genuine AI judgement, the acceptable outcome; it is not an infrastructure
+rejection and must not be tuned away.
+
+### Cost accounting — honest, not free
+
+Rows carry `provider_mode=OPENCODE_API` with real token counts (analyst ~37k in / ~13k out, of
+which ~9.7k reasoning) and `pricing_status=unpriced_model`, **not** `not_billed`. `OPENCODE_API`
+is in `BILLED_PROVIDER_MODES`, so the traffic is treated as billable; there is simply no price
+table entry for `muse-spark-1.3-contributor`, so the ledger reports the cost as unknown rather
+than falsely $0.00. Adding a price is a data decision, not a code fix. Prompt caching works
+implicitly despite `prompt_cache_key` being stripped: the second request reported
+`cached_input_tokens=7153`.
+
+### State
+
+- Python suite **1053 passed, 12 skipped, 595 subtests** (was 1048/11/595; +5 tests). The two new
+  skips are the OpenRouter block-specific tests correctly standing down now that the deployed
+  selection is not OpenRouter.
+- `test_checked_in_runtime_env_is_a_usable_selection` was failing against a hardcoded
+  three-selection tuple while its own docstring claimed to be selection-agnostic. It now reads
+  `po3_env.PROVIDER_SELECT_VALUES`, which is what it always meant to assert.
+- `validate-runtime`: `provider_config_valid=true`, `blocking_reasons=[]`,
+  **`valid_for_live_authority=true`**, `openrouter_api_key_configured=false` (secret isolation
+  holding), `opencode_api_key_configured=true` — the key itself never appears in any output.
+- Live gate running, pid 14540, `[single_instance] acquired=true`,
+  `[ai_provider_health] healthy=true provider_mode=OPENCODE_API`, all four schema preflights
+  `valid=true`. (The 4 MB `.venv` process beside it is the launcher parent — see §4aa, do not
+  kill it.)
+- **No MQL change this round.** `Config.mqh` already accepts `OPENCODE_API` from the earlier
+  session and the `.ex5` is current; nothing was recompiled.
+- Not verified: no EA session has produced a live request on this provider yet — the EA is
+  attached to no chart (GUI-only, §4f). `OPENCODE_CALL_DIRECTING=false`, so the Qwen leg has
+  never run inside the gate; its dialect is proven only by direct endpoint probes and doubles.
+
 ## 5. Working notes
 
 - Read MT5 logs with `Get-Content <path> -Encoding Unicode`; they are UTF-16 and large.

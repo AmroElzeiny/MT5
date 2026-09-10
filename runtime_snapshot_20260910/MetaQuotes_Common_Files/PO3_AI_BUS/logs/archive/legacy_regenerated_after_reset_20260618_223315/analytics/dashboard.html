@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PO3 Codex Virtual Ledger</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, Segoe UI, Arial, sans-serif; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: #f8fbff;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(0, 209, 255, .34), transparent 28rem),
+        radial-gradient(circle at 90% 15%, rgba(255, 64, 129, .32), transparent 24rem),
+        linear-gradient(135deg, #0b1020 0%, #172554 42%, #32115f 100%);
+    }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 44px 22px 56px; }
+    .hero { display: flex; justify-content: space-between; gap: 20px; align-items: end; margin-bottom: 26px; }
+    h1 { margin: 0; font-size: clamp(32px, 4vw, 56px); letter-spacing: -0.04em; }
+    .subtitle { margin-top: 10px; color: #c8d7ff; font-size: 15px; }
+    .badge { padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+    .card, .panel {
+      border: 1px solid rgba(255,255,255,.20);
+      background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,.08));
+      border-radius: 24px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.28);
+      backdrop-filter: blur(18px);
+    }
+    .card { padding: 20px; min-height: 120px; }
+    .card-label { color: #a8c7ff; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+    .card-value { margin-top: 12px; font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
+    .card-note { margin-top: 10px; color: #d9e4ff; font-size: 13px; line-height: 1.35; }
+    .panel { margin-top: 18px; padding: 22px; overflow: auto; }
+    h2 { margin: 0 0 14px; font-size: 20px; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid rgba(255,255,255,.13); }
+    th { color: #b9d3ff; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .pill { display: inline-block; padding: 5px 9px; border-radius: 999px; background: rgba(255,255,255,.14); }
+    .penalize_session, .penalize_risk { background: rgba(255, 92, 122, .25); color: #ffd0d9; }
+    .upgrade, .watch_for_upgrade { background: rgba(64, 255, 175, .22); color: #c8ffe8; }
+    .monitor { background: rgba(148, 163, 184, .22); color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <h1>PO3 Codex Virtual Ledger</h1>
+        <div class="subtitle">Virtual system history starts from 100,000 and ignores broker/account balance distortion.</div>
+      </div>
+      <div class="badge">Generated 2026-06-18 19:30:33 UTC</div>
+    </header>
+    <div class="grid">
+        <section class="card">
+          <div class="card-label">Virtual Balance</div>
+          <div class="card-value">100,000.00</div>
+          <div class="card-note">System-owned ledger, not broker balance</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Virtual Equity</div>
+          <div class="card-value">100,000.00</div>
+          <div class="card-note">Same as balance until open-trade MTM is added</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Gross Balance</div>
+          <div class="card-value">100,000.00</div>
+          <div class="card-note">Start balance plus gross winners</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Total Trades</div>
+          <div class="card-value">0</div>
+          <div class="card-note">Valid closed trades only</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Win Rate</div>
+          <div class="card-value">0.00%</div>
+          <div class="card-note">Closed winners / valid trades</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Profit Factor</div>
+          <div class="card-value">0.00</div>
+          <div class="card-note">Gross R winners / gross R losers</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Avg RR</div>
+          <div class="card-value">0.000R</div>
+          <div class="card-note">Mean realized R</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Profitable Days</div>
+          <div class="card-value">0</div>
+          <div class="card-note">Virtual daily PnL above zero</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Losing Days</div>
+          <div class="card-value">0</div>
+          <div class="card-note">Virtual daily PnL below zero</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Best Trade</div>
+          <div class="card-value">0.00%</div>
+          <div class="card-note">Best trade as % of 100,000</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Worst Trade</div>
+          <div class="card-value">0.00%</div>
+          <div class="card-note">Worst trade as % of 100,000</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Best Weekday</div>
+          <div class="card-value">unknown</div>
+          <div class="card-note">By average virtual %</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">Worst Weekday</div>
+          <div class="card-value">unknown</div>
+          <div class="card-note">By average virtual %</div>
+        </section>
+        
+
+        <section class="card">
+          <div class="card-label">AI Audit</div>
+          <div class="card-value">skipped</div>
+          <div class="card-note">veto=False</div>
+        </section>
+        </div>
+    <section class="panel">
+      <h2>Session x Weekday Decisions</h2>
+      <table>
+        <thead><tr><th>Bucket</th><th>Action</th><th>Trades</th><th>Avg R</th><th>PF</th><th>Risk Mult</th></tr></thead>
+        <tbody><tr><td colspan="6">No session-weekday evidence yet.</td></tr></tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

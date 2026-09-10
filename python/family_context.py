@@ -31,7 +31,7 @@ from governance_contracts import (
 # "nested_continuation", "reclaim", "ote", ...), so the payload told the model that
 # the very branch which produced the taxonomy was not permitted for it.  Every
 # full-PO3 candidate in the 2026-08-18 run was vetoed on that contradiction.
-FAMILY_PROFILE_VERSION = "20260818_family_context_v3"
+FAMILY_PROFILE_VERSION = "20260908_family_context_v4"
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,7 @@ class FamilyContextProfile:
     relevant_feature_whitelist: tuple[str, ...]
     historical_retrieval_dimensions: tuple[str, ...]
     family_specific_abstention_reasons: tuple[str, ...]
+    deferred_execution_triggers: tuple[str, ...] = ()
     profile_version: str = FAMILY_PROFILE_VERSION
     taxonomy_version: str = SETUP_TAXONOMY_VERSION
 
@@ -97,6 +98,7 @@ def _profile(
     branches: tuple[str, ...],
     regimes: tuple[str, ...],
     failures: tuple[str, ...],
+    deferred_execution_triggers: tuple[str, ...] = (),
 ) -> FamilyContextProfile:
     return FamilyContextProfile(
         taxonomy=taxonomy.value,
@@ -131,6 +133,7 @@ def _profile(
             "historical evidence insufficient",
             "material structured evidence conflict",
         ),
+        deferred_execution_triggers=deferred_execution_triggers,
     )
 
 
@@ -138,66 +141,74 @@ FAMILY_CONTEXT_REGISTRY: Mapping[str, FamilyContextProfile] = {
     SetupTaxonomy.MICRO_FVG_MID_REVERSAL.value: _profile(
         SetupTaxonomy.MICRO_FVG_MID_REVERSAL,
         "micro reversal from the deterministic FVG midpoint entry branch",
-        ("declared source context", "deterministic displacement/FVG", "midpoint entry"),
+        ("declared source context", "deterministic displacement/FVG", "validated midpoint entry plan"),
         FVG_MID_ENTRY_BRANCHES,
         ("range", "reversal", "transition"),
         ("weak displacement", "late midpoint entry", "near opposing liquidity"),
+        ("midpoint price touch",),
     ),
     SetupTaxonomy.MICRO_FVG_EDGE_REVERSAL.value: _profile(
         SetupTaxonomy.MICRO_FVG_EDGE_REVERSAL,
         "micro reversal from the deterministic FVG edge entry branch",
-        ("declared source context", "deterministic displacement/FVG", "edge entry"),
+        ("declared source context", "deterministic displacement/FVG", "validated edge entry plan"),
         FVG_EDGE_ENTRY_BRANCHES,
         ("range", "reversal", "transition"),
         ("edge already mitigated", "weak origin", "late entry"),
+        ("edge price touch",),
     ),
     SetupTaxonomy.MICRO_BREAKER_RETEST.value: _profile(
         SetupTaxonomy.MICRO_BREAKER_RETEST,
         "micro breaker retest using the deterministic breaker identity and retest state",
-        ("declared source context", "breaker formation", "clean retest"),
+        ("declared source context", "validated breaker formation"),
         BREAKER_RETEST_ENTRY_BRANCHES,
         ("reversal", "transition", "trend pullback"),
         ("non-virgin breaker", "weak origin", "retest invalidation"),
+        ("clean retest",),
     ),
     SetupTaxonomy.MICRO_OTE_REVERSAL.value: _profile(
         SetupTaxonomy.MICRO_OTE_REVERSAL,
         "micro reversal at the deterministic OTE branch",
-        ("declared source context", "displacement", "OTE retracement"),
+        ("declared source context", "displacement", "validated OTE/FVG overlap"),
         OTE_ENTRY_BRANCHES,
         ("reversal", "trend pullback"),
         ("OTE reached without confirmation", "sequence conflict", "target obstruction"),
+        ("OTE retracement",),
     ),
     SetupTaxonomy.MICRO_CONTINUATION_FVG.value: _profile(
         SetupTaxonomy.MICRO_CONTINUATION_FVG,
         "micro continuation through a deterministically classified continuation FVG",
-        ("trend context", "continuation displacement", "continuation FVG entry"),
+        ("trend context", "continuation displacement", "validated continuation FVG plan"),
         CONTINUATION_ENTRY_BRANCHES + FVG_MID_ENTRY_BRANCHES + FVG_EDGE_ENTRY_BRANCHES,
         ("trend", "expansion"),
         ("stale FVG", "touched continuation without clean retest", "trend exhaustion"),
+        ("continuation FVG entry touch",),
     ),
     SetupTaxonomy.MICRO_NESTED_CONTINUATION.value: _profile(
         SetupTaxonomy.MICRO_NESTED_CONTINUATION,
         "nested micro continuation inside deterministic higher-order context",
-        ("parent context", "nested displacement", "nested entry"),
+        ("parent context", "nested displacement", "validated nested entry plan"),
         NESTED_CONTINUATION_ENTRY_BRANCHES,
         ("trend", "expansion"),
         ("parent-child contradiction", "stale nested FVG", "overextended entry"),
+        ("nested entry touch",),
     ),
     SetupTaxonomy.MICRO_RANGE_REENTRY.value: _profile(
         SetupTaxonomy.MICRO_RANGE_REENTRY,
         "micro reentry into a deterministic range after the declared range event",
-        ("range identity", "range excursion", "range reentry"),
+        ("range identity", "range excursion", "validated range reentry plan"),
         RANGE_REENTRY_ENTRY_BRANCHES,
         ("range", "compression"),
         ("range expansion underway", "opposite confirmed structure", "poor target clearance"),
+        ("range reentry price trigger",),
     ),
     SetupTaxonomy.MICRO_SESSION_REENTRY.value: _profile(
         SetupTaxonomy.MICRO_SESSION_REENTRY,
         "micro session reentry using deterministic session boundaries and timing",
-        ("session range identity", "session excursion", "session reentry"),
+        ("session range identity", "session excursion", "validated session reentry plan"),
         SESSION_REENTRY_ENTRY_BRANCHES,
         ("session transition", "range"),
         ("off-session timing", "session objective already reached", "stale session context"),
+        ("session reentry price trigger",),
     ),
     SetupTaxonomy.FAILED_BREAKOUT_RECLAIM.value: _profile(
         SetupTaxonomy.FAILED_BREAKOUT_RECLAIM,

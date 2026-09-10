@@ -1,0 +1,19 @@
+{
+  "activate_adaptive_policy": false,
+  "checks": {
+    "total_trades_ge_500": false,
+    "family_trades_ge_50": true,
+    "symbol_trades_ge_30": false,
+    "profit_factor_after_costs_gt_1_10": true,
+    "walk_forward_positive_fold_rate_ge_60pct": true
+  },
+  "walk_forward_summary": {
+    "folds": 2,
+    "positive_fold_rate": 1.0,
+    "avg_train_r": -0.04522362280701757,
+    "avg_test_r": 0.35050291974548436,
+    "avg_train_ev": -0.7683258180136434,
+    "avg_test_ev": 1.0518660950328391,
+    "avg_gap": -0.39572654255250195
+  }
+}

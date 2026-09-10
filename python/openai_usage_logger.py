@@ -163,7 +163,7 @@ PRICE_PER_MILLION_BY_ENDPOINT: Dict[tuple, Dict[str, float]] = {
 # genuinely free; every other provider mode spends real money and must be
 # priced.  Keeping this a set rather than a single ``== "REMOTE_API"`` test is
 # the fix for OpenRouter traffic being recorded at $0.00 by construction.
-BILLED_PROVIDER_MODES = frozenset({"REMOTE_API", "OPENROUTER_API"})
+BILLED_PROVIDER_MODES = frozenset({"REMOTE_API", "OPENROUTER_API", "OPENCODE_API"})
 
 PRICING_STATUS_PRICED = "priced"
 PRICING_STATUS_UPPER_BOUND = "priced_upper_bound"
@@ -174,10 +174,27 @@ PRICING_STATUS_NOT_BILLED = "not_billed"
 # and the status names the uncertainty instead of hiding it -- a new 2x tier
 # silently billed as 1x is the same class of understatement as an unpriced model.
 PRICING_STATUS_TIER_UNKNOWN = "priced_tier_unknown"
+# The transport told us what the call actually cost, so nothing was estimated.
+# OpenRouter returns ``usage.cost`` (the credits it charged) on every completion.
+# This outranks every table below it for the same reason ``_response_service_tier``
+# outranks the requested tier and ``_routed_endpoint`` outranks the configured
+# provider list: only the response knows what a call cost.
+#
+# It also closes a gap the tables cannot close.  ``openai/gpt-5.6-luna`` is served
+# by an ``openai/flex`` endpoint at half rate and an ``openai`` endpoint at full
+# rate, and OpenRouter reports both as the provider name ``OpenAI`` -- so no
+# ``(model, endpoint)`` key can tell a flex call from a standard one, and the
+# model-level row would price half of them at 2x while claiming to be exact.
+PRICING_STATUS_PROVIDER_REPORTED = "provider_reported"
 
 # Statuses whose ``estimated_cost_usd`` is a real number rather than 0.0.
 PRICING_STATUSES_WITH_COST = frozenset(
-    {PRICING_STATUS_PRICED, PRICING_STATUS_UPPER_BOUND, PRICING_STATUS_TIER_UNKNOWN}
+    {
+        PRICING_STATUS_PRICED,
+        PRICING_STATUS_UPPER_BOUND,
+        PRICING_STATUS_TIER_UNKNOWN,
+        PRICING_STATUS_PROVIDER_REPORTED,
+    }
 )
 
 _WARNED_UNPRICED: set = set()
@@ -324,6 +341,45 @@ def _routed_endpoint(response: Any) -> str:
     return str(routed or "").strip()
 
 
+def _provider_reported_cost(usage: Dict[str, Any]) -> Optional[float]:
+    """What the transport says this call was charged, in USD, or None.
+
+    OpenRouter puts ``cost`` on the usage block of every completion and repeats
+    the upstream figure under ``cost_details.upstream_inference_cost``.  Under
+    BYOK the two differ -- OpenRouter's own ``cost`` covers only its fee while
+    the upstream provider bills separately -- so the larger of the two is taken:
+    the whole point of this module is that the recorded number must never be
+    smaller than the money actually spent.
+
+    Only a real, finite, non-negative number is accepted.  Anything else (a
+    missing key, a string, NaN, a negative) returns None and the call falls back
+    to the published rate tables, so a malformed field can never zero a row out.
+    """
+
+    if not isinstance(usage, dict):
+        return None
+    candidates = [
+        usage.get("cost"),
+        _get_nested(usage, "cost_details", "upstream_inference_cost"),
+    ]
+    best: Optional[float] = None
+    for raw in candidates:
+        if raw is None or isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            continue
+        value = float(raw)
+        if value != value or value in (float("inf"), float("-inf")) or value < 0.0:
+            continue
+        if best is None or value > best:
+            best = value
+    return best
+
+
+def response_reported_cost_usd(response: Any) -> Optional[float]:
+    """Public reader, so every cost surface asks the response the same way."""
+
+    return _provider_reported_cost(_usage_from_response(response))
+
+
 def _canonical_model(model: str) -> str:
     """Fold vendor prefixes, effort suffixes and dated snapshots onto the priced row.
 
@@ -414,6 +470,7 @@ def _pricing_status(
     provider_mode: str,
     routed_endpoint: str = "",
     service_tier: str = "",
+    provider_reported_cost: Optional[float] = None,
 ) -> str:
     """Separate "this transport is free" from "we have no price for this model".
 
@@ -426,6 +483,11 @@ def _pricing_status(
 
     if str(provider_mode or "").upper() not in BILLED_PROVIDER_MODES:
         return PRICING_STATUS_NOT_BILLED
+    # Checked before the tables, not after them: when the transport reports the
+    # charge there is nothing left to estimate, and an unpriced model on a
+    # transport that told us the price is not a gap.
+    if provider_reported_cost is not None:
+        return PRICING_STATUS_PROVIDER_REPORTED
     rates, exact = _rates(model, routed_endpoint)
     if rates is None:
         return PRICING_STATUS_UNPRICED
@@ -522,6 +584,7 @@ def price_call(
     output_tokens: int = 0,
     routed_endpoint: str = "",
     service_tier: str = "",
+    provider_reported_cost: Optional[float] = None,
 ) -> tuple[Optional[float], str]:
     """Single public entry point for "what did this call cost".
 
@@ -532,9 +595,13 @@ def price_call(
     rates, or the two surfaces drift.
     """
 
-    status = _pricing_status(model, provider_mode, routed_endpoint, service_tier)
+    status = _pricing_status(
+        model, provider_mode, routed_endpoint, service_tier, provider_reported_cost
+    )
     if status not in PRICING_STATUSES_WITH_COST:
         return None, status
+    if status == PRICING_STATUS_PROVIDER_REPORTED:
+        return round(float(provider_reported_cost or 0.0), 8), status
     return (
         _estimated_cost(
             model,
@@ -619,8 +686,13 @@ def log_ai_usage(
     # resolved server-side and only the response knows what it resolved to.
     effective_service_tier = _response_service_tier(response) or str(service_tier or "").strip()
     price_multiplier, _tier_known = _tier_multiplier(effective_service_tier)
+    reported_cost = _provider_reported_cost(usage)
     pricing_status = _pricing_status(
-        str(model or ""), str(provider_mode or ""), routed_endpoint, effective_service_tier
+        str(model or ""),
+        str(provider_mode or ""),
+        routed_endpoint,
+        effective_service_tier,
+        reported_cost,
     )
     if pricing_status == PRICING_STATUS_UNPRICED:
         _warn_unpriced_once(str(model or ""), str(provider_mode or ""), pricing_status)
@@ -659,7 +731,9 @@ def log_ai_usage(
         "reasoning_output_tokens": reasoning_output_tokens,
         "total_tokens": total_tokens,
         "estimated_cost_usd": (
-            _estimated_cost(
+            round(float(reported_cost or 0.0), 8)
+            if pricing_status == PRICING_STATUS_PROVIDER_REPORTED
+            else _estimated_cost(
                 str(model or ""),
                 input_tokens,
                 cached_input_tokens,

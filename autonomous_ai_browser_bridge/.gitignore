@@ -1,5 +1,8 @@
-.venv/
+﻿.venv/
 .env
+.env.*
+*.env
+*.env.*
 state/browser_profile/
 state/gemini_browser_profile/
 state/downloads/

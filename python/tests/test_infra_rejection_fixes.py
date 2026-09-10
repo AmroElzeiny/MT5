@@ -66,9 +66,20 @@ class EvidenceReferenceNormalizationTests(unittest.TestCase):
         # Partition catalog IDs by the candidate they are scoped to.  Only
         # ``catalog.items`` carries the scope; provider_rows() deliberately
         # exposes just id/path/value to the model.
+        #
+        # Restricted to the CITABLE rows.  Identity rows (candidate_hash,
+        # execution fingerprints) are catalogued with authority
+        # ``internal_identity``, withheld from provider_rows and refused by
+        # resolve(), so an id taken from ``items`` alone can be one the model is
+        # never offered -- and those sort first in each candidate scope, so the
+        # unrestricted version tested "unknown id" while claiming to test
+        # "mis-scoped id".
+        citable = {int(row["id"]) for row in self.catalog.provider_rows()}
         self.by_candidate: dict[int, list[int]] = {}
         for item in self.catalog.items:
             if item.candidate_index is None:
+                continue
+            if int(item.evidence_id) not in citable:
                 continue
             self.by_candidate.setdefault(
                 int(item.candidate_index), []

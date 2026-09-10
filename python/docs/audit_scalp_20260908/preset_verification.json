@@ -1,0 +1,52 @@
+{
+  "source_sha256": "7ce854da4d7dcb897c102adb8068e2f82ab94f99a5ddd97e54261586001129a1",
+  "v2_sha256": "bf94d4b913a190079075f1eef3b023ec6193bc0a00771c7f374c934932779793",
+  "input_count": 382,
+  "unknown_inputs": [],
+  "original_unchanged": true,
+  "changed_existing": {
+    "InpScanIntervalMinutes": {
+      "old": "5",
+      "new": "10"
+    },
+    "InpSuppressStaleFvgBranches": {
+      "old": "false",
+      "new": "true"
+    },
+    "InpSuppressTouchedContinuationUnlessRetested": {
+      "old": "false",
+      "new": "true"
+    },
+    "InpShadowCandidateLedgerEnable": {
+      "old": "false",
+      "new": "true"
+    }
+  },
+  "pinned_missing_inputs": {
+    "InpTesterLegacyPolicyFingerprint": "false",
+    "InpTesterLegacyNormalizedPolicyRawHash": "",
+    "InpTesterLegacyInvalidationPolicyRawHash": "",
+    "InpJournalDetailLevel": "1",
+    "InpMaxSpreadPriceFrac": "0.0025",
+    "InpMaxPersistentSpreadAttempts": "3",
+    "InpBrokerCostCacheSeconds": "3600",
+    "InpTradeMetaMemoEntries": "256",
+    "InpTradeMetaWatermarkSeconds": "15",
+    "InpShadowTrackPreAiRejects": "false",
+    "InpShadowIdentityRetentionMinutes": "4320",
+    "InpShadowEvaluationIntervalSeconds": "60",
+    "InpShadowMaxEvaluationsPerTick": "25",
+    "InpShadowMaxDataRetries": "30",
+    "InpShadowUseTickOrdering": "true",
+    "InpShadowMaxPendingTrackers": "4000"
+  },
+  "runtime_activated": false,
+  "checks": [
+    "all input names exist in deployed Config.mqh",
+    "no duplicate keys",
+    "all eight branches enabled",
+    "all original values outside declared changes preserved",
+    "two output copies byte-identical",
+    "source unchanged"
+  ]
+}

@@ -139,17 +139,29 @@ private:
          StringFind(value, "XAG") >= 0 || StringFind(value, "SILVER") >= 0) return "metals";
       if(StringFind(value, "WTI") >= 0 || StringFind(value, "BRENT") >= 0 ||
          StringFind(value, "OIL") >= 0 || StringFind(value, "NGAS") >= 0) return "energy";
-      if(StringFind(value, "BTC") >= 0 || StringFind(value, "ETH") >= 0 || StringFind(value, "SOL") >= 0) return "crypto";
-      if(StringFind(value, "US30") >= 0 || StringFind(value, "NAS") >= 0 ||
-         StringFind(value, "SPX") >= 0 || StringFind(value, "GER") >= 0 ||
+      if(StringFind(value, "BTC") >= 0 || StringFind(value, "ETH") >= 0 || StringFind(value, "SOL") >= 0 ||
+         StringFind(value, "LTC") >= 0 || StringFind(value, "XRP") >= 0) return "crypto";
+      if(StringFind(value, "US30") >= 0 || StringFind(value, "USNDAQ") >= 0 ||
+         StringFind(value, "NASDAQ") >= 0 || StringFind(value, "NAS100") >= 0 ||
+         StringFind(value, "USSPX") >= 0 || StringFind(value, "SPX") >= 0 ||
+         StringFind(value, "US500") >= 0 || StringFind(value, "GERMANY") >= 0 ||
+         StringFind(value, "GER40") >= 0 || StringFind(value, "DE40") >= 0 ||
          StringFind(value, "DAX") >= 0 || StringFind(value, "UK100") >= 0 ||
-         StringFind(value, "JP225") >= 0) return "indices";
+         StringFind(value, "JAPAN") >= 0 || StringFind(value, "JP225") >= 0 ||
+         StringFind(value, "US2000") >= 0 || StringFind(value, "FRANCE") >= 0 ||
+         StringFind(value, "FRA40") >= 0 || StringFind(value, "EURO50") >= 0) return "indices";
       string letters = "";
       for(int i=0; i<StringLen(value); i++){
          ushort c = (ushort)StringGetCharacter(value, i);
          if(c >= 'A' && c <= 'Z') letters += StringSubstr(value, i, 1);
       }
-      if(StringLen(letters) >= 6) return "fx";
+      if(StringLen(letters) >= 6){
+         string base = StringSubstr(letters, 0, 3);
+         string quote = StringSubstr(letters, 3, 3);
+         string currencies = "|AUD|CAD|CHF|CNH|EUR|GBP|HKD|HUF|JPY|MXN|NOK|NZD|PLN|SEK|SGD|TRY|USD|ZAR|";
+         if(StringFind(currencies, "|" + base + "|") >= 0 &&
+            StringFind(currencies, "|" + quote + "|") >= 0) return "fx";
+      }
       return "other";
    }
 

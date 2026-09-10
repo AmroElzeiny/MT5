@@ -21,19 +21,36 @@ from typing import Dict, Iterable, Tuple
 PROVIDER_SELECT_OPENAI = "openai_remote"
 PROVIDER_SELECT_LOCAL = "local"
 PROVIDER_SELECT_OPENROUTER = "openrouter"
+PROVIDER_SELECT_OPENCODE = "opencode"
 PROVIDER_SELECT_VALUES: Tuple[str, ...] = (
     PROVIDER_SELECT_OPENAI,
     PROVIDER_SELECT_LOCAL,
     PROVIDER_SELECT_OPENROUTER,
+    PROVIDER_SELECT_OPENCODE,
 )
 
 # Credentials owned by each selection.  Everything not owned by the selected
 # provider is stripped from the environment before any provider is built, so a
 # stale parent-process secret can never reach a transport that must not see it.
+#
+# ``opencode`` deliberately owns the OpenAI credential as well as its own.  That
+# is not a hole in the isolation contract, it is the contract stating the truth
+# about this selection: the OpenCode mode is defined as "OpenCode Go primary with
+# a mandatory OpenAI Luna fallback", so the OpenAI transport is a declared,
+# required leg of the mode rather than a foreign provider that happened to be
+# left in the process.  Every credential this mode does NOT use -- OpenRouter and
+# the local server -- is still stripped exactly as before, and every other
+# selection still strips ``OPENCODE_GO_API_KEY``.
 PROVIDER_SECRET_KEYS: Dict[str, Tuple[str, ...]] = {
     PROVIDER_SELECT_OPENAI: ("OPENAI_API_KEY", "OPENAI_BASE_URL"),
     PROVIDER_SELECT_LOCAL: ("LOCAL_AI_API_KEY", "LOCAL_AI_MODEL_PATH"),
     PROVIDER_SELECT_OPENROUTER: ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"),
+    PROVIDER_SELECT_OPENCODE: (
+        "OPENCODE_GO_API_KEY",
+        "OPENCODE_GO_BASE_URL",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+    ),
 }
 
 
@@ -87,14 +104,24 @@ def excluded_secret_keys(selection: str | None) -> Tuple[str, ...]:
 
     An unusable selector (``None``) keeps *every* provider secret out: the gate
     cannot call anything in that state, so nothing needs a credential.
+
+    A credential owned by more than one selection is never excluded from a
+    selection that owns it.  Without that subtraction, adding ``opencode`` --
+    which legitimately needs ``OPENAI_API_KEY`` for its mandatory Luna fallback
+    -- would have stripped that same key from ``openai_remote``, because the
+    key appears under a *different* owner in the map.  The invariant is asserted
+    by ``test_excluded_keys_never_include_the_selected_providers_own``.
     """
 
-    return tuple(
-        key
-        for owner, keys in PROVIDER_SECRET_KEYS.items()
-        if owner != selection
-        for key in keys
-    )
+    owned = set(PROVIDER_SECRET_KEYS.get(selection or "", ()))
+    excluded: list[str] = []
+    for owner, keys in PROVIDER_SECRET_KEYS.items():
+        if owner == selection:
+            continue
+        for key in keys:
+            if key not in owned and key not in excluded:
+                excluded.append(key)
+    return tuple(excluded)
 
 
 def bootstrap_provider_env() -> Tuple[str | None, str]:

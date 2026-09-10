@@ -1,0 +1,1 @@
+{"claimed_at":1789004359.6256363,"expected_max_provider_duration_sec":10920.0,"heartbeat_at":1789004631.8801496,"hostname":"WIN-FOVCL5KBJ2M","pid":4504,"process_id":4504,"provider_call_started_at":1789004359.6256363,"request_id":"903871_1788999394_24185000_1789014948_CHFJPY_26701","request_lifecycle_version":"20260724_exactly_once_request_v1","worker_id":"python_4504_1789000319"}

@@ -36,9 +36,18 @@ from typing import Any
 
 import pytest
 
-from ai_provider import ProviderCallError, RemoteAPIProvider
+from pathlib import Path
+
+from ai_provider import (
+    LocalOpenAICompatibleProvider,
+    OpenRouterProvider,
+    ProviderCallError,
+    RemoteAPIProvider,
+)
 from provider_deadline import DeadlinePolicy, RequestDeadline
 from structured_models import StrictStructuredModel
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Probe(StrictStructuredModel):
@@ -450,3 +459,237 @@ def test_admission_retry_counter_is_reported_on_every_attempt(_no_real_sleep):
     assert len(attempts) == 2
     assert "admission_retry=0" in attempts[0]
     assert "admission_retry=1" in attempts[1]
+
+
+# --------------------------------------------------------------------------
+# The same contract on the OpenRouter transport.
+#
+# OpenRouter is a PAID remote endpoint that reaches the provider through the
+# LOCAL-compatible call loop, so before this it inherited neither half of the
+# admission contract: a 429 was retried IMMEDIATELY (no Retry-After, no
+# backoff -- the behaviour that re-triggers a rate limit) while an AMBIGUOUS
+# timeout was also resubmitted, which on a billed endpoint can be a second
+# charge racing a late first result.
+# --------------------------------------------------------------------------
+
+
+class _CountingChatClient:
+    """A chat-completions client, which is the dialect OpenRouter speaks."""
+
+    def __init__(self, errors: list[Exception]) -> None:
+        self.calls = 0
+        self._errors = list(errors)
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def with_options(self, **_options: Any) -> "_CountingChatClient":
+        return self
+
+    def create(self, **kwargs: Any) -> Any:
+        index = self.calls
+        self.calls += 1
+        if index < len(self._errors):
+            raise self._errors[index]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content='{"ok":true}'))
+            ],
+            model=kwargs.get("model"),
+            system_fingerprint="admission-test",
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+
+def _router(
+    client: _CountingChatClient,
+    *,
+    admission_retry_enable: bool = True,
+    admission_max_retries: int = 3,
+    max_retries: int = 2,
+    log: list[str] | None = None,
+) -> OpenRouterProvider:
+    sink = log if log is not None else []
+    provider = OpenRouterProvider(
+        base_url="https://openrouter.ai/api/v1",
+        api_key="test-key",
+        analyst_model="openai/model-a",
+        critic_model="openai/model-a",
+        adjudicator_model="openai/model-a",
+        fallback_models=(),
+        healthcheck_path="/models",
+        timeout_sec=300.0,
+        max_retries=max_retries,
+        max_output_tokens=2048,
+        temperature=None,
+        top_p=None,
+        seed=42,
+        enable_thinking=False,
+        reasoning_effort="low",
+        reasoning_token_reserve=0,
+        require_json_schema=True,
+        require_structured_provider=True,
+        allowed_providers=("openai/flex", "openai"),
+        parallelism=1,
+        context_budget_tokens=131072,
+        circuit_failure_threshold=100,
+        circuit_cooldown_sec=60.0,
+        log=sink.append,
+        admission_retry_enable=admission_retry_enable,
+        admission_max_retries=admission_max_retries,
+        admission_backoff_initial_sec=2.0,
+        admission_backoff_max_sec=30.0,
+        client_factory=lambda **_kwargs: client,
+    )
+    provider._client = client
+    return provider
+
+
+def _router_call(
+    provider: OpenRouterProvider,
+    *,
+    deadline: RequestDeadline | None = None,
+    request_id: str = "admission-test",
+) -> Any:
+    metadata: dict[str, Any] = {"request_id": request_id}
+    if deadline is not None:
+        metadata["deadline"] = deadline
+    return provider.generate_structured(
+        role="analyst",
+        system_prompt="Return JSON.",
+        evidence={"probe": True},
+        response_schema=_Probe,
+        request_metadata=metadata,
+    )
+
+
+def test_openrouter_shares_one_admission_classifier_with_the_remote_transport():
+    """One definition of 'never admitted', not two that can drift apart."""
+
+    exc = _rate_limit_error()
+    assert OpenRouterProvider._admission_rejected(exc) is True
+    assert RemoteAPIProvider._admission_rejected(exc) is True
+    assert OpenRouterProvider._admission_rejected(_quota_error()) is False
+    assert OpenRouterProvider._admission_rejected(_timeout_error()) is False
+
+
+def test_openrouter_waits_before_resubmitting_a_rate_limit(_no_real_sleep):
+    client = _CountingChatClient([_rate_limit_error()])
+    log: list[str] = []
+    provider = _router(client, log=log)
+
+    result = _router_call(provider, deadline=_deadline(2700.0))
+
+    assert result.parsed.ok is True
+    assert client.calls == 2
+    # The point of the fix: it WAITED.  The pre-fix loop retried immediately.
+    assert _no_real_sleep == [pytest.approx(2.0, abs=0.5)]
+    assert any(line.startswith("[provider_admission_retry]") for line in log)
+
+
+def test_openrouter_honours_retry_after(_no_real_sleep):
+    client = _CountingChatClient([_rate_limit_error(retry_after="7")])
+    provider = _router(client)
+
+    _router_call(provider, deadline=_deadline(2700.0))
+
+    assert _no_real_sleep == [7.0]
+
+
+def test_openrouter_admission_budget_is_separate_from_max_retries(_no_real_sleep):
+    """Three admission refusals clear on a transport configured max_retries=0."""
+
+    client = _CountingChatClient([_rate_limit_error()] * 3)
+    provider = _router(client, max_retries=0, admission_max_retries=3)
+
+    result = _router_call(provider, deadline=_deadline(2700.0))
+
+    assert result.parsed.ok is True
+    assert client.calls == 4
+    assert len(_no_real_sleep) == 3
+
+
+def test_openrouter_admission_retries_are_bounded(_no_real_sleep):
+    client = _CountingChatClient([_rate_limit_error()] * 9)
+    provider = _router(client, max_retries=0, admission_max_retries=2)
+
+    with pytest.raises(ProviderCallError):
+        _router_call(provider, deadline=_deadline(2700.0))
+
+    # max_retries=0, so all three calls are the admission budget and nothing
+    # else.  Leaving max_retries at 2 made the same count reachable through the
+    # old immediate-retry path, which is exactly what this pins against.
+    assert client.calls == 3
+    assert len(_no_real_sleep) == 2
+
+
+def test_openrouter_never_resubmits_an_ambiguous_timeout(_no_real_sleep):
+    """A billed call that may have been ADMITTED must not be sent twice."""
+
+    client = _CountingChatClient([_timeout_error(), _timeout_error()])
+    log: list[str] = []
+    provider = _router(client, max_retries=2, log=log)
+
+    with pytest.raises(ProviderCallError):
+        _router_call(provider, deadline=_deadline(2700.0))
+
+    assert client.calls == 1
+    assert any(
+        line.startswith("[provider_ambiguous_failure_not_resubmitted]") for line in log
+    )
+
+
+def test_openrouter_never_resubmits_a_generic_5xx(_no_real_sleep):
+    client = _CountingChatClient([_server_error(), _server_error()])
+    provider = _router(client, max_retries=2)
+
+    with pytest.raises(ProviderCallError):
+        _router_call(provider, deadline=_deadline(2700.0))
+
+    assert client.calls == 1
+
+
+def test_openrouter_quota_exhaustion_is_not_retried(_no_real_sleep):
+    """Waiting cannot clear a billing state; burning the deadline is not a fix."""
+
+    client = _CountingChatClient([_quota_error()] * 4)
+    provider = _router(client)
+
+    with pytest.raises(ProviderCallError):
+        _router_call(provider, deadline=_deadline(2700.0))
+
+    assert client.calls == 1
+    assert _no_real_sleep == []
+
+
+def test_openrouter_skips_a_retry_it_cannot_afford(_no_real_sleep):
+    client = _CountingChatClient([_rate_limit_error(retry_after="600")])
+    log: list[str] = []
+    provider = _router(client, log=log)
+
+    with pytest.raises(ProviderCallError):
+        _router_call(provider, deadline=_deadline(120.0, min_attempt_sec=30.0))
+
+    assert client.calls == 1
+    assert _no_real_sleep == []
+    assert any("action=skipped_insufficient_budget" in line for line in log)
+
+
+def test_the_loopback_transport_keeps_its_permissive_retry_posture():
+    """The change is scoped to paid transports; the local server is untouched."""
+
+    assert LocalOpenAICompatibleProvider.resubmit_ambiguous_transport_failures is True
+    assert OpenRouterProvider.resubmit_ambiguous_transport_failures is False
+
+
+def test_the_gate_wires_the_admission_budget_into_the_openrouter_transport():
+    """A budget the factory never passes is a setting that does not exist."""
+
+    source = (ROOT / "ai_gate.py").read_text(encoding="utf-8")
+    start = source.index("return OpenRouterProvider(")
+    block = source[start : source.index("\n    if cfg.use_remote_api:", start)]
+    for field in (
+        "admission_retry_enable=cfg.admission_retry_enable",
+        "admission_max_retries=cfg.admission_max_retries",
+        "admission_backoff_initial_sec=cfg.admission_backoff_initial_sec",
+        "admission_backoff_max_sec=cfg.admission_backoff_max_sec",
+    ):
+        assert field in block, field

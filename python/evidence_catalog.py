@@ -35,6 +35,7 @@ EVIDENCE_CATALOG_VERSION = "20260730_python_owned_evidence_catalog_v1"
 
 AUTHORITY_DETERMINISTIC = "deterministic"
 AUTHORITY_DIAGNOSTIC = "diagnostic_only"
+AUTHORITY_INTERNAL_IDENTITY = "internal_identity"
 
 # Global (request-scoped) sections the analyst may legitimately cite.  Each entry
 # is (section, tuple-of-leaf-names) -- an empty tuple means "every scalar leaf".
@@ -52,8 +53,6 @@ _GLOBAL_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 # Per-candidate scalar fields worth citing, beyond the numeric evidence block.
 _CANDIDATE_FIELDS: tuple[str, ...] = (
-    "candidate_id",
-    "candidate_hash",
     "symbol",
     "direction",
     "is_buy",
@@ -67,10 +66,9 @@ _CANDIDATE_FIELDS: tuple[str, ...] = (
     "session_code",
     "killzone_code",
     "asset_class",
+    "asset_class_source",
     "regime_profile",
     "volatility_profile",
-    "target_source",
-    "target_model",
     "obstacle_kind",
     "obstacle_tf",
     "fvg_lower",
@@ -126,6 +124,13 @@ _CANDIDATE_FIELDS: tuple[str, ...] = (
     "follow_through_required",
     "follow_through_observed",
     "follow_through_absence_classification",
+)
+
+_INTERNAL_IDENTITY_FIELDS: tuple[str, ...] = (
+    "candidate_id",
+    "candidate_hash",
+    "request_execution_fingerprint",
+    "assessed_execution_fingerprint",
 )
 
 _MAX_SCALAR_CHARS = 160
@@ -212,13 +217,18 @@ class EvidenceCatalog:
         return self._by_path.get(str(canonical_path))
 
     def provider_rows(self) -> list[dict[str, Any]]:
-        return [item.as_catalog_row() for item in self.items]
+        return [
+            item.as_catalog_row()
+            for item in self.items
+            if item.authority != AUTHORITY_INTERNAL_IDENTITY
+        ]
 
     def resolve(
         self,
         evidence_ref_ids: Iterable[Any],
         *,
         candidate_index: int | None,
+        include_internal_identity: bool = False,
     ) -> EvidenceResolution:
         """Validate returned IDs and map them to canonical evidence.
 
@@ -235,7 +245,10 @@ class EvidenceCatalog:
 
         for raw in evidence_ref_ids or ():
             item = self.get(raw)
-            if item is None:
+            if item is None or (
+                item.authority == AUTHORITY_INTERNAL_IDENTITY
+                and not include_internal_identity
+            ):
                 unknown.append(raw)
                 continue
             if item.evidence_id in seen:
@@ -311,6 +324,18 @@ def build_evidence_catalog(envelope: Mapping[str, Any]) -> EvidenceCatalog:
                 continue
             index = int(row.get("candidate_index", position))
             base = f"entry_and_invalidation.candidates.{position}"
+            # Retained only for migration of old cached path citations.  These
+            # rows never appear in provider_rows, so review roles cannot parse
+            # lineage IDs or mistake an embedded anchor for an entry price.
+            for name in _INTERNAL_IDENTITY_FIELDS:
+                if name in row and _is_scalar(row[name]):
+                    _append(
+                        items,
+                        candidate_index=index,
+                        canonical_path=f"{base}.{name}",
+                        value=row[name],
+                        authority=AUTHORITY_INTERNAL_IDENTITY,
+                    )
             for name in _CANDIDATE_FIELDS:
                 if name not in row:
                     continue
@@ -347,6 +372,7 @@ def build_evidence_catalog(envelope: Mapping[str, Any]) -> EvidenceCatalog:
                     "follow_through_observed",
                     "follow_through_absence_classification",
                     "required_event_sequence",
+                    "deferred_execution_triggers",
                 ):
                     if name not in family_requirements:
                         continue
@@ -360,6 +386,56 @@ def build_evidence_catalog(envelope: Mapping[str, Any]) -> EvidenceCatalog:
                             canonical_path=f"{base}.family_requirement_contract.{name}",
                             value=value,
                         )
+            for block_name in ("target_semantics",):
+                block = row.get(block_name)
+                if not isinstance(block, Mapping):
+                    continue
+                for name in sorted(block):
+                    value = block[name]
+                    if _is_scalar(value):
+                        _append(
+                            items,
+                            candidate_index=index,
+                            canonical_path=f"{base}.{block_name}.{name}",
+                            value=value,
+                        )
+            family_events = row.get("family_event_evidence")
+            if isinstance(family_events, Mapping):
+                for name in ("approval_contract_satisfied", "execution_trigger_pending", "contract_rule"):
+                    if name in family_events and _is_scalar(family_events[name]):
+                        _append(
+                            items,
+                            candidate_index=index,
+                            canonical_path=f"{base}.family_event_evidence.{name}",
+                            value=family_events[name],
+                        )
+                for group in ("approval_events", "execution_triggers"):
+                    values = family_events.get(group)
+                    if not isinstance(values, Mapping):
+                        continue
+                    for name in sorted(values):
+                        if _is_scalar(values[name]):
+                            _append(
+                                items,
+                                candidate_index=index,
+                                canonical_path=f"{base}.family_event_evidence.{group}.{name}",
+                                value=values[name],
+                            )
+            # Counterfactual (shadow) history.  Published field by field so each
+            # number has its own evidence id: a model is required to cite what it
+            # relies on, and an uncitable block is evidence it may not use.
+            shadow_history = row.get("shadow_historical_evidence")
+            if isinstance(shadow_history, Mapping):
+                for name in sorted(shadow_history):
+                    value = shadow_history[name]
+                    if not _is_scalar(value):
+                        continue
+                    _append(
+                        items,
+                        candidate_index=index,
+                        canonical_path=f"{base}.shadow_historical_evidence.{name}",
+                        value=value,
+                    )
 
     catalog_hash = sha256(
         json.dumps(
@@ -442,7 +518,11 @@ def resolve_legacy_references(
             }
         )
 
-    resolution = catalog.resolve(ids, candidate_index=candidate_index)
+    resolution = catalog.resolve(
+        ids,
+        candidate_index=candidate_index,
+        include_internal_identity=True,
+    )
     if unresolved:
         resolution = EvidenceResolution(
             valid=False,

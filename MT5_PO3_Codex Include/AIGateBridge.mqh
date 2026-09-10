@@ -544,7 +544,10 @@ private:
       // enforce one absolute deadline. Operational only: deliberately excluded
       // from RuntimeInputHash(), because changing the wait budget must not
       // invalidate decision identity or the replay-cache cohort.
-      j += JsonKVInt("ai_wait_timeout_ms", MathMax(1000, InpAiWaitTimeoutRealMin * 60 * 1000)) + ",";
+      int ai_wait_timeout_min = (MQLInfoInteger(MQL_TESTER)
+                                 ? InpAiWaitTimeoutRealMin
+                                 : InpPendingAiTimeoutMin);
+      j += JsonKVInt("ai_wait_timeout_ms", MathMax(1000, ai_wait_timeout_min * 60 * 1000)) + ",";
       j += JsonKVInt("ai_wait_poll_ms", MathMax(50, InpAiWaitPollMs)) + ",";
       j += JsonKVInt("strategy_mode", (int)InpStrategyMode) + ",";
       j += JsonKVStr("strategy_preset", InpStrategyPreset) + ",";
@@ -1471,6 +1474,19 @@ public:
              double reward = (c.is_buy ? c.po3.liquidity_target - c.entry_est : c.entry_est - c.po3.liquidity_target);
              if(reward > 0) c_liq_rr = reward / c_risk;
           }
+          bool c_zone_valid = (c.fvg.upper > c.fvg.lower &&
+                               !c.fvg.invalidated && !c.fvg.fully_filled &&
+                               !c.fvg.entry_invalid && !c.fvg.structure_invalidated);
+          bool c_trigger_observed = (c.fvg.touched || c.fvg.mid_mitigated);
+          string c_entry_trigger_phase = (!c_zone_valid ? "INVALIDATED" :
+                                          (c_trigger_observed ? "OBSERVED" : "PENDING_ENTRY_TRIGGER"));
+          bool c_breaker_formation_confirmed =
+             (c.entry_branch == "breaker_retest" && c.po3.bos_level > 0.0 &&
+              (c.po3.has_bos || c.po3.htf_mss || c.po3.htf_choch ||
+               c.po3.ltf_bos || c.po3.ltf_mss || c.po3.ltf_choch));
+          bool c_ote_geometry_valid =
+             (c.entry_branch == "ote_inside_fvg" &&
+              c.ote_state != "lost" && c.ote_state != "unavailable");
 
           if(i > 0) j += ",";
           j += "{";
@@ -1509,6 +1525,15 @@ public:
            j += JsonKVStr("killzone_name", c.po3.killzone_name) + ",";
            j += JsonKVBool("in_killzone", c.po3.in_killzone) + ",";
            j += JsonKVStr("source_context_tier", c.source_context_tier) + ",";
+           j += JsonKVStr("asset_class", c.asset_class) + ",";
+           j += JsonKVBool("branch_contract_validated", true) + ",";
+           j += JsonKVBool("breaker_formation_confirmed", c_breaker_formation_confirmed) + ",";
+           j += JsonKVStr("entry_trigger_phase", c_entry_trigger_phase) + ",";
+           j += JsonKVStr("ote_state", c.ote_state) + ",";
+           j += JsonKVNum("ote_distance_frac", c.ote_distance_frac, 6) + ",";
+           j += JsonKVBool("ote_geometry_valid", c_ote_geometry_valid) + ",";
+           j += JsonKVBool("dealing_range_valid", c.po3.dr_high > c.po3.dr_low && c.po3.dr_low > 0.0) + ",";
+           j += JsonKVBool("session_range_valid", c.po3.session_high > c.po3.session_low && c.po3.session_low > 0.0) + ",";
            j += JsonKVInt("source_t_sweep", (int)c.source_t_sweep) + ",";
            j += JsonKVInt("source_t_disp", (int)c.source_t_disp) + ",";
            j += JsonKVInt("source_t_bos", (int)c.source_t_bos) + ",";

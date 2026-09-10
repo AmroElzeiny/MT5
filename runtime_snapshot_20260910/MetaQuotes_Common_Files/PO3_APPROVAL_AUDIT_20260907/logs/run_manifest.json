@@ -1,0 +1,23 @@
+{
+  "contract_manifest_hash": "1823865419",
+  "decision_schema_version": "20260724_canonical_frozen_request_v10",
+  "ea_name": "",
+  "ex5_bytes": 0,
+  "ex5_hash": "",
+  "ex5_path": "",
+  "host": "WIN-FOVCL5KBJ2M",
+  "model": "~deepseek/deepseek-v4-flash-latest",
+  "mql_session_id": "",
+  "prompt_contract_version": "20260724_canonical_frozen_request_v12",
+  "provider_id": "openrouter_api",
+  "provider_mode": "OPENROUTER_API",
+  "provider_process_id": 3176,
+  "python_session_id": "python_3176_1788753868",
+  "run_manifest_version": "20260731_correlated_run_manifest_v1",
+  "runtime_input_hash": "",
+  "started_at": 1788753868.1594577,
+  "test_period_from": "",
+  "test_period_to": "",
+  "test_run_id": "run_a7bb5d004b95427f",
+  "tester_mode": ""
+}

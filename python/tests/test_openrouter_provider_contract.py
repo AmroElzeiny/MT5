@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from test_governance_contracts import MQL_STAGE  # noqa: E402  (shared resolver)
 
 import ai_gate  # noqa: E402
+import po3_env  # noqa: E402
 from ai_gate import (  # noqa: E402
     AIGateRuntimeConfig,
     PROVIDER_SELECT_LOCAL,
@@ -225,6 +226,16 @@ class OpenRouterWireContractTests(unittest.TestCase):
         test actually protects is "no half-configured OpenRouter deployment", so it
         is now conditioned on OpenRouter being the selection.  The openai_remote
         counterpart below keeps the other selection covered rather than untested.
+
+        The same lesson applied twice: it also asserted the model id and the
+        reasoning effort by literal value, so retuning the block to
+        ``openai/gpt-5.6-luna`` at effort ``low`` on 2026-09-08 would have turned
+        it red the moment the selection was flipped -- again with nothing wrong.
+        A *model choice* is not an invariant either.  What is: every role runs the
+        SAME model, that model carries a routed vendor prefix (an api.openai.com
+        bare id is unroutable here, the mirror of the openai_remote test below),
+        reasoning is on with an effort the config parser accepts, and there is
+        enough transport parallelism for one scan's setups.
         """
 
         values = self._deployed_env_values()
@@ -233,15 +244,28 @@ class OpenRouterWireContractTests(unittest.TestCase):
                 "deployed AI_PROVIDER_SELECT="
                 f"{values.get('AI_PROVIDER_SELECT')!r}; OpenRouter block is inert"
             )
+        model = values.get("OPENROUTER_MODEL") or ""
+        self.assertTrue(model, "OPENROUTER_MODEL must be set under openrouter")
+        self.assertIn(
+            "/",
+            model,
+            f"OPENROUTER_MODEL={model!r} has no vendor prefix; it is not a routable id",
+        )
         for key in (
-            "OPENROUTER_MODEL",
             "OPENROUTER_ANALYST_MODEL",
             "OPENROUTER_CRITIC_MODEL",
             "OPENROUTER_ADJUDICATOR_MODEL",
         ):
-            self.assertEqual(values.get(key), LATEST_MODEL)
+            role_model = values.get(key) or ""
+            # Blank inherits OPENROUTER_MODEL, which is whole.  A DIFFERENT id is
+            # the half-configured deployment this test exists to catch.
+            if role_model:
+                self.assertEqual(role_model, model, f"{key} disagrees with OPENROUTER_MODEL")
         self.assertEqual(values.get("OPENROUTER_ENABLE_THINKING"), "true")
-        self.assertEqual(values.get("OPENROUTER_REASONING_EFFORT"), "high")
+        self.assertIn(
+            values.get("OPENROUTER_REASONING_EFFORT"),
+            {"minimal", "low", "medium", "high", "xhigh"},
+        )
         self.assertGreaterEqual(int(values.get("OPENROUTER_PARALLELISM", "0")), 3)
 
     def test_checked_in_runtime_env_is_a_usable_selection(self):
@@ -256,9 +280,19 @@ class OpenRouterWireContractTests(unittest.TestCase):
             values.get("AI_PROVIDER_SELECT"), values.get("AI_USE_REMOTE_API")
         )
         self.assertEqual(error, "")
+        # Read from the authority rather than a literal tuple.  The tuple was a
+        # snapshot of the selections that existed when this was written, so it
+        # failed the moment a fourth one was deployed -- which is the opposite of
+        # the selection-agnostic property this test exists to assert.
+        self.assertIn(selection, po3_env.PROVIDER_SELECT_VALUES)
         self.assertIn(
-            selection,
-            (PROVIDER_SELECT_OPENAI, PROVIDER_SELECT_LOCAL, PROVIDER_SELECT_OPENROUTER),
+            PROVIDER_SELECT_OPENAI, po3_env.PROVIDER_SELECT_VALUES
+        )
+        self.assertIn(
+            PROVIDER_SELECT_LOCAL, po3_env.PROVIDER_SELECT_VALUES
+        )
+        self.assertIn(
+            PROVIDER_SELECT_OPENROUTER, po3_env.PROVIDER_SELECT_VALUES
         )
 
     def test_checked_in_runtime_env_openai_block_is_whole_when_selected(self):

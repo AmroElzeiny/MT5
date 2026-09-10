@@ -1,0 +1,294 @@
+{
+  "policy_id": "policy_1781811204_v1",
+  "version": 1,
+  "generated_at": 1781811204,
+  "active_policy": {
+    "policy_id": "policy_1781811204_v1",
+    "version": 1,
+    "activated_at": 0,
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "soft_setup_floor": 35.0,
+    "hard_setup_floor": 29.0,
+    "setup_floor_penalty_mult": 0.75,
+    "ote_softness_frac": 0.08,
+    "default_risk_multiplier": 0.9,
+    "runner_sequence_floor": 6.6,
+    "runner_liquidity_rr_floor": 2.1,
+    "runner_cost_r_ceiling": 0.22,
+    "runner_alignment_floor": 6.1,
+    "runner_adverse_ceiling": 3.2,
+    "runner_ev_floor": 0.0,
+    "shadow_mode": true,
+    "activation_state": "shadow",
+    "ai_review_passed": true
+  },
+  "governance": {
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "min_total_trades": 200,
+    "min_bucket_trades": 50,
+    "max_relevant_bucket": 0,
+    "r_ci_low": 0.0,
+    "profit_factor_after_costs": 0.0,
+    "max_drawdown_r": 0.0,
+    "min_profit_factor_after_costs": 1.15,
+    "max_allowed_drawdown_r": 12.0,
+    "min_positive_fold_rate": 0.6,
+    "max_train_test_gap_r": 0.25,
+    "change_count": 0,
+    "changed_fields": [],
+    "activate_ok": false,
+    "subtype_policy_count": 0,
+    "shadow_mode": true,
+    "governance_passed": false,
+    "ai_audit_status": "skipped",
+    "ai_review_passed": true,
+    "ai_decision_weight": 0.75
+  },
+  "context_policy": [],
+  "subtype_policy": [],
+  "session_weekday_policy": [],
+  "symbol_expectancy_policy": [],
+  "family_expectancy_policy": [],
+  "adaptive_policy_readiness": {
+    "activate_adaptive_policy": false,
+    "checks": {
+      "total_trades_ge_500": false,
+      "family_trades_ge_50": false,
+      "symbol_trades_ge_30": false,
+      "profit_factor_after_costs_gt_1_10": false,
+      "walk_forward_positive_fold_rate_ge_60pct": false
+    },
+    "walk_forward_summary": {
+      "folds": 0,
+      "positive_fold_rate": 0.0,
+      "avg_train_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_train_ev": 0.0,
+      "avg_test_ev": 0.0,
+      "avg_gap": 0.0
+    }
+  },
+  "data_quality": {
+    "loaded_files": 13,
+    "used_records": 0,
+    "ignored_records": 13,
+    "ignored_reasons": {
+      "legacy_trade_result_schema": 13,
+      "missing_trade_id": 13
+    },
+    "ignored_examples": [
+      {
+        "file": "trade_result_EURUSD_11.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "EURUSD_11",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": 771.4,
+        "realized_r": 1.026562
+      },
+      {
+        "file": "trade_result_EURUSD_17.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "EURUSD_17",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": 476.86,
+        "realized_r": 0.528488
+      },
+      {
+        "file": "trade_result_EURUSD_2.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "EURUSD_2",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": -462.62,
+        "realized_r": -0.731438
+      },
+      {
+        "file": "trade_result_EURUSD_20.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "EURUSD_20",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": -472.25,
+        "realized_r": -0.523379
+      },
+      {
+        "file": "trade_result_EURUSD_27.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "EURUSD_27",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": 148.58,
+        "realized_r": 0.239406
+      },
+      {
+        "file": "trade_result_sl 1.15897.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "sl 1.15897",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": -1007.04,
+        "realized_r": -1.28
+      },
+      {
+        "file": "trade_result_sl 1.15930.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "sl 1.15930",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": -522.87,
+        "realized_r": -0.579479
+      },
+      {
+        "file": "trade_result_sl 1.16316.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "sl 1.16316",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": -458.45,
+        "realized_r": -2.883333
+      },
+      {
+        "file": "trade_result_sl 1.16362.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "sl 1.16362",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": -627.35,
+        "realized_r": -0.991889
+      },
+      {
+        "file": "trade_result_tp 1.15868.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "tp 1.15868",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": 322.57,
+        "realized_r": 0.357494
+      },
+      {
+        "file": "trade_result_tp 1.16217.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "tp 1.16217",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": 735.3,
+        "realized_r": 0.978521
+      },
+      {
+        "file": "trade_result_tp 1.16374.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "tp 1.16374",
+        "position_id": "",
+        "symbol": "EURUSD",
+        "realized_pnl": 717.44,
+        "realized_r": 1.134328
+      }
+    ],
+    "parse_failures": 0,
+    "identity_meta_keys": 646,
+    "identity_enriched_from_trade_key_meta": 0,
+    "source_filter_excluded": 0,
+    "analyzed_records": 0
+  },
+  "input_recommendations": {
+    "mode": "advisory_only",
+    "auto_apply": false,
+    "valid_trades": 0,
+    "recommendation_count": 1,
+    "recommendations": [
+      {
+        "category": "data_quality",
+        "severity": "critical",
+        "action": "block_input_optimization",
+        "inputs": [
+          "trade_result_*.json",
+          "position_id",
+          "planned_entry",
+          "planned_sl",
+          "entry_branch",
+          "realized_r"
+        ],
+        "suggested_change": "Do not tune performance inputs from this sample. Collect fresh closed trades after the analytics metadata fix.",
+        "reason": "All loaded trade-result records were rejected by the quality gate.",
+        "evidence": {
+          "loaded_files": 13,
+          "ignored_records": 13,
+          "ignored_reasons": {
+            "legacy_trade_result_schema": 13,
+            "missing_trade_id": 13
+          }
+        },
+        "min_valid_trades": 30,
+        "auto_apply": false
+      }
+    ],
+    "notes": [
+      "Recommendations are generated from valid closed-trade evidence only.",
+      "The report never lowers governance safety gates just to force activation.",
+      "Apply input changes manually or through a separately governed change workflow."
+    ],
+    "active_policy_reference": {
+      "policy_id": "policy_1781811204_v1",
+      "activation_state": "shadow",
+      "shadow_mode": true
+    }
+  },
+  "ai_audit": {
+    "enabled": false,
+    "model": "gpt-5.5",
+    "reasoning_effort": "high",
+    "decision_weight": 0.75,
+    "status": "skipped",
+    "agree": null,
+    "confidence": 0.0,
+    "weighted_confidence": 0.0,
+    "activation_veto": false,
+    "summary": "EXPECTANCY_AI_AUDIT_ENABLE is off."
+  },
+  "context_diagnostics": [],
+  "global_walk_forward": []
+}

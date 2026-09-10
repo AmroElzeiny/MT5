@@ -15,7 +15,7 @@ from governance_contracts import SETUP_TAXONOMY_VERSION, SetupTaxonomy
 
 
 EVIDENCE_ENVELOPE_VERSION = "20260718_decision_evidence_v1"
-PROVIDER_DECISION_CONTEXT_VERSION = "20260814_provider_decision_context_v3"
+PROVIDER_DECISION_CONTEXT_VERSION = "20260909_provider_decision_context_v6"
 
 
 _FULL_PO3_TAXONOMIES = {
@@ -121,6 +121,9 @@ def _family_requirement_contract(
         "follow_through_observed": follow["observed"],
         "follow_through_absence_classification": follow["absence_classification"],
         "required_event_sequence": required_sequence,
+        "deferred_execution_triggers": list(
+            getattr(profile, "deferred_execution_triggers", ()) or ()
+        ),
         "mandatory_evidence_rule": (
             "Only an absent event named by family_profile.required_event_sequence "
             "may be reported as missing mandatory family evidence."
@@ -150,6 +153,208 @@ def _first(mapping: Mapping[str, Any], names: Sequence[str], default: Any = None
         if name in mapping and mapping[name] not in (None, ""):
             return mapping[name]
     return default
+
+
+_ASSET_CLASS_ALIASES = {
+    "forex": "fx",
+    "fx": "fx",
+    "metal": "metals",
+    "metals": "metals",
+    "index": "indices",
+    "indices": "indices",
+    "energy": "energy",
+    "crypto": "crypto",
+    "cfd": "other",
+    "other": "other",
+}
+_FX_CURRENCIES = {
+    "AUD", "CAD", "CHF", "CNH", "EUR", "GBP", "HKD", "HUF", "JPY",
+    "MXN", "NOK", "NZD", "PLN", "SEK", "SGD", "TRY", "USD", "ZAR",
+}
+
+
+def _canonical_asset_class(value: Any) -> str:
+    return _ASSET_CLASS_ALIASES.get(str(value or "").strip().lower(), "")
+
+
+def _asset_class_from_symbol(symbol: Any) -> str:
+    token = re.sub(r"[^A-Z0-9]", "", str(symbol or "").upper())
+    if any(name in token for name in ("XAU", "GOLD", "XAG", "SILVER", "XPT", "XPD")):
+        return "metals"
+    if any(name in token for name in ("WTI", "BRENT", "OIL", "NGAS")):
+        return "energy"
+    if any(name in token for name in ("BTC", "ETH", "SOL", "LTC", "XRP")):
+        return "crypto"
+    if any(
+        name in token
+        for name in (
+            "US30", "USNDAQ", "NASDAQ", "NAS100", "USSPX", "SPX", "US500",
+            "GERMANY", "GER40", "DE40", "DAX", "UK100", "JAPAN", "JP225",
+            "US2000", "FRANCE", "FRA40", "EURO50",
+        )
+    ):
+        return "indices"
+    letters = re.sub(r"[^A-Z]", "", token)
+    if len(letters) >= 6 and letters[:3] in _FX_CURRENCIES and letters[3:6] in _FX_CURRENCIES:
+        return "fx"
+    return "other"
+
+
+def _resolved_asset_class(item: Mapping[str, Any], request_symbol: str) -> tuple[str, str]:
+    symbol = str(item.get("symbol") or request_symbol or "")
+    inferred = _asset_class_from_symbol(symbol)
+    explicit = _canonical_asset_class(item.get("asset_class"))
+    normalized_fvg = _canonical_asset_class(item.get("fvg_normalized_asset_class"))
+    # Known symbol aliases are stronger than legacy generic-six-letter fallbacks,
+    # which mislabeled #USNDAQ100/#Japan225 as FX in the captured live requests.
+    if inferred != "other":
+        return inferred, "symbol_alias_classifier"
+    if explicit:
+        return explicit, "candidate_asset_class"
+    if normalized_fvg:
+        return normalized_fvg, "normalized_fvg_asset_class"
+    return "other", "unclassified"
+
+
+def _target_review_projection(item: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw = _mapping(item.get("target_candidates"))
+    current = _mapping(raw.get("keep_current_target"))
+    current_price = _first(current, ("tp2", "tp"), item.get("tp2"))
+    current_source = str(
+        raw.get("current_target_source")
+        or item.get("target_source")
+        or item.get("tp_model")
+        or ""
+    )
+    semantics = {
+        "current_selection_identity": "keep_current",
+        "current_underlying_source": current_source,
+        "current_underlying_tp_model": str(
+            raw.get("current_tp_model") or item.get("tp_model") or current_source
+        ),
+        "current_target_price": current_price,
+        "family_target_policy": str(item.get("target_model") or ""),
+        "liquidity_objective_model": str(item.get("liquidity_target_model") or ""),
+        "labels_have_distinct_meanings": True,
+        "interpretation": (
+            "keep_current names the selectable incumbent route; current_underlying_source "
+            "names its price source; family_target_policy is a preference and is not the "
+            "selected execution target. Never compare these as aliases."
+        ),
+    }
+    menu: dict[str, Any] = {
+        "arbitration_required": bool(raw.get("arbitration_required", item.get("target_arbitration_required"))),
+        "incumbent_target": {
+            "identity": "keep_current",
+            "underlying_source": current_source,
+            "underlying_tp_model": semantics["current_underlying_tp_model"],
+            "tp2": current_price,
+            "rr2": _first(current, ("rr2", "rr"), raw.get("current_rr2")),
+            "available": current.get("available"),
+            "feasible_for_tp2": current.get("feasible_for_tp2"),
+            "infeasible_reason": current.get("infeasible_reason"),
+        },
+    }
+    for key in (
+        "keep_current_target",
+        "liquidity_target",
+        "partial_before_obstacle_then_liquidity",
+        "capped_before_obstacle",
+        "synthetic_rr_fallback",
+        "synthetic_rr_capped_to_max_distance",
+        "blocker_features",
+    ):
+        value = raw.get(key)
+        if isinstance(value, Mapping):
+            menu[key] = dict(value)
+    for key in ("obstacle_kind", "obstacle_price", "obstacle_r", "obstacle_distance_r", "obstacle_tf"):
+        if key in raw:
+            menu[key] = raw[key]
+    return semantics, menu
+
+
+def _family_event_evidence(
+    item: Mapping[str, Any], taxonomy: str, po3: Mapping[str, Any]
+) -> dict[str, Any]:
+    branch = str(item.get("entry_branch") or item.get("entry_model") or "").strip().lower()
+    valid_zone = bool(
+        _finite(item.get("fvg_lower"))
+        and _finite(item.get("fvg_upper"))
+        and float(item.get("fvg_upper")) > float(item.get("fvg_lower"))
+        and not bool(item.get("fvg_invalidated"))
+        and not bool(item.get("fvg_fully_filled"))
+        and not bool(item.get("fvg_entry_invalid"))
+        and not bool(item.get("fvg_structure_invalidated"))
+    )
+    touched = bool(item.get("fvg_touched") or item.get("fvg_mid_mitigated"))
+    trigger_state = (
+        "INVALIDATED"
+        if not valid_zone
+        else ("OBSERVED" if touched else "PENDING_ENTRY_TRIGGER")
+    )
+    source_confirmed = bool(
+        str(item.get("source_context_tier") or po3.get("context_tier") or "").strip()
+        and (int(item.get("source_t_sweep") or po3.get("t_sweep") or 0) > 0
+             or int(item.get("source_t_disp") or po3.get("t_disp") or 0) > 0)
+    )
+    displacement_confirmed = bool(
+        item.get("displacement_confirmed")
+        or po3.get("has_displacement")
+        or int(item.get("source_t_disp") or po3.get("t_disp") or 0) > 0
+    )
+    structure_confirmed = bool(
+        item.get("breaker_formation_confirmed")
+        or po3.get("has_bos")
+        or po3.get("htf_mss")
+        or po3.get("htf_choch")
+        or po3.get("ltf_bos")
+        or po3.get("ltf_mss")
+        or po3.get("ltf_choch")
+    )
+    branch_validated = bool(item.get("branch_contract_validated", bool(branch)))
+    approval: dict[str, str] = {
+        "source_context": "CONFIRMED" if source_confirmed else "MISSING",
+    }
+    triggers: dict[str, str] = {}
+    if taxonomy == SetupTaxonomy.MICRO_BREAKER_RETEST.value:
+        approval["breaker_formation"] = (
+            "CONFIRMED" if branch == "breaker_retest" and branch_validated and structure_confirmed else "MISSING"
+        )
+        triggers["clean_retest"] = trigger_state
+    elif taxonomy == SetupTaxonomy.MICRO_OTE_REVERSAL.value:
+        ote_state = str(item.get("ote_state") or "").strip().lower()
+        ote_geometry = bool(
+            item.get("ote_geometry_valid")
+            or (branch == "ote_inside_fvg" and branch_validated and ote_state not in {"lost", "unavailable"})
+        )
+        approval["displacement"] = "CONFIRMED" if displacement_confirmed else "MISSING"
+        approval["ote_geometry"] = "CONFIRMED" if ote_geometry else "MISSING"
+        triggers["ote_price_retracement"] = trigger_state
+    elif taxonomy == SetupTaxonomy.MICRO_RANGE_REENTRY.value:
+        approval["range_identity"] = "CONFIRMED" if bool(item.get("dealing_range_valid", branch_validated)) else "MISSING"
+        approval["range_excursion"] = "CONFIRMED" if bool(po3.get("has_sweep") or item.get("source_t_sweep")) else "MISSING"
+        approval["range_reentry_plan"] = "CONFIRMED" if branch == "range_reentry" and branch_validated else "MISSING"
+        triggers["range_reentry_price"] = trigger_state
+    elif taxonomy == SetupTaxonomy.MICRO_SESSION_REENTRY.value:
+        approval["session_range_identity"] = "CONFIRMED" if bool(item.get("session_range_valid", branch_validated)) else "MISSING"
+        approval["session_excursion"] = "CONFIRMED" if bool(po3.get("has_sweep") or item.get("source_t_sweep")) else "MISSING"
+        approval["session_reentry_plan"] = "CONFIRMED" if branch == "session_reentry" and branch_validated else "MISSING"
+        triggers["session_reentry_price"] = trigger_state
+    else:
+        approval["branch_contract"] = "CONFIRMED" if branch_validated else "MISSING"
+        if displacement_confirmed:
+            approval["displacement"] = "CONFIRMED"
+        triggers["entry_zone_touch"] = trigger_state
+    return {
+        "approval_events": approval,
+        "execution_triggers": triggers,
+        "approval_contract_satisfied": all(value == "CONFIRMED" for value in approval.values()),
+        "execution_trigger_pending": any(value == "PENDING_ENTRY_TRIGGER" for value in triggers.values()),
+        "contract_rule": (
+            "Only a MISSING approval event can be mandatory evidence for AI review. "
+            "A PENDING_ENTRY_TRIGGER is enforced later by the MQL watchlist and is not missing preapproval evidence."
+        ),
+    }
 
 
 def _number_evidence(
@@ -191,6 +396,8 @@ def _candidate_evidence(
     request_time: int,
     now: int,
     observed_flags: Mapping[str, Any] | None = None,
+    request_symbol: str = "",
+    po3_context: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str], list[str]]:
     item = dict(candidate)
     missing: list[str] = []
@@ -284,9 +491,6 @@ def _candidate_evidence(
             "asset_class",
             "regime_profile",
             "volatility_profile",
-            "target_source",
-            "target_model",
-            "tp_model",
             "obstacle_kind",
             "obstacle_tf",
             "fvg_lower",
@@ -331,13 +535,26 @@ def _candidate_evidence(
             "liquidity_target_blocked_by_obstacle",
             "historical_evidence_state",
             "retrieved_analogue_ids",
+            # Counterfactual (shadow) history for comparable prior decisions.
+            # Diagnostic by construction: the payload carries its own authority
+            # and promotion-gate state, and is built only from outcomes that had
+            # already resolved before this request's own timestamp.
+            "shadow_historical_evidence",
             "rule_score",
-            "target_candidates",
             "bucket_prior",
         )
         if key in item
     }
     compact["candidate_index"] = int(item.get("candidate_index", index))
+    resolved_asset_class, asset_source = _resolved_asset_class(item, request_symbol)
+    compact["asset_class"] = resolved_asset_class
+    compact["asset_class_source"] = asset_source
+    target_semantics, target_menu = _target_review_projection(item)
+    compact["target_semantics"] = target_semantics
+    compact["target_choice_menu"] = target_menu
+    compact["family_event_evidence"] = _family_event_evidence(
+        item, taxonomy, po3_context or {}
+    )
     compact["authoritative_numbers"] = authoritative_numbers
     compact["family_profile"] = profile.as_payload() if profile is not None else {}
     compact["family_requirement_contract"] = _family_requirement_contract(
@@ -393,6 +610,8 @@ def build_decision_evidence_envelope(
             request_time,
             now,
             {field: po3.get(field) for _, field, _ in _SEQUENCE_FLAG_SPECS},
+            request_symbol=str(payload.get("symbol") or ""),
+            po3_context=po3,
         )
         candidate_rows.append(row)
         missing.extend(row_missing)
@@ -406,6 +625,22 @@ def build_decision_evidence_envelope(
     reported_blockers = validation.get("hard_blockers")
     if isinstance(reported_blockers, list):
         hard_blockers.extend(str(value) for value in reported_blockers if str(value).strip())
+
+    candidate_asset_classes = {
+        str(row.get("asset_class") or "") for row in candidate_rows if str(row.get("asset_class") or "")
+    }
+    root_explicit_asset = _canonical_asset_class(payload.get("asset_class"))
+    inferred_root_asset = _asset_class_from_symbol(payload.get("symbol"))
+    resolved_root_asset = (
+        inferred_root_asset
+        if inferred_root_asset != "other"
+        else (next(iter(candidate_asset_classes)) if len(candidate_asset_classes) == 1 else root_explicit_asset or "other")
+    )
+    asset_consistent = len(candidate_asset_classes) <= 1 and all(
+        value == resolved_root_asset for value in candidate_asset_classes
+    )
+    if not asset_consistent:
+        invalid.append("instrument.asset_class_candidate_mismatch")
 
     envelope: dict[str, Any] = {
         "evidence_envelope_version": EVIDENCE_ENVELOPE_VERSION,
@@ -429,7 +664,11 @@ def build_decision_evidence_envelope(
         },
         "instrument": {
             "symbol": str(payload.get("symbol") or ""),
-            "asset_class": str(payload.get("asset_class") or ""),
+            "asset_class": resolved_root_asset,
+            "asset_class_source": (
+                "symbol_alias_classifier" if inferred_root_asset != "other" else "candidate_consensus"
+            ),
+            "asset_class_consistent": asset_consistent,
             "symbol_digits": payload.get("symbol_digits"),
             "symbol_tick_size": payload.get("symbol_tick_size"),
         },
@@ -466,6 +705,11 @@ def build_decision_evidence_envelope(
             "t_disp": po3.get("t_disp"),
             "t_bos": po3.get("t_bos"),
             "t_follow": po3.get("t_follow"),
+            "bos_level": po3.get("bos_level"),
+            "dr_high": po3.get("dr_high"),
+            "dr_low": po3.get("dr_low"),
+            "session_high": po3.get("session_high"),
+            "session_low": po3.get("session_low"),
             "ltf_structure_time": po3.get("ltf_structure_time"),
             "ltf_structure_level": po3.get("ltf_structure_level"),
             "displacement_score": po3.get("displacement_score"),
@@ -486,7 +730,7 @@ def build_decision_evidence_envelope(
         },
         "entry_and_invalidation": {"candidates": candidate_rows},
         "targets_and_obstacles": {
-            "candidate_targets": [row.get("target_candidates") for row in candidate_rows],
+            "candidate_targets": [row.get("target_choice_menu") for row in candidate_rows],
         },
         "execution_costs": {
             "authoritative_source": "MQL5_execution_cost_model",
@@ -531,6 +775,52 @@ def build_decision_evidence_envelope(
                     "so its absence alone is not a reason to withhold a decision."
                 ),
                 "Use historical evidence only when its asset-class applicability is sufficient.",
+                (
+                    "candidate_id, candidate_hash, and execution fingerprints are internal identity and are not "
+                    "provider evidence. Never parse an embedded identity component as an entry price; use only "
+                    "authoritative_numbers.entry for the executable entry."
+                ),
+                (
+                    "target_semantics separates the selectable current route from its underlying price source, "
+                    "the family's target policy, and the alternative liquidity objective. Those labels have "
+                    "different meanings and must never be compared as aliases or treated as a contradiction."
+                ),
+                (
+                    "family_event_evidence separates approval events from deferred execution triggers. Only a "
+                    "MISSING approval event is missing mandatory evidence. PENDING_ENTRY_TRIGGER is valid for a "
+                    "staged plan because the MQL watchlist waits for and revalidates that trigger before execution."
+                ),
+                (
+                    "shadow_historical_evidence, when present, reports what comparable "
+                    "PRIOR decisions of the same kind actually did after the fact. It is "
+                    "counterfactual research: every sample resolved strictly before this "
+                    "request's own timestamp, ambiguous, data-loss and entry-never-reached "
+                    "cases are excluded rather than counted as wins or losses, and "
+                    "state=INSUFFICIENT_SAMPLE means there is not enough history to read "
+                    "anything from it. Treat authority=DIAGNOSTIC_SHADOW_ONLY as context "
+                    "for your reasoning only: it must never by itself approve a trade, "
+                    "override a veto, or replace the evidence in front of you."
+                ),
+                (
+                    "shadow_historical_evidence state=INSUFFICIENT_SAMPLE is a RESOLVED "
+                    "absence, not adverse evidence: the research is silent, not negative. "
+                    "Do not reject, abstain, lower a score, or record a missing "
+                    "confirmation solely because shadow history is insufficient, absent, "
+                    "or reports zero samples. This forbids treating the ABSENCE of history "
+                    "as a finding; it does not forbid relying on history that IS present -- "
+                    "when state=SUFFICIENT_SAMPLE the reported rates are real evidence and "
+                    "may be cited for or against the setup."
+                ),
+                (
+                    "shadow_historical_evidence.match_specificity says how the reported "
+                    "history was matched. EXACT_FAMILY_TAXONOMY_STATE matched family, setup "
+                    "taxonomy and decision state; FAMILY_TAXONOMY_ANY_DECIDED_STATE widened "
+                    "the decision state; FAMILY_ANY_DECIDED_STATE widened to the family "
+                    "alone. A widened match describes a wider population, so weight it "
+                    "accordingly and name the specificity you relied on. Rates are never "
+                    "pooled across decision states: every rate you are shown was computed "
+                    "inside the single state named by decision_state_compared."
+                ),
                 "Use only supplied feasible targets and never invent a price.",
             ],
         },

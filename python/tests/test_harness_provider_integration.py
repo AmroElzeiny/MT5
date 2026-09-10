@@ -635,12 +635,25 @@ class HarnessTransportFailureTests(HarnessServerTestCase):
         ) as resp:
             body = json.loads(resp.read().decode("utf-8"))
 
+        catalog = _catalog()
+        # ``catalog_size`` is counted by the harness from the rows it received,
+        # so the comparison is against what may be SENT, not against every row
+        # the catalog holds.  Identity rows (candidate_hash, fingerprints) are
+        # built with authority=internal_identity and withheld from the provider,
+        # so len(catalog) is deliberately the larger number.
+        citable = len(catalog.provider_rows())
+        self.assertLess(
+            citable,
+            len(catalog),
+            "internal-identity rows must exist and be withheld, or this "
+            "assertion no longer pins the withholding",
+        )
         self.assertEqual(body["call_count"], 2)
         for call in body["calls"]:
             self.assertEqual(call["schema_name"], "ModelAIGateOutput")
             self.assertEqual(call["role_hint"], "analyst")
             self.assertEqual(call["candidate_count"], CANDIDATE_COUNT)
-            self.assertEqual(call["catalog_size"], len(_catalog()))
+            self.assertEqual(call["catalog_size"], citable)
 
     def test_one_provider_call_per_generate_structured(self) -> None:
         """Guards the 'duplicate provider calls' defect class."""

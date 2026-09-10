@@ -1,0 +1,15 @@
+{
+  "global_walk_forward": {
+    "folds": 0,
+    "positive_fold_rate": 0.0,
+    "avg_train_r": 0.0,
+    "avg_test_r": 0.0,
+    "avg_train_ev": 0.0,
+    "avg_test_ev": 0.0,
+    "avg_gap": 0.0
+  },
+  "unstable_bucket_count": 0,
+  "unstable_buckets": [],
+  "max_avg_gap": 0.0,
+  "avg_bucket_gap": 0.0
+}

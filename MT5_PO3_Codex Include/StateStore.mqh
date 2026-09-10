@@ -653,6 +653,57 @@ private:
       j += JsonKVStr("shadow_ambiguity_reason", p.shadow_ambiguity_reason) + ",";
       j += JsonKVBool("shadow_threshold_order_ambiguous", p.shadow_threshold_order_ambiguous) + ",";
       j += JsonKVBool("shadow_outcome_ambiguous", p.shadow_outcome_ambiguous) + ",";
+      //--- Shadow lifecycle v4.  Every field below has to survive a restart or a
+      //--- restored tracker silently reverts to the permissive pre-fix state: no
+      //--- identity to deduplicate against, no cursor to resume from, and an
+      //--- entry-activation flag that reads false for a trade that was already
+      //--- activated hours earlier.
+      j += JsonKVStr("shadow_sweep_opportunity_id", p.shadow_sweep_opportunity_id) + ",";
+      j += JsonKVStr("shadow_sweep_opportunity_lineage", p.shadow_sweep_opportunity_lineage) + ",";
+      j += JsonKVStr("shadow_candidate_variant_id", p.shadow_candidate_variant_id) + ",";
+      j += JsonKVStr("shadow_variant_parent_id", p.shadow_variant_parent_id) + ",";
+      j += JsonKVInt("shadow_variant_revision", p.shadow_variant_revision) + ",";
+      j += JsonKVInt("shadow_observation_count", p.shadow_observation_count) + ",";
+      j += JsonKVBool("shadow_plan_locked", p.shadow_plan_locked) + ",";
+      j += JsonKVInt("shadow_scan_cursor", (int)p.shadow_scan_cursor) + ",";
+      j += JsonKVInt("shadow_last_evaluated_at", (int)p.shadow_last_evaluated_at) + ",";
+      j += JsonKVInt("shadow_data_retry_count", p.shadow_data_retry_count) + ",";
+      j += JsonKVInt("shadow_progress_mask", p.shadow_progress_mask) + ",";
+      j += JsonKVBool("shadow_entry_activated", p.shadow_entry_activated) + ",";
+      j += JsonKVInt("shadow_entry_activated_at", (int)p.shadow_entry_activated_at) + ",";
+      j += JsonKVInt("shadow_time_to_entry_sec", p.shadow_time_to_entry_sec) + ",";
+      j += JsonKVNum("shadow_entry_touch_price", p.shadow_entry_touch_price, 8) + ",";
+      j += JsonKVBool("shadow_entry_order_ambiguous", p.shadow_entry_order_ambiguous) + ",";
+      j += JsonKVBool("shadow_entry_never_reached", p.shadow_entry_never_reached) + ",";
+      j += JsonKVBool("shadow_tp1_hit", p.shadow_tp1_hit) + ",";
+      j += JsonKVInt("shadow_tp1_hit_at", (int)p.shadow_tp1_hit_at) + ",";
+      j += JsonKVInt("shadow_time_to_tp1_sec", p.shadow_time_to_tp1_sec) + ",";
+      j += JsonKVBool("shadow_tp1_before_sl", p.shadow_tp1_before_sl) + ",";
+      j += JsonKVBool("shadow_sl_before_tp1", p.shadow_sl_before_tp1) + ",";
+      j += JsonKVBool("shadow_tp2_hit", p.shadow_tp2_hit) + ",";
+      j += JsonKVInt("shadow_tp2_hit_at", (int)p.shadow_tp2_hit_at) + ",";
+      j += JsonKVInt("shadow_time_to_tp2_sec", p.shadow_time_to_tp2_sec) + ",";
+      j += JsonKVBool("shadow_tp2_before_sl", p.shadow_tp2_before_sl) + ",";
+      j += JsonKVBool("shadow_sl_before_tp2", p.shadow_sl_before_tp2) + ",";
+      j += JsonKVBool("shadow_tp1_then_sl", p.shadow_tp1_then_sl) + ",";
+      j += JsonKVBool("shadow_tp1_then_tp2", p.shadow_tp1_then_tp2) + ",";
+      j += JsonKVBool("shadow_neither_target_nor_stop", p.shadow_neither_target_nor_stop) + ",";
+      j += JsonKVNum("shadow_max_favorable_price", p.shadow_max_favorable_price, 8) + ",";
+      j += JsonKVNum("shadow_max_adverse_price", p.shadow_max_adverse_price, 8) + ",";
+      j += JsonKVNum("shadow_result_r_unmanaged", p.shadow_result_r_unmanaged, 6) + ",";
+      j += JsonKVNum("shadow_result_r_tp1_partial", p.shadow_result_r_tp1_partial, 6) + ",";
+      j += JsonKVNum("shadow_tp1_partial_fraction", p.shadow_tp1_partial_fraction, 6) + ",";
+      j += JsonKVStr("shadow_terminal_event", p.shadow_terminal_event) + ",";
+      j += JsonKVInt("shadow_terminal_event_at", (int)p.shadow_terminal_event_at) + ",";
+      j += JsonKVStr("shadow_data_quality_status", p.shadow_data_quality_status) + ",";
+      j += JsonKVStr("shadow_ordering_source", p.shadow_ordering_source) + ",";
+      j += JsonKVStr("shadow_ambiguity_status", p.shadow_ambiguity_status) + ",";
+      j += JsonKVNum("shadow_assessed_entry", p.shadow_assessed_entry, 8) + ",";
+      j += JsonKVNum("shadow_assessed_sl", p.shadow_assessed_sl, 8) + ",";
+      j += JsonKVNum("shadow_assessed_tp1", p.shadow_assessed_tp1, 8) + ",";
+      j += JsonKVNum("shadow_assessed_tp2", p.shadow_assessed_tp2, 8) + ",";
+      j += JsonKVStr("shadow_decision_state", p.shadow_decision_state) + ",";
+      j += JsonKVStr("shadow_decision_source", p.shadow_decision_source) + ",";
       j += JsonKVNum("mfe_price", p.mfe_price, 8) + ",";
       j += JsonKVNum("mae_price", p.mae_price, 8) + ",";
       j += JsonKVNum("mfe_r", p.mfe_r, 6) + ",";
@@ -1599,6 +1650,52 @@ private:
       p.shadow_ambiguity_reason = JsonGetString(json, "shadow_ambiguity_reason", "");
       p.shadow_threshold_order_ambiguous = JsonGetBool(json, "shadow_threshold_order_ambiguous", false);
       p.shadow_outcome_ambiguous = JsonGetBool(json, "shadow_outcome_ambiguous", false);
+      p.shadow_sweep_opportunity_id = JsonGetString(json, "shadow_sweep_opportunity_id", "");
+      p.shadow_sweep_opportunity_lineage = JsonGetString(json, "shadow_sweep_opportunity_lineage", "");
+      p.shadow_candidate_variant_id = JsonGetString(json, "shadow_candidate_variant_id", "");
+      p.shadow_variant_parent_id = JsonGetString(json, "shadow_variant_parent_id", "");
+      p.shadow_variant_revision = (int)JsonGetNumber(json, "shadow_variant_revision", 0);
+      p.shadow_observation_count = (int)JsonGetNumber(json, "shadow_observation_count", 0);
+      p.shadow_plan_locked = JsonGetBool(json, "shadow_plan_locked", false);
+      p.shadow_scan_cursor = (datetime)JsonGetNumber(json, "shadow_scan_cursor", 0);
+      p.shadow_last_evaluated_at = (datetime)JsonGetNumber(json, "shadow_last_evaluated_at", 0);
+      p.shadow_data_retry_count = (int)JsonGetNumber(json, "shadow_data_retry_count", 0);
+      p.shadow_progress_mask = (int)JsonGetNumber(json, "shadow_progress_mask", 0);
+      p.shadow_entry_activated = JsonGetBool(json, "shadow_entry_activated", false);
+      p.shadow_entry_activated_at = (datetime)JsonGetNumber(json, "shadow_entry_activated_at", 0);
+      p.shadow_time_to_entry_sec = (int)JsonGetNumber(json, "shadow_time_to_entry_sec", -1);
+      p.shadow_entry_touch_price = JsonGetNumber(json, "shadow_entry_touch_price", 0);
+      p.shadow_entry_order_ambiguous = JsonGetBool(json, "shadow_entry_order_ambiguous", false);
+      p.shadow_entry_never_reached = JsonGetBool(json, "shadow_entry_never_reached", false);
+      p.shadow_tp1_hit = JsonGetBool(json, "shadow_tp1_hit", false);
+      p.shadow_tp1_hit_at = (datetime)JsonGetNumber(json, "shadow_tp1_hit_at", 0);
+      p.shadow_time_to_tp1_sec = (int)JsonGetNumber(json, "shadow_time_to_tp1_sec", -1);
+      p.shadow_tp1_before_sl = JsonGetBool(json, "shadow_tp1_before_sl", false);
+      p.shadow_sl_before_tp1 = JsonGetBool(json, "shadow_sl_before_tp1", false);
+      p.shadow_tp2_hit = JsonGetBool(json, "shadow_tp2_hit", false);
+      p.shadow_tp2_hit_at = (datetime)JsonGetNumber(json, "shadow_tp2_hit_at", 0);
+      p.shadow_time_to_tp2_sec = (int)JsonGetNumber(json, "shadow_time_to_tp2_sec", -1);
+      p.shadow_tp2_before_sl = JsonGetBool(json, "shadow_tp2_before_sl", false);
+      p.shadow_sl_before_tp2 = JsonGetBool(json, "shadow_sl_before_tp2", false);
+      p.shadow_tp1_then_sl = JsonGetBool(json, "shadow_tp1_then_sl", false);
+      p.shadow_tp1_then_tp2 = JsonGetBool(json, "shadow_tp1_then_tp2", false);
+      p.shadow_neither_target_nor_stop = JsonGetBool(json, "shadow_neither_target_nor_stop", false);
+      p.shadow_max_favorable_price = JsonGetNumber(json, "shadow_max_favorable_price", 0);
+      p.shadow_max_adverse_price = JsonGetNumber(json, "shadow_max_adverse_price", 0);
+      p.shadow_result_r_unmanaged = JsonGetNumber(json, "shadow_result_r_unmanaged", 0);
+      p.shadow_result_r_tp1_partial = JsonGetNumber(json, "shadow_result_r_tp1_partial", 0);
+      p.shadow_tp1_partial_fraction = JsonGetNumber(json, "shadow_tp1_partial_fraction", 0);
+      p.shadow_terminal_event = JsonGetString(json, "shadow_terminal_event", "");
+      p.shadow_terminal_event_at = (datetime)JsonGetNumber(json, "shadow_terminal_event_at", 0);
+      p.shadow_data_quality_status = JsonGetString(json, "shadow_data_quality_status", "");
+      p.shadow_ordering_source = JsonGetString(json, "shadow_ordering_source", "");
+      p.shadow_ambiguity_status = JsonGetString(json, "shadow_ambiguity_status", "");
+      p.shadow_assessed_entry = JsonGetNumber(json, "shadow_assessed_entry", 0);
+      p.shadow_assessed_sl = JsonGetNumber(json, "shadow_assessed_sl", 0);
+      p.shadow_assessed_tp1 = JsonGetNumber(json, "shadow_assessed_tp1", 0);
+      p.shadow_assessed_tp2 = JsonGetNumber(json, "shadow_assessed_tp2", 0);
+      p.shadow_decision_state = JsonGetString(json, "shadow_decision_state", "");
+      p.shadow_decision_source = JsonGetString(json, "shadow_decision_source", "");
       p.mfe_price = JsonGetNumber(json, "mfe_price", 0);
       p.mae_price = JsonGetNumber(json, "mae_price", 0);
       p.mfe_r = JsonGetNumber(json, "mfe_r", 0);
@@ -1883,6 +1980,12 @@ public:
    string PenaltyPath() const { return _ScopedPath("penalty.ndjson"); }
    string CounterfactualPendingPath() const { return _ScopedPath("counterfactual_pending.ndjson"); }
    string ShadowPendingPath() const { return _ScopedPath("shadow_candidate_pending.ndjson"); }
+   //--- Terminal-once and observe-once identities.  Kept out of the pending file
+   //--- on purpose: a resolved variant leaves the pending queue, so without a
+   //--- separate durable index a restart cannot tell "never tracked" from
+   //--- "already resolved" and would emit a second terminal for the same sample.
+   string ShadowTrackerIndexPath() const { return _ScopedPath("shadow_tracker_index.ndjson"); }
+   string ShadowQuarantinePath() const { return _ScopedPath("shadow_tracker_quarantine.ndjson"); }
    string AiCachePath() const { return m_bus.LogDir() + "\\ai_cache.ndjson"; }
    string TradePlanToJson(const TradePlan &p) { return PlanToJson(p); }
    bool ParseTradePlanJson(const string json, TradePlan &p) { return PlanFromJson(json, p); }
@@ -1914,6 +2017,37 @@ public:
       string out="";
       for(int i=0; i<ArraySize(arr); i++){
          out += PlanToJson(arr[i]) + "\n";
+      }
+      return m_bus.WriteText(rel_path, out);
+   }
+
+   //--- Plain line store for identity indexes.  Written through the same
+   //--- tmp-then-move path as every other state file, so a crash mid-write
+   //--- cannot leave a half-parsed identity set behind.
+   bool LoadTextLines(const string rel_path, string &out_arr[]) {
+      ArrayResize(out_arr, 0);
+      string txt;
+      if(!m_bus.ReadText(rel_path, txt)) return false;
+      int len = (int)StringLen(txt);
+      int start = 0;
+      for(int i=0; i<=len; i++){
+         if(i==len || StringGetCharacter(txt, i)=='\n'){
+            string line = _TrimCopy(StringSubstr(txt, start, i-start));
+            start = i+1;
+            if(StringLen(line)==0) continue;
+            int n = ArraySize(out_arr);
+            ArrayResize(out_arr, n+1);
+            out_arr[n] = line;
+         }
+      }
+      return true;
+   }
+
+   bool SaveTextLines(const string rel_path, const string &arr[]) {
+      string out="";
+      for(int i=0; i<ArraySize(arr); i++){
+         if(StringLen(arr[i]) == 0) continue;
+         out += arr[i] + "\n";
       }
       return m_bus.WriteText(rel_path, out);
    }

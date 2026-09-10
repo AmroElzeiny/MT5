@@ -117,7 +117,7 @@ class CatalogStructureTests(unittest.TestCase):
         for item in self.catalog.items:
             self.assertTrue(item.canonical_path)
             self.assertEqual(len(item.value_hash), 64)
-            self.assertEqual(item.authority, "deterministic")
+            self.assertIn(item.authority, {"deterministic", "internal_identity"})
 
     def test_provider_rows_omit_hash_and_authority(self) -> None:
         # The model gets id/path/value only; it never sees or supplies hashes.
@@ -125,14 +125,37 @@ class CatalogStructureTests(unittest.TestCase):
             self.assertNotIn("value_hash", row)
             self.assertNotIn("authority", row)
             self.assertIn("id", row)
+            self.assertFalse(
+                any(
+                    str(row["p"]).endswith("." + field)
+                    for field in (
+                        "candidate_id",
+                        "candidate_hash",
+                        "request_execution_fingerprint",
+                        "assessed_execution_fingerprint",
+                    )
+                )
+            )
 
 
 class CatalogResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.catalog = build_evidence_catalog(_synthetic_envelope())
         self.global_ids = [i.evidence_id for i in self.catalog.items if i.candidate_index is None]
-        self.cand0 = [i.evidence_id for i in self.catalog.items if i.candidate_index == 0]
-        self.cand1 = [i.evidence_id for i in self.catalog.items if i.candidate_index == 1]
+        visible = {
+            int(row["id"])
+            for row in self.catalog.provider_rows()
+        }
+        self.cand0 = [
+            i.evidence_id
+            for i in self.catalog.items
+            if i.candidate_index == 0 and i.evidence_id in visible
+        ]
+        self.cand1 = [
+            i.evidence_id
+            for i in self.catalog.items
+            if i.candidate_index == 1 and i.evidence_id in visible
+        ]
 
     def test_valid_global_evidence_id(self) -> None:
         result = self.catalog.resolve([self.global_ids[0]], candidate_index=0)
@@ -309,7 +332,7 @@ class CapturedRequestFixtureTests(unittest.TestCase):
             catalog = build_evidence_catalog(envelope)
             compact = ai_gate._compact_model_evidence_payload(envelope, catalog)
             rows = compact["evidence_catalog"]["items"]
-            self.assertEqual(len(rows), len(catalog))
+            self.assertEqual(len(rows), len(catalog.provider_rows()))
             self.assertEqual(
                 compact["evidence_catalog"]["catalog_hash"], catalog.catalog_hash
             )
@@ -323,9 +346,9 @@ class CapturedRequestFixtureTests(unittest.TestCase):
             for position, row in enumerate(rows):
                 candidate_index = int(row.get("candidate_index", position))
                 expected = [
-                    item.evidence_id
-                    for item in catalog.items
-                    if item.candidate_index in (None, candidate_index)
+                    int(item["id"])
+                    for item in catalog.provider_rows()
+                    if item.get("c") in (None, candidate_index)
                 ]
                 self.assertEqual(row["allowed_evidence_ref_ids"], expected)
                 self.assertTrue(

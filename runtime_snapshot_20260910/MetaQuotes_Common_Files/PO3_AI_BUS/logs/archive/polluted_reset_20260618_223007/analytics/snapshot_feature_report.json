@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "snapshot_state": "no_snapshots",
+      "setup_class": "micro_bisi_sibi_edge.fvg_edge.virgin_fvg",
+      "count": 6,
+      "avg_r": 1.139976,
+      "avg_expected_value_r": 0.6688079999999998,
+      "avg_stop_quality": 8.339479833333334,
+      "win_rate": 1.0
+    },
+    {
+      "snapshot_state": "no_snapshots",
+      "setup_class": "micro_bisi_sibi_edge.breaker_retest.touched_fvg",
+      "count": 5,
+      "avg_r": 0.8161008000000001,
+      "avg_expected_value_r": 0.5694617999999999,
+      "avg_stop_quality": 8.172375800000001,
+      "win_rate": 0.8
+    },
+    {
+      "snapshot_state": "no_snapshots",
+      "setup_class": "micro_bisi_sibi_edge.breaker_retest.virgin_fvg",
+      "count": 25,
+      "avg_r": 0.47547732,
+      "avg_expected_value_r": 0.6219210000000001,
+      "avg_stop_quality": 7.720131959999999,
+      "win_rate": 0.72
+    },
+    {
+      "snapshot_state": "no_snapshots",
+      "setup_class": "micro_continuation_fvg..virgin_fvg",
+      "count": 22,
+      "avg_r": 0.0,
+      "avg_expected_value_r": -0.85,
+      "avg_stop_quality": 0.0,
+      "win_rate": 0.0
+    }
+  ]
+}

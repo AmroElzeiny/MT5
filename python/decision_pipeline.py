@@ -211,13 +211,18 @@ def _validate_adjudication(
         raise ValueError("adjudicator_approve_did_not_resolve_all_objections")
 
 
-def _selected_candidate_evidence(evidence: Mapping[str, Any], candidate_hash: str) -> dict[str, Any]:
+def _selected_candidate_evidence(evidence: Mapping[str, Any], candidate_index: int) -> dict[str, Any]:
     section = evidence.get("entry_and_invalidation")
     rows = section.get("candidates") if isinstance(section, Mapping) else None
     if not isinstance(rows, list):
         raise ValueError("evidence_candidates_missing")
     selected = next(
-        (dict(row) for row in rows if isinstance(row, Mapping) and str(row.get("candidate_hash") or "") == candidate_hash),
+        (
+            dict(row)
+            for position, row in enumerate(rows)
+            if isinstance(row, Mapping)
+            and int(row.get("candidate_index", position)) == candidate_index
+        ),
         None,
     )
     if selected is None:
@@ -241,7 +246,7 @@ def run_qualitative_consensus(
     if candidate_index < 0:
         raise ValueError("analyst_candidate_index_invalid")
     analyst_state = str(analyst_assessment.get("decision_state") or "").upper()
-    selected_evidence = _selected_candidate_evidence(evidence, candidate_hash)
+    selected_evidence = _selected_candidate_evidence(evidence, candidate_index)
     critic_evidence = {
         "request_id": str(request_metadata.get("request_id") or ""),
         "request_identity_hash": str(request_metadata.get("request_identity_hash") or ""),
@@ -283,6 +288,9 @@ def run_qualitative_consensus(
         "Use ABSTAIN for uncertainty or insufficient evidence. Return strict JSON only and do not expose hidden reasoning. "
         "Reference only the supplied candidate_index; Python owns all request, "
         "candidate, provider, model, and schema identity."
+        " Internal candidate IDs, hashes, fingerprints, and any embedded lineage prices are intentionally absent; "
+        "they are not evidence and must never be reconstructed or compared with the executable entry. "
+        "Treat target_semantics and family_event_evidence as the authoritative interpretation contracts."
     )
     critic_metadata = dict(request_metadata)
     if request_metadata.get("critic_timeout_sec") is not None:
@@ -473,6 +481,9 @@ def run_qualitative_consensus(
         f"For this candidate the complete allowed id set is: {adjudicator_allowed_ids}. "
         "Reference only the supplied candidate_index; Python owns all request, "
         "candidate, provider, model, and schema identity."
+        " Internal candidate IDs, hashes, fingerprints, and any embedded lineage prices are intentionally absent; "
+        "they are not evidence and must never be reconstructed or compared with the executable entry. "
+        "Treat target_semantics and family_event_evidence as the authoritative interpretation contracts."
     )
     adjudicator_metadata = dict(request_metadata)
     if request_metadata.get("adjudicator_timeout_sec") is not None:

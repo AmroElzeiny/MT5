@@ -1,2 +1,18 @@
+﻿# --- Environment files: real secrets, examples, backups, variants ---
+# Matches .env, .env.example, .env.harness, .env.bak_*, foo.env, foo.env.example
 .env
+.env.*
 *.env
+*.env.*
+
+# Local files excluded from the public GitHub snapshot.
+# These four files exceed GitHub's 100 MB per-file limit.
+/python/.codex_validation/approval_execution_20260907/terminal/Tester/Agent-127.0.0.1-3000/logs/20260907.log
+/python/.codex_validation/approval_execution_20260907/terminal/Tester/logs/20260907.log
+/python/.codex_validation/approval_execution_20260907/terminal/terminal64.exe
+/python/.codex_validation/approval_execution_20260907/terminal/MetaEditor64.exe
+/python/data/ai_decision_cache.jsonl
+
+# Authentication/account stores are not safe to publish in this public repo.
+/python/.codex_validation/approval_execution_20260907/terminal/config/
+/python/.codex_validation/approval_execution_20260907/terminal/temp/EBWebView/

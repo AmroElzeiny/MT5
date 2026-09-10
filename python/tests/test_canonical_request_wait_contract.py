@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 import ai_gate
 from compatibility_manifest import (
+    _FIELD_ORDER,
     compatibility_manifest,
     compatibility_manifest_hash,
     validate_mql_contract,
@@ -37,6 +39,61 @@ MQL_EXPERT = Path(
     r"C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal"
     r"\0148BD5691B65B0F2157627A4231F3DE\MQL5\Experts\MT5_PO3_Codex"
 )
+
+
+def _mql_string_constants() -> dict[str, str]:
+    """``const string NAME = "literal";`` declared anywhere in the includes."""
+
+    found: dict[str, str] = {}
+    for path in sorted(MQL_INCLUDE.glob("*.mqh")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for name, value in re.findall(
+            r'^\s*const\s+string\s+(\w+)\s*=\s*"([^"]*)"\s*;', text, re.MULTILINE
+        ):
+            found.setdefault(name, value)
+    return found
+
+
+def _mql_manifest_field_order(builder: str) -> tuple[str, ...]:
+    """The manifest keys, in the order the named MQL builder emits them."""
+
+    known = set(_FIELD_ORDER)
+    for path in (MQL_INCLUDE / "Config.mqh", MQL_INCLUDE / "AIGateBridge.mqh"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        start = text.find(builder + "(")
+        if start < 0:
+            continue
+        # Bounded at the builder's own ``return``: an indented closing brace is
+        # not distinguishable from the enclosing class's, and slicing to the
+        # wrong one swept half the file into the key list.
+        end = text.find("return ", start)
+        body = text[start : end if end > start else len(text)]
+        # ``"field="`` in the hashed material, ``"field"`` in the JSON builder;
+        # the material's separator makes it ``"|field="`` from the second entry.
+        keys = re.findall(r'"\|?([a-z0-9_]+)=?"\s*[,+]', body)
+        ordered = tuple(k for k in keys if k in known)
+        if ordered:
+            return ordered
+    raise AssertionError(f"{builder} not found in the deployed includes")
+
+
+def _mql_manifest_values() -> dict[str, str]:
+    """The manifest MQL will actually send, resolved key -> literal.
+
+    Read from ``PO3ContractManifestMaterial`` -- the function whose output is
+    hashed -- so the mapping under test is the wiring the gate validates, not a
+    second list maintained beside it.
+    """
+
+    config = (MQL_INCLUDE / "Config.mqh").read_text(encoding="utf-8", errors="replace")
+    start = config.find("PO3ContractManifestMaterial(")
+    assert start >= 0, "PO3ContractManifestMaterial not found in deployed Config.mqh"
+    body = config[start : config.find("\n}", start)]
+    constants = _mql_string_constants()
+    values: dict[str, str] = {}
+    for field, constant in re.findall(r'"\|?([a-z0-9_]+)=" \+ (\w+)', body):
+        values[field] = constants.get(constant, f"<undeclared:{constant}>")
+    return values
 
 
 def mql_contract_payload() -> dict:
@@ -176,9 +233,53 @@ class ContractCompatibilityTests(unittest.TestCase):
 
     def test_mql_and_python_manifest_material_are_synchronized(self) -> None:
         config = (MQL_INCLUDE / "Config.mqh").read_text(encoding="utf-8")
-        for value in compatibility_manifest().values():
-            self.assertIn(value, config)
         self.assertIn("PO3ContractManifestHash", config)
+        # Field by field against the constant MQL actually emits, not a
+        # substring search over the whole file.  A bare ``assertIn`` proves only
+        # that the literal appears *somewhere*: it cannot say which field
+        # drifted, and it passes when the right string is wired to the wrong
+        # key.  The 2026-09-08 18:26 session lost 8 of 8 requests to exactly one
+        # drifted field and this assertion answered with a 20 KB file dump.
+        mql = _mql_manifest_values()
+        expected = compatibility_manifest()
+        drifted = {
+            field: (mql.get(field), value)
+            for field, value in expected.items()
+            if mql.get(field) != value
+        }
+        self.assertEqual(
+            drifted,
+            {},
+            "MQL/Python contract manifest drift (field: (mql, python)). "
+            "Every request fails contract_manifest_incompatible until the "
+            "Config.mqh constant is bumped to match.",
+        )
+
+    def test_manifest_field_order_matches_the_hashed_material(self) -> None:
+        """The hash is order-dependent, so the two orders are part of the contract."""
+
+        self.assertEqual(_mql_manifest_field_order("PO3ContractManifestMaterial"), _FIELD_ORDER)
+        self.assertEqual(_mql_manifest_field_order("_ContractManifestJson"), _FIELD_ORDER)
+
+    def test_mql_manifest_hash_reproduces_the_python_hash(self) -> None:
+        """The end the gate actually checks: same material in, same hash out."""
+
+        self.assertEqual(
+            compatibility_manifest_hash(_mql_manifest_values()),
+            compatibility_manifest_hash(),
+        )
+
+    def test_a_drifted_mql_constant_is_reported_by_name(self) -> None:
+        """Falsification: the detector must name the field, not merely fail."""
+
+        drifted = dict(_mql_manifest_values())
+        drifted["family_profile_version"] = "20260818_family_context_v3"
+        expected = compatibility_manifest()
+        named = [f for f, v in expected.items() if drifted.get(f) != v]
+        self.assertEqual(named, ["family_profile_version"])
+        self.assertNotEqual(
+            compatibility_manifest_hash(drifted), compatibility_manifest_hash()
+        )
 
     def test_incompatible_contract_never_selects_or_calls_provider(self) -> None:
         payload = mql_contract_payload()

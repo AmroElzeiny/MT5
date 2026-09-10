@@ -1,0 +1,23 @@
+{
+  "contract_manifest_hash": "1068509530",
+  "decision_schema_version": "20260724_canonical_frozen_request_v10",
+  "ea_name": "",
+  "ex5_bytes": 0,
+  "ex5_hash": "",
+  "ex5_path": "",
+  "host": "WIN-FOVCL5KBJ2M",
+  "model": "muse-spark-1.3-contributor",
+  "mql_session_id": "",
+  "prompt_contract_version": "20260724_canonical_frozen_request_v12",
+  "provider_id": "opencode_go_responses",
+  "provider_mode": "OPENCODE_API",
+  "provider_process_id": 25160,
+  "python_session_id": "python_25160_1789004663",
+  "run_manifest_version": "20260731_correlated_run_manifest_v1",
+  "runtime_input_hash": "",
+  "started_at": 1789004663.4290385,
+  "test_period_from": "",
+  "test_period_to": "",
+  "test_run_id": "run_d5017e2a43b42a28",
+  "tester_mode": ""
+}

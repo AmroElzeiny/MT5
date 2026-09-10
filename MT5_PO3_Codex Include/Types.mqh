@@ -1031,6 +1031,57 @@ struct TradePlan {
    string shadow_ambiguity_reason;
    bool   shadow_threshold_order_ambiguous;
    bool   shadow_outcome_ambiguous;
+   //--- Shadow counterfactual lifecycle v4.  Research only: nothing below ever
+   //--- carries trading authority.  The identity pair (opportunity, variant) is
+   //--- what makes re-scans, AI retries and EA restarts idempotent, and the
+   //--- entry-activation block is what stops a level touched before the
+   //--- hypothetical entry was ever reached from being counted as a result.
+   string shadow_sweep_opportunity_id;
+   string shadow_sweep_opportunity_lineage;
+   string shadow_candidate_variant_id;
+   string shadow_variant_parent_id;
+   int    shadow_variant_revision;
+   int    shadow_observation_count;
+   bool   shadow_plan_locked;
+   datetime shadow_scan_cursor;
+   datetime shadow_last_evaluated_at;
+   int    shadow_data_retry_count;
+   int    shadow_progress_mask;
+   bool   shadow_entry_activated;
+   datetime shadow_entry_activated_at;
+   int    shadow_time_to_entry_sec;
+   double shadow_entry_touch_price;
+   bool   shadow_entry_order_ambiguous;
+   bool   shadow_entry_never_reached;
+   bool   shadow_tp1_hit;
+   datetime shadow_tp1_hit_at;
+   int    shadow_time_to_tp1_sec;
+   bool   shadow_tp1_before_sl;
+   bool   shadow_sl_before_tp1;
+   bool   shadow_tp2_hit;
+   datetime shadow_tp2_hit_at;
+   int    shadow_time_to_tp2_sec;
+   bool   shadow_tp2_before_sl;
+   bool   shadow_sl_before_tp2;
+   bool   shadow_tp1_then_sl;
+   bool   shadow_tp1_then_tp2;
+   bool   shadow_neither_target_nor_stop;
+   double shadow_max_favorable_price;
+   double shadow_max_adverse_price;
+   double shadow_result_r_unmanaged;
+   double shadow_result_r_tp1_partial;
+   double shadow_tp1_partial_fraction;
+   string shadow_terminal_event;
+   datetime shadow_terminal_event_at;
+   string shadow_data_quality_status;
+   string shadow_ordering_source;
+   string shadow_ambiguity_status;
+   double shadow_assessed_entry;
+   double shadow_assessed_sl;
+   double shadow_assessed_tp1;
+   double shadow_assessed_tp2;
+   string shadow_decision_state;
+   string shadow_decision_source;
    double mfe_price;
    double mae_price;
    double mfe_r;

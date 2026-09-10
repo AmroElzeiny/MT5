@@ -32,6 +32,14 @@ from structured_models import (
     StructuredSchemaPreflight,
     strict_structured_schema,
 )
+from opencode_routing import (
+    IMPORTANCE_CRITICAL,
+    IMPORTANCE_IMPORTANT,
+    IMPORTANCE_NORMAL,
+    ROUTING_POLICY_VERSION,
+    OpenCodeRoutingPolicy,
+    classify_importance,
+)
 
 
 PROVIDER_CONTRACT_VERSION = "20260723_provider_neutral_transport_v2"
@@ -39,15 +47,22 @@ PROVIDER_EXCHANGE_CONTRACT_VERSION = "20260811_provider_exchange_v1"
 PROVIDER_MODE_REMOTE = "REMOTE_API"
 PROVIDER_MODE_LOCAL = "LOCAL_OPENAI_COMPATIBLE"
 PROVIDER_MODE_OPENROUTER = "OPENROUTER_API"
+PROVIDER_MODE_OPENCODE = "OPENCODE_API"
 PROVIDER_MODE_UNAVAILABLE = "UNAVAILABLE"
 
 # Every mode MQL is willing to bind a decision to.  ``AIGateBridge.mqh`` and
 # ``StateStore.mqh`` carry the identical literal set; adding a mode here without
 # adding it there turns a healthy decision into an MQL schema rejection.
+#
+# ``OPENCODE_API`` names the OpenCode Go transport only.  A request that this
+# mode routes to its OpenAI Luna fallback comes back reporting ``REMOTE_API``,
+# because that is the transport that actually answered it -- the routed leg is
+# never relabelled as OpenCode.
 PROVIDER_MODES_TRADING = (
     PROVIDER_MODE_REMOTE,
     PROVIDER_MODE_LOCAL,
     PROVIDER_MODE_OPENROUTER,
+    PROVIDER_MODE_OPENCODE,
 )
 
 # Reserved, non-trading request id used by the structured-output capability
@@ -406,7 +421,33 @@ def _extract_responses_value(response: Any) -> dict[str, Any]:
                 text = getattr(content, "text", None)
                 if isinstance(text, str) and text.strip():
                     return _strict_json_object(text)
-    raise ValueError("structured_response_missing_json")
+    # A bare "missing_json" is a correct fail-closed verdict with no evidence
+    # for WHY, which is the defect class this project has already paid for
+    # twice.  The Responses envelope states the reason itself -- an exhausted
+    # output budget, a content filter, a still-running background response --
+    # so carry it.  Diagnostic only: the failure and its category are unchanged.
+    detail: list[str] = []
+    status = getattr(response, "status", None)
+    if isinstance(status, str) and status:
+        detail.append("status=" + status)
+    incomplete = getattr(response, "incomplete_details", None)
+    reason = getattr(incomplete, "reason", None)
+    if reason is None and isinstance(incomplete, Mapping):
+        reason = incomplete.get("reason")
+    if isinstance(reason, str) and reason:
+        detail.append("incomplete_reason=" + reason)
+    usage = getattr(response, "usage", None)
+    output_tokens = getattr(usage, "output_tokens", None)
+    if isinstance(output_tokens, int):
+        detail.append(f"output_tokens={output_tokens}")
+    details = getattr(usage, "output_tokens_details", None)
+    reasoning_tokens = getattr(details, "reasoning_tokens", None)
+    if isinstance(reasoning_tokens, int):
+        detail.append(f"reasoning_tokens={reasoning_tokens}")
+    raise ValueError(
+        "structured_response_missing_json"
+        + (":" + " ".join(detail) if detail else "")
+    )
 
 
 def _extract_chat_value(response: Any) -> dict[str, Any]:
@@ -473,6 +514,15 @@ class _OpenAICompatibleProviderBase:
     # (which zeroes ``_circuit_open_until``) instead of sleeping through it.
     _CIRCUIT_WAIT_SLICE_SEC = 1.0
 
+    # Whether an AMBIGUOUS transport failure (timeout, connection error,
+    # generic 5xx) may be resubmitted.  True only for transports where a second
+    # submission cannot cost a second billed upstream call -- i.e. the loopback
+    # local server.  Every paid remote transport sets this False and relies on
+    # the admission-retry budget below, which resubmits only failures that are
+    # PROVEN never to have been admitted.  Without the distinction, "retryable"
+    # silently means "may double-bill and race a late result".
+    resubmit_ambiguous_transport_failures = True
+
     def __init__(
         self,
         *,
@@ -522,6 +572,162 @@ class _OpenAICompatibleProviderBase:
         self._known_model_fingerprint = ""
         self._unsupported_logged: set[str] = set()
         self._configuration_circuits: dict[str, str] = {}
+        # Admission-retry defaults.  Every transport carries the attributes so
+        # the shared retry helpers below are usable from any subclass; a
+        # subclass that has its own configuration overwrites them after
+        # ``super().__init__``.
+        self.admission_retry_enable = True
+        self.admission_max_retries = 0
+        self.admission_backoff_initial_sec = 2.0
+        self.admission_backoff_max_sec = 30.0
+
+    # ------------------------------------------------------------------
+    # Admission-refusal classification, shared by every transport.
+    #
+    # These lived on ``RemoteAPIProvider`` only, so the OpenRouter transport --
+    # which is a paid remote endpoint reached through the local-compatible loop
+    # -- had no admission handling at all: it retried a 429 IMMEDIATELY, twice,
+    # with no Retry-After and no backoff, which is the behaviour that
+    # re-triggers the limit rather than clearing it.
+    # ------------------------------------------------------------------
+
+    # A quota exhaustion is a 429 that no amount of waiting inside this request
+    # can clear -- it is a billing/configuration state, not congestion.  Retrying
+    # it burns the whole deadline to reach the same answer.
+    _ADMISSION_NON_RETRYABLE_MARKERS = (
+        "insufficient_quota",
+        "exceeded your current quota",
+        "billing_hard_limit",
+        "billing hard limit",
+    )
+
+    # Markers that prove the provider refused ADMISSION.  ``rate_limit_exceeded``
+    # and "processing too many requests" are the exact strings the live gate saw
+    # on 2026-09-07; ``_flex_capacity_rejected`` missed them because its only
+    # near match was "rate limit" with a space.
+    _ADMISSION_REJECTED_MARKERS = (
+        "rate_limit_exceeded",
+        "rate limit",
+        "ratelimit",
+        "too many requests",
+        "try again later",
+        "resource_unavailable",
+        "temporarily unavailable",
+        "overloaded",
+        "server_overloaded",
+        "capacity",
+        "slow down",
+    )
+
+    @classmethod
+    def _admission_rejected(cls, exc: Exception) -> bool:
+        """True only when the provider refused to ADMIT the request at all.
+
+        This is the same safety argument as ``_flex_capacity_rejected``, lifted
+        off the flex service tier.  A 429/503 admission refusal means no tokens
+        were produced, nothing is running server-side, and nothing can complete
+        late -- so resubmitting still yields exactly one authoritative provider
+        call per request identity.  Timeouts, connection errors and generic 5xx
+        stay excluded because they are ambiguous: the call may have been
+        admitted and still be running, where a resubmission would produce a
+        second billed call and a late result racing the first.
+
+        Quota exhaustion is excluded separately: it is a 429 that waiting cannot
+        clear.
+        """
+        text = str(exc).lower()
+        error_body = getattr(exc, "body", None)
+        if isinstance(error_body, Mapping):
+            text += " " + json.dumps(error_body, sort_keys=True, default=str).lower()
+        if any(
+            marker in text
+            for marker in ("timeout", "timed out", "connection error", "read error")
+        ):
+            return False
+        if any(marker in text for marker in cls._ADMISSION_NON_RETRYABLE_MARKERS):
+            return False
+        if cls._status_code(exc) not in {429, 503}:
+            return False
+        return any(marker in text for marker in cls._ADMISSION_REJECTED_MARKERS)
+
+    @staticmethod
+    def _retry_after_sec(exc: Exception) -> float | None:
+        """The provider's own ``Retry-After`` instruction, in seconds.
+
+        Honoured verbatim rather than capped: the affordability check against
+        the absolute deadline decides whether we can wait that long, and a
+        shorter wait than the server asked for is what produces a second 429.
+        """
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return None
+        for name in ("retry-after", "Retry-After", "x-ratelimit-reset-requests"):
+            try:
+                raw = headers.get(name)
+            except Exception:
+                continue
+            if raw is None:
+                continue
+            text = str(raw).strip().lower()
+            multiplier = 1.0
+            if text.endswith("ms"):
+                text, multiplier = text[:-2], 0.001
+            elif text.endswith("s"):
+                text, multiplier = text[:-1], 1.0
+            try:
+                value = float(text) * multiplier
+            except (TypeError, ValueError):
+                continue
+            if value >= 0.0:
+                return value
+        return None
+
+    def _admission_backoff_sec(self, attempt: int, request_id: str) -> float:
+        """Exponential backoff with request-derived jitter.
+
+        The jitter is derived from the request id instead of ``random`` so a
+        replay of the same request sleeps the same amount, while concurrent
+        workers that hit the same rate limit spread out instead of retrying in
+        lockstep and re-triggering it.
+        """
+        base = self.admission_backoff_initial_sec * (2.0 ** max(0, attempt - 1))
+        base = min(base, self.admission_backoff_max_sec)
+        digest = sha256(f"{request_id}|{attempt}".encode("utf-8")).digest()
+        jitter_fraction = (digest[0] / 255.0) * 0.25
+        return base * (1.0 + jitter_fraction)
+
+    def _admission_wait_plan(
+        self,
+        exc: Exception,
+        *,
+        attempts_used: int,
+        deadline: Any,
+        request_id: str,
+    ) -> tuple[float, bool, bool] | None:
+        """``(wait_sec, retry_after_header_present, affordable)`` or None.
+
+        None means this failure is not an admission refusal, or the budget is
+        exhausted, or admission retries are disabled -- i.e. nothing to decide.
+        The sleep is spent INSIDE the absolute request budget, so both the wait
+        and the attempt that follows it must fit or the retry only guarantees a
+        deadline breach.
+        """
+        if not self.admission_retry_enable:
+            return None
+        if attempts_used >= self.admission_max_retries:
+            return None
+        if not self._admission_rejected(exc):
+            return None
+        wait_sec = self._retry_after_sec(exc)
+        retry_after_present = wait_sec is not None
+        if wait_sec is None:
+            wait_sec = self._admission_backoff_sec(attempts_used + 1, request_id)
+        affordable = deadline is None or (
+            deadline.remaining_ms()
+            >= int(wait_sec * 1000) + deadline.policy.min_attempt_ms
+        )
+        return wait_sec, retry_after_present, affordable
 
     def _client_instance(self) -> Any:
         if self._client is not None:
@@ -753,6 +959,32 @@ class _OpenAICompatibleProviderBase:
             return ProviderCallError(
                 "PROVIDER_CONFIGURATION_ERROR",
                 "invalid_model:" + str(exc),
+                status_code=status,
+                configuration_block=True,
+            )
+        # An OpenRouter routing rejection is OUR request being unroutable, not
+        # the transport failing.  It answers HTTP 404 with a routing funnel and
+        # a ``failed_routing_step``; the generic branch below would call that
+        # PROVIDER_TRANSPORT_ERROR, leave the configuration circuit closed, and
+        # let every following request repeat the same doomed call while blaming
+        # the network.  Measured on 2026-09-08: ``openai/gpt-5.6-luna``
+        # publishes no endpoint that accepts ``temperature``/``top_p``, so with
+        # ``provider.require_parameters=true`` a single sampling key emptied the
+        # funnel and returned ``failed_routing_step="Filter by Parameters"``.
+        # These messages are OpenRouter's own wording; no other transport in
+        # this file can produce them.
+        routing_rejected = status == 404 and any(
+            marker in text
+            for marker in (
+                "no endpoints found",
+                "no allowed providers",
+                "failed_routing_step",
+            )
+        )
+        if routing_rejected:
+            return ProviderCallError(
+                "PROVIDER_CONFIGURATION_ERROR",
+                "router_no_eligible_endpoint:" + str(exc),
                 status_code=status,
                 configuration_block=True,
             )
@@ -1005,6 +1237,31 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             self.admission_backoff_initial_sec, float(admission_backoff_max_sec)
         )
 
+    # How many times a *content* validation failure may be re-asked of the same
+    # model before the call is abandoned.  1 preserves the transport's existing
+    # single-repair behaviour exactly.  A transport that has a cheaper, better
+    # answer to bad JSON than asking the same model again -- the OpenCode legs,
+    # which fall back to Luna instead -- sets this to 0 so a malformed response
+    # is not paid for twice.
+    schema_repair_attempts = 1
+
+    def _wire_responses_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        request_metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Last-chance shaping of the Responses request body.
+
+        The default is the identity function, so the official transport is
+        byte-identical to before.  It exists so a Responses-compatible endpoint
+        that is *not* api.openai.com can remove the OpenAI-account-specific keys
+        (service tiers, prompt-cache handles) instead of a subclass having to
+        copy the whole request loop to omit two fields.
+        """
+
+        return kwargs
+
     def _generation_settings(self, role: str) -> dict[str, Any]:
         settings = super()._generation_settings(role)
         settings.update(
@@ -1095,111 +1352,10 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             )
         )
 
-    # A quota exhaustion is a 429 that no amount of waiting inside this request
-    # can clear -- it is a billing/configuration state, not congestion.  Retrying
-    # it burns the whole deadline to reach the same answer.
-    _ADMISSION_NON_RETRYABLE_MARKERS = (
-        "insufficient_quota",
-        "exceeded your current quota",
-        "billing_hard_limit",
-        "billing hard limit",
-    )
-
-    # Markers that prove the provider refused ADMISSION.  ``rate_limit_exceeded``
-    # and "processing too many requests" are the exact strings the live gate saw
-    # on 2026-09-07; ``_flex_capacity_rejected`` missed them because its only
-    # near match was "rate limit" with a space.
-    _ADMISSION_REJECTED_MARKERS = (
-        "rate_limit_exceeded",
-        "rate limit",
-        "ratelimit",
-        "too many requests",
-        "try again later",
-        "resource_unavailable",
-        "temporarily unavailable",
-        "overloaded",
-        "server_overloaded",
-        "capacity",
-        "slow down",
-    )
-
-    @classmethod
-    def _admission_rejected(cls, exc: Exception) -> bool:
-        """True only when the provider refused to ADMIT the request at all.
-
-        This is the same safety argument as ``_flex_capacity_rejected``, lifted
-        off the flex service tier.  A 429/503 admission refusal means no tokens
-        were produced, nothing is running server-side, and nothing can complete
-        late -- so resubmitting still yields exactly one authoritative provider
-        call per request identity.  Timeouts, connection errors and generic 5xx
-        stay excluded because they are ambiguous: the call may have been
-        admitted and still be running, where a resubmission would produce a
-        second billed call and a late result racing the first.
-
-        Quota exhaustion is excluded separately: it is a 429 that waiting cannot
-        clear.
-        """
-        text = str(exc).lower()
-        error_body = getattr(exc, "body", None)
-        if isinstance(error_body, Mapping):
-            text += " " + json.dumps(error_body, sort_keys=True, default=str).lower()
-        if any(
-            marker in text
-            for marker in ("timeout", "timed out", "connection error", "read error")
-        ):
-            return False
-        if any(marker in text for marker in cls._ADMISSION_NON_RETRYABLE_MARKERS):
-            return False
-        if cls._status_code(exc) not in {429, 503}:
-            return False
-        return any(marker in text for marker in cls._ADMISSION_REJECTED_MARKERS)
-
-    @staticmethod
-    def _retry_after_sec(exc: Exception) -> float | None:
-        """The provider's own ``Retry-After`` instruction, in seconds.
-
-        Honoured verbatim rather than capped: the affordability check against
-        the absolute deadline decides whether we can wait that long, and a
-        shorter wait than the server asked for is what produces a second 429.
-        """
-        response = getattr(exc, "response", None)
-        headers = getattr(response, "headers", None)
-        if headers is None:
-            return None
-        for name in ("retry-after", "Retry-After", "x-ratelimit-reset-requests"):
-            try:
-                raw = headers.get(name)
-            except Exception:
-                continue
-            if raw is None:
-                continue
-            text = str(raw).strip().lower()
-            multiplier = 1.0
-            if text.endswith("ms"):
-                text, multiplier = text[:-2], 0.001
-            elif text.endswith("s"):
-                text, multiplier = text[:-1], 1.0
-            try:
-                value = float(text) * multiplier
-            except (TypeError, ValueError):
-                continue
-            if value >= 0.0:
-                return value
-        return None
-
-    def _admission_backoff_sec(self, attempt: int, request_id: str) -> float:
-        """Exponential backoff with request-derived jitter.
-
-        The jitter is derived from the request id instead of ``random`` so a
-        replay of the same request sleeps the same amount, while concurrent
-        workers that hit the same rate limit spread out instead of retrying in
-        lockstep and re-triggering it.
-        """
-        base = self.admission_backoff_initial_sec * (2.0 ** max(0, attempt - 1))
-        base = min(base, self.admission_backoff_max_sec)
-        digest = sha256(f"{request_id}|{attempt}".encode("utf-8")).digest()
-        jitter_fraction = (digest[0] / 255.0) * 0.25
-        return base * (1.0 + jitter_fraction)
+    # ``_admission_rejected``, ``_retry_after_sec`` and ``_admission_backoff_sec``
+    # now live on ``_OpenAICompatibleProviderBase`` so every paid transport --
+    # this one and OpenRouter -- shares one definition of "was never admitted".
+    # They were duplicated here while OpenRouter had none at all.
 
     def generate_structured(
         self,
@@ -1336,6 +1492,9 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     service_tier = str(request_metadata.get("service_tier") or self.service_tier or "auto")
                     if service_tier:
                         kwargs["service_tier"] = service_tier
+                    kwargs = self._wire_responses_kwargs(
+                        kwargs, request_metadata=request_metadata
+                    )
                     call_client = client
                     with_options = getattr(client, "with_options", None)
                     if callable(with_options):
@@ -1425,7 +1584,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     )
                 except (ValueError, TypeError) as exc:
                     errors.append(f"{model}:schema:{type(exc).__name__}:{exc}")
-                    if schema_retries < 1 and (
+                    if schema_retries < self.schema_repair_attempts and (
                         deadline is None or deadline.can_start_attempt()
                     ):
                         schema_retries += 1
@@ -1850,6 +2009,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
         errors: list[str] = []
         transport_retries = 0
         schema_retries = 0
+        admission_retries = 0
         unsupported: set[str] = set()
         last_preflight: StructuredSchemaPreflight | None = None
         # The absolute request deadline is owned by the caller and is never
@@ -1907,7 +2067,14 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                 )
                 last_preflight = preflight
                 client = self._client_instance()
-                for attempt in range(self.max_retries + 1):
+                # ``attempt`` counts only what is charged to ``max_retries``.
+                # An admission retry deliberately does NOT consume it: the two
+                # budgets are separate by contract -- one covers failures the
+                # transport may repeat, the other covers refusals proven never
+                # to have been admitted.  Merging them would let a rate limit
+                # eat the schema-repair budget.
+                attempt = 0
+                while attempt <= self.max_retries:
                     kwargs: dict[str, Any] = {}
                     # Serialized transports queue: time spent waiting for the
                     # semaphore is deadline time already spent.  Re-check here so
@@ -2092,6 +2259,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                 self.temperature = None
                             elif unsupported_parameter == "top_p":
                                 self.top_p = None
+                            attempt += 1
                             continue
                         schema_retries += 1
                         errors.append(f"{model}:schema:{type(exc).__name__}:{exc}")
@@ -2104,6 +2272,8 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                         )
                         if attempt >= self.max_retries:
                             break
+                        attempt += 1
+                        continue
                     except ProviderCallError:
                         raise
                     except Exception as exc:
@@ -2119,6 +2289,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                 self.temperature = None
                             elif unsupported_parameter == "top_p":
                                 self.top_p = None
+                            attempt += 1
                             continue
                         failure = self._classify_transport_exception(exc)
                         if failure.configuration_block:
@@ -2147,6 +2318,49 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                 repair_attempted=schema_retries > 0,
                                 repair_result="failed" if schema_retries else "not_attempted",
                             ) from exc
+                        # An admission refusal is the one failure class proven
+                        # never to have reached the model, so it is the only one
+                        # a paid transport may resubmit.  Retried with the
+                        # provider's own Retry-After, or exponential backoff with
+                        # request-derived jitter -- the immediate retry this loop
+                        # used to perform is what re-triggers a rate limit.
+                        plan = self._admission_wait_plan(
+                            exc,
+                            attempts_used=admission_retries,
+                            deadline=deadline,
+                            request_id=request_id,
+                        )
+                        if plan is not None:
+                            wait_sec, retry_after_present, affordable = plan
+                            if affordable:
+                                admission_retries += 1
+                                self._log(
+                                    "[provider_admission_retry]"
+                                    f" request_id={request_id}"
+                                    f" provider={self.provider_id} model={model}"
+                                    f" attempt={admission_retries}/{self.admission_max_retries}"
+                                    f" http_status={failure.status_code or 0}"
+                                    f" error_category={failure.category}"
+                                    " admitted=false resubmission_safe=true"
+                                    f" retry_after_header={str(retry_after_present).lower()}"
+                                    f" wait_sec={wait_sec:.3f}"
+                                    f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
+                                )
+                                errors.append(f"{model}:{failure.category}:{failure}")
+                                if wait_sec > 0:
+                                    time.sleep(wait_sec)
+                                continue
+                            self._log(
+                                "[provider_admission_retry]"
+                                f" request_id={request_id}"
+                                f" provider={self.provider_id} model={model}"
+                                f" attempt={admission_retries + 1}/{self.admission_max_retries}"
+                                f" http_status={failure.status_code or 0}"
+                                f" wait_sec={wait_sec:.3f}"
+                                f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
+                                f" min_attempt_ms={deadline.policy.min_attempt_ms if deadline is not None else -1}"
+                                " action=skipped_insufficient_budget"
+                            )
                         transport_retries += 1
                         errors.append(f"{model}:{failure.category}:{failure}")
                         if deadline is not None and not deadline.can_start_attempt():
@@ -2173,8 +2387,26 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                 repair_attempted=schema_retries > 0,
                                 repair_result="failed" if schema_retries else "not_attempted",
                             ) from exc
+                        # Anything reaching here is either not an admission
+                        # refusal, or one whose separate budget is spent.  A
+                        # paid transport must not resubmit it: an ambiguous
+                        # failure may mean the call WAS admitted, where a
+                        # resubmission produces a second billed call and a late
+                        # result racing the first.
+                        if not self.resubmit_ambiguous_transport_failures:
+                            self._log(
+                                "[provider_ambiguous_failure_not_resubmitted]"
+                                f" request_id={request_id}"
+                                f" provider={self.provider_id} model={model}"
+                                f" http_status={failure.status_code or 0}"
+                                f" error_category={failure.category}"
+                                " admitted=unknown resubmission_safe=false"
+                            )
+                            break
                         if not failure.retryable or attempt >= self.max_retries:
                             break
+                        attempt += 1
+                        continue
         self._record_failure()
         raise ProviderCallError(
             _terminal_failure_category(errors),
@@ -2220,7 +2452,14 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
     The endpoint is remote by construction, so it is deliberately NOT subject to
     the loopback contract that governs the local provider: it is a separate
     provider mode with its own credential, and it never reads the OpenAI secret.
+    That same fact is why it overrides the inherited retry posture below.
     """
+
+    # A billed upstream call.  The local transport may repeat an ambiguous
+    # failure because a loopback server costs nothing and produces no late
+    # billed result; here a resubmission after a timeout or a 5xx can be a
+    # second charge racing a first call that was in fact admitted.
+    resubmit_ambiguous_transport_failures = False
 
     def __init__(
         self,
@@ -2251,6 +2490,10 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
         log: Callable[[str], None],
         app_url: str = "",
         app_title: str = "",
+        admission_retry_enable: bool = True,
+        admission_max_retries: int = 3,
+        admission_backoff_initial_sec: float = 2.0,
+        admission_backoff_max_sec: float = 30.0,
         client_factory: Callable[..., Any] | None = None,
         health_fetcher: Callable[[str, Mapping[str, str], float], Any] | None = None,
     ) -> None:
@@ -2289,9 +2532,27 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
         )
         self.app_url = str(app_url or "").strip()
         self.app_title = str(app_title or "").strip()
+        # OpenRouter is a PAID remote endpoint reached through the local
+        # transport loop, so it inherits neither the loopback assumption nor the
+        # remote transport's admission handling.  Both halves are corrected
+        # here: ambiguous failures are never resubmitted (a second submission
+        # can be a second billed upstream call racing a late first result), and
+        # a proven admission refusal gets the same Retry-After / jittered
+        # backoff budget the remote transport uses.  ``max_retries`` keeps its
+        # configured value: it still governs schema repair.
+        self.admission_retry_enable = bool(admission_retry_enable)
+        self.admission_max_retries = max(0, int(admission_max_retries))
+        self.admission_backoff_initial_sec = max(0.0, float(admission_backoff_initial_sec))
+        self.admission_backoff_max_sec = max(
+            self.admission_backoff_initial_sec, float(admission_backoff_max_sec)
+        )
 
     def _generation_settings(self, role: str) -> dict[str, Any]:
         settings = super()._generation_settings(role)
+        # Deliberately NOT extended with the admission-retry settings: this
+        # mapping is hashed into ``generation_settings_hash``, which is decision
+        # identity.  A transport retry policy does not change what the model was
+        # asked, and folding it in would move the identity of every request.
         settings["reasoning_effort"] = self.reasoning_effort
         settings["reasoning_token_reserve"] = self.reasoning_token_reserve
         settings["require_structured_provider"] = self.require_structured_provider
@@ -2340,3 +2601,938 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
         if not self.enable_thinking:
             return int(requested)
         return int(requested) + self.reasoning_token_reserve
+
+
+# ---------------------------------------------------------------------------
+# OpenCode Go transports.
+#
+# One selection, three legs, and exactly one strict validation contract shared
+# with every other transport in this file:
+#
+#   ``OpenCodeResponsesProvider``  Muse Spark 1.3 Contributor, /zen/go/v1/responses
+#   ``OpenCodeMessagesProvider``   qwen3.8-flash, /zen/go/v1/messages (Anthropic dialect)
+#   ``OpenCodeRoutedProvider``     deterministic routing + one Luna fallback
+#
+# Neither OpenCode leg re-implements the request loop, the deadline contract,
+# the admission-retry rules, the circuit breaker, or the structured validation.
+# The Responses leg subclasses the official transport and shapes two keys; the
+# Messages leg reuses the chat-completions loop verbatim behind a client adapter
+# that speaks the Anthropic-compatible wire dialect.  That adapter is the only
+# place in the codebase that knows ``responses`` and ``messages`` differ.
+# ---------------------------------------------------------------------------
+
+
+class OpenCodeTransportError(RuntimeError):
+    """HTTP failure from an OpenCode endpoint, shaped for the shared classifiers.
+
+    ``_status_code``, ``_classify_transport_exception``, ``_admission_rejected``
+    and ``_retry_after_sec`` all read an exception through duck typing
+    (``status_code``, ``body``, ``response.headers``).  Carrying those three
+    attributes is what lets an OpenCode 429 reuse the admission-retry rules
+    rather than needing a second, divergent definition of "never admitted".
+    """
+
+    class _Response:
+        def __init__(self, headers: Mapping[str, str]) -> None:
+            self.headers = dict(headers)
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        body: Any = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.status = status_code
+        self.body = body if isinstance(body, Mapping) else None
+        self.response = self._Response(headers or {})
+
+
+# Measured against the live endpoint on 2026-09-09, both dialects:
+#
+#   * A request whose ``User-Agent`` is urllib's default (``Python-urllib/3.11``)
+#     is refused by the edge with HTTP 403 / ``error code: 1010`` before it ever
+#     reaches OpenCode.  Every other agent tried -- including ``curl``, ``node``
+#     and ``openai-python`` -- was accepted, so this is an agent *denylist*, not
+#     an allowlist, and the SDK's own agent needs no override.  Only the raw
+#     urllib transport in this file does.
+#   * A request with no ``x-opencode-session`` header is refused with HTTP 400
+#     ``MissingSessionID`` on BOTH ``/responses`` and ``/messages``.  Any opaque
+#     value is accepted; the header exists so the provider can route a
+#     conversation consistently.  Deriving it from the request id is therefore
+#     free and strictly better than a random one: the same request replays to the
+#     same session, and two concurrent workers never share one.
+OPENCODE_SESSION_HEADER = "x-opencode-session"
+OPENCODE_DEFAULT_USER_AGENT = "opencode/1.0.0"
+_OPENCODE_SESSION_FALLBACK = "po3-aigate"
+
+
+def _opencode_session_id(request_id: str) -> str:
+    """Header-safe, deterministic session id for one request."""
+
+    token = "".join(
+        ch if (ch.isalnum() or ch in "-_.") else "-" for ch in str(request_id or "")
+    ).strip("-")
+    if not token:
+        return _OPENCODE_SESSION_FALLBACK
+    return ("po3-" + token)[:120]
+
+
+class _OpenCodeMessagesClient:
+    """OpenAI chat-completions facade over the Anthropic-compatible dialect.
+
+    The chat-completions request loop in ``LocalOpenAICompatibleProvider`` is
+    the transport contract this project has already hardened: absolute deadline,
+    separated admission/schema budgets, model-identity binding, strict JSON
+    extraction.  Re-implementing it for a second wire dialect would duplicate
+    exactly the business logic that must not be duplicated, so instead this
+    object is injected through the existing ``client_factory`` seam and performs
+    a pure translation in both directions:
+
+    request   ``messages`` + ``response_format(json_schema)``
+              -> ``system`` + ``messages`` + a SINGLE tool whose ``input_schema``
+                 IS the strict schema.  Declaring exactly one tool, and saying in
+                 the system text that the answer must be delivered through it, is
+                 the strongest structural guarantee this endpoint actually
+                 accepts -- see ``tool_choice`` below.
+
+    response  ``content[].tool_use.input`` -> ``choices[0].message.content`` as
+              a JSON string, which the caller then parses and validates through
+              the identical ``_strict_json_object`` + schema path used for every
+              other provider.  Nothing is trusted because it came back from a
+              tool call; the same validator still has the last word.  ``thinking``
+              blocks are never content: they are reasoning, not the answer.
+
+    A tool-less answer degrades to its concatenated ``text`` blocks rather than
+    being silently accepted: if that text is not a valid instance of the schema
+    the shared validator rejects it, and the routed provider falls back.
+
+    ``tool_choice`` IS NOT SENT, and that is measured, not an oversight.  This
+    endpoint answers any request carrying ``tool_choice`` -- ``{"type":"tool"}``
+    and ``{"type":"any"}`` alike -- with HTTP 400 and an opaque ``{"model": ...}``
+    body, i.e. sending it makes every Qwen call fail rather than making it
+    strict.  With the key omitted the model chose the declared tool in 3 of 3
+    live runs against a prompt that explicitly invited prose, each time with a
+    schema-conforming ``input``.  So the forcing is contractual rather than
+    parametric, and it is backstopped where it matters: an answer that is not a
+    valid instance of the schema is rejected by the shared validator and routed
+    to Luna, exactly like any other unusable response.
+    """
+
+    _KNOWN_KEYS = frozenset(
+        {
+            "model",
+            "messages",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "extra_body",
+            "extra_headers",
+            "response_format",
+        }
+    )
+
+    class _Completions:
+        def __init__(self, client: "_OpenCodeMessagesClient") -> None:
+            self._client = client
+
+        def create(self, **kwargs: Any) -> dict[str, Any]:
+            return self._client._create(**kwargs)
+
+    class _Chat:
+        def __init__(self, client: "_OpenCodeMessagesClient") -> None:
+            self.completions = _OpenCodeMessagesClient._Completions(client)
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        timeout: float,
+        base_url: str = "",
+        max_retries: int = 0,
+        default_headers: Mapping[str, str] | None = None,
+        anthropic_version: str = "2023-06-01",
+        user_agent: str = OPENCODE_DEFAULT_USER_AGENT,
+        transport: Callable[[str, dict[str, Any], Mapping[str, str], float], Any] | None = None,
+    ) -> None:
+        self._api_key = str(api_key or "")
+        self.timeout = float(timeout)
+        self.base_url = str(base_url or "").rstrip("/")
+        self._default_headers = dict(default_headers or {})
+        self._anthropic_version = str(anthropic_version or "2023-06-01")
+        self._user_agent = str(user_agent or OPENCODE_DEFAULT_USER_AGENT)
+        self._transport = transport
+        self.chat = self._Chat(self)
+
+    def with_options(self, *, timeout: float | None = None, max_retries: int | None = None) -> "_OpenCodeMessagesClient":
+        clone = _OpenCodeMessagesClient(
+            api_key=self._api_key,
+            timeout=self.timeout if timeout is None else float(timeout),
+            base_url=self.base_url,
+            default_headers=self._default_headers,
+            anthropic_version=self._anthropic_version,
+            user_agent=self._user_agent,
+            transport=self._transport,
+        )
+        return clone
+
+    # ---- request translation -------------------------------------------
+
+    @staticmethod
+    def _split_system(messages: Sequence[Mapping[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+        system_parts: list[str] = []
+        turns: list[dict[str, Any]] = []
+        for message in messages or ():
+            if not isinstance(message, Mapping):
+                continue
+            role = str(message.get("role") or "").strip().lower()
+            content = message.get("content")
+            text = content if isinstance(content, str) else json.dumps(content, sort_keys=True)
+            if role == "system":
+                system_parts.append(text)
+                continue
+            turns.append(
+                {
+                    "role": "assistant" if role == "assistant" else "user",
+                    "content": [{"type": "text", "text": text}],
+                }
+            )
+        return "\n\n".join(part for part in system_parts if part), turns
+
+    def _build_body(self, kwargs: Mapping[str, Any]) -> dict[str, Any]:
+        unknown = sorted(set(kwargs) - self._KNOWN_KEYS)
+        if unknown:
+            # Never send a key this dialect has no representation for, and never
+            # drop one silently either: an unrepresentable parameter is a
+            # configuration defect and must say so before any HTTP request.
+            raise OpenCodeTransportError(
+                "opencode_messages_unsupported_request_parameter:" + ",".join(unknown)
+            )
+        system_text, turns = self._split_system(kwargs.get("messages") or ())
+        body: dict[str, Any] = {
+            "model": str(kwargs.get("model") or ""),
+            "max_tokens": max(1, int(kwargs.get("max_tokens") or 1)),
+            "messages": turns,
+        }
+        if system_text:
+            body["system"] = system_text
+        for optional in ("temperature", "top_p"):
+            if kwargs.get(optional) is not None:
+                body[optional] = kwargs[optional]
+        response_format = kwargs.get("response_format")
+        if isinstance(response_format, Mapping):
+            json_schema = response_format.get("json_schema")
+            if not isinstance(json_schema, Mapping) or not isinstance(
+                json_schema.get("schema"), Mapping
+            ):
+                raise OpenCodeTransportError(
+                    "opencode_messages_response_format_not_translatable"
+                )
+            tool_name = str(json_schema.get("name") or "structured_response")
+            body["tools"] = [
+                {
+                    "name": tool_name,
+                    "description": (
+                        "Return the decision as this tool's input object. "
+                        "Every field is required and the schema is strict."
+                    ),
+                    "input_schema": dict(json_schema["schema"]),
+                }
+            ]
+            # No ``tool_choice``: this endpoint rejects the key outright (see the
+            # class docstring).  The obligation is stated in the system text
+            # instead, and enforced downstream by the same strict validator that
+            # protects every other transport.
+            directive = (
+                "You MUST deliver your entire answer by calling the "
+                f"`{tool_name}` tool exactly once. Do not answer in prose."
+            )
+            body["system"] = (
+                (body["system"] + "\n\n" + directive) if body.get("system") else directive
+            )
+        extra_body = kwargs.get("extra_body")
+        if isinstance(extra_body, Mapping):
+            body.update(dict(extra_body))
+        return body
+
+    def _headers(self, kwargs: Mapping[str, Any]) -> dict[str, str]:
+        headers = {
+            "content-type": "application/json",
+            "accept": "application/json",
+            # Both are mandatory at this endpoint; see the constants above for
+            # the measured failures that prove it.  The agent must not be
+            # urllib's default, and the request must name a session.
+            "user-agent": self._user_agent,
+            # OpenCode Go issues one key for both of its dialects.  The bearer
+            # header is what the /responses leg uses; ``x-api-key`` is the
+            # Anthropic-dialect convention.  Both name the same credential and
+            # neither is ever logged.
+            "authorization": "Bearer " + self._api_key,
+            "x-api-key": self._api_key,
+            "anthropic-version": self._anthropic_version,
+        }
+        headers.update(self._default_headers)
+        extra = kwargs.get("extra_headers")
+        if isinstance(extra, Mapping):
+            headers.update({str(k): str(v) for k, v in extra.items()})
+        # Derived last, from the request identity the transport already carries,
+        # so one request always names one session and a replay names the same
+        # one.  An explicitly supplied session header still wins.
+        if not headers.get(OPENCODE_SESSION_HEADER):
+            headers[OPENCODE_SESSION_HEADER] = _opencode_session_id(
+                headers.get("X-PO3-Request-Id") or ""
+            )
+        return headers
+
+    # ---- response translation ------------------------------------------
+
+    @staticmethod
+    def _content_to_text(payload: Mapping[str, Any]) -> tuple[str, str]:
+        """``(content_text, finish_reason)`` from an Anthropic-shaped response."""
+
+        blocks = payload.get("content")
+        finish_reason = str(payload.get("stop_reason") or "")
+        if isinstance(blocks, Sequence) and not isinstance(blocks, (str, bytes)):
+            for block in blocks:
+                if not isinstance(block, Mapping):
+                    continue
+                if str(block.get("type") or "") == "tool_use":
+                    tool_input = block.get("input")
+                    if isinstance(tool_input, Mapping):
+                        return json.dumps(dict(tool_input), sort_keys=False), finish_reason
+            texts = [
+                str(block.get("text") or "")
+                for block in blocks
+                if isinstance(block, Mapping) and str(block.get("type") or "") == "text"
+            ]
+            joined = "".join(texts)
+            if joined.strip():
+                return joined, finish_reason
+        return "", finish_reason
+
+    def _create(self, **kwargs: Any) -> dict[str, Any]:
+        body = self._build_body(kwargs)
+        headers = self._headers(kwargs)
+        url = self.base_url + "/messages"
+        payload = self._post(url, body, headers, self.timeout)
+        if not isinstance(payload, Mapping):
+            raise OpenCodeTransportError("opencode_messages_response_root_not_object")
+        content, finish_reason = self._content_to_text(payload)
+        usage = payload.get("usage") if isinstance(payload.get("usage"), Mapping) else {}
+        input_tokens = usage.get("input_tokens")
+        output_tokens = usage.get("output_tokens")
+        total = None
+        try:
+            if input_tokens is not None and output_tokens is not None:
+                total = int(input_tokens) + int(output_tokens)
+        except (TypeError, ValueError):
+            total = None
+        return {
+            "id": str(payload.get("id") or ""),
+            "model": str(payload.get("model") or body.get("model") or ""),
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": finish_reason,
+                    "message": {"role": "assistant", "content": content},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": total,
+            },
+            "opencode_stop_reason": finish_reason,
+        }
+
+    def _post(
+        self,
+        url: str,
+        body: Mapping[str, Any],
+        headers: Mapping[str, str],
+        timeout: float,
+    ) -> Any:
+        if self._transport is not None:
+            return self._transport(url, dict(body), dict(headers), float(timeout))
+        data = json.dumps(body, ensure_ascii=True).encode("utf-8")
+        request = urllib.request.Request(url, data=data, headers=dict(headers), method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = ""
+            try:
+                raw = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw = ""
+            parsed: Any = None
+            try:
+                parsed = json.loads(raw) if raw else None
+            except ValueError:
+                parsed = None
+            raise OpenCodeTransportError(
+                f"opencode_messages_http_{int(getattr(exc, 'code', 0) or 0)}:{raw[:500]}",
+                status_code=int(getattr(exc, "code", 0) or 0),
+                body=parsed,
+                headers=dict(getattr(exc, "headers", {}) or {}),
+            ) from exc
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, TimeoutError):
+                raise OpenCodeTransportError("opencode_messages_timeout:read timed out") from exc
+            raise OpenCodeTransportError(
+                "opencode_messages_connection error:" + str(reason or exc)
+            ) from exc
+        except TimeoutError as exc:
+            raise OpenCodeTransportError("opencode_messages_timeout:read timed out") from exc
+
+
+class OpenCodeResponsesProvider(RemoteAPIProvider):
+    """Muse Spark 1.3 Contributor over the OpenCode Go ``/responses`` endpoint.
+
+    Subclasses the official Responses transport rather than copying it, so the
+    deadline contract, admission-retry budget, circuit breaker, strict schema
+    preflight and structured validation are the identical code paths that
+    already protect api.openai.com traffic.
+
+    Two things genuinely differ and both are confined to one hook:
+
+    * ``service_tier`` and the prompt-cache handles are OpenAI *account*
+      features. OpenCode publishes no such parameters, and this transport routes
+      with a strict schema, so sending them risks the whole request being
+      rejected for an unknown key.  ``_wire_responses_kwargs`` removes them.
+    * A malformed answer is not re-asked of the same model.  ``Luna`` is a
+      better and cheaper answer to bad JSON than a second Muse call, so
+      ``schema_repair_attempts`` is 0 and the routed provider falls back.
+    """
+
+    resubmit_ambiguous_transport_failures = False
+    schema_repair_attempts = 0
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_sec: float,
+        max_output_tokens: int,
+        reasoning_token_reserve: int = 24000,
+        circuit_failure_threshold: int,
+        circuit_cooldown_sec: float,
+        log: Callable[[str], None],
+        admission_retry_enable: bool = True,
+        admission_max_retries: int = 3,
+        admission_backoff_initial_sec: float = 2.0,
+        admission_backoff_max_sec: float = 30.0,
+        client_factory: Callable[..., Any] | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            primary_model=model,
+            # Model fallback inside one provider is deliberately empty: the
+            # fallback for this leg is a different provider entirely (Luna), and
+            # that decision belongs to OpenCodeRoutedProvider, not here.
+            fallback_models=(),
+            analytics_model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_sec=timeout_sec,
+            max_output_tokens=max_output_tokens,
+            prompt_cache_enable=False,
+            prompt_cache_key="",
+            prompt_cache_retention="",
+            service_tier="",
+            flex_unavailable_retry_enable=False,
+            flex_unavailable_max_retries=0,
+            flex_unavailable_cooldown_sec=0.0,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_cooldown_sec=circuit_cooldown_sec,
+            log=log,
+            admission_retry_enable=admission_retry_enable,
+            admission_max_retries=admission_max_retries,
+            admission_backoff_initial_sec=admission_backoff_initial_sec,
+            admission_backoff_max_sec=admission_backoff_max_sec,
+            client_factory=client_factory,
+        )
+        self.provider_mode = PROVIDER_MODE_OPENCODE
+        self.provider_id = "opencode_go_responses"
+        self.reasoning_token_reserve = max(0, int(reasoning_token_reserve))
+
+    def _wire_responses_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        request_metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        shaped = dict(kwargs)
+        # Unconditional, not "only when self.service_tier is empty": the gate
+        # supplies "auto" in request_metadata for every non-OpenAI transport, and
+        # the base loop treats that as a value to send.
+        shaped.pop("service_tier", None)
+        shaped.pop("prompt_cache_key", None)
+        extra_body = shaped.get("extra_body")
+        if isinstance(extra_body, Mapping):
+            trimmed = {
+                key: value
+                for key, value in extra_body.items()
+                if key != "prompt_cache_retention"
+            }
+            if trimmed:
+                shaped["extra_body"] = trimmed
+            else:
+                shaped.pop("extra_body", None)
+        # ``truncation`` is the one Responses parameter whose OpenAI default is
+        # not merely ignored here but REJECTED: measured 2026-09-09, this
+        # endpoint answers ``auto`` with HTTP 400 ``value `auto` is not
+        # supported. Only `disabled` is supported``, which failed every single
+        # Muse call.  Restated rather than dropped, because ``disabled`` is also
+        # the value this project wants: ``auto`` lets the upstream silently drop
+        # evidence out of the middle of an over-long context and answer anyway,
+        # which is a decision made on evidence Python never agreed to omit.
+        # With it disabled an over-long request fails loudly instead, and the
+        # context-budget fitter -- not the provider -- stays the one thing that
+        # decides what evidence a decision is allowed to rest on.
+        if "truncation" in shaped:
+            shaped["truncation"] = "disabled"
+        # ``max_output_tokens`` bounds reasoning tokens AND content together on
+        # this API, so a schema-derived budget is not a content budget -- it is
+        # a budget the reasoning spends first.  Measured 2026-09-09 on a real
+        # archived live request: Muse at effort=high returned
+        # ``status=incomplete incomplete_reason=max_output_tokens`` with an empty
+        # message on the analyst role -- every time -- while the smaller critic
+        # and adjudicator roles completed normally on the same budget.  This is
+        # the same trap this repo already documented on OpenRouter
+        # (OPENROUTER_REASONING_TOKEN_RESERVE), so it takes the same shape here:
+        # a reserve added ON TOP of the caller's budget rather than taken out of
+        # it, so the schema still gets every token it was promised.  It is a
+        # ceiling, not a spend -- an answer that reasons less is billed less.
+        if self.reasoning_token_reserve > 0:
+            requested = shaped.get("max_output_tokens")
+            if isinstance(requested, int) and requested > 0:
+                shaped["max_output_tokens"] = requested + self.reasoning_token_reserve
+        # Mandatory at this endpoint: without it the request is refused with
+        # HTTP 400 MissingSessionID before the model is reached.  The base loop
+        # only builds ``extra_headers`` when a deadline is present, so this
+        # cannot be folded into that block -- a deadline-free call needs the
+        # header just as much.
+        headers = dict(shaped.get("extra_headers") or {})
+        if not headers.get(OPENCODE_SESSION_HEADER):
+            headers[OPENCODE_SESSION_HEADER] = _opencode_session_id(
+                str(request_metadata.get("request_id") or "")
+            )
+        shaped["extra_headers"] = headers
+        return shaped
+
+
+class OpenCodeMessagesProvider(LocalOpenAICompatibleProvider):
+    """qwen3.8-flash over the OpenCode Go Anthropic-compatible ``/messages``.
+
+    Reuses the chat-completions request loop unchanged; the dialect difference
+    lives entirely in ``_OpenCodeMessagesClient``.  Sampling parameters default
+    to omitted so no unsupported key reaches the wire, and, like the Responses
+    leg, a malformed answer routes to Luna instead of being re-asked here.
+    """
+
+    resubmit_ambiguous_transport_failures = False
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout_sec: float,
+        max_output_tokens: int,
+        context_budget_tokens: int,
+        circuit_failure_threshold: int,
+        circuit_cooldown_sec: float,
+        log: Callable[[str], None],
+        anthropic_version: str = "2023-06-01",
+        enable_thinking: bool = False,
+        thinking_budget_tokens: int = 0,
+        parallelism: int = 3,
+        admission_retry_enable: bool = True,
+        admission_max_retries: int = 3,
+        admission_backoff_initial_sec: float = 2.0,
+        admission_backoff_max_sec: float = 30.0,
+        client_factory: Callable[..., Any] | None = None,
+    ) -> None:
+        self.anthropic_version = str(anthropic_version or "2023-06-01")
+        super().__init__(
+            base_url=base_url,
+            api_key=api_key,
+            analyst_model=model,
+            critic_model=model,
+            adjudicator_model=model,
+            fallback_models=(),
+            healthcheck_path="/models",
+            timeout_sec=timeout_sec,
+            # 0 repairs: a bad answer goes to Luna, it is not re-asked here.
+            max_retries=0,
+            max_output_tokens=max_output_tokens,
+            temperature=None,
+            top_p=None,
+            seed=None,
+            enable_thinking=bool(enable_thinking),
+            require_json_schema=True,
+            parallelism=parallelism,
+            context_budget_tokens=context_budget_tokens,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_cooldown_sec=circuit_cooldown_sec,
+            log=log,
+            client_factory=client_factory or self._default_client_factory,
+            provider_mode=PROVIDER_MODE_OPENCODE,
+            provider_id="opencode_go_messages",
+            max_retries_ceiling=0,
+        )
+        self.thinking_budget_tokens = max(0, int(thinking_budget_tokens))
+        self.admission_retry_enable = bool(admission_retry_enable)
+        self.admission_max_retries = max(0, int(admission_max_retries))
+        self.admission_backoff_initial_sec = max(0.0, float(admission_backoff_initial_sec))
+        self.admission_backoff_max_sec = max(
+            self.admission_backoff_initial_sec, float(admission_backoff_max_sec)
+        )
+
+    def _default_client_factory(self, **kwargs: Any) -> "_OpenCodeMessagesClient":
+        return _OpenCodeMessagesClient(
+            api_key=str(kwargs.get("api_key") or ""),
+            timeout=float(kwargs.get("timeout") or self.timeout_sec),
+            base_url=str(kwargs.get("base_url") or self.base_url),
+            default_headers=kwargs.get("default_headers") or {},
+            anthropic_version=self.anthropic_version,
+        )
+
+    def _generation_settings(self, role: str) -> dict[str, Any]:
+        settings = super()._generation_settings(role)
+        settings["anthropic_version"] = self.anthropic_version
+        settings["thinking_budget_tokens"] = (
+            self.thinking_budget_tokens if self.enable_thinking else 0
+        )
+        return settings
+
+    def _wire_extra_body(self) -> dict[str, Any]:
+        # The vLLM chat-template keyword the local family sends means nothing to
+        # this dialect.  Extended thinking is the dialect's own key, and it is
+        # only sent when it is explicitly configured, so a deployment that has
+        # not enabled it never puts an unsupported parameter on the wire.
+        if self.enable_thinking and self.thinking_budget_tokens > 0:
+            return {
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": self.thinking_budget_tokens,
+                }
+            }
+        return {}
+
+    def _wire_max_tokens(self, requested: int) -> int:
+        # ``max_tokens`` bounds thinking tokens and content together in this
+        # dialect, exactly as on OpenRouter, so the thinking budget is added on
+        # top of the caller's schema-derived budget rather than eaten out of it.
+        if self.enable_thinking and self.thinking_budget_tokens > 0:
+            return int(requested) + self.thinking_budget_tokens
+        return int(requested)
+
+    def healthcheck(self, *, probe_structured: bool = False) -> ProviderHealth:
+        """Configuration health, not a model listing.
+
+        The inherited implementation GETs ``/models`` and reads an OpenAI-shaped
+        catalogue.  OpenCode Go publishes no such listing on this dialect, so
+        inheriting it would report a correctly configured transport as unhealthy
+        and -- worse -- would keep the circuit breaker permanently open, because
+        breaker recovery re-runs exactly this check.  What is actually knowable
+        without spending a billed call is whether the credential and model are
+        configured; the real answer comes from the call itself, which falls back
+        to Luna when it fails.
+        """
+
+        model = self.model_for_role("analyst")
+        healthy = bool(self._api_key and model)
+        health = ProviderHealth(
+            healthy,
+            self.provider_mode,
+            self.provider_id,
+            self.endpoint_class,
+            model,
+            healthy,
+            healthy,
+            "" if healthy else "opencode_api_key_or_model_missing",
+        )
+        self._last_health = health
+        return health
+
+
+class OpenCodeRoutedProvider:
+    """OpenCode Go with deterministic routing and a single OpenAI Luna fallback.
+
+    Owns *routing only*.  Every leg it dispatches to is a fully independent
+    provider that performs its own strict schema validation, so this class can
+    never forward an unvalidated answer: it either returns a ``ProviderResult``
+    that a leg already validated, or it raises.
+
+    Routing (``OPENCODE_CALL_DIRECTING`` off is the default):
+
+        directing off              -> Muse, fallback Luna
+        directing on, normal       -> Muse, fallback Luna
+        directing on, important    -> Qwen, fallback Luna
+        directing on, critical     -> Luna directly
+
+    Importance is classified by ``opencode_routing.classify_importance``: a pure
+    function of signals the request already carries.  No extra model call is
+    made to decide where a request goes.
+
+    Identity is delegated to the leg the *default* route would use, so under the
+    default configuration -- directing off, every request on Muse -- the
+    decision cache's provider-identity check matches exactly as it does for any
+    single-transport mode.  When directing sends a request elsewhere, the result
+    truthfully reports the leg that answered, and a cache row written by one leg
+    is correctly not replayed under another leg's identity.
+    """
+
+    def __init__(
+        self,
+        *,
+        muse: Any,
+        qwen: Any,
+        fallback: Any,
+        policy: Any,
+        log: Callable[[str], None],
+        fallback_service_tier: str = "flex",
+    ) -> None:
+        self._muse = muse
+        self._qwen = qwen
+        self._fallback = fallback
+        self._policy = policy
+        self._log = log
+        self._fallback_service_tier = str(fallback_service_tier or "").strip().lower()
+        default_leg = self._default_leg()
+        self.provider_mode = default_leg.provider_mode
+        self.provider_id = default_leg.provider_id
+        self.endpoint_class = default_leg.endpoint_class
+
+    def _fallback_metadata(self, request_metadata: Mapping[str, Any]) -> dict[str, Any]:
+        """Request metadata for the OpenAI leg, carrying its configured tier.
+
+        The gate supplies ``service_tier="auto"`` for every transport that is not
+        ``PROVIDER_MODE_REMOTE``, and the remote transport lets request metadata
+        outrank its constructor value -- so without this the Luna fallback would
+        silently run on the standard tier no matter how it was configured.  The
+        rewrite is confined to the leg that owns the parameter, and the cost
+        ledger stays correct on its own because ``_response_service_tier`` reads
+        the tier back off the response rather than trusting the request.
+        """
+
+        metadata = dict(request_metadata)
+        if self._fallback_service_tier:
+            metadata["service_tier"] = self._fallback_service_tier
+        return metadata
+
+    # ---- routing --------------------------------------------------------
+
+    def _default_leg(self) -> Any:
+        """The leg an unclassified call uses; also the identity this reports."""
+
+        return self._muse
+
+    def _leg_for(self, importance: str) -> tuple[Any, bool]:
+        """``(leg, is_opencode_leg)`` for a classified importance."""
+
+        if importance == IMPORTANCE_CRITICAL:
+            return self._fallback, False
+        if importance == IMPORTANCE_IMPORTANT:
+            return self._qwen, True
+        if importance != IMPORTANCE_NORMAL:
+            # Unreachable while the classifier can only return the three known
+            # levels, and written this way so it stays unreachable: if a fourth
+            # level is ever added, an unmapped request takes the STRONGEST route
+            # rather than falling through to the cheapest one by accident.
+            return self._fallback, False
+        return self._muse, True
+
+    def classify(
+        self,
+        request_metadata: Mapping[str, Any] | None,
+        evidence: Mapping[str, Any] | None,
+    ) -> Any:
+        return classify_importance(
+            policy=self._policy,
+            request_metadata=request_metadata,
+            evidence=evidence,
+        )
+
+    # ---- AIProvider protocol -------------------------------------------
+
+    def healthcheck(self, *, probe_structured: bool = False) -> ProviderHealth:
+        primary = self._default_leg().healthcheck(probe_structured=False)
+        fallback = self._fallback.healthcheck(probe_structured=False)
+        reasons = [
+            f"{name}:{health.reason}"
+            for name, health in (("opencode", primary), ("fallback", fallback))
+            if not health.healthy and health.reason
+        ]
+        return ProviderHealth(
+            bool(primary.healthy or fallback.healthy),
+            self.provider_mode,
+            self.provider_id,
+            self.endpoint_class,
+            primary.model_id or fallback.model_id,
+            bool(primary.model_available or fallback.model_available),
+            bool(primary.structured_output_available or fallback.structured_output_available),
+            ";".join(reasons),
+        )
+
+    def model_for_role(self, role: str) -> str:
+        return self._default_leg().model_for_role(role)
+
+    def configured_models(self, role: str) -> tuple[str, ...]:
+        return self._default_leg().configured_models(role)
+
+    def identity(self, role: str = "analyst") -> dict[str, Any]:
+        identity = dict(self._default_leg().identity(role))
+        identity["opencode_routing"] = self._policy.fingerprint()
+        identity["opencode_legs"] = {
+            "normal": self._muse.model_for_role(role),
+            "important": self._qwen.model_for_role(role),
+            "critical": self._fallback.model_for_role(role),
+        }
+        return identity
+
+    def generation_identity(
+        self,
+        role: str = "analyst",
+        request_metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._default_leg().generation_identity(role, request_metadata)
+
+    def clear_configuration_circuit(self, key: str) -> None:
+        for leg in (self._muse, self._qwen, self._fallback):
+            clear = getattr(leg, "clear_configuration_circuit", None)
+            if callable(clear):
+                clear(key)
+
+    def configuration_circuit_count(self) -> int:
+        return sum(
+            int(getattr(leg, "configuration_circuit_count", lambda: 0)())
+            for leg in (self._muse, self._qwen, self._fallback)
+        )
+
+    @staticmethod
+    def _failure_fields(exc: Exception) -> tuple[str, str]:
+        """``(category, detail)`` for telemetry, precise where it is knowable."""
+
+        if isinstance(exc, ProviderCallError):
+            return exc.category, str(exc)[:200]
+        return type(exc).__name__, str(exc)[:200]
+
+    def generate_structured(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        evidence: Mapping[str, Any],
+        response_schema: type,
+        request_metadata: Mapping[str, Any],
+    ) -> ProviderResult:
+        decision = self.classify(request_metadata, evidence)
+        leg, is_opencode = self._leg_for(decision.importance)
+        request_id = str(request_metadata.get("request_id") or "")
+        started = time.perf_counter()
+        self._log(
+            "[opencode_routing]"
+            f" request_id={request_id}"
+            f" role={role}"
+            + decision.as_log_fields()
+            + f" routed_provider={leg.provider_id}"
+            f" routed_model={leg.model_for_role(role)}"
+            f" fallback_available={str(is_opencode).lower()}"
+            f" routing_policy_version={ROUTING_POLICY_VERSION}"
+        )
+        leg_metadata = (
+            request_metadata if is_opencode else self._fallback_metadata(request_metadata)
+        )
+        try:
+            result = leg.generate_structured(
+                role=role,
+                system_prompt=system_prompt,
+                evidence=evidence,
+                response_schema=response_schema,
+                request_metadata=leg_metadata,
+            )
+        except Exception as exc:
+            category, detail = self._failure_fields(exc)
+            if not is_opencode:
+                # The critical route is already Luna.  There is no second
+                # fallback: a failure here is the transport's real answer and is
+                # raised unchanged rather than retried against itself.
+                self._log(
+                    "[opencode_fallback]"
+                    f" request_id={request_id}"
+                    f" importance={decision.importance}"
+                    f" from={leg.provider_id} action=none"
+                    f" reason=no_fallback_configured_for_direct_openai_route"
+                    f" error_category={category}"
+                    f" latency_sec={time.perf_counter() - started:.3f}"
+                )
+                raise
+            deadline = request_metadata.get("deadline")
+            if deadline is not None and not deadline.can_start_attempt():
+                # Falling back would begin an attempt the absolute deadline
+                # cannot cover.  The deadline is never extended to make room for
+                # a fallback, so the OpenCode failure is the terminal answer.
+                self._log(
+                    "[opencode_fallback]"
+                    f" request_id={request_id}"
+                    f" importance={decision.importance}"
+                    f" from={leg.provider_id} action=skipped"
+                    " reason=insufficient_remaining_budget"
+                    f" error_category={category}"
+                    f" remaining_ms={deadline.remaining_ms()}"
+                    f" latency_sec={time.perf_counter() - started:.3f}"
+                )
+                raise
+            self._log(
+                "[opencode_fallback]"
+                f" request_id={request_id}"
+                f" importance={decision.importance}"
+                f" from={leg.provider_id}"
+                f" from_model={leg.model_for_role(role)}"
+                f" to={self._fallback.provider_id}"
+                f" to_model={self._fallback.model_for_role(role)}"
+                " action=fallback_once"
+                f" error_category={category}"
+                f" fallback_reason={detail}"
+                f" opencode_latency_sec={time.perf_counter() - started:.3f}"
+            )
+            fallback_started = time.perf_counter()
+            fallback_result = self._fallback.generate_structured(
+                role=role,
+                system_prompt=system_prompt,
+                evidence=evidence,
+                response_schema=response_schema,
+                request_metadata=self._fallback_metadata(request_metadata),
+            )
+            self._log(
+                "[opencode_fallback_completed]"
+                f" request_id={request_id}"
+                f" provider={fallback_result.provider_id}"
+                f" provider_mode={fallback_result.provider_mode}"
+                f" model={fallback_result.actual_model}"
+                " validation=passed"
+                f" latency_sec={time.perf_counter() - fallback_started:.3f}"
+            )
+            return fallback_result
+        self._log(
+            "[opencode_call_completed]"
+            f" request_id={request_id}"
+            f" importance={decision.importance}"
+            f" provider={result.provider_id}"
+            f" provider_mode={result.provider_mode}"
+            f" model={result.actual_model}"
+            " validation=passed fallback_used=false"
+            f" latency_sec={result.latency_sec:.3f}"
+        )
+        return result

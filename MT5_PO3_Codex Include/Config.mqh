@@ -13,7 +13,13 @@ const string AI_ROLE_CONTRACT_VERSION = "20260724_python_bound_roles_v3";
 const string AI_PROVIDER_CONTRACT_VERSION = "20260723_provider_neutral_transport_v2";
 const string AI_REQUEST_IDENTITY_VERSION = "20260724_ai_request_identity_v3";
 const string AI_EVIDENCE_ENVELOPE_VERSION = "20260718_decision_evidence_v1";
-const string AI_FAMILY_PROFILE_VERSION = "20260818_family_context_v3";
+// v4 splits each family's required_event_sequence into approval evidence and
+// deferred_execution_triggers.  MQL never reads the profile itself, but this
+// string is one of the eighteen fields hashed into PO3ContractManifestHash(),
+// so leaving it on v3 while Python moved to v4 made every request fail
+// validate_mql_contract() as contract_manifest_incompatible before any provider
+// call -- 8 of 8 requests in the 2026-09-08 18:26 session died that way.
+const string AI_FAMILY_PROFILE_VERSION = "20260908_family_context_v4";
 const string AI_TRADE_MEMORY_SCHEMA_VERSION = "20260718_trade_memory_v1";
 const string AI_RETRIEVAL_POLICY_VERSION = "20260718_hybrid_analogue_retrieval_v1";
 const string AI_CONSENSUS_RESOLVER_VERSION = "20260718_deterministic_consensus_v1";
@@ -25,15 +31,22 @@ const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
 // persisted-plan validator (StateStore.mqh).  Duplicating the literals let one
 // side accept a mode the other rejected.  Python carries the identical set in
 // ai_provider.PROVIDER_MODES_TRADING and a governance test asserts they match.
+// OPENCODE_API names the OpenCode Go transport only.  A request that the
+// OpenCode selection routes to its OpenAI Luna fallback arrives here reporting
+// REMOTE_API, because that is the transport that actually answered it.  These
+// literals are NOT among the hashed contract-manifest fields, so adding one
+// leaves the contract manifest hash unchanged and invalidates no cohort.
 const string AI_PROVIDER_MODE_REMOTE     = "REMOTE_API";
 const string AI_PROVIDER_MODE_LOCAL      = "LOCAL_OPENAI_COMPATIBLE";
 const string AI_PROVIDER_MODE_OPENROUTER = "OPENROUTER_API";
+const string AI_PROVIDER_MODE_OPENCODE   = "OPENCODE_API";
 
 bool AiProviderModeIsTradeable(const string mode)
   {
    return(mode == AI_PROVIDER_MODE_REMOTE
        || mode == AI_PROVIDER_MODE_LOCAL
-       || mode == AI_PROVIDER_MODE_OPENROUTER);
+       || mode == AI_PROVIDER_MODE_OPENROUTER
+       || mode == AI_PROVIDER_MODE_OPENCODE);
   }
 const string FEATURE_LINEAGE_VERSION = "20260718_tick_path_evidence_v3";
 const string RISK_MODEL_VERSION = "20260717_original_initial_risk_v3";
@@ -45,7 +58,12 @@ const string MANAGEMENT_SCHEMA_VERSION = "20260718_management_action_lifecycle_v
 const string MANAGEMENT_EXPERIMENT_SCHEMA_VERSION = "20260717_management_experiment_v1";
 const string MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_counterfactual_v2";
 const string INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1";
-const string SHADOW_CANDIDATE_SCHEMA_VERSION = "20260717_shadow_candidate_v3";
+// v4 adds the full counterfactual lifecycle: canonical sweep/variant identity,
+// entry activation, the ordered TP1/TP2/SL path and terminal-once resolution.
+// It participates in RuntimeInputHash (provenance) but deliberately NOT in
+// _ComputeDecisionInputHash, so a replay cohort recorded under v3 stays
+// addressable -- shadow research is not an economic decision input.
+const string SHADOW_CANDIDATE_SCHEMA_VERSION = "20260908_shadow_lifecycle_v4";
 const string NORMALIZED_FVG_SCHEMA_VERSION = "20260717_normalized_fvg_v2";
 const string ARCHITECTURE_CONTRACT_VERSION = "20260718_provider_neutral_architecture_v4";
 const string LIVE_FORWARD_CONTRACT_VERSION = "20260717_live_forward_v1";
@@ -209,6 +227,17 @@ input string InpTradingFreezeStartServerTime = "23:54";
 input string InpTradingFreezeEndServerTime = "01:05";
 input string InpServerMarketCloseTime = "00:00";
 input int    InpCloseManagedTradesBeforeMarketCloseMin = 0;
+// Explicit switch for the pre-close flatten.  Before this input the feature was
+// reachable only by inferring intent from a non-zero minute count, so "off" and
+// "configured but idle" were the same state and neither was declared.  With the
+// switch false the flatten never runs no matter what the minute count says.
+input bool   InpPreCloseFlattenEnable = false;
+// Scope of the pre-close flatten.  true restricts BOTH the flatten and the
+// matching pre-close entry block to spot forex pairs, leaving metals, crypto,
+// indices, energies and every other CFD product to run through the daily close
+// under their own stops.  Classification is read from broker symbol metadata,
+// never from the symbol text -- see PO3SymbolIsForexPair in Risk.mqh.
+input bool   InpPreCloseFlattenForexOnly = true;
 
 // --- Timeframes ---
 input ENUM_TIMEFRAMES InpHTF         = PERIOD_H4;
@@ -652,6 +681,26 @@ input int    InpSymbolFlattenRetrySeconds = 30;
 // --- Shadow candidate research (never trading authority) ---
 input bool   InpShadowCandidateLedgerEnable = true;
 input int    InpShadowCandidateHorizonMinutes = 1440;
+// Track pre-AI rejections too.  A rejection whose plan prices were built is a
+// real counterfactual; one rejected before prices exist is recorded as
+// UNTRACKABLE and never enters the pending queue.
+input bool   InpShadowTrackPreAiRejects = true;
+// How long a sweep/variant identity is remembered for deduplication after its
+// horizon ends.  Shorter than this and a re-scan of the same sweep creates a
+// second statistical sample; the memory is bounded so it cannot grow forever.
+input int    InpShadowIdentityRetentionMinutes = 4320;
+// Evaluation budget.  M1 bars change once a minute, so re-reading the path at
+// 1 Hz buys nothing and costs a CopyRates per pending tracker per second.
+input int    InpShadowEvaluationIntervalSeconds = 60;
+input int    InpShadowMaxEvaluationsPerTick = 25;
+// Bounded CopyRates retries before a candidate is declared DATA_LOSS rather
+// than left pending forever.
+input int    InpShadowMaxDataRetries = 30;
+// Prefer real tick ordering when two levels land inside the same M1 bar.
+// M1 bars alone can never order intrabar events, and inventing an order is
+// worse than reporting the ambiguity.
+input bool   InpShadowUseTickOrdering = true;
+input int    InpShadowMaxPendingTrackers = 4000;
 
 input ENUM_PO3_STOP_MODEL InpStopModel = STOP_STRUCTURAL_SWEEP;
 

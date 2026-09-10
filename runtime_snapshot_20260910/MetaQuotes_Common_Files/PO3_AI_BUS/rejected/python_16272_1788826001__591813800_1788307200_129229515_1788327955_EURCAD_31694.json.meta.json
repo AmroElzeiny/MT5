@@ -1,0 +1,1 @@
+{"archived_at":"2026-09-08T02:53:53.421712Z","file_bus_lifecycle_version":"20260724_file_bus_lifecycle_v3","reason":"reject:missing_structure_confirmation;weak_sequence_quality;net_rr_below_one;ai_qualitative_consensus_reject;resolved_risk_multiplier_zero;ai_veto;ai_veto_sequence_contradiction","session_id":"python_16272_1788826001","terminal_state":"rejected"}

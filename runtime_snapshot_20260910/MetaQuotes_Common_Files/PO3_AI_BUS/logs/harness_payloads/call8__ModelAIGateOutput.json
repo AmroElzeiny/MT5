@@ -1,0 +1,3297 @@
+{
+  "authority_manifest": {
+    "deterministic": "prices_costs_risk_session_broker_feasibility_identity_fingerprints",
+    "llm": "qualitative_audit_veto_abstention_narrative_only",
+    "management": "independently_validated_exit_policy",
+    "portfolio": "aggregate_risk_and_exposure",
+    "provider": {
+      "configuration_valid": true,
+      "configured_model_ids": [
+        "harness-deterministic-v1"
+      ],
+      "configured_models_hash": "88edcc58fa9fa38171cd33040166f7ba9cb60586511a9d74fc133963dad101c4",
+      "endpoint_class": "loopback",
+      "endpoint_identity_hash": "7fe94aac54c9eecbd34250f31d28e82de30ed00f8805fdd53a472d5a10f036d4",
+      "generation_settings": {
+        "context_budget_tokens": 131072,
+        "enable_thinking": false,
+        "max_output_tokens": 32768,
+        "require_json_schema": true,
+        "role": "analyst",
+        "seed": 42,
+        "temperature": 0.0,
+        "top_p": 0.85
+      },
+      "generation_settings_hash": "47a00c4a64b90cf8542b6ab52e53dfd8bea64fd420d519a5ce25a3907f54183e",
+      "model_fingerprint": "59f84900d628256cd30872be09c04f91fddbc0c3da29f5131ee59acb37615a79",
+      "model_id": "harness-deterministic-v1",
+      "provider_contract_version": "20260723_provider_neutral_transport_v2",
+      "provider_id": "local_openai_compatible",
+      "provider_mode": "LOCAL_OPENAI_COMPATIBLE"
+    },
+    "statistical": "validated_artifacts_only"
+  },
+  "correlations": {},
+  "entry_and_invalidation": {
+    "candidates": [
+      {
+        "assessed_execution_fingerprint": "0FD4D78D174245D1",
+        "authoritative_numbers": {
+          "adr_pct": null,
+          "adverse_context_score": 2.2527,
+          "atr_pct": null,
+          "entry": 4033.51,
+          "execution_cost_r": 0.0042,
+          "htf_alignment_score": 9.0,
+          "liquidity_rr": 2.0798,
+          "net_rr": 1.0453,
+          "obstacle_distance_r": 0.0756,
+          "sequence_quality": 9.5473,
+          "sl": 4069.36,
+          "slippage_r": 0.0006,
+          "spread_r": 0.004184,
+          "tp1": 4007.16025,
+          "tp2": 3995.8675,
+          "volume_impulse_score": 4.9437,
+          "vwap_dist_atr": null
+        },
+        "candidate_evidence_hash": "e5916588d8a89a21ff004fa919099efea3a747eae9099db841542e7a24467b94",
+        "candidate_hash": "1F74C9ABAB8F130F",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|breaker_retest|4033.28|breaker_retest|0",
+        "candidate_index": 0,
+        "entry_branch": "breaker_retest",
+        "entry_model": "breaker_retest",
+        "family_profile": {
+          "adverse_context_checks": [
+            "obstacle evidence",
+            "spread and execution cost",
+            "session and correlation context"
+          ],
+          "canonical_market_hypothesis": "micro continuation through a deterministically classified continuation FVG",
+          "entry_invalidation_conditions": [
+            "respect deterministic structure, FVG, entry, and stop validity flags"
+          ],
+          "expected_regime": [
+            "trend",
+            "expansion"
+          ],
+          "family_specific_abstention_reasons": [
+            "required sequence evidence unresolved",
+            "target choice unstable",
+            "historical evidence insufficient",
+            "material structured evidence conflict"
+          ],
+          "historical_retrieval_dimensions": [
+            "exact_taxonomy",
+            "setup_family_entry_branch",
+            "direction_semantics",
+            "asset_class",
+            "session_killzone",
+            "volatility_trend_regime",
+            "htf_ltf_alignment",
+            "rr_cost_obstacle_liquidity_buckets",
+            "stop_target_model",
+            "data_quality_tier"
+          ],
+          "htf_alignment_requirements": [
+            "audit supplied HTF alignment fields only"
+          ],
+          "known_failure_modes": [
+            "stale FVG",
+            "touched continuation without clean retest",
+            "trend exhaustion"
+          ],
+          "liquidity_objective_logic": [
+            "compare only deterministic target candidates marked available and feasible"
+          ],
+          "ltf_confirmation_requirements": [
+            "audit supplied displacement, BOS, retest, and confirmation fields only"
+          ],
+          "permitted_entry_branches": [
+            "continuation_fvg",
+            "fvg_mid",
+            "fvg_edge"
+          ],
+          "profile_version": "20260718_family_context_v1",
+          "relevant_feature_whitelist": [
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+            "setup_family",
+            "entry_branch",
+            "direction",
+            "source_t_sweep",
+            "source_t_disp",
+            "source_t_bos",
+            "entry_est",
+            "sl",
+            "tp1",
+            "tp2",
+            "effective_rr2",
+            "liquidity_rr",
+            "sequence_quality",
+            "htf_alignment_score",
+            "adverse_context_score",
+            "execution_cost_r",
+            "spread_r",
+            "target_candidates",
+            "obstacle_kind",
+            "session_name",
+            "killzone_code",
+            "asset_class",
+            "regime_profile"
+          ],
+          "required_event_sequence": [
+            "trend context",
+            "continuation displacement",
+            "continuation FVG entry"
+          ],
+          "required_temporal_ordering": [
+            "use MQL source timestamps; never infer absent events"
+          ],
+          "target_feasibility_rules": [
+            "never invent target prices",
+            "never select infeasible target candidates"
+          ],
+          "taxonomy": "MICRO_CONTINUATION_FVG",
+          "taxonomy_version": "20260716_setup_taxonomy_v1"
+        },
+        "family_profile_version": "20260718_family_context_v1",
+        "fvg_lower": 4033.04,
+        "fvg_mid": 4033.275,
+        "fvg_touched": false,
+        "fvg_upper": 4033.51,
+        "killzone_code": "NK",
+        "model_code": "MBC",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "request_execution_fingerprint": "0FD4D78D174245D1",
+        "session_code": "LON",
+        "session_name": "LONDON",
+        "setup_class": "micro_continuation_fvg.breaker_retest.virgin_fvg",
+        "setup_code": "MBC",
+        "setup_family": "micro_continuation_fvg",
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+        "setup_taxonomy_version": "20260716_setup_taxonomy_v1",
+        "source_t_bos": 1782733500,
+        "source_t_disp": 1782732600,
+        "source_t_sweep": 1782729900,
+        "target_candidates": {
+          "arbitration_required": true,
+          "blocker_features": {
+            "capped_rr": 0.075,
+            "diagnostic_legacy_setup_score": 129.0965,
+            "displacement_quality": 8.5462,
+            "distance_from_obstacle_to_liquidity_target_r": 2.0042,
+            "effective_fallback_rr": 1.05,
+            "fallback_rr": 1.05,
+            "htf_alignment_score": 9.0,
+            "is_htf_obstacle": false,
+            "is_ltf_obstacle": true,
+            "killzone": "NK",
+            "liquidity_rr": 2.0798,
+            "obstacle_age_bars": 1,
+            "obstacle_distance_r": 0.0756,
+            "obstacle_freshness": "fresh",
+            "obstacle_kind": "crossed_opposing_imbalance",
+            "obstacle_mitigated_percent": 0.0,
+            "obstacle_mitigation_state": "virgin",
+            "obstacle_price": 4030.8,
+            "obstacle_retested": false,
+            "obstacle_tf": "entry_tf",
+            "obstacle_width_atr": 10.0,
+            "obstacle_width_price": 0.47,
+            "session": "LONDON",
+            "tp1_before_obstacle_possible": true
+          },
+          "capped_before_obstacle": {
+            "available": true,
+            "feasible_for_tp1_only": true,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "rr_below_min",
+            "max_allowed_distance": 46.07081867,
+            "model": "capped_before_opposing_imbalance",
+            "partial_allowed": true,
+            "reward_distance_price": 2.69,
+            "rr2": 0.075,
+            "tp2": 4030.82
+          },
+          "current_rr2": 1.05,
+          "current_target_source": "synthetic_rr_fallback",
+          "current_tp2": 3995.8675,
+          "current_tp_model": "synthetic_rr_fallback",
+          "effective_fallback_rr": 1.05,
+          "entry": 4033.51,
+          "liquidity_target": {
+            "available": true,
+            "blocked_by_obstacle": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.07081867,
+            "model": "next_liquidity_session_range",
+            "reward_distance_price": 74.56,
+            "rr2": 2.0798,
+            "tp2": 3958.95,
+            "valid_structurally": true
+          },
+          "max_allowed_target_distance": 46.07081867,
+          "obstacle_distance_r": 0.0756,
+          "obstacle_kind": "crossed_opposing_imbalance",
+          "obstacle_price": 4030.8,
+          "obstacle_r": 0.0,
+          "obstacle_strength_features": "severity=7.00;class=major",
+          "obstacle_tf": "entry_tf",
+          "partial_before_obstacle_then_liquidity": {
+            "available": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "model": "partial_before_obstacle_then_liquidity",
+            "rr1": 0.075,
+            "rr2": 2.0798,
+            "tp1": 4030.82,
+            "tp2": 3958.95
+          },
+          "risk_distance": 35.85,
+          "sl": 4069.36,
+          "synthetic_rr_capped_to_max_distance": {
+            "available": false,
+            "configured_rr": 1.05,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "unavailable",
+            "model": "synthetic_rr_capped_to_max_distance",
+            "reason": "",
+            "rr": 0.0,
+            "rr2": 0.0,
+            "tp": 0.0,
+            "tp2": 0.0
+          },
+          "synthetic_rr_fallback": {
+            "available": true,
+            "configured_rr": 1.05,
+            "crosses_obstacle": true,
+            "effective_rr2": 1.05,
+            "exceeds_max_target_distance": false,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.07081867,
+            "max_rr_pass": true,
+            "min_rr_pass": true,
+            "model": "synthetic_rr_fallback",
+            "reward_distance_price": 37.6425,
+            "rr": 1.05,
+            "rr2": 1.05,
+            "target_already_reached": false,
+            "target_direction_valid": true,
+            "tp": 3995.8675,
+            "tp2": 3995.8675
+          }
+        },
+        "target_model": "next_liquidity_session_range",
+        "target_source": "synthetic_rr_fallback",
+        "taxonomy_mapping_source": "exact_branch_structure_scope",
+        "tp_model": "synthetic_rr_fallback",
+        "volatility_profile": "balanced"
+      },
+      {
+        "assessed_execution_fingerprint": "D8C4E0DB81049587",
+        "authoritative_numbers": {
+          "adr_pct": null,
+          "adverse_context_score": 2.2527,
+          "atr_pct": null,
+          "entry": 4033.04,
+          "execution_cost_r": 0.0041,
+          "htf_alignment_score": 9.0,
+          "liquidity_rr": 2.0399,
+          "net_rr": 1.0453,
+          "obstacle_distance_r": 0.0617,
+          "sequence_quality": 9.5473,
+          "sl": 4069.36,
+          "slippage_r": 0.0006,
+          "spread_r": 0.00413,
+          "tp1": 4006.3448,
+          "tp2": 3994.904,
+          "volume_impulse_score": 4.9437,
+          "vwap_dist_atr": null
+        },
+        "candidate_evidence_hash": "188d8aebdbbc2a2ab55058af639b128a14ed9a118b5c6aa9172c7385afe3f4e8",
+        "candidate_hash": "F1A1F26B32D23E27",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|continuation_reentry|4033.28|continuation_reentry|0",
+        "candidate_index": 1,
+        "entry_branch": "continuation_reentry",
+        "entry_model": "continuation_reentry",
+        "family_profile": {
+          "adverse_context_checks": [
+            "obstacle evidence",
+            "spread and execution cost",
+            "session and correlation context"
+          ],
+          "canonical_market_hypothesis": "micro continuation through a deterministically classified continuation FVG",
+          "entry_invalidation_conditions": [
+            "respect deterministic structure, FVG, entry, and stop validity flags"
+          ],
+          "expected_regime": [
+            "trend",
+            "expansion"
+          ],
+          "family_specific_abstention_reasons": [
+            "required sequence evidence unresolved",
+            "target choice unstable",
+            "historical evidence insufficient",
+            "material structured evidence conflict"
+          ],
+          "historical_retrieval_dimensions": [
+            "exact_taxonomy",
+            "setup_family_entry_branch",
+            "direction_semantics",
+            "asset_class",
+            "session_killzone",
+            "volatility_trend_regime",
+            "htf_ltf_alignment",
+            "rr_cost_obstacle_liquidity_buckets",
+            "stop_target_model",
+            "data_quality_tier"
+          ],
+          "htf_alignment_requirements": [
+            "audit supplied HTF alignment fields only"
+          ],
+          "known_failure_modes": [
+            "stale FVG",
+            "touched continuation without clean retest",
+            "trend exhaustion"
+          ],
+          "liquidity_objective_logic": [
+            "compare only deterministic target candidates marked available and feasible"
+          ],
+          "ltf_confirmation_requirements": [
+            "audit supplied displacement, BOS, retest, and confirmation fields only"
+          ],
+          "permitted_entry_branches": [
+            "continuation_fvg",
+            "fvg_mid",
+            "fvg_edge"
+          ],
+          "profile_version": "20260718_family_context_v1",
+          "relevant_feature_whitelist": [
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+            "setup_family",
+            "entry_branch",
+            "direction",
+            "source_t_sweep",
+            "source_t_disp",
+            "source_t_bos",
+            "entry_est",
+            "sl",
+            "tp1",
+            "tp2",
+            "effective_rr2",
+            "liquidity_rr",
+            "sequence_quality",
+            "htf_alignment_score",
+            "adverse_context_score",
+            "execution_cost_r",
+            "spread_r",
+            "target_candidates",
+            "obstacle_kind",
+            "session_name",
+            "killzone_code",
+            "asset_class",
+            "regime_profile"
+          ],
+          "required_event_sequence": [
+            "trend context",
+            "continuation displacement",
+            "continuation FVG entry"
+          ],
+          "required_temporal_ordering": [
+            "use MQL source timestamps; never infer absent events"
+          ],
+          "target_feasibility_rules": [
+            "never invent target prices",
+            "never select infeasible target candidates"
+          ],
+          "taxonomy": "MICRO_CONTINUATION_FVG",
+          "taxonomy_version": "20260716_setup_taxonomy_v1"
+        },
+        "family_profile_version": "20260718_family_context_v1",
+        "fvg_lower": 4033.04,
+        "fvg_mid": 4033.275,
+        "fvg_touched": false,
+        "fvg_upper": 4033.51,
+        "killzone_code": "NK",
+        "model_code": "MPC",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "request_execution_fingerprint": "D8C4E0DB81049587",
+        "session_code": "LON",
+        "session_name": "LONDON",
+        "setup_class": "micro_continuation_fvg.continuation_reentry.virgin_fvg",
+        "setup_code": "MPC",
+        "setup_family": "micro_continuation_fvg",
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+        "setup_taxonomy_version": "20260716_setup_taxonomy_v1",
+        "source_t_bos": 1782733500,
+        "source_t_disp": 1782732600,
+        "source_t_sweep": 1782729900,
+        "target_candidates": {
+          "arbitration_required": true,
+          "blocker_features": {
+            "capped_rr": 0.0611,
+            "diagnostic_legacy_setup_score": 128.5965,
+            "displacement_quality": 8.5462,
+            "distance_from_obstacle_to_liquidity_target_r": 1.9782,
+            "effective_fallback_rr": 1.05,
+            "fallback_rr": 1.05,
+            "htf_alignment_score": 9.0,
+            "is_htf_obstacle": false,
+            "is_ltf_obstacle": true,
+            "killzone": "NK",
+            "liquidity_rr": 2.0399,
+            "obstacle_age_bars": 1,
+            "obstacle_distance_r": 0.0617,
+            "obstacle_freshness": "fresh",
+            "obstacle_kind": "crossed_opposing_imbalance",
+            "obstacle_mitigated_percent": 0.0,
+            "obstacle_mitigation_state": "virgin",
+            "obstacle_price": 4030.8,
+            "obstacle_retested": false,
+            "obstacle_tf": "entry_tf",
+            "obstacle_width_atr": 10.0,
+            "obstacle_width_price": 0.47,
+            "session": "LONDON",
+            "tp1_before_obstacle_possible": true
+          },
+          "capped_before_obstacle": {
+            "available": true,
+            "feasible_for_tp1_only": true,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "rr_below_min",
+            "max_allowed_distance": 46.06545033,
+            "model": "capped_before_opposing_imbalance",
+            "partial_allowed": true,
+            "reward_distance_price": 2.22,
+            "rr2": 0.0611,
+            "tp2": 4030.82
+          },
+          "current_rr2": 1.05,
+          "current_target_source": "synthetic_rr_fallback",
+          "current_tp2": 3994.904,
+          "current_tp_model": "synthetic_rr_fallback",
+          "effective_fallback_rr": 1.05,
+          "entry": 4033.04,
+          "liquidity_target": {
+            "available": true,
+            "blocked_by_obstacle": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.06545033,
+            "model": "next_liquidity_session_range",
+            "reward_distance_price": 74.09,
+            "rr2": 2.0399,
+            "tp2": 3958.95,
+            "valid_structurally": true
+          },
+          "max_allowed_target_distance": 46.06545033,
+          "obstacle_distance_r": 0.0617,
+          "obstacle_kind": "crossed_opposing_imbalance",
+          "obstacle_price": 4030.8,
+          "obstacle_r": 0.0,
+          "obstacle_strength_features": "severity=7.00;class=major",
+          "obstacle_tf": "entry_tf",
+          "partial_before_obstacle_then_liquidity": {
+            "available": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "model": "partial_before_obstacle_then_liquidity",
+            "rr1": 0.0611,
+            "rr2": 2.0399,
+            "tp1": 4030.82,
+            "tp2": 3958.95
+          },
+          "risk_distance": 36.32,
+          "sl": 4069.36,
+          "synthetic_rr_capped_to_max_distance": {
+            "available": false,
+            "configured_rr": 1.05,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "unavailable",
+            "model": "synthetic_rr_capped_to_max_distance",
+            "reason": "",
+            "rr": 0.0,
+            "rr2": 0.0,
+            "tp": 0.0,
+            "tp2": 0.0
+          },
+          "synthetic_rr_fallback": {
+            "available": true,
+            "configured_rr": 1.05,
+            "crosses_obstacle": true,
+            "effective_rr2": 1.05,
+            "exceeds_max_target_distance": false,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.06545033,
+            "max_rr_pass": true,
+            "min_rr_pass": true,
+            "model": "synthetic_rr_fallback",
+            "reward_distance_price": 38.136,
+            "rr": 1.05,
+            "rr2": 1.05,
+            "target_already_reached": false,
+            "target_direction_valid": true,
+            "tp": 3994.904,
+            "tp2": 3994.904
+          }
+        },
+        "target_model": "next_liquidity_session_range",
+        "target_source": "synthetic_rr_fallback",
+        "taxonomy_mapping_source": "exact_branch_structure_scope",
+        "tp_model": "synthetic_rr_fallback",
+        "volatility_profile": "balanced"
+      },
+      {
+        "assessed_execution_fingerprint": "4580E226427C21CA",
+        "authoritative_numbers": {
+          "adr_pct": null,
+          "adverse_context_score": 2.2527,
+          "atr_pct": null,
+          "entry": 4033.51,
+          "execution_cost_r": 0.0042,
+          "htf_alignment_score": 9.0,
+          "liquidity_rr": 2.0798,
+          "net_rr": 1.0453,
+          "obstacle_distance_r": 0.0756,
+          "sequence_quality": 9.5473,
+          "sl": 4069.36,
+          "slippage_r": 0.0006,
+          "spread_r": 0.004184,
+          "tp1": 4007.16025,
+          "tp2": 3995.8675,
+          "volume_impulse_score": 4.9437,
+          "vwap_dist_atr": null
+        },
+        "candidate_evidence_hash": "ef94a0288846aca78e4c899ade6678156e102eb42104cc297b720ae7edbabb9e",
+        "candidate_hash": "29B45141EA0F19E5",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|range_reentry|4033.28|range_reentry|0",
+        "candidate_index": 2,
+        "entry_branch": "range_reentry",
+        "entry_model": "range_reentry",
+        "family_profile": {
+          "adverse_context_checks": [
+            "obstacle evidence",
+            "spread and execution cost",
+            "session and correlation context"
+          ],
+          "canonical_market_hypothesis": "micro reentry into a deterministic range after the declared range event",
+          "entry_invalidation_conditions": [
+            "respect deterministic structure, FVG, entry, and stop validity flags"
+          ],
+          "expected_regime": [
+            "range",
+            "compression"
+          ],
+          "family_specific_abstention_reasons": [
+            "required sequence evidence unresolved",
+            "target choice unstable",
+            "historical evidence insufficient",
+            "material structured evidence conflict"
+          ],
+          "historical_retrieval_dimensions": [
+            "exact_taxonomy",
+            "setup_family_entry_branch",
+            "direction_semantics",
+            "asset_class",
+            "session_killzone",
+            "volatility_trend_regime",
+            "htf_ltf_alignment",
+            "rr_cost_obstacle_liquidity_buckets",
+            "stop_target_model",
+            "data_quality_tier"
+          ],
+          "htf_alignment_requirements": [
+            "audit supplied HTF alignment fields only"
+          ],
+          "known_failure_modes": [
+            "range expansion underway",
+            "opposite confirmed structure",
+            "poor target clearance"
+          ],
+          "liquidity_objective_logic": [
+            "compare only deterministic target candidates marked available and feasible"
+          ],
+          "ltf_confirmation_requirements": [
+            "audit supplied displacement, BOS, retest, and confirmation fields only"
+          ],
+          "permitted_entry_branches": [
+            "range_reentry",
+            "micro_range"
+          ],
+          "profile_version": "20260718_family_context_v1",
+          "relevant_feature_whitelist": [
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+            "setup_family",
+            "entry_branch",
+            "direction",
+            "source_t_sweep",
+            "source_t_disp",
+            "source_t_bos",
+            "entry_est",
+            "sl",
+            "tp1",
+            "tp2",
+            "effective_rr2",
+            "liquidity_rr",
+            "sequence_quality",
+            "htf_alignment_score",
+            "adverse_context_score",
+            "execution_cost_r",
+            "spread_r",
+            "target_candidates",
+            "obstacle_kind",
+            "session_name",
+            "killzone_code",
+            "asset_class",
+            "regime_profile"
+          ],
+          "required_event_sequence": [
+            "range identity",
+            "range excursion",
+            "range reentry"
+          ],
+          "required_temporal_ordering": [
+            "use MQL source timestamps; never infer absent events"
+          ],
+          "target_feasibility_rules": [
+            "never invent target prices",
+            "never select infeasible target candidates"
+          ],
+          "taxonomy": "MICRO_RANGE_REENTRY",
+          "taxonomy_version": "20260716_setup_taxonomy_v1"
+        },
+        "family_profile_version": "20260718_family_context_v1",
+        "fvg_lower": 4033.04,
+        "fvg_mid": 4033.275,
+        "fvg_touched": false,
+        "fvg_upper": 4033.51,
+        "killzone_code": "NK",
+        "model_code": "RNG",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "request_execution_fingerprint": "4580E226427C21CA",
+        "session_code": "LON",
+        "session_name": "LONDON",
+        "setup_class": "micro_range_reentry.range_reentry.virgin_fvg",
+        "setup_code": "RNG",
+        "setup_family": "micro_range_reentry",
+        "setup_taxonomy_enum": "MICRO_RANGE_REENTRY",
+        "setup_taxonomy_version": "20260716_setup_taxonomy_v1",
+        "source_t_bos": 1782733500,
+        "source_t_disp": 1782732600,
+        "source_t_sweep": 1782729900,
+        "target_candidates": {
+          "arbitration_required": true,
+          "blocker_features": {
+            "capped_rr": 0.075,
+            "diagnostic_legacy_setup_score": 127.6965,
+            "displacement_quality": 8.5462,
+            "distance_from_obstacle_to_liquidity_target_r": 2.0042,
+            "effective_fallback_rr": 1.05,
+            "fallback_rr": 1.05,
+            "htf_alignment_score": 9.0,
+            "is_htf_obstacle": false,
+            "is_ltf_obstacle": true,
+            "killzone": "NK",
+            "liquidity_rr": 2.0798,
+            "obstacle_age_bars": 1,
+            "obstacle_distance_r": 0.0756,
+            "obstacle_freshness": "fresh",
+            "obstacle_kind": "crossed_opposing_imbalance",
+            "obstacle_mitigated_percent": 0.0,
+            "obstacle_mitigation_state": "virgin",
+            "obstacle_price": 4030.8,
+            "obstacle_retested": false,
+            "obstacle_tf": "entry_tf",
+            "obstacle_width_atr": 10.0,
+            "obstacle_width_price": 0.47,
+            "session": "LONDON",
+            "tp1_before_obstacle_possible": true
+          },
+          "capped_before_obstacle": {
+            "available": true,
+            "feasible_for_tp1_only": true,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "rr_below_min",
+            "max_allowed_distance": 46.07081867,
+            "model": "capped_before_opposing_imbalance",
+            "partial_allowed": true,
+            "reward_distance_price": 2.69,
+            "rr2": 0.075,
+            "tp2": 4030.82
+          },
+          "current_rr2": 1.05,
+          "current_target_source": "synthetic_rr_fallback",
+          "current_tp2": 3995.8675,
+          "current_tp_model": "synthetic_rr_fallback",
+          "effective_fallback_rr": 1.05,
+          "entry": 4033.51,
+          "liquidity_target": {
+            "available": true,
+            "blocked_by_obstacle": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.07081867,
+            "model": "range_mid_opposite_side",
+            "reward_distance_price": 74.56,
+            "rr2": 2.0798,
+            "tp2": 3958.95,
+            "valid_structurally": true
+          },
+          "max_allowed_target_distance": 46.07081867,
+          "obstacle_distance_r": 0.0756,
+          "obstacle_kind": "crossed_opposing_imbalance",
+          "obstacle_price": 4030.8,
+          "obstacle_r": 0.0,
+          "obstacle_strength_features": "severity=7.00;class=major",
+          "obstacle_tf": "entry_tf",
+          "partial_before_obstacle_then_liquidity": {
+            "available": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "model": "partial_before_obstacle_then_liquidity",
+            "rr1": 0.075,
+            "rr2": 2.0798,
+            "tp1": 4030.82,
+            "tp2": 3958.95
+          },
+          "risk_distance": 35.85,
+          "sl": 4069.36,
+          "synthetic_rr_capped_to_max_distance": {
+            "available": false,
+            "configured_rr": 1.05,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "unavailable",
+            "model": "synthetic_rr_capped_to_max_distance",
+            "reason": "",
+            "rr": 0.0,
+            "rr2": 0.0,
+            "tp": 0.0,
+            "tp2": 0.0
+          },
+          "synthetic_rr_fallback": {
+            "available": true,
+            "configured_rr": 1.05,
+            "crosses_obstacle": true,
+            "effective_rr2": 1.05,
+            "exceeds_max_target_distance": false,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.07081867,
+            "max_rr_pass": true,
+            "min_rr_pass": true,
+            "model": "synthetic_rr_fallback",
+            "reward_distance_price": 37.6425,
+            "rr": 1.05,
+            "rr2": 1.05,
+            "target_already_reached": false,
+            "target_direction_valid": true,
+            "tp": 3995.8675,
+            "tp2": 3995.8675
+          }
+        },
+        "target_model": "range_mid_opposite_side",
+        "target_source": "synthetic_rr_fallback",
+        "taxonomy_mapping_source": "exact_branch_structure_scope",
+        "tp_model": "synthetic_rr_fallback",
+        "volatility_profile": "balanced"
+      },
+      {
+        "assessed_execution_fingerprint": "C12E2FA63D5EE3C2",
+        "authoritative_numbers": {
+          "adr_pct": null,
+          "adverse_context_score": 2.2527,
+          "atr_pct": null,
+          "entry": 4033.51,
+          "execution_cost_r": 0.0042,
+          "htf_alignment_score": 9.0,
+          "liquidity_rr": 2.0798,
+          "net_rr": 1.0453,
+          "obstacle_distance_r": 0.0756,
+          "sequence_quality": 9.5473,
+          "sl": 4069.36,
+          "slippage_r": 0.0006,
+          "spread_r": 0.004184,
+          "tp1": 4007.16025,
+          "tp2": 3995.8675,
+          "volume_impulse_score": 4.9437,
+          "vwap_dist_atr": null
+        },
+        "candidate_evidence_hash": "cc3bcabc7badd6cc025a7763cbe6a531de31d877a779ef208e57f4dcde54a14b",
+        "candidate_hash": "56AB268490026F50",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|session_reentry|4033.28|session_reentry|0",
+        "candidate_index": 3,
+        "entry_branch": "session_reentry",
+        "entry_model": "session_reentry",
+        "family_profile": {
+          "adverse_context_checks": [
+            "obstacle evidence",
+            "spread and execution cost",
+            "session and correlation context"
+          ],
+          "canonical_market_hypothesis": "micro session reentry using deterministic session boundaries and timing",
+          "entry_invalidation_conditions": [
+            "respect deterministic structure, FVG, entry, and stop validity flags"
+          ],
+          "expected_regime": [
+            "session transition",
+            "range"
+          ],
+          "family_specific_abstention_reasons": [
+            "required sequence evidence unresolved",
+            "target choice unstable",
+            "historical evidence insufficient",
+            "material structured evidence conflict"
+          ],
+          "historical_retrieval_dimensions": [
+            "exact_taxonomy",
+            "setup_family_entry_branch",
+            "direction_semantics",
+            "asset_class",
+            "session_killzone",
+            "volatility_trend_regime",
+            "htf_ltf_alignment",
+            "rr_cost_obstacle_liquidity_buckets",
+            "stop_target_model",
+            "data_quality_tier"
+          ],
+          "htf_alignment_requirements": [
+            "audit supplied HTF alignment fields only"
+          ],
+          "known_failure_modes": [
+            "off-session timing",
+            "session objective already reached",
+            "stale session context"
+          ],
+          "liquidity_objective_logic": [
+            "compare only deterministic target candidates marked available and feasible"
+          ],
+          "ltf_confirmation_requirements": [
+            "audit supplied displacement, BOS, retest, and confirmation fields only"
+          ],
+          "permitted_entry_branches": [
+            "session_reentry",
+            "micro_session"
+          ],
+          "profile_version": "20260718_family_context_v1",
+          "relevant_feature_whitelist": [
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+            "setup_family",
+            "entry_branch",
+            "direction",
+            "source_t_sweep",
+            "source_t_disp",
+            "source_t_bos",
+            "entry_est",
+            "sl",
+            "tp1",
+            "tp2",
+            "effective_rr2",
+            "liquidity_rr",
+            "sequence_quality",
+            "htf_alignment_score",
+            "adverse_context_score",
+            "execution_cost_r",
+            "spread_r",
+            "target_candidates",
+            "obstacle_kind",
+            "session_name",
+            "killzone_code",
+            "asset_class",
+            "regime_profile"
+          ],
+          "required_event_sequence": [
+            "session range identity",
+            "session excursion",
+            "session reentry"
+          ],
+          "required_temporal_ordering": [
+            "use MQL source timestamps; never infer absent events"
+          ],
+          "target_feasibility_rules": [
+            "never invent target prices",
+            "never select infeasible target candidates"
+          ],
+          "taxonomy": "MICRO_SESSION_REENTRY",
+          "taxonomy_version": "20260716_setup_taxonomy_v1"
+        },
+        "family_profile_version": "20260718_family_context_v1",
+        "fvg_lower": 4033.04,
+        "fvg_mid": 4033.275,
+        "fvg_touched": false,
+        "fvg_upper": 4033.51,
+        "killzone_code": "NK",
+        "model_code": "SES",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "request_execution_fingerprint": "C12E2FA63D5EE3C2",
+        "session_code": "LON",
+        "session_name": "LONDON",
+        "setup_class": "micro_range_reentry.session_reentry.virgin_fvg",
+        "setup_code": "SES",
+        "setup_family": "micro_range_reentry",
+        "setup_taxonomy_enum": "MICRO_SESSION_REENTRY",
+        "setup_taxonomy_version": "20260716_setup_taxonomy_v1",
+        "source_t_bos": 1782733500,
+        "source_t_disp": 1782732600,
+        "source_t_sweep": 1782729900,
+        "target_candidates": {
+          "arbitration_required": true,
+          "blocker_features": {
+            "capped_rr": 0.075,
+            "diagnostic_legacy_setup_score": 127.4965,
+            "displacement_quality": 8.5462,
+            "distance_from_obstacle_to_liquidity_target_r": 2.0042,
+            "effective_fallback_rr": 1.05,
+            "fallback_rr": 1.05,
+            "htf_alignment_score": 9.0,
+            "is_htf_obstacle": false,
+            "is_ltf_obstacle": true,
+            "killzone": "NK",
+            "liquidity_rr": 2.0798,
+            "obstacle_age_bars": 1,
+            "obstacle_distance_r": 0.0756,
+            "obstacle_freshness": "fresh",
+            "obstacle_kind": "crossed_opposing_imbalance",
+            "obstacle_mitigated_percent": 0.0,
+            "obstacle_mitigation_state": "virgin",
+            "obstacle_price": 4030.8,
+            "obstacle_retested": false,
+            "obstacle_tf": "entry_tf",
+            "obstacle_width_atr": 10.0,
+            "obstacle_width_price": 0.47,
+            "session": "LONDON",
+            "tp1_before_obstacle_possible": true
+          },
+          "capped_before_obstacle": {
+            "available": true,
+            "feasible_for_tp1_only": true,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "rr_below_min",
+            "max_allowed_distance": 46.07081867,
+            "model": "capped_before_opposing_imbalance",
+            "partial_allowed": true,
+            "reward_distance_price": 2.69,
+            "rr2": 0.075,
+            "tp2": 4030.82
+          },
+          "current_rr2": 1.05,
+          "current_target_source": "synthetic_rr_fallback",
+          "current_tp2": 3995.8675,
+          "current_tp_model": "synthetic_rr_fallback",
+          "effective_fallback_rr": 1.05,
+          "entry": 4033.51,
+          "liquidity_target": {
+            "available": true,
+            "blocked_by_obstacle": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.07081867,
+            "model": "range_mid_opposite_side",
+            "reward_distance_price": 74.56,
+            "rr2": 2.0798,
+            "tp2": 3958.95,
+            "valid_structurally": true
+          },
+          "max_allowed_target_distance": 46.07081867,
+          "obstacle_distance_r": 0.0756,
+          "obstacle_kind": "crossed_opposing_imbalance",
+          "obstacle_price": 4030.8,
+          "obstacle_r": 0.0,
+          "obstacle_strength_features": "severity=7.00;class=major",
+          "obstacle_tf": "entry_tf",
+          "partial_before_obstacle_then_liquidity": {
+            "available": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "model": "partial_before_obstacle_then_liquidity",
+            "rr1": 0.075,
+            "rr2": 2.0798,
+            "tp1": 4030.82,
+            "tp2": 3958.95
+          },
+          "risk_distance": 35.85,
+          "sl": 4069.36,
+          "synthetic_rr_capped_to_max_distance": {
+            "available": false,
+            "configured_rr": 1.05,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "unavailable",
+            "model": "synthetic_rr_capped_to_max_distance",
+            "reason": "",
+            "rr": 0.0,
+            "rr2": 0.0,
+            "tp": 0.0,
+            "tp2": 0.0
+          },
+          "synthetic_rr_fallback": {
+            "available": true,
+            "configured_rr": 1.05,
+            "crosses_obstacle": true,
+            "effective_rr2": 1.05,
+            "exceeds_max_target_distance": false,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.07081867,
+            "max_rr_pass": true,
+            "min_rr_pass": true,
+            "model": "synthetic_rr_fallback",
+            "reward_distance_price": 37.6425,
+            "rr": 1.05,
+            "rr2": 1.05,
+            "target_already_reached": false,
+            "target_direction_valid": true,
+            "tp": 3995.8675,
+            "tp2": 3995.8675
+          }
+        },
+        "target_model": "range_mid_opposite_side",
+        "target_source": "synthetic_rr_fallback",
+        "taxonomy_mapping_source": "exact_branch_structure_scope",
+        "tp_model": "synthetic_rr_fallback",
+        "volatility_profile": "balanced"
+      },
+      {
+        "assessed_execution_fingerprint": "C20D8DB406AD4E40",
+        "authoritative_numbers": {
+          "adr_pct": null,
+          "adverse_context_score": 2.2527,
+          "atr_pct": null,
+          "entry": 4033.275,
+          "execution_cost_r": 0.0042,
+          "htf_alignment_score": 9.0,
+          "liquidity_rr": 2.0597,
+          "net_rr": 1.0453,
+          "obstacle_distance_r": 0.0686,
+          "sequence_quality": 9.5473,
+          "sl": 4069.36,
+          "slippage_r": 0.0006,
+          "spread_r": 0.004157,
+          "tp1": 4006.752525,
+          "tp2": 3995.38575,
+          "volume_impulse_score": 4.9437,
+          "vwap_dist_atr": null
+        },
+        "candidate_evidence_hash": "3f44abb361d7d02ef5fd72412443cf2eb9cb24150c3a65bd104ff69b10941472",
+        "candidate_hash": "EBC8D7F21596472E",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|fvg_mid|4033.28|fvg_mid|0",
+        "candidate_index": 4,
+        "entry_branch": "fvg_mid",
+        "entry_model": "fvg_mid",
+        "family_profile": {
+          "adverse_context_checks": [
+            "obstacle evidence",
+            "spread and execution cost",
+            "session and correlation context"
+          ],
+          "canonical_market_hypothesis": "micro continuation through a deterministically classified continuation FVG",
+          "entry_invalidation_conditions": [
+            "respect deterministic structure, FVG, entry, and stop validity flags"
+          ],
+          "expected_regime": [
+            "trend",
+            "expansion"
+          ],
+          "family_specific_abstention_reasons": [
+            "required sequence evidence unresolved",
+            "target choice unstable",
+            "historical evidence insufficient",
+            "material structured evidence conflict"
+          ],
+          "historical_retrieval_dimensions": [
+            "exact_taxonomy",
+            "setup_family_entry_branch",
+            "direction_semantics",
+            "asset_class",
+            "session_killzone",
+            "volatility_trend_regime",
+            "htf_ltf_alignment",
+            "rr_cost_obstacle_liquidity_buckets",
+            "stop_target_model",
+            "data_quality_tier"
+          ],
+          "htf_alignment_requirements": [
+            "audit supplied HTF alignment fields only"
+          ],
+          "known_failure_modes": [
+            "stale FVG",
+            "touched continuation without clean retest",
+            "trend exhaustion"
+          ],
+          "liquidity_objective_logic": [
+            "compare only deterministic target candidates marked available and feasible"
+          ],
+          "ltf_confirmation_requirements": [
+            "audit supplied displacement, BOS, retest, and confirmation fields only"
+          ],
+          "permitted_entry_branches": [
+            "continuation_fvg",
+            "fvg_mid",
+            "fvg_edge"
+          ],
+          "profile_version": "20260718_family_context_v1",
+          "relevant_feature_whitelist": [
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+            "setup_family",
+            "entry_branch",
+            "direction",
+            "source_t_sweep",
+            "source_t_disp",
+            "source_t_bos",
+            "entry_est",
+            "sl",
+            "tp1",
+            "tp2",
+            "effective_rr2",
+            "liquidity_rr",
+            "sequence_quality",
+            "htf_alignment_score",
+            "adverse_context_score",
+            "execution_cost_r",
+            "spread_r",
+            "target_candidates",
+            "obstacle_kind",
+            "session_name",
+            "killzone_code",
+            "asset_class",
+            "regime_profile"
+          ],
+          "required_event_sequence": [
+            "trend context",
+            "continuation displacement",
+            "continuation FVG entry"
+          ],
+          "required_temporal_ordering": [
+            "use MQL source timestamps; never infer absent events"
+          ],
+          "target_feasibility_rules": [
+            "never invent target prices",
+            "never select infeasible target candidates"
+          ],
+          "taxonomy": "MICRO_CONTINUATION_FVG",
+          "taxonomy_version": "20260716_setup_taxonomy_v1"
+        },
+        "family_profile_version": "20260718_family_context_v1",
+        "fvg_lower": 4033.04,
+        "fvg_mid": 4033.275,
+        "fvg_touched": false,
+        "fvg_upper": 4033.51,
+        "killzone_code": "NK",
+        "model_code": "MPC",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "request_execution_fingerprint": "C20D8DB406AD4E40",
+        "session_code": "LON",
+        "session_name": "LONDON",
+        "setup_class": "micro_continuation_fvg.fvg_mid.virgin_fvg",
+        "setup_code": "MPC",
+        "setup_family": "micro_continuation_fvg",
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+        "setup_taxonomy_version": "20260716_setup_taxonomy_v1",
+        "source_t_bos": 1782733500,
+        "source_t_disp": 1782732600,
+        "source_t_sweep": 1782729900,
+        "target_candidates": {
+          "arbitration_required": true,
+          "blocker_features": {
+            "capped_rr": 0.068,
+            "diagnostic_legacy_setup_score": 126.0965,
+            "displacement_quality": 8.5462,
+            "distance_from_obstacle_to_liquidity_target_r": 1.9911,
+            "effective_fallback_rr": 1.05,
+            "fallback_rr": 1.05,
+            "htf_alignment_score": 9.0,
+            "is_htf_obstacle": false,
+            "is_ltf_obstacle": true,
+            "killzone": "NK",
+            "liquidity_rr": 2.0597,
+            "obstacle_age_bars": 1,
+            "obstacle_distance_r": 0.0686,
+            "obstacle_freshness": "fresh",
+            "obstacle_kind": "crossed_opposing_imbalance",
+            "obstacle_mitigated_percent": 0.0,
+            "obstacle_mitigation_state": "virgin",
+            "obstacle_price": 4030.8,
+            "obstacle_retested": false,
+            "obstacle_tf": "entry_tf",
+            "obstacle_width_atr": 10.0,
+            "obstacle_width_price": 0.47,
+            "session": "LONDON",
+            "tp1_before_obstacle_possible": true
+          },
+          "capped_before_obstacle": {
+            "available": true,
+            "feasible_for_tp1_only": true,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "rr_below_min",
+            "max_allowed_distance": 46.0681345,
+            "model": "capped_before_opposing_imbalance",
+            "partial_allowed": true,
+            "reward_distance_price": 2.455,
+            "rr2": 0.068,
+            "tp2": 4030.82
+          },
+          "current_rr2": 1.05,
+          "current_target_source": "synthetic_rr_fallback",
+          "current_tp2": 3995.38575,
+          "current_tp_model": "synthetic_rr_fallback",
+          "effective_fallback_rr": 1.05,
+          "entry": 4033.275,
+          "liquidity_target": {
+            "available": true,
+            "blocked_by_obstacle": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.0681345,
+            "model": "next_liquidity_session_range",
+            "reward_distance_price": 74.325,
+            "rr2": 2.0597,
+            "tp2": 3958.95,
+            "valid_structurally": true
+          },
+          "max_allowed_target_distance": 46.0681345,
+          "obstacle_distance_r": 0.0686,
+          "obstacle_kind": "crossed_opposing_imbalance",
+          "obstacle_price": 4030.8,
+          "obstacle_r": 0.0,
+          "obstacle_strength_features": "severity=7.00;class=major",
+          "obstacle_tf": "entry_tf",
+          "partial_before_obstacle_then_liquidity": {
+            "available": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "model": "partial_before_obstacle_then_liquidity",
+            "rr1": 0.068,
+            "rr2": 2.0597,
+            "tp1": 4030.82,
+            "tp2": 3958.95
+          },
+          "risk_distance": 36.085,
+          "sl": 4069.36,
+          "synthetic_rr_capped_to_max_distance": {
+            "available": false,
+            "configured_rr": 1.05,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "unavailable",
+            "model": "synthetic_rr_capped_to_max_distance",
+            "reason": "",
+            "rr": 0.0,
+            "rr2": 0.0,
+            "tp": 0.0,
+            "tp2": 0.0
+          },
+          "synthetic_rr_fallback": {
+            "available": true,
+            "configured_rr": 1.05,
+            "crosses_obstacle": true,
+            "effective_rr2": 1.05,
+            "exceeds_max_target_distance": false,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.0681345,
+            "max_rr_pass": true,
+            "min_rr_pass": true,
+            "model": "synthetic_rr_fallback",
+            "reward_distance_price": 37.88925,
+            "rr": 1.05,
+            "rr2": 1.05,
+            "target_already_reached": false,
+            "target_direction_valid": true,
+            "tp": 3995.38575,
+            "tp2": 3995.38575
+          }
+        },
+        "target_model": "next_liquidity_session_range",
+        "target_source": "synthetic_rr_fallback",
+        "taxonomy_mapping_source": "exact_branch_structure_scope",
+        "tp_model": "synthetic_rr_fallback",
+        "volatility_profile": "balanced"
+      },
+      {
+        "assessed_execution_fingerprint": "8B6D361FCB1E9EA3",
+        "authoritative_numbers": {
+          "adr_pct": null,
+          "adverse_context_score": 2.2527,
+          "atr_pct": null,
+          "entry": 4033.04,
+          "execution_cost_r": 0.0041,
+          "htf_alignment_score": 9.0,
+          "liquidity_rr": 2.0399,
+          "net_rr": 1.0453,
+          "obstacle_distance_r": 0.0617,
+          "sequence_quality": 9.5473,
+          "sl": 4069.36,
+          "slippage_r": 0.0006,
+          "spread_r": 0.00413,
+          "tp1": 4006.3448,
+          "tp2": 3994.904,
+          "volume_impulse_score": 4.9437,
+          "vwap_dist_atr": null
+        },
+        "candidate_evidence_hash": "caf88881d8bf92e3906e76fd97e23757a2d48dbd0393b74f82d1ecc99f4e545f",
+        "candidate_hash": "52A80F87EB1E7563",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|fvg_edge|4033.28|fvg_edge|0",
+        "candidate_index": 5,
+        "entry_branch": "fvg_edge",
+        "entry_model": "fvg_lower",
+        "family_profile": {
+          "adverse_context_checks": [
+            "obstacle evidence",
+            "spread and execution cost",
+            "session and correlation context"
+          ],
+          "canonical_market_hypothesis": "micro continuation through a deterministically classified continuation FVG",
+          "entry_invalidation_conditions": [
+            "respect deterministic structure, FVG, entry, and stop validity flags"
+          ],
+          "expected_regime": [
+            "trend",
+            "expansion"
+          ],
+          "family_specific_abstention_reasons": [
+            "required sequence evidence unresolved",
+            "target choice unstable",
+            "historical evidence insufficient",
+            "material structured evidence conflict"
+          ],
+          "historical_retrieval_dimensions": [
+            "exact_taxonomy",
+            "setup_family_entry_branch",
+            "direction_semantics",
+            "asset_class",
+            "session_killzone",
+            "volatility_trend_regime",
+            "htf_ltf_alignment",
+            "rr_cost_obstacle_liquidity_buckets",
+            "stop_target_model",
+            "data_quality_tier"
+          ],
+          "htf_alignment_requirements": [
+            "audit supplied HTF alignment fields only"
+          ],
+          "known_failure_modes": [
+            "stale FVG",
+            "touched continuation without clean retest",
+            "trend exhaustion"
+          ],
+          "liquidity_objective_logic": [
+            "compare only deterministic target candidates marked available and feasible"
+          ],
+          "ltf_confirmation_requirements": [
+            "audit supplied displacement, BOS, retest, and confirmation fields only"
+          ],
+          "permitted_entry_branches": [
+            "continuation_fvg",
+            "fvg_mid",
+            "fvg_edge"
+          ],
+          "profile_version": "20260718_family_context_v1",
+          "relevant_feature_whitelist": [
+            "candidate_id",
+            "candidate_hash",
+            "request_execution_fingerprint",
+            "setup_taxonomy_enum",
+            "setup_family",
+            "entry_branch",
+            "direction",
+            "source_t_sweep",
+            "source_t_disp",
+            "source_t_bos",
+            "entry_est",
+            "sl",
+            "tp1",
+            "tp2",
+            "effective_rr2",
+            "liquidity_rr",
+            "sequence_quality",
+            "htf_alignment_score",
+            "adverse_context_score",
+            "execution_cost_r",
+            "spread_r",
+            "target_candidates",
+            "obstacle_kind",
+            "session_name",
+            "killzone_code",
+            "asset_class",
+            "regime_profile"
+          ],
+          "required_event_sequence": [
+            "trend context",
+            "continuation displacement",
+            "continuation FVG entry"
+          ],
+          "required_temporal_ordering": [
+            "use MQL source timestamps; never infer absent events"
+          ],
+          "target_feasibility_rules": [
+            "never invent target prices",
+            "never select infeasible target candidates"
+          ],
+          "taxonomy": "MICRO_CONTINUATION_FVG",
+          "taxonomy_version": "20260716_setup_taxonomy_v1"
+        },
+        "family_profile_version": "20260718_family_context_v1",
+        "fvg_lower": 4033.04,
+        "fvg_mid": 4033.275,
+        "fvg_touched": false,
+        "fvg_upper": 4033.51,
+        "killzone_code": "NK",
+        "model_code": "MPC",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "request_execution_fingerprint": "8B6D361FCB1E9EA3",
+        "session_code": "LON",
+        "session_name": "LONDON",
+        "setup_class": "micro_continuation_fvg.fvg_edge.virgin_fvg",
+        "setup_code": "MPC",
+        "setup_family": "micro_continuation_fvg",
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG",
+        "setup_taxonomy_version": "20260716_setup_taxonomy_v1",
+        "source_t_bos": 1782733500,
+        "source_t_disp": 1782732600,
+        "source_t_sweep": 1782729900,
+        "target_candidates": {
+          "arbitration_required": true,
+          "blocker_features": {
+            "capped_rr": 0.0611,
+            "diagnostic_legacy_setup_score": 126.0965,
+            "displacement_quality": 8.5462,
+            "distance_from_obstacle_to_liquidity_target_r": 1.9782,
+            "effective_fallback_rr": 1.05,
+            "fallback_rr": 1.05,
+            "htf_alignment_score": 9.0,
+            "is_htf_obstacle": false,
+            "is_ltf_obstacle": true,
+            "killzone": "NK",
+            "liquidity_rr": 2.0399,
+            "obstacle_age_bars": 1,
+            "obstacle_distance_r": 0.0617,
+            "obstacle_freshness": "fresh",
+            "obstacle_kind": "crossed_opposing_imbalance",
+            "obstacle_mitigated_percent": 0.0,
+            "obstacle_mitigation_state": "virgin",
+            "obstacle_price": 4030.8,
+            "obstacle_retested": false,
+            "obstacle_tf": "entry_tf",
+            "obstacle_width_atr": 10.0,
+            "obstacle_width_price": 0.47,
+            "session": "LONDON",
+            "tp1_before_obstacle_possible": true
+          },
+          "capped_before_obstacle": {
+            "available": true,
+            "feasible_for_tp1_only": true,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "rr_below_min",
+            "max_allowed_distance": 46.06545033,
+            "model": "capped_before_opposing_imbalance",
+            "partial_allowed": true,
+            "reward_distance_price": 2.22,
+            "rr2": 0.0611,
+            "tp2": 4030.82
+          },
+          "current_rr2": 1.05,
+          "current_target_source": "synthetic_rr_fallback",
+          "current_tp2": 3994.904,
+          "current_tp_model": "synthetic_rr_fallback",
+          "effective_fallback_rr": 1.05,
+          "entry": 4033.04,
+          "liquidity_target": {
+            "available": true,
+            "blocked_by_obstacle": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.06545033,
+            "model": "next_liquidity_session_range",
+            "reward_distance_price": 74.09,
+            "rr2": 2.0399,
+            "tp2": 3958.95,
+            "valid_structurally": true
+          },
+          "max_allowed_target_distance": 46.06545033,
+          "obstacle_distance_r": 0.0617,
+          "obstacle_kind": "crossed_opposing_imbalance",
+          "obstacle_price": 4030.8,
+          "obstacle_r": 0.0,
+          "obstacle_strength_features": "severity=7.00;class=major",
+          "obstacle_tf": "entry_tf",
+          "partial_before_obstacle_then_liquidity": {
+            "available": true,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "model": "partial_before_obstacle_then_liquidity",
+            "rr1": 0.0611,
+            "rr2": 2.0399,
+            "tp1": 4030.82,
+            "tp2": 3958.95
+          },
+          "risk_distance": 36.32,
+          "sl": 4069.36,
+          "synthetic_rr_capped_to_max_distance": {
+            "available": false,
+            "configured_rr": 1.05,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": false,
+            "infeasible_reason": "unavailable",
+            "model": "synthetic_rr_capped_to_max_distance",
+            "reason": "",
+            "rr": 0.0,
+            "rr2": 0.0,
+            "tp": 0.0,
+            "tp2": 0.0
+          },
+          "synthetic_rr_fallback": {
+            "available": true,
+            "configured_rr": 1.05,
+            "crosses_obstacle": true,
+            "effective_rr2": 1.05,
+            "exceeds_max_target_distance": false,
+            "feasible_for_tp1_only": false,
+            "feasible_for_tp2": true,
+            "infeasible_reason": "",
+            "max_allowed_distance": 46.06545033,
+            "max_rr_pass": true,
+            "min_rr_pass": true,
+            "model": "synthetic_rr_fallback",
+            "reward_distance_price": 38.136,
+            "rr": 1.05,
+            "rr2": 1.05,
+            "target_already_reached": false,
+            "target_direction_valid": true,
+            "tp": 3994.904,
+            "tp2": 3994.904
+          }
+        },
+        "target_model": "next_liquidity_session_range",
+        "target_source": "synthetic_rr_fallback",
+        "taxonomy_mapping_source": "exact_branch_structure_scope",
+        "tp_model": "synthetic_rr_fallback",
+        "volatility_profile": "balanced"
+      }
+    ]
+  },
+  "evidence_catalog": {
+    "catalog_hash": "15a17102964a5ef96257f6feccefcdaf4f857314cc7858d493e067ace8d14da7",
+    "catalog_version": "20260730_python_owned_evidence_catalog_v1",
+    "items": [
+      {
+        "id": 0,
+        "p": "sequence.has_bos",
+        "v": true
+      },
+      {
+        "id": 1,
+        "p": "sequence.has_displacement",
+        "v": true
+      },
+      {
+        "id": 2,
+        "p": "sequence.has_sweep",
+        "v": true
+      },
+      {
+        "id": 3,
+        "p": "sequence.t_bos",
+        "v": 1782733500
+      },
+      {
+        "id": 4,
+        "p": "sequence.t_disp",
+        "v": 1782732600
+      },
+      {
+        "id": 5,
+        "p": "sequence.t_sweep",
+        "v": 1782729900
+      },
+      {
+        "id": 6,
+        "p": "liquidity.in_killzone",
+        "v": false
+      },
+      {
+        "id": 7,
+        "p": "liquidity.liquidity_target",
+        "v": 3958.95
+      },
+      {
+        "id": 8,
+        "p": "liquidity.session_name",
+        "v": "LONDON"
+      },
+      {
+        "id": 9,
+        "p": "setup_taxonomy.family_profile_version",
+        "v": "20260718_family_context_v1"
+      },
+      {
+        "id": 10,
+        "p": "setup_taxonomy.taxonomy_version",
+        "v": "20260716_setup_taxonomy_v1"
+      },
+      {
+        "id": 11,
+        "p": "validation.hard_blockers",
+        "v": []
+      },
+      {
+        "id": 12,
+        "p": "validation.invalid_fields",
+        "v": []
+      },
+      {
+        "id": 13,
+        "p": "validation.missing_fields",
+        "v": []
+      },
+      {
+        "id": 14,
+        "p": "instrument.asset_class",
+        "v": ""
+      },
+      {
+        "id": 15,
+        "p": "instrument.symbol",
+        "v": "GOLD"
+      },
+      {
+        "id": 16,
+        "p": "instrument.symbol_digits",
+        "v": null
+      },
+      {
+        "id": 17,
+        "p": "instrument.symbol_tick_size",
+        "v": null
+      },
+      {
+        "id": 18,
+        "p": "market_regime.adr_pct",
+        "v": 0.026752
+      },
+      {
+        "id": 19,
+        "p": "market_regime.adx_value",
+        "v": 53.0446
+      },
+      {
+        "id": 20,
+        "p": "market_regime.atr_pct",
+        "v": 0.002284
+      },
+      {
+        "id": 21,
+        "p": "market_regime.compression_score",
+        "v": 0.025631
+      },
+      {
+        "id": 22,
+        "p": "market_regime.expansion_score",
+        "v": 0.974369
+      },
+      {
+        "id": 23,
+        "p": "market_regime.news_risk",
+        "v": 0.0
+      },
+      {
+        "id": 24,
+        "p": "market_regime.session_vol_ratio",
+        "v": 0.40681
+      },
+      {
+        "id": 25,
+        "p": "market_regime.trend_slope_pct",
+        "v": -0.00012521
+      },
+      {
+        "id": 26,
+        "p": "market_regime.trend_strength",
+        "v": 0.577716
+      },
+      {
+        "id": 27,
+        "p": "market_regime.vwap_dist_atr",
+        "v": 7.225244
+      },
+      {
+        "id": 28,
+        "p": "risk.deterministic_only",
+        "v": true
+      },
+      {
+        "c": 0,
+        "id": 29,
+        "p": "entry_and_invalidation.candidates.0.candidate_id",
+        "v": "GOLD|1782729900|1782732600|1782733500|breaker_retest|4033.28|breaker_retest|0"
+      },
+      {
+        "c": 0,
+        "id": 30,
+        "p": "entry_and_invalidation.candidates.0.candidate_hash",
+        "v": "1F74C9ABAB8F130F"
+      },
+      {
+        "c": 0,
+        "id": 31,
+        "p": "entry_and_invalidation.candidates.0.setup_code",
+        "v": "MBC"
+      },
+      {
+        "c": 0,
+        "id": 32,
+        "p": "entry_and_invalidation.candidates.0.setup_family",
+        "v": "micro_continuation_fvg"
+      },
+      {
+        "c": 0,
+        "id": 33,
+        "p": "entry_and_invalidation.candidates.0.setup_class",
+        "v": "micro_continuation_fvg.breaker_retest.virgin_fvg"
+      },
+      {
+        "c": 0,
+        "id": 34,
+        "p": "entry_and_invalidation.candidates.0.setup_taxonomy_enum",
+        "v": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "c": 0,
+        "id": 35,
+        "p": "entry_and_invalidation.candidates.0.entry_branch",
+        "v": "breaker_retest"
+      },
+      {
+        "c": 0,
+        "id": 36,
+        "p": "entry_and_invalidation.candidates.0.entry_model",
+        "v": "breaker_retest"
+      },
+      {
+        "c": 0,
+        "id": 37,
+        "p": "entry_and_invalidation.candidates.0.session_name",
+        "v": "LONDON"
+      },
+      {
+        "c": 0,
+        "id": 38,
+        "p": "entry_and_invalidation.candidates.0.session_code",
+        "v": "LON"
+      },
+      {
+        "c": 0,
+        "id": 39,
+        "p": "entry_and_invalidation.candidates.0.killzone_code",
+        "v": "NK"
+      },
+      {
+        "c": 0,
+        "id": 40,
+        "p": "entry_and_invalidation.candidates.0.volatility_profile",
+        "v": "balanced"
+      },
+      {
+        "c": 0,
+        "id": 41,
+        "p": "entry_and_invalidation.candidates.0.target_source",
+        "v": "synthetic_rr_fallback"
+      },
+      {
+        "c": 0,
+        "id": 42,
+        "p": "entry_and_invalidation.candidates.0.target_model",
+        "v": "next_liquidity_session_range"
+      },
+      {
+        "c": 0,
+        "id": 43,
+        "p": "entry_and_invalidation.candidates.0.obstacle_kind",
+        "v": "crossed_opposing_imbalance"
+      },
+      {
+        "c": 0,
+        "id": 44,
+        "p": "entry_and_invalidation.candidates.0.fvg_lower",
+        "v": 4033.04
+      },
+      {
+        "c": 0,
+        "id": 45,
+        "p": "entry_and_invalidation.candidates.0.fvg_upper",
+        "v": 4033.51
+      },
+      {
+        "c": 0,
+        "id": 46,
+        "p": "entry_and_invalidation.candidates.0.fvg_mid",
+        "v": 4033.275
+      },
+      {
+        "c": 0,
+        "id": 47,
+        "p": "entry_and_invalidation.candidates.0.fvg_touched",
+        "v": false
+      },
+      {
+        "c": 0,
+        "id": 48,
+        "p": "entry_and_invalidation.candidates.0.source_t_sweep",
+        "v": 1782729900
+      },
+      {
+        "c": 0,
+        "id": 49,
+        "p": "entry_and_invalidation.candidates.0.source_t_disp",
+        "v": 1782732600
+      },
+      {
+        "c": 0,
+        "id": 50,
+        "p": "entry_and_invalidation.candidates.0.source_t_bos",
+        "v": 1782733500
+      },
+      {
+        "c": 0,
+        "id": 51,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.adr_pct.value",
+        "v": null
+      },
+      {
+        "c": 0,
+        "id": 52,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.adverse_context_score.value",
+        "v": 2.2527
+      },
+      {
+        "c": 0,
+        "id": 53,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.atr_pct.value",
+        "v": null
+      },
+      {
+        "c": 0,
+        "id": 54,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.entry.value",
+        "v": 4033.51
+      },
+      {
+        "c": 0,
+        "id": 55,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.execution_cost_r.value",
+        "v": 0.0042
+      },
+      {
+        "c": 0,
+        "id": 56,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.htf_alignment_score.value",
+        "v": 9.0
+      },
+      {
+        "c": 0,
+        "id": 57,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.liquidity_rr.value",
+        "v": 2.0798
+      },
+      {
+        "c": 0,
+        "id": 58,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.net_rr.value",
+        "v": 1.0453
+      },
+      {
+        "c": 0,
+        "id": 59,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.obstacle_distance_r.value",
+        "v": 0.0756
+      },
+      {
+        "c": 0,
+        "id": 60,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.sequence_quality.value",
+        "v": 9.5473
+      },
+      {
+        "c": 0,
+        "id": 61,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.sl.value",
+        "v": 4069.36
+      },
+      {
+        "c": 0,
+        "id": 62,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.slippage_r.value",
+        "v": 0.0006
+      },
+      {
+        "c": 0,
+        "id": 63,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.spread_r.value",
+        "v": 0.004184
+      },
+      {
+        "c": 0,
+        "id": 64,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.tp1.value",
+        "v": 4007.16025
+      },
+      {
+        "c": 0,
+        "id": 65,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.tp2.value",
+        "v": 3995.8675
+      },
+      {
+        "c": 0,
+        "id": 66,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.volume_impulse_score.value",
+        "v": 4.9437
+      },
+      {
+        "c": 0,
+        "id": 67,
+        "p": "entry_and_invalidation.candidates.0.authoritative_numbers.vwap_dist_atr.value",
+        "v": null
+      },
+      {
+        "c": 1,
+        "id": 68,
+        "p": "entry_and_invalidation.candidates.1.candidate_id",
+        "v": "GOLD|1782729900|1782732600|1782733500|continuation_reentry|4033.28|continuation_reentry|0"
+      },
+      {
+        "c": 1,
+        "id": 69,
+        "p": "entry_and_invalidation.candidates.1.candidate_hash",
+        "v": "F1A1F26B32D23E27"
+      },
+      {
+        "c": 1,
+        "id": 70,
+        "p": "entry_and_invalidation.candidates.1.setup_code",
+        "v": "MPC"
+      },
+      {
+        "c": 1,
+        "id": 71,
+        "p": "entry_and_invalidation.candidates.1.setup_family",
+        "v": "micro_continuation_fvg"
+      },
+      {
+        "c": 1,
+        "id": 72,
+        "p": "entry_and_invalidation.candidates.1.setup_class",
+        "v": "micro_continuation_fvg.continuation_reentry.virgin_fvg"
+      },
+      {
+        "c": 1,
+        "id": 73,
+        "p": "entry_and_invalidation.candidates.1.setup_taxonomy_enum",
+        "v": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "c": 1,
+        "id": 74,
+        "p": "entry_and_invalidation.candidates.1.entry_branch",
+        "v": "continuation_reentry"
+      },
+      {
+        "c": 1,
+        "id": 75,
+        "p": "entry_and_invalidation.candidates.1.entry_model",
+        "v": "continuation_reentry"
+      },
+      {
+        "c": 1,
+        "id": 76,
+        "p": "entry_and_invalidation.candidates.1.session_name",
+        "v": "LONDON"
+      },
+      {
+        "c": 1,
+        "id": 77,
+        "p": "entry_and_invalidation.candidates.1.session_code",
+        "v": "LON"
+      },
+      {
+        "c": 1,
+        "id": 78,
+        "p": "entry_and_invalidation.candidates.1.killzone_code",
+        "v": "NK"
+      },
+      {
+        "c": 1,
+        "id": 79,
+        "p": "entry_and_invalidation.candidates.1.volatility_profile",
+        "v": "balanced"
+      },
+      {
+        "c": 1,
+        "id": 80,
+        "p": "entry_and_invalidation.candidates.1.target_source",
+        "v": "synthetic_rr_fallback"
+      },
+      {
+        "c": 1,
+        "id": 81,
+        "p": "entry_and_invalidation.candidates.1.target_model",
+        "v": "next_liquidity_session_range"
+      },
+      {
+        "c": 1,
+        "id": 82,
+        "p": "entry_and_invalidation.candidates.1.obstacle_kind",
+        "v": "crossed_opposing_imbalance"
+      },
+      {
+        "c": 1,
+        "id": 83,
+        "p": "entry_and_invalidation.candidates.1.fvg_lower",
+        "v": 4033.04
+      },
+      {
+        "c": 1,
+        "id": 84,
+        "p": "entry_and_invalidation.candidates.1.fvg_upper",
+        "v": 4033.51
+      },
+      {
+        "c": 1,
+        "id": 85,
+        "p": "entry_and_invalidation.candidates.1.fvg_mid",
+        "v": 4033.275
+      },
+      {
+        "c": 1,
+        "id": 86,
+        "p": "entry_and_invalidation.candidates.1.fvg_touched",
+        "v": false
+      },
+      {
+        "c": 1,
+        "id": 87,
+        "p": "entry_and_invalidation.candidates.1.source_t_sweep",
+        "v": 1782729900
+      },
+      {
+        "c": 1,
+        "id": 88,
+        "p": "entry_and_invalidation.candidates.1.source_t_disp",
+        "v": 1782732600
+      },
+      {
+        "c": 1,
+        "id": 89,
+        "p": "entry_and_invalidation.candidates.1.source_t_bos",
+        "v": 1782733500
+      },
+      {
+        "c": 1,
+        "id": 90,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.adr_pct.value",
+        "v": null
+      },
+      {
+        "c": 1,
+        "id": 91,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.adverse_context_score.value",
+        "v": 2.2527
+      },
+      {
+        "c": 1,
+        "id": 92,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.atr_pct.value",
+        "v": null
+      },
+      {
+        "c": 1,
+        "id": 93,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.entry.value",
+        "v": 4033.04
+      },
+      {
+        "c": 1,
+        "id": 94,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.execution_cost_r.value",
+        "v": 0.0041
+      },
+      {
+        "c": 1,
+        "id": 95,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.htf_alignment_score.value",
+        "v": 9.0
+      },
+      {
+        "c": 1,
+        "id": 96,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.liquidity_rr.value",
+        "v": 2.0399
+      },
+      {
+        "c": 1,
+        "id": 97,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.net_rr.value",
+        "v": 1.0453
+      },
+      {
+        "c": 1,
+        "id": 98,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.obstacle_distance_r.value",
+        "v": 0.0617
+      },
+      {
+        "c": 1,
+        "id": 99,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.sequence_quality.value",
+        "v": 9.5473
+      },
+      {
+        "c": 1,
+        "id": 100,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.sl.value",
+        "v": 4069.36
+      },
+      {
+        "c": 1,
+        "id": 101,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.slippage_r.value",
+        "v": 0.0006
+      },
+      {
+        "c": 1,
+        "id": 102,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.spread_r.value",
+        "v": 0.00413
+      },
+      {
+        "c": 1,
+        "id": 103,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.tp1.value",
+        "v": 4006.3448
+      },
+      {
+        "c": 1,
+        "id": 104,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.tp2.value",
+        "v": 3994.904
+      },
+      {
+        "c": 1,
+        "id": 105,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.volume_impulse_score.value",
+        "v": 4.9437
+      },
+      {
+        "c": 1,
+        "id": 106,
+        "p": "entry_and_invalidation.candidates.1.authoritative_numbers.vwap_dist_atr.value",
+        "v": null
+      },
+      {
+        "c": 2,
+        "id": 107,
+        "p": "entry_and_invalidation.candidates.2.candidate_id",
+        "v": "GOLD|1782729900|1782732600|1782733500|range_reentry|4033.28|range_reentry|0"
+      },
+      {
+        "c": 2,
+        "id": 108,
+        "p": "entry_and_invalidation.candidates.2.candidate_hash",
+        "v": "29B45141EA0F19E5"
+      },
+      {
+        "c": 2,
+        "id": 109,
+        "p": "entry_and_invalidation.candidates.2.setup_code",
+        "v": "RNG"
+      },
+      {
+        "c": 2,
+        "id": 110,
+        "p": "entry_and_invalidation.candidates.2.setup_family",
+        "v": "micro_range_reentry"
+      },
+      {
+        "c": 2,
+        "id": 111,
+        "p": "entry_and_invalidation.candidates.2.setup_class",
+        "v": "micro_range_reentry.range_reentry.virgin_fvg"
+      },
+      {
+        "c": 2,
+        "id": 112,
+        "p": "entry_and_invalidation.candidates.2.setup_taxonomy_enum",
+        "v": "MICRO_RANGE_REENTRY"
+      },
+      {
+        "c": 2,
+        "id": 113,
+        "p": "entry_and_invalidation.candidates.2.entry_branch",
+        "v": "range_reentry"
+      },
+      {
+        "c": 2,
+        "id": 114,
+        "p": "entry_and_invalidation.candidates.2.entry_model",
+        "v": "range_reentry"
+      },
+      {
+        "c": 2,
+        "id": 115,
+        "p": "entry_and_invalidation.candidates.2.session_name",
+        "v": "LONDON"
+      },
+      {
+        "c": 2,
+        "id": 116,
+        "p": "entry_and_invalidation.candidates.2.session_code",
+        "v": "LON"
+      },
+      {
+        "c": 2,
+        "id": 117,
+        "p": "entry_and_invalidation.candidates.2.killzone_code",
+        "v": "NK"
+      },
+      {
+        "c": 2,
+        "id": 118,
+        "p": "entry_and_invalidation.candidates.2.volatility_profile",
+        "v": "balanced"
+      },
+      {
+        "c": 2,
+        "id": 119,
+        "p": "entry_and_invalidation.candidates.2.target_source",
+        "v": "synthetic_rr_fallback"
+      },
+      {
+        "c": 2,
+        "id": 120,
+        "p": "entry_and_invalidation.candidates.2.target_model",
+        "v": "range_mid_opposite_side"
+      },
+      {
+        "c": 2,
+        "id": 121,
+        "p": "entry_and_invalidation.candidates.2.obstacle_kind",
+        "v": "crossed_opposing_imbalance"
+      },
+      {
+        "c": 2,
+        "id": 122,
+        "p": "entry_and_invalidation.candidates.2.fvg_lower",
+        "v": 4033.04
+      },
+      {
+        "c": 2,
+        "id": 123,
+        "p": "entry_and_invalidation.candidates.2.fvg_upper",
+        "v": 4033.51
+      },
+      {
+        "c": 2,
+        "id": 124,
+        "p": "entry_and_invalidation.candidates.2.fvg_mid",
+        "v": 4033.275
+      },
+      {
+        "c": 2,
+        "id": 125,
+        "p": "entry_and_invalidation.candidates.2.fvg_touched",
+        "v": false
+      },
+      {
+        "c": 2,
+        "id": 126,
+        "p": "entry_and_invalidation.candidates.2.source_t_sweep",
+        "v": 1782729900
+      },
+      {
+        "c": 2,
+        "id": 127,
+        "p": "entry_and_invalidation.candidates.2.source_t_disp",
+        "v": 1782732600
+      },
+      {
+        "c": 2,
+        "id": 128,
+        "p": "entry_and_invalidation.candidates.2.source_t_bos",
+        "v": 1782733500
+      },
+      {
+        "c": 2,
+        "id": 129,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.adr_pct.value",
+        "v": null
+      },
+      {
+        "c": 2,
+        "id": 130,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.adverse_context_score.value",
+        "v": 2.2527
+      },
+      {
+        "c": 2,
+        "id": 131,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.atr_pct.value",
+        "v": null
+      },
+      {
+        "c": 2,
+        "id": 132,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.entry.value",
+        "v": 4033.51
+      },
+      {
+        "c": 2,
+        "id": 133,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.execution_cost_r.value",
+        "v": 0.0042
+      },
+      {
+        "c": 2,
+        "id": 134,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.htf_alignment_score.value",
+        "v": 9.0
+      },
+      {
+        "c": 2,
+        "id": 135,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.liquidity_rr.value",
+        "v": 2.0798
+      },
+      {
+        "c": 2,
+        "id": 136,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.net_rr.value",
+        "v": 1.0453
+      },
+      {
+        "c": 2,
+        "id": 137,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.obstacle_distance_r.value",
+        "v": 0.0756
+      },
+      {
+        "c": 2,
+        "id": 138,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.sequence_quality.value",
+        "v": 9.5473
+      },
+      {
+        "c": 2,
+        "id": 139,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.sl.value",
+        "v": 4069.36
+      },
+      {
+        "c": 2,
+        "id": 140,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.slippage_r.value",
+        "v": 0.0006
+      },
+      {
+        "c": 2,
+        "id": 141,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.spread_r.value",
+        "v": 0.004184
+      },
+      {
+        "c": 2,
+        "id": 142,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.tp1.value",
+        "v": 4007.16025
+      },
+      {
+        "c": 2,
+        "id": 143,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.tp2.value",
+        "v": 3995.8675
+      },
+      {
+        "c": 2,
+        "id": 144,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.volume_impulse_score.value",
+        "v": 4.9437
+      },
+      {
+        "c": 2,
+        "id": 145,
+        "p": "entry_and_invalidation.candidates.2.authoritative_numbers.vwap_dist_atr.value",
+        "v": null
+      },
+      {
+        "c": 3,
+        "id": 146,
+        "p": "entry_and_invalidation.candidates.3.candidate_id",
+        "v": "GOLD|1782729900|1782732600|1782733500|session_reentry|4033.28|session_reentry|0"
+      },
+      {
+        "c": 3,
+        "id": 147,
+        "p": "entry_and_invalidation.candidates.3.candidate_hash",
+        "v": "56AB268490026F50"
+      },
+      {
+        "c": 3,
+        "id": 148,
+        "p": "entry_and_invalidation.candidates.3.setup_code",
+        "v": "SES"
+      },
+      {
+        "c": 3,
+        "id": 149,
+        "p": "entry_and_invalidation.candidates.3.setup_family",
+        "v": "micro_range_reentry"
+      },
+      {
+        "c": 3,
+        "id": 150,
+        "p": "entry_and_invalidation.candidates.3.setup_class",
+        "v": "micro_range_reentry.session_reentry.virgin_fvg"
+      },
+      {
+        "c": 3,
+        "id": 151,
+        "p": "entry_and_invalidation.candidates.3.setup_taxonomy_enum",
+        "v": "MICRO_SESSION_REENTRY"
+      },
+      {
+        "c": 3,
+        "id": 152,
+        "p": "entry_and_invalidation.candidates.3.entry_branch",
+        "v": "session_reentry"
+      },
+      {
+        "c": 3,
+        "id": 153,
+        "p": "entry_and_invalidation.candidates.3.entry_model",
+        "v": "session_reentry"
+      },
+      {
+        "c": 3,
+        "id": 154,
+        "p": "entry_and_invalidation.candidates.3.session_name",
+        "v": "LONDON"
+      },
+      {
+        "c": 3,
+        "id": 155,
+        "p": "entry_and_invalidation.candidates.3.session_code",
+        "v": "LON"
+      },
+      {
+        "c": 3,
+        "id": 156,
+        "p": "entry_and_invalidation.candidates.3.killzone_code",
+        "v": "NK"
+      },
+      {
+        "c": 3,
+        "id": 157,
+        "p": "entry_and_invalidation.candidates.3.volatility_profile",
+        "v": "balanced"
+      },
+      {
+        "c": 3,
+        "id": 158,
+        "p": "entry_and_invalidation.candidates.3.target_source",
+        "v": "synthetic_rr_fallback"
+      },
+      {
+        "c": 3,
+        "id": 159,
+        "p": "entry_and_invalidation.candidates.3.target_model",
+        "v": "range_mid_opposite_side"
+      },
+      {
+        "c": 3,
+        "id": 160,
+        "p": "entry_and_invalidation.candidates.3.obstacle_kind",
+        "v": "crossed_opposing_imbalance"
+      },
+      {
+        "c": 3,
+        "id": 161,
+        "p": "entry_and_invalidation.candidates.3.fvg_lower",
+        "v": 4033.04
+      },
+      {
+        "c": 3,
+        "id": 162,
+        "p": "entry_and_invalidation.candidates.3.fvg_upper",
+        "v": 4033.51
+      },
+      {
+        "c": 3,
+        "id": 163,
+        "p": "entry_and_invalidation.candidates.3.fvg_mid",
+        "v": 4033.275
+      },
+      {
+        "c": 3,
+        "id": 164,
+        "p": "entry_and_invalidation.candidates.3.fvg_touched",
+        "v": false
+      },
+      {
+        "c": 3,
+        "id": 165,
+        "p": "entry_and_invalidation.candidates.3.source_t_sweep",
+        "v": 1782729900
+      },
+      {
+        "c": 3,
+        "id": 166,
+        "p": "entry_and_invalidation.candidates.3.source_t_disp",
+        "v": 1782732600
+      },
+      {
+        "c": 3,
+        "id": 167,
+        "p": "entry_and_invalidation.candidates.3.source_t_bos",
+        "v": 1782733500
+      },
+      {
+        "c": 3,
+        "id": 168,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.adr_pct.value",
+        "v": null
+      },
+      {
+        "c": 3,
+        "id": 169,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.adverse_context_score.value",
+        "v": 2.2527
+      },
+      {
+        "c": 3,
+        "id": 170,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.atr_pct.value",
+        "v": null
+      },
+      {
+        "c": 3,
+        "id": 171,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.entry.value",
+        "v": 4033.51
+      },
+      {
+        "c": 3,
+        "id": 172,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.execution_cost_r.value",
+        "v": 0.0042
+      },
+      {
+        "c": 3,
+        "id": 173,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.htf_alignment_score.value",
+        "v": 9.0
+      },
+      {
+        "c": 3,
+        "id": 174,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.liquidity_rr.value",
+        "v": 2.0798
+      },
+      {
+        "c": 3,
+        "id": 175,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.net_rr.value",
+        "v": 1.0453
+      },
+      {
+        "c": 3,
+        "id": 176,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.obstacle_distance_r.value",
+        "v": 0.0756
+      },
+      {
+        "c": 3,
+        "id": 177,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.sequence_quality.value",
+        "v": 9.5473
+      },
+      {
+        "c": 3,
+        "id": 178,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.sl.value",
+        "v": 4069.36
+      },
+      {
+        "c": 3,
+        "id": 179,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.slippage_r.value",
+        "v": 0.0006
+      },
+      {
+        "c": 3,
+        "id": 180,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.spread_r.value",
+        "v": 0.004184
+      },
+      {
+        "c": 3,
+        "id": 181,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.tp1.value",
+        "v": 4007.16025
+      },
+      {
+        "c": 3,
+        "id": 182,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.tp2.value",
+        "v": 3995.8675
+      },
+      {
+        "c": 3,
+        "id": 183,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.volume_impulse_score.value",
+        "v": 4.9437
+      },
+      {
+        "c": 3,
+        "id": 184,
+        "p": "entry_and_invalidation.candidates.3.authoritative_numbers.vwap_dist_atr.value",
+        "v": null
+      },
+      {
+        "c": 4,
+        "id": 185,
+        "p": "entry_and_invalidation.candidates.4.candidate_id",
+        "v": "GOLD|1782729900|1782732600|1782733500|fvg_mid|4033.28|fvg_mid|0"
+      },
+      {
+        "c": 4,
+        "id": 186,
+        "p": "entry_and_invalidation.candidates.4.candidate_hash",
+        "v": "EBC8D7F21596472E"
+      },
+      {
+        "c": 4,
+        "id": 187,
+        "p": "entry_and_invalidation.candidates.4.setup_code",
+        "v": "MPC"
+      },
+      {
+        "c": 4,
+        "id": 188,
+        "p": "entry_and_invalidation.candidates.4.setup_family",
+        "v": "micro_continuation_fvg"
+      },
+      {
+        "c": 4,
+        "id": 189,
+        "p": "entry_and_invalidation.candidates.4.setup_class",
+        "v": "micro_continuation_fvg.fvg_mid.virgin_fvg"
+      },
+      {
+        "c": 4,
+        "id": 190,
+        "p": "entry_and_invalidation.candidates.4.setup_taxonomy_enum",
+        "v": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "c": 4,
+        "id": 191,
+        "p": "entry_and_invalidation.candidates.4.entry_branch",
+        "v": "fvg_mid"
+      },
+      {
+        "c": 4,
+        "id": 192,
+        "p": "entry_and_invalidation.candidates.4.entry_model",
+        "v": "fvg_mid"
+      },
+      {
+        "c": 4,
+        "id": 193,
+        "p": "entry_and_invalidation.candidates.4.session_name",
+        "v": "LONDON"
+      },
+      {
+        "c": 4,
+        "id": 194,
+        "p": "entry_and_invalidation.candidates.4.session_code",
+        "v": "LON"
+      },
+      {
+        "c": 4,
+        "id": 195,
+        "p": "entry_and_invalidation.candidates.4.killzone_code",
+        "v": "NK"
+      },
+      {
+        "c": 4,
+        "id": 196,
+        "p": "entry_and_invalidation.candidates.4.volatility_profile",
+        "v": "balanced"
+      },
+      {
+        "c": 4,
+        "id": 197,
+        "p": "entry_and_invalidation.candidates.4.target_source",
+        "v": "synthetic_rr_fallback"
+      },
+      {
+        "c": 4,
+        "id": 198,
+        "p": "entry_and_invalidation.candidates.4.target_model",
+        "v": "next_liquidity_session_range"
+      },
+      {
+        "c": 4,
+        "id": 199,
+        "p": "entry_and_invalidation.candidates.4.obstacle_kind",
+        "v": "crossed_opposing_imbalance"
+      },
+      {
+        "c": 4,
+        "id": 200,
+        "p": "entry_and_invalidation.candidates.4.fvg_lower",
+        "v": 4033.04
+      },
+      {
+        "c": 4,
+        "id": 201,
+        "p": "entry_and_invalidation.candidates.4.fvg_upper",
+        "v": 4033.51
+      },
+      {
+        "c": 4,
+        "id": 202,
+        "p": "entry_and_invalidation.candidates.4.fvg_mid",
+        "v": 4033.275
+      },
+      {
+        "c": 4,
+        "id": 203,
+        "p": "entry_and_invalidation.candidates.4.fvg_touched",
+        "v": false
+      },
+      {
+        "c": 4,
+        "id": 204,
+        "p": "entry_and_invalidation.candidates.4.source_t_sweep",
+        "v": 1782729900
+      },
+      {
+        "c": 4,
+        "id": 205,
+        "p": "entry_and_invalidation.candidates.4.source_t_disp",
+        "v": 1782732600
+      },
+      {
+        "c": 4,
+        "id": 206,
+        "p": "entry_and_invalidation.candidates.4.source_t_bos",
+        "v": 1782733500
+      },
+      {
+        "c": 4,
+        "id": 207,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.adr_pct.value",
+        "v": null
+      },
+      {
+        "c": 4,
+        "id": 208,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.adverse_context_score.value",
+        "v": 2.2527
+      },
+      {
+        "c": 4,
+        "id": 209,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.atr_pct.value",
+        "v": null
+      },
+      {
+        "c": 4,
+        "id": 210,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.entry.value",
+        "v": 4033.275
+      },
+      {
+        "c": 4,
+        "id": 211,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.execution_cost_r.value",
+        "v": 0.0042
+      },
+      {
+        "c": 4,
+        "id": 212,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.htf_alignment_score.value",
+        "v": 9.0
+      },
+      {
+        "c": 4,
+        "id": 213,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.liquidity_rr.value",
+        "v": 2.0597
+      },
+      {
+        "c": 4,
+        "id": 214,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.net_rr.value",
+        "v": 1.0453
+      },
+      {
+        "c": 4,
+        "id": 215,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.obstacle_distance_r.value",
+        "v": 0.0686
+      },
+      {
+        "c": 4,
+        "id": 216,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.sequence_quality.value",
+        "v": 9.5473
+      },
+      {
+        "c": 4,
+        "id": 217,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.sl.value",
+        "v": 4069.36
+      },
+      {
+        "c": 4,
+        "id": 218,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.slippage_r.value",
+        "v": 0.0006
+      },
+      {
+        "c": 4,
+        "id": 219,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.spread_r.value",
+        "v": 0.004157
+      },
+      {
+        "c": 4,
+        "id": 220,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.tp1.value",
+        "v": 4006.752525
+      },
+      {
+        "c": 4,
+        "id": 221,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.tp2.value",
+        "v": 3995.38575
+      },
+      {
+        "c": 4,
+        "id": 222,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.volume_impulse_score.value",
+        "v": 4.9437
+      },
+      {
+        "c": 4,
+        "id": 223,
+        "p": "entry_and_invalidation.candidates.4.authoritative_numbers.vwap_dist_atr.value",
+        "v": null
+      },
+      {
+        "c": 5,
+        "id": 224,
+        "p": "entry_and_invalidation.candidates.5.candidate_id",
+        "v": "GOLD|1782729900|1782732600|1782733500|fvg_edge|4033.28|fvg_edge|0"
+      },
+      {
+        "c": 5,
+        "id": 225,
+        "p": "entry_and_invalidation.candidates.5.candidate_hash",
+        "v": "52A80F87EB1E7563"
+      },
+      {
+        "c": 5,
+        "id": 226,
+        "p": "entry_and_invalidation.candidates.5.setup_code",
+        "v": "MPC"
+      },
+      {
+        "c": 5,
+        "id": 227,
+        "p": "entry_and_invalidation.candidates.5.setup_family",
+        "v": "micro_continuation_fvg"
+      },
+      {
+        "c": 5,
+        "id": 228,
+        "p": "entry_and_invalidation.candidates.5.setup_class",
+        "v": "micro_continuation_fvg.fvg_edge.virgin_fvg"
+      },
+      {
+        "c": 5,
+        "id": 229,
+        "p": "entry_and_invalidation.candidates.5.setup_taxonomy_enum",
+        "v": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "c": 5,
+        "id": 230,
+        "p": "entry_and_invalidation.candidates.5.entry_branch",
+        "v": "fvg_edge"
+      },
+      {
+        "c": 5,
+        "id": 231,
+        "p": "entry_and_invalidation.candidates.5.entry_model",
+        "v": "fvg_lower"
+      },
+      {
+        "c": 5,
+        "id": 232,
+        "p": "entry_and_invalidation.candidates.5.session_name",
+        "v": "LONDON"
+      },
+      {
+        "c": 5,
+        "id": 233,
+        "p": "entry_and_invalidation.candidates.5.session_code",
+        "v": "LON"
+      },
+      {
+        "c": 5,
+        "id": 234,
+        "p": "entry_and_invalidation.candidates.5.killzone_code",
+        "v": "NK"
+      },
+      {
+        "c": 5,
+        "id": 235,
+        "p": "entry_and_invalidation.candidates.5.volatility_profile",
+        "v": "balanced"
+      },
+      {
+        "c": 5,
+        "id": 236,
+        "p": "entry_and_invalidation.candidates.5.target_source",
+        "v": "synthetic_rr_fallback"
+      },
+      {
+        "c": 5,
+        "id": 237,
+        "p": "entry_and_invalidation.candidates.5.target_model",
+        "v": "next_liquidity_session_range"
+      },
+      {
+        "c": 5,
+        "id": 238,
+        "p": "entry_and_invalidation.candidates.5.obstacle_kind",
+        "v": "crossed_opposing_imbalance"
+      },
+      {
+        "c": 5,
+        "id": 239,
+        "p": "entry_and_invalidation.candidates.5.fvg_lower",
+        "v": 4033.04
+      },
+      {
+        "c": 5,
+        "id": 240,
+        "p": "entry_and_invalidation.candidates.5.fvg_upper",
+        "v": 4033.51
+      },
+      {
+        "c": 5,
+        "id": 241,
+        "p": "entry_and_invalidation.candidates.5.fvg_mid",
+        "v": 4033.275
+      },
+      {
+        "c": 5,
+        "id": 242,
+        "p": "entry_and_invalidation.candidates.5.fvg_touched",
+        "v": false
+      },
+      {
+        "c": 5,
+        "id": 243,
+        "p": "entry_and_invalidation.candidates.5.source_t_sweep",
+        "v": 1782729900
+      },
+      {
+        "c": 5,
+        "id": 244,
+        "p": "entry_and_invalidation.candidates.5.source_t_disp",
+        "v": 1782732600
+      },
+      {
+        "c": 5,
+        "id": 245,
+        "p": "entry_and_invalidation.candidates.5.source_t_bos",
+        "v": 1782733500
+      },
+      {
+        "c": 5,
+        "id": 246,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.adr_pct.value",
+        "v": null
+      },
+      {
+        "c": 5,
+        "id": 247,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.adverse_context_score.value",
+        "v": 2.2527
+      },
+      {
+        "c": 5,
+        "id": 248,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.atr_pct.value",
+        "v": null
+      },
+      {
+        "c": 5,
+        "id": 249,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.entry.value",
+        "v": 4033.04
+      },
+      {
+        "c": 5,
+        "id": 250,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.execution_cost_r.value",
+        "v": 0.0041
+      },
+      {
+        "c": 5,
+        "id": 251,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.htf_alignment_score.value",
+        "v": 9.0
+      },
+      {
+        "c": 5,
+        "id": 252,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.liquidity_rr.value",
+        "v": 2.0399
+      },
+      {
+        "c": 5,
+        "id": 253,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.net_rr.value",
+        "v": 1.0453
+      },
+      {
+        "c": 5,
+        "id": 254,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.obstacle_distance_r.value",
+        "v": 0.0617
+      },
+      {
+        "c": 5,
+        "id": 255,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.sequence_quality.value",
+        "v": 9.5473
+      },
+      {
+        "c": 5,
+        "id": 256,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.sl.value",
+        "v": 4069.36
+      },
+      {
+        "c": 5,
+        "id": 257,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.slippage_r.value",
+        "v": 0.0006
+      },
+      {
+        "c": 5,
+        "id": 258,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.spread_r.value",
+        "v": 0.00413
+      },
+      {
+        "c": 5,
+        "id": 259,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.tp1.value",
+        "v": 4006.3448
+      },
+      {
+        "c": 5,
+        "id": 260,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.tp2.value",
+        "v": 3994.904
+      },
+      {
+        "c": 5,
+        "id": 261,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.volume_impulse_score.value",
+        "v": 4.9437
+      },
+      {
+        "c": 5,
+        "id": 262,
+        "p": "entry_and_invalidation.candidates.5.authoritative_numbers.vwap_dist_atr.value",
+        "v": null
+      }
+    ],
+    "usage": "Cite evidence only by these integer ids in evidence_ref_ids. Candidate-scoped items carry 'c'; items without 'c' are global. A candidate may cite its own items and global items only."
+  },
+  "evidence_envelope_version": "20260718_decision_evidence_v1",
+  "execution_costs": {
+    "authoritative_source": "MQL5_execution_cost_model",
+    "per_candidate_reference": "entry_and_invalidation.candidates[i].authoritative_numbers"
+  },
+  "historical_analogues": [],
+  "htf_context": {},
+  "identity": {
+    "lineage_id": "591813800_1782691200_136464296_1782743910_GOLD_20017",
+    "ordered_candidate_identities": [
+      {
+        "candidate_hash": "1F74C9ABAB8F130F",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|breaker_retest|4033.28|breaker_retest|0",
+        "candidate_index": 0,
+        "request_execution_fingerprint": "0FD4D78D174245D1",
+        "setup_snapshot_time": 1782743900,
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "candidate_hash": "F1A1F26B32D23E27",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|continuation_reentry|4033.28|continuation_reentry|0",
+        "candidate_index": 1,
+        "request_execution_fingerprint": "D8C4E0DB81049587",
+        "setup_snapshot_time": 1782743900,
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "candidate_hash": "29B45141EA0F19E5",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|range_reentry|4033.28|range_reentry|0",
+        "candidate_index": 2,
+        "request_execution_fingerprint": "4580E226427C21CA",
+        "setup_snapshot_time": 1782743900,
+        "setup_taxonomy_enum": "MICRO_RANGE_REENTRY"
+      },
+      {
+        "candidate_hash": "56AB268490026F50",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|session_reentry|4033.28|session_reentry|0",
+        "candidate_index": 3,
+        "request_execution_fingerprint": "C12E2FA63D5EE3C2",
+        "setup_snapshot_time": 1782743900,
+        "setup_taxonomy_enum": "MICRO_SESSION_REENTRY"
+      },
+      {
+        "candidate_hash": "EBC8D7F21596472E",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|fvg_mid|4033.28|fvg_mid|0",
+        "candidate_index": 4,
+        "request_execution_fingerprint": "C20D8DB406AD4E40",
+        "setup_snapshot_time": 1782743900,
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG"
+      },
+      {
+        "candidate_hash": "52A80F87EB1E7563",
+        "candidate_id": "GOLD|1782729900|1782732600|1782733500|fvg_edge|4033.28|fvg_edge|0",
+        "candidate_index": 5,
+        "request_execution_fingerprint": "8B6D361FCB1E9EA3",
+        "setup_snapshot_time": 1782743900,
+        "setup_taxonomy_enum": "MICRO_CONTINUATION_FVG"
+      }
+    ],
+    "request_created_sim_time": 1782743900,
+    "request_created_wall_time": 136996078,
+    "request_fingerprint": "9634e08f91d461afa20a6c58c25274126b0200d6efcd135b03f1f426ea352823",
+    "request_id": "591813800_1782691200_136464296_1782743910_GOLD_20017",
+    "request_identity_hash": "52d28e5ad64c5269c373b1a3f72c701124a789db36f9a5ddfe1fed7f058c0fc1",
+    "request_identity_version": "20260724_ai_request_identity_v3",
+    "request_nonce": "1362551458",
+    "session_id": "591813800_1782691200_136464296"
+  },
+  "input_fingerprint": "7d75afc6689d0b9395d725b59f781c1bbed550489b7a340b5e4d7d542c149729",
+  "instrument": {
+    "asset_class": "",
+    "symbol": "GOLD",
+    "symbol_digits": null,
+    "symbol_tick_size": null
+  },
+  "liquidity": {
+    "in_killzone": false,
+    "liquidity_target": 3958.95,
+    "session_name": "LONDON"
+  },
+  "ltf_execution": {},
+  "market_regime": {
+    "adr_pct": 0.026752,
+    "adx_value": 53.0446,
+    "atr_pct": 0.002284,
+    "compression_score": 0.025631,
+    "expansion_score": 0.974369,
+    "news_risk": 0.0,
+    "session_vol_ratio": 0.40681,
+    "trend_slope_pct": -0.00012521,
+    "trend_strength": 0.577716,
+    "vwap_dist_atr": 7.225244
+  },
+  "risk": {
+    "deterministic_only": true,
+    "portfolio_state": {}
+  },
+  "runtime": {
+    "decision_input_hash": "1383015757",
+    "observed_at": 1785444823,
+    "runtime_input_hash": "933187738",
+    "workload_mode": "TESTER_AI_LIVE_WAIT_DEBUG"
+  },
+  "sequence": {
+    "has_bos": true,
+    "has_displacement": true,
+    "has_sweep": true,
+    "t_bos": 1782733500,
+    "t_disp": 1782732600,
+    "t_sweep": 1782729900
+  },
+  "setup_taxonomy": {
+    "candidate_taxonomies": [
+      "MICRO_CONTINUATION_FVG",
+      "MICRO_CONTINUATION_FVG",
+      "MICRO_RANGE_REENTRY",
+      "MICRO_SESSION_REENTRY",
+      "MICRO_CONTINUATION_FVG",
+      "MICRO_CONTINUATION_FVG"
+    ],
+    "family_profile_version": "20260718_family_context_v1",
+    "taxonomy_version": "20260716_setup_taxonomy_v1"
+  },
+  "targets_and_obstacles": {
+    "candidate_targets_reference": "entry_and_invalidation.candidates[i].target_candidates"
+  },
+  "validation": {
+    "deterministic_numbers_authoritative": true,
+    "hard_blockers": [],
+    "invalid_fields": [],
+    "missing_fields": []
+  }
+}

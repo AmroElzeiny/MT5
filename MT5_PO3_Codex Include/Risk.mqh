@@ -37,9 +37,11 @@ void _RiskLog(const string msg) {
 //| it can never make it fire where it did not before.                  |
 //+------------------------------------------------------------------+
 string g_po3_behavior_runtime_scope = "";
+string g_po3_behavior_window_last_log = "";
 
 void PO3SetBehaviorRuntimeScope(const string scope_key) {
    g_po3_behavior_runtime_scope = scope_key;
+   g_po3_behavior_window_last_log = "";
 }
 
 struct VolumeNormalizationResult {
@@ -290,10 +292,18 @@ void _LoadRecentBehaviorTrades(const int limit, datetime &times[], double &rs[],
       _InsertRecentBehaviorTrade(closed_at, realized_r, fill_slippage_r, limit, times, rs, slips);
    } while(FileFindNext(handle, file_name));
    FileFindClose(handle);
-   if(skipped_foreign_scope > 0)
-      _RiskLog("[behavior_window] runtime_scope=" + g_po3_behavior_runtime_scope
-               + " in_scope=" + IntegerToString(ArraySize(times))
-               + " skipped_other_runs=" + IntegerToString(skipped_foreign_scope));
+   if(skipped_foreign_scope > 0){
+      string behavior_window_log = "[behavior_window] runtime_scope=" + g_po3_behavior_runtime_scope
+                                   + " in_scope=" + IntegerToString(ArraySize(times))
+                                   + " skipped_other_runs=" + IntegerToString(skipped_foreign_scope);
+      // EnforceGlobalStops runs on every timer tick.  This diagnostic describes
+      // state, not an event, so emit it once and again only when that state
+      // changes instead of filling the journal every second.
+      if(behavior_window_log != g_po3_behavior_window_last_log){
+         _RiskLog(behavior_window_log);
+         g_po3_behavior_window_last_log = behavior_window_log;
+      }
+   }
 }
 
 bool _BehaviorStopTriggered(string &reason) {
@@ -427,9 +437,94 @@ bool PO3TradingFreezeActive(const datetime now, string &reason) {
    return true;
 }
 
+// --- Instrument-class scoping for the pre-close flatten ---------------------
+//
+// "Is this a forex pair?" is decided from broker metadata, never from the
+// symbol text.  There is no naming convention that survives contact with a
+// broker list: gold ships as GOLD, XAUUSD or XAU/USD, indices as #US30, US30
+// or NAS100, and a pair may carry any suffix (EURUSD.p, EURUSD_i, EURUSDm).
+// Worse, many brokers set spot metals to SYMBOL_CALC_MODE_FOREX, so the calc
+// mode alone would classify gold as forex.
+//
+// Three independent signals must therefore agree, and the currency test is an
+// ALLOWLIST of ISO-4217 fiat codes: an allowlist excludes XAU/XAG/XPT/XPD and
+// every crypto code automatically, and a code the broker invents later is
+// excluded rather than silently admitted.
+bool _IsFiatCurrencyCode(const string code) {
+   if(StringLen(code) != 3) return false;
+   string upper = code;
+   StringToUpper(upper);
+   static const string fiat =
+      "|USD|EUR|GBP|JPY|CHF|AUD|NZD|CAD|SEK|NOK|DKK|ISK|PLN|HUF|CZK|RON|BGN|"
+      "HRK|RUB|TRY|ZAR|MXN|BRL|CLP|COP|PEN|ARS|SGD|HKD|CNH|CNY|TWD|KRW|INR|"
+      "IDR|MYR|PHP|THB|VND|ILS|SAR|AED|QAR|KWD|BHD|OMR|JOD|EGP|MAD|NGN|KES|";
+   return (StringFind(fiat, "|" + upper + "|") >= 0);
+}
+
+// classification is always written, so a refusal can say which signal failed.
+bool PO3SymbolIsForexPair(const string symbol, string &classification) {
+   classification = "";
+   if(StringLen(symbol) <= 0){ classification = "empty_symbol"; return false; }
+
+   long calc_mode = 0;
+   if(!SymbolInfoInteger(symbol, SYMBOL_TRADE_CALC_MODE, calc_mode)){
+      // Unresolvable metadata is NOT assumed to be forex: an unreadable symbol
+      // stays out of a scope that exists to name one product class exactly.
+      classification = "symbol_metadata_unavailable";
+      return false;
+   }
+   if(calc_mode != SYMBOL_CALC_MODE_FOREX && calc_mode != SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE){
+      classification = "non_forex_calc_mode:" + IntegerToString((int)calc_mode);
+      return false;
+   }
+
+   string base = SymbolInfoString(symbol, SYMBOL_CURRENCY_BASE);
+   string profit = SymbolInfoString(symbol, SYMBOL_CURRENCY_PROFIT);
+   StringToUpper(base);
+   StringToUpper(profit);
+   if(!_IsFiatCurrencyCode(base)){
+      classification = "non_fiat_base_currency:" + base;
+      return false;
+   }
+   if(!_IsFiatCurrencyCode(profit)){
+      classification = "non_fiat_profit_currency:" + profit;
+      return false;
+   }
+   if(base == profit){
+      classification = "base_equals_profit_currency:" + base;
+      return false;
+   }
+
+   // Final guard: the tradable must actually be the BASEPROFIT pair, so a CFD
+   // that happens to be quoted in two fiat currencies cannot slip through.
+   string upper_symbol = symbol;
+   StringToUpper(upper_symbol);
+   if(StringFind(upper_symbol, base + profit) != 0){
+      classification = "symbol_is_not_base_profit_pair:" + upper_symbol;
+      return false;
+   }
+
+   classification = "forex_pair:" + base + profit;
+   return true;
+}
+
+// Does the pre-close flatten apply to this symbol at all?  Separated from the
+// time window so scope and timing can never be conflated in a log line.
+bool PO3SymbolInPreCloseFlattenScope(const string symbol, string &classification) {
+   classification = "";
+   if(!InpPreCloseFlattenForexOnly){
+      classification = "scope_all_instruments";
+      return true;
+   }
+   return PO3SymbolIsForexPair(symbol, classification);
+}
+
 bool PO3PreCloseFlattenActive(const datetime now, string &reason) {
    reason = "";
    if(!InpRolloverProtectionEnable) return false;
+   // The switch is authoritative: a configured minute count is intent to size
+   // the window, not intent to enable the feature.
+   if(!InpPreCloseFlattenEnable) return false;
 
    int minutes_before = MathMax(0, InpCloseManagedTradesBeforeMarketCloseMin);
    if(minutes_before <= 0) return false;
@@ -449,8 +544,27 @@ bool PO3PreCloseFlattenActive(const datetime now, string &reason) {
    if(!_MinuteInsideDailyWindow(minute, start_minute, close_minute)) return false;
 
    reason = "server_time_pre_close_flatten close=" + _ClockMinuteLabel(close_minute)
-            + " minutes_before=" + IntegerToString(minutes_before);
+            + " minutes_before=" + IntegerToString(minutes_before)
+            + " scope=" + (InpPreCloseFlattenForexOnly ? "forex_pairs_only" : "all_instruments");
    return true;
+}
+
+// Symbol-scoped entry block.  The pre-close half of it is refused for a symbol
+// the flatten will not touch: blocking an entry for a close-out that is never
+// going to happen would stop a product trading for a reason that does not apply
+// to it.  The rollover trading freeze stays global -- it is a separate input
+// about spread and liquidity across the whole book, not about flattening.
+bool PO3EntryBlockedByRolloverForSymbol(const string symbol, const datetime now, string &reason) {
+   if(PO3PreCloseFlattenActive(now, reason)){
+      string classification = "";
+      if(PO3SymbolInPreCloseFlattenScope(symbol, classification)){
+         reason += " symbol_class=" + classification;
+         return true;
+      }
+   }
+   if(PO3TradingFreezeActive(now, reason)) return true;
+   reason = "";
+   return false;
 }
 
 bool PO3EntryBlockedByRollover(const datetime now, string &reason) {
@@ -460,37 +574,68 @@ bool PO3EntryBlockedByRollover(const datetime now, string &reason) {
    return false;
 }
 
-bool _DeleteManagedPendingOrders(CTrade &trade, const string reason) {
+// ``scope_to_flatten_symbols`` narrows the sweep to the pre-close scope.  It is
+// false for every other caller -- above all the global stop, which is a risk
+// emergency and must keep flattening the whole managed book.
+bool _DeleteManagedPendingOrdersScoped(CTrade &trade, const string reason, const bool scope_to_flatten_symbols) {
    bool acted = false;
    for(int i=OrdersTotal()-1; i>=0; i--){
       ulong ticket = OrderGetTicket(i);
       if(!OrderMatchesMagic(ticket)) continue;
       string sym = OrderGetString(ORDER_SYMBOL);
+      string classification = "";
+      if(scope_to_flatten_symbols && !PO3SymbolInPreCloseFlattenScope(sym, classification)){
+         _RiskLog(sym + " pending order retained"
+                  + " ticket=" + IntegerToString((int)ticket)
+                  + " reason=" + reason
+                  + " action=out_of_pre_close_scope"
+                  + " symbol_class=" + classification);
+         continue;
+      }
       bool ok = trade.OrderDelete(ticket);
       _RiskLog(sym + " pending order delete"
                + " ticket=" + IntegerToString((int)ticket)
                + " reason=" + reason
+               + " symbol_class=" + classification
                + " ok=" + (ok ? "true" : "false"));
       acted = true;
    }
    return acted;
 }
 
-bool _FlattenManagedExposureWithReason(CTrade &trade, const string reason) {
+bool _DeleteManagedPendingOrders(CTrade &trade, const string reason) {
+   return _DeleteManagedPendingOrdersScoped(trade, reason, false);
+}
+
+bool _FlattenManagedExposureScoped(CTrade &trade, const string reason, const bool scope_to_flatten_symbols) {
    bool acted = false;
    for(int i=PositionsTotal()-1; i>=0; i--){
       ulong ticket = PositionGetTicket(i);
       if(!PositionMatchesMagic(ticket)) continue;
       string sym = PositionGetString(POSITION_SYMBOL);
+      string classification = "";
+      if(scope_to_flatten_symbols && !PO3SymbolInPreCloseFlattenScope(sym, classification)){
+         _RiskLog(sym + " position retained"
+                  + " ticket=" + IntegerToString((int)ticket)
+                  + " reason=" + reason
+                  + " action=out_of_pre_close_scope"
+                  + " symbol_class=" + classification);
+         continue;
+      }
       bool ok = trade.PositionClose(ticket);
       _RiskLog(sym + " position close"
                + " ticket=" + IntegerToString((int)ticket)
                + " reason=" + reason
+               + " symbol_class=" + classification
                + " ok=" + (ok ? "true" : "false"));
       acted = true;
    }
-   if(_DeleteManagedPendingOrders(trade, reason)) acted = true;
+   if(_DeleteManagedPendingOrdersScoped(trade, reason, scope_to_flatten_symbols)) acted = true;
    return acted;
+}
+
+bool _FlattenManagedExposureWithReason(CTrade &trade, const string reason) {
+   return _FlattenManagedExposureScoped(trade, reason, false);
 }
 
 bool _FlattenManagedExposure(CTrade &trade) {
@@ -790,17 +935,29 @@ string _RiskAssetClassForSymbol(const string symbol) {
    if(StringFind(value, "WTI") >= 0 || StringFind(value, "BRENT") >= 0 ||
       StringFind(value, "OIL") >= 0 || StringFind(value, "NGAS") >= 0) return "energy";
    if(StringFind(value, "BTC") >= 0 || StringFind(value, "ETH") >= 0 ||
-      StringFind(value, "SOL") >= 0) return "crypto";
-   if(StringFind(value, "US30") >= 0 || StringFind(value, "NAS") >= 0 ||
-      StringFind(value, "SPX") >= 0 || StringFind(value, "GER") >= 0 ||
+      StringFind(value, "SOL") >= 0 || StringFind(value, "LTC") >= 0 ||
+      StringFind(value, "XRP") >= 0) return "crypto";
+   if(StringFind(value, "US30") >= 0 || StringFind(value, "USNDAQ") >= 0 ||
+      StringFind(value, "NASDAQ") >= 0 || StringFind(value, "NAS100") >= 0 ||
+      StringFind(value, "USSPX") >= 0 || StringFind(value, "SPX") >= 0 ||
+      StringFind(value, "US500") >= 0 || StringFind(value, "GERMANY") >= 0 ||
+      StringFind(value, "GER40") >= 0 || StringFind(value, "DE40") >= 0 ||
       StringFind(value, "DAX") >= 0 || StringFind(value, "UK100") >= 0 ||
-      StringFind(value, "JP225") >= 0) return "indices";
+      StringFind(value, "JAPAN") >= 0 || StringFind(value, "JP225") >= 0 ||
+      StringFind(value, "US2000") >= 0 || StringFind(value, "FRANCE") >= 0 ||
+      StringFind(value, "FRA40") >= 0 || StringFind(value, "EURO50") >= 0) return "indices";
    string letters = "";
    for(int i=0; i<StringLen(value); i++){
       ushort c = (ushort)StringGetCharacter(value, i);
       if(c >= 'A' && c <= 'Z') letters += StringSubstr(value, i, 1);
    }
-   if(StringLen(letters) >= 6) return "fx";
+   if(StringLen(letters) >= 6){
+      string base = StringSubstr(letters, 0, 3);
+      string quote = StringSubstr(letters, 3, 3);
+      string currencies = "|AUD|CAD|CHF|CNH|EUR|GBP|HKD|HUF|JPY|MXN|NOK|NZD|PLN|SEK|SGD|TRY|USD|ZAR|";
+      if(StringFind(currencies, "|" + base + "|") >= 0 &&
+         StringFind(currencies, "|" + quote + "|") >= 0) return "fx";
+   }
    return "other";
 }
 

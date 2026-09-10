@@ -30,7 +30,10 @@ MANAGEMENT_SCHEMA_VERSION = "20260718_management_action_lifecycle_v4"
 MANAGEMENT_EXPERIMENT_SCHEMA_VERSION = "20260717_management_experiment_v1"
 MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_counterfactual_v2"
 INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1"
-SHADOW_CANDIDATE_SCHEMA_VERSION = "20260717_shadow_candidate_v3"
+# Mirrors Config.mqh.  v4 is the counterfactual lifecycle schema: canonical
+# sweep/variant identity, entry activation, the ordered TP1/TP2/SL path and
+# terminal-once resolution.  MQL and Python must never disagree on this string.
+SHADOW_CANDIDATE_SCHEMA_VERSION = "20260908_shadow_lifecycle_v4"
 NORMALIZED_FVG_SCHEMA_VERSION = "20260717_normalized_fvg_v2"
 
 REPEATABLE = "REPEATABLE"

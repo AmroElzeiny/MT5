@@ -38,9 +38,13 @@ from tester_replay_provenance import build_replay_provenance
 from ai_provider import (
     AIProvider,
     LocalOpenAICompatibleProvider,
+    OpenCodeMessagesProvider,
+    OpenCodeResponsesProvider,
+    OpenCodeRoutedProvider,
     OpenRouterProvider,
     PROVIDER_CONTRACT_VERSION,
     PROVIDER_MODE_LOCAL,
+    PROVIDER_MODE_OPENCODE,
     PROVIDER_MODE_OPENROUTER,
     PROVIDER_MODE_REMOTE,
     PROVIDER_MODES_TRADING,
@@ -112,6 +116,15 @@ from decision_integrity import (
 )
 from bus_cohort_migration import CohortIdentity, migrate_bus_cohorts
 from decision_evidence import EVIDENCE_ENVELOPE_VERSION, build_decision_evidence_envelope
+from shadow_outcome_ledger import (
+    SHADOW_LEDGER_SCHEMA_VERSION,
+    EvidencePolicy as ShadowEvidencePolicy,
+    compact_candidate_evidence as compact_shadow_candidate_evidence,
+    consolidate_shadow_lifecycle,
+    historical_evidence as shadow_historical_evidence,
+    historical_evidence_ladder as shadow_historical_evidence_ladder,
+    read_shadow_events,
+)
 from evidence_catalog import (
     EVIDENCE_CATALOG_VERSION,
     EvidenceCatalog,
@@ -136,6 +149,7 @@ from openai_usage_logger import (
     log_ai_usage,
     price_call,
     response_cached_input_tokens,
+    response_reported_cost_usd,
     response_routed_endpoint,
     set_ai_usage_bus,
 )
@@ -143,6 +157,7 @@ from po3_env import (
     PROVIDER_SECRET_KEYS,
     PROVIDER_SELECT_LOCAL,
     PROVIDER_SELECT_OPENAI,
+    PROVIDER_SELECT_OPENCODE,
     PROVIDER_SELECT_OPENROUTER,
     PROVIDER_SELECT_VALUES,
     bootstrap_provider_env,
@@ -151,6 +166,7 @@ from po3_env import (
     peek_dotenv_value,
     resolve_provider_select,
 )
+from opencode_routing import OpenCodeRoutingPolicy
 from runtime_governance import (
     DECISION_NON_REPEATABLE,
     HIERARCHICAL_PRIOR_SCHEMA_VERSION,
@@ -342,6 +358,53 @@ def _env_float(
     return value
 
 
+def _env_float_or_none(
+    env: Mapping[str, str],
+    name: str,
+    default: float | None,
+    warnings: list[str],
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> float | None:
+    """``_env_float`` with an explicit "omit this parameter" state.
+
+    ``_env_float`` folds a present-but-empty value onto the default, so there is
+    no way to express "do not send this key" in the file -- the default goes on
+    the wire regardless.  That is a real gap rather than a stylistic one: a
+    sampling parameter the routed model does not accept is not merely ignored
+    under ``provider.require_parameters=true``, it empties the routing funnel
+    and every call fails closed.
+
+    An ABSENT key still means the default, so no existing configuration
+    changes.  A key written with an empty value -- or the literal ``none`` /
+    ``omit`` / ``unset`` -- means None, i.e. the key is not built into the
+    request at all.
+    """
+
+    raw = env.get(name)
+    if raw is None:
+        value = default
+    else:
+        text = str(raw).strip()
+        if text == "" or text.lower() in {"none", "omit", "unset", "null"}:
+            return None
+        try:
+            value = float(text)
+        except Exception:
+            warnings.append(f"{name}=invalid_float")
+            value = default
+    if value is None:
+        return None
+    if min_value is not None and value < min_value:
+        warnings.append(f"{name}=below_min")
+        value = min_value
+    if max_value is not None and value > max_value:
+        warnings.append(f"{name}=above_max")
+        value = max_value
+    return value
+
+
 @dataclass(frozen=True)
 class AIGateRuntimeConfig:
     # ``provider_select`` is the authority.  ``use_remote_api`` is kept as the
@@ -441,8 +504,17 @@ class AIGateRuntimeConfig:
     openrouter_timeout_sec: float
     openrouter_max_retries: int
     openrouter_max_output_tokens: int
-    openrouter_temperature: float
-    openrouter_top_p: float
+    # ``None`` means "do not put this key on the wire at all", which is a
+    # different request from "send the default".  It is load-bearing on this
+    # transport: OpenRouter routes with ``provider.require_parameters=true``
+    # (below), so a sampling parameter the model's endpoints do not advertise
+    # removes every endpoint from the funnel and the call dies as HTTP 404
+    # ``No endpoints found that can handle the requested parameters`` instead of
+    # being ignored.  Reasoning-only models are exactly that case -- the direct
+    # OpenAI transport already passes ``temperature=None, top_p=None`` for the
+    # same family (ai_provider.py:970-971).
+    openrouter_temperature: float | None
+    openrouter_top_p: float | None
     openrouter_seed: int
     openrouter_enable_thinking: bool
     openrouter_reasoning_effort: str
@@ -454,6 +526,32 @@ class AIGateRuntimeConfig:
     openrouter_context_budget_tokens: int
     openrouter_app_url: str
     openrouter_app_title: str
+    # OpenCode Go transport.  One base URL serves both dialects: the OpenAI SDK
+    # appends ``/responses`` for Muse and the messages adapter appends
+    # ``/messages`` for Qwen, so the two documented endpoints are one setting.
+    opencode_base_url: str
+    opencode_api_key: str
+    opencode_call_directing: bool
+    opencode_muse_model: str
+    opencode_muse_reasoning_effort: str
+    opencode_muse_reasoning_token_reserve: int
+    opencode_qwen_model: str
+    opencode_anthropic_version: str
+    opencode_enable_thinking: bool
+    opencode_thinking_budget_tokens: int
+    opencode_timeout_sec: float
+    opencode_max_output_tokens: int
+    opencode_context_budget_tokens: int
+    opencode_parallelism: int
+    # The fallback is the system's existing OpenAI integration, configured -- not
+    # reimplemented.  These three values are what that one RemoteAPIProvider is
+    # built with under this selection.
+    opencode_fallback_model: str
+    opencode_fallback_reasoning_effort: str
+    opencode_fallback_service_tier: str
+    opencode_critical_rule_score: float
+    opencode_important_rule_score: float
+    opencode_importance_force: str
     shadow_compare_providers: bool
     trade_memory_file: Path
     provider_circuit_failure_threshold: int
@@ -479,6 +577,7 @@ class AIGateRuntimeConfig:
         )
         is_local = provider_select == PROVIDER_SELECT_LOCAL
         is_openrouter = provider_select == PROVIDER_SELECT_OPENROUTER
+        is_opencode = provider_select == PROVIDER_SELECT_OPENCODE
 
         # Preserve the existing Version Z remote defaults. The new provider
         # switch changes transport selection, never the configured model.
@@ -497,9 +596,23 @@ class AIGateRuntimeConfig:
             )
             or "~deepseek/deepseek-v4-flash-latest"
         )
+        opencode_muse_model = (
+            _env_lookup(env, ("OPENCODE_MUSE_MODEL", "OPENCODE_MODEL"), "muse-spark-1.3-contributor")
+            or "muse-spark-1.3-contributor"
+        )
+        opencode_qwen_model = (
+            _env_lookup(env, ("OPENCODE_QWEN_MODEL",), "qwen3.8-flash") or "qwen3.8-flash"
+        )
         if is_local:
             selected_model = _env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model
             fallback_raw = _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "")
+        elif is_opencode:
+            # The primary route.  ``fallback_models`` stays empty on purpose:
+            # this mode's fallback is a different provider, not another model on
+            # the same one, and the same-provider fallback list must not imply
+            # otherwise.
+            selected_model = opencode_muse_model
+            fallback_raw = ""
         elif is_openrouter:
             selected_model = (
                 _env_lookup(env, ("OPENROUTER_ANALYST_MODEL",), openrouter_model)
@@ -581,6 +694,58 @@ class AIGateRuntimeConfig:
             warnings.append("OPENROUTER_REASONING_EFFORT=invalid")
             openrouter_reasoning_effort = "high"
 
+        opencode_base_url = (
+            (
+                _env_lookup(env, ("OPENCODE_GO_BASE_URL",), "https://opencode.ai/zen/go/v1")
+                or "https://opencode.ai/zen/go/v1"
+            )
+            if is_opencode
+            else "https://opencode.ai/zen/go/v1"
+        )
+        # ``high`` is the strongest reasoning level the Responses dialect defines
+        # for every deployment of it; ``xhigh`` exists only on some OpenAI models
+        # and is not advertised for Muse, so it is accepted if an operator sets
+        # it deliberately but is never the default.  ``auto``/``none``/empty make
+        # the transport omit the key entirely rather than send an unsupported
+        # value -- see RemoteAPIProvider.generate_structured.
+        opencode_muse_reasoning_effort = _env_lookup(
+            env, ("OPENCODE_MUSE_REASONING_EFFORT",), "high"
+        ).strip().lower()
+        if opencode_muse_reasoning_effort not in {
+            "",
+            "auto",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        }:
+            warnings.append("OPENCODE_MUSE_REASONING_EFFORT=invalid")
+            opencode_muse_reasoning_effort = "high"
+        opencode_fallback_reasoning_effort = _env_lookup(
+            env, ("OPENCODE_FALLBACK_REASONING_EFFORT",), "low"
+        ).strip().lower()
+        if opencode_fallback_reasoning_effort not in {
+            "",
+            "auto",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        }:
+            warnings.append("OPENCODE_FALLBACK_REASONING_EFFORT=invalid")
+            opencode_fallback_reasoning_effort = "low"
+        opencode_fallback_service_tier = _env_lookup(
+            env, ("OPENCODE_FALLBACK_SERVICE_TIER",), "flex"
+        ).strip().lower()
+        if opencode_fallback_service_tier not in {"auto", "default", "flex"}:
+            warnings.append("OPENCODE_FALLBACK_SERVICE_TIER=invalid")
+            opencode_fallback_service_tier = "flex"
+        opencode_routing_policy = OpenCodeRoutingPolicy.from_env(env, warnings)
+
         if use_remote_api is True:
             if not str(env.get("OPENAI_API_KEY") or "").strip():
                 provider_errors.append("OPENAI_API_KEY=missing_remote")
@@ -607,6 +772,22 @@ class AIGateRuntimeConfig:
                 # this transport without it would downgrade a validated envelope
                 # to a best-effort JSON blob, which is an authority change.
                 provider_errors.append("OPENROUTER_REQUIRE_JSON_SCHEMA=must_be_true")
+        elif is_opencode:
+            if not str(env.get("OPENCODE_GO_API_KEY") or "").strip():
+                provider_errors.append("OPENCODE_GO_API_KEY=missing")
+            if not opencode_muse_model:
+                provider_errors.append("OPENCODE_MUSE_MODEL=missing")
+            if not opencode_qwen_model:
+                provider_errors.append("OPENCODE_QWEN_MODEL=missing")
+            if endpoint_class(opencode_base_url) == "invalid":
+                provider_errors.append("OPENCODE_GO_BASE_URL=invalid")
+            # The OpenAI leg is not optional in this mode: every OpenCode route
+            # is defined as "OpenCode, then Luna", so a mode without the Luna
+            # credential is a mode whose declared fallback cannot exist.  It
+            # fails closed at configuration time rather than at the first
+            # transport error, when a live request would already be waiting.
+            if not str(env.get("OPENAI_API_KEY") or "").strip():
+                provider_errors.append("OPENAI_API_KEY=missing_opencode_fallback")
 
         local_fallback_models: list[str] = []
         for item in _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "").split(","):
@@ -643,7 +824,7 @@ class AIGateRuntimeConfig:
                 (_env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model)
                 if is_local
                 else selected_model
-                if is_openrouter
+                if is_openrouter or is_opencode
                 else (_env_lookup(env, ("EXPECTANCY_AI_MODEL",), "gpt-5.5") or "gpt-5.5")
             ),
             fallback_models=fallback_models,
@@ -776,8 +957,8 @@ class AIGateRuntimeConfig:
             # bounds every attempt.
             openrouter_max_retries=_env_int(env, "OPENROUTER_MAX_RETRIES", 2, warnings, min_value=0, max_value=3),
             openrouter_max_output_tokens=_env_int(env, "OPENROUTER_MAX_OUTPUT_TOKENS", 25000, warnings, min_value=1024, max_value=128000),
-            openrouter_temperature=_env_float(env, "OPENROUTER_TEMPERATURE", 0.15, warnings, min_value=0.0, max_value=2.0),
-            openrouter_top_p=_env_float(env, "OPENROUTER_TOP_P", 0.85, warnings, min_value=0.0, max_value=1.0),
+            openrouter_temperature=_env_float_or_none(env, "OPENROUTER_TEMPERATURE", 0.15, warnings, min_value=0.0, max_value=2.0),
+            openrouter_top_p=_env_float_or_none(env, "OPENROUTER_TOP_P", 0.85, warnings, min_value=0.0, max_value=1.0),
             openrouter_seed=_env_int(env, "OPENROUTER_SEED", 42, warnings, min_value=0, max_value=2147483647),
             openrouter_enable_thinking=openrouter_enable_thinking,
             openrouter_reasoning_effort=openrouter_reasoning_effort,
@@ -799,6 +980,54 @@ class AIGateRuntimeConfig:
             ),
             openrouter_app_url=_env_lookup(env, ("OPENROUTER_APP_URL",), ""),
             openrouter_app_title=_env_lookup(env, ("OPENROUTER_APP_TITLE",), "PO3_AIGate"),
+            opencode_base_url=opencode_base_url,
+            opencode_api_key=(
+                _env_lookup(env, ("OPENCODE_GO_API_KEY",), "") if is_opencode else ""
+            ),
+            opencode_call_directing=opencode_routing_policy.call_directing,
+            opencode_muse_model=opencode_muse_model,
+            opencode_muse_reasoning_effort=opencode_muse_reasoning_effort,
+            # Added ON TOP of the schema budget, because max_output_tokens bounds
+            # reasoning and content together on this API.  See the note in
+            # OpenCodeResponsesProvider._wire_responses_kwargs for the measurement.
+            opencode_muse_reasoning_token_reserve=_env_int(
+                env,
+                "OPENCODE_MUSE_REASONING_TOKEN_RESERVE",
+                24000,
+                warnings,
+                min_value=0,
+                max_value=120000,
+            ),
+            opencode_qwen_model=opencode_qwen_model,
+            opencode_anthropic_version=(
+                _env_lookup(env, ("OPENCODE_ANTHROPIC_VERSION",), "2023-06-01") or "2023-06-01"
+            ),
+            opencode_enable_thinking=_env_bool(
+                env, "OPENCODE_ENABLE_THINKING", False, warnings, safe_default=False
+            ),
+            opencode_thinking_budget_tokens=_env_int(
+                env, "OPENCODE_THINKING_BUDGET_TOKENS", 0, warnings, min_value=0, max_value=120000
+            ),
+            opencode_timeout_sec=_env_float(
+                env, "OPENCODE_TIMEOUT_SEC", 900.0, warnings, min_value=10.0, max_value=9000.0
+            ),
+            opencode_max_output_tokens=_env_int(
+                env, "OPENCODE_MAX_OUTPUT_TOKENS", 25000, warnings, min_value=1024, max_value=128000
+            ),
+            opencode_context_budget_tokens=_env_int(
+                env, "OPENCODE_CONTEXT_BUDGET_TOKENS", 131072, warnings, min_value=2048, max_value=1000000
+            ),
+            opencode_parallelism=_env_int(
+                env, "OPENCODE_PARALLELISM", 3, warnings, min_value=1, max_value=8
+            ),
+            opencode_fallback_model=(
+                _env_lookup(env, ("OPENCODE_FALLBACK_MODEL",), "gpt-5.6-luna") or "gpt-5.6-luna"
+            ),
+            opencode_fallback_reasoning_effort=opencode_fallback_reasoning_effort,
+            opencode_fallback_service_tier=opencode_fallback_service_tier,
+            opencode_critical_rule_score=opencode_routing_policy.critical_rule_score,
+            opencode_important_rule_score=opencode_routing_policy.important_rule_score,
+            opencode_importance_force=opencode_routing_policy.forced_importance,
             shadow_compare_providers=shadow_compare_providers,
             trade_memory_file=resolve_project_path(_env_lookup(env, ("AI_TRADE_MEMORY_FILE",), "data/ai_trade_memory.sqlite3")),
             provider_circuit_failure_threshold=_env_int(env, "AI_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", 3, warnings, min_value=1, max_value=100),
@@ -818,6 +1047,27 @@ class AIGateRuntimeConfig:
         return self.provider_select == PROVIDER_SELECT_OPENROUTER
 
     @property
+    def is_opencode_provider(self) -> bool:
+        return self.provider_select == PROVIDER_SELECT_OPENCODE
+
+    @property
+    def opencode_routing_policy(self) -> OpenCodeRoutingPolicy:
+        """The routing policy rebuilt from the frozen config, not re-read env.
+
+        The dataclass is frozen and must stay hashable/serialisable, so the
+        policy is stored as its individual fields and reassembled here.  One
+        origin for the values, so the banner, the identity fingerprint and the
+        classifier can never disagree.
+        """
+
+        return OpenCodeRoutingPolicy(
+            call_directing=self.opencode_call_directing,
+            critical_rule_score=self.opencode_critical_rule_score,
+            important_rule_score=self.opencode_important_rule_score,
+            forced_importance=self.opencode_importance_force,
+        )
+
+    @property
     def provider_mode(self) -> str:
         if self.provider_select == PROVIDER_SELECT_OPENAI:
             return PROVIDER_MODE_REMOTE
@@ -825,6 +1075,8 @@ class AIGateRuntimeConfig:
             return PROVIDER_MODE_LOCAL
         if self.provider_select == PROVIDER_SELECT_OPENROUTER:
             return PROVIDER_MODE_OPENROUTER
+        if self.provider_select == PROVIDER_SELECT_OPENCODE:
+            return PROVIDER_MODE_OPENCODE
         return "UNAVAILABLE"
 
     def safe_log_dict(self) -> Dict[str, Any]:
@@ -921,6 +1173,9 @@ class AIGateRuntimeConfig:
             "openrouter_timeout_sec": self.openrouter_timeout_sec if self.is_openrouter_provider else 0.0,
             "openrouter_max_retries": self.openrouter_max_retries if self.is_openrouter_provider else 0,
             "openrouter_max_output_tokens": self.openrouter_max_output_tokens if self.is_openrouter_provider else 0,
+            # ``None`` here is the banner saying the key is not on the wire.
+            # Printing 0.0 for it would read as "temperature zero", which is a
+            # different request and would hide the routing-critical distinction.
             "openrouter_temperature": self.openrouter_temperature if self.is_openrouter_provider else 0.0,
             "openrouter_top_p": self.openrouter_top_p if self.is_openrouter_provider else 0.0,
             "openrouter_seed": self.openrouter_seed if self.is_openrouter_provider else 0,
@@ -932,6 +1187,31 @@ class AIGateRuntimeConfig:
             "openrouter_allowed_providers": self.openrouter_allowed_providers if self.is_openrouter_provider else [],
             "openrouter_parallelism": self.openrouter_parallelism if self.is_openrouter_provider else 0,
             "openrouter_context_budget_tokens": self.openrouter_context_budget_tokens if self.is_openrouter_provider else 0,
+            # OpenCode.  The credential is reported only as a boolean, exactly
+            # like every other provider block here; the key itself is never
+            # rendered into a log line.
+            "opencode_base_url": self.opencode_base_url if self.is_opencode_provider else "",
+            "opencode_api_key_configured": bool(self.opencode_api_key) if self.is_opencode_provider else False,
+            "opencode_call_directing": self.opencode_call_directing if self.is_opencode_provider else False,
+            "opencode_muse_model": self.opencode_muse_model if self.is_opencode_provider else "",
+            "opencode_muse_reasoning_effort": self.opencode_muse_reasoning_effort if self.is_opencode_provider else "",
+            "opencode_muse_reasoning_token_reserve": (
+                self.opencode_muse_reasoning_token_reserve if self.is_opencode_provider else 0
+            ),
+            "opencode_qwen_model": self.opencode_qwen_model if self.is_opencode_provider else "",
+            "opencode_anthropic_version": self.opencode_anthropic_version if self.is_opencode_provider else "",
+            "opencode_enable_thinking": self.opencode_enable_thinking if self.is_opencode_provider else False,
+            "opencode_thinking_budget_tokens": self.opencode_thinking_budget_tokens if self.is_opencode_provider else 0,
+            "opencode_timeout_sec": self.opencode_timeout_sec if self.is_opencode_provider else 0.0,
+            "opencode_max_output_tokens": self.opencode_max_output_tokens if self.is_opencode_provider else 0,
+            "opencode_context_budget_tokens": self.opencode_context_budget_tokens if self.is_opencode_provider else 0,
+            "opencode_parallelism": self.opencode_parallelism if self.is_opencode_provider else 0,
+            "opencode_fallback_model": self.opencode_fallback_model if self.is_opencode_provider else "",
+            "opencode_fallback_reasoning_effort": self.opencode_fallback_reasoning_effort if self.is_opencode_provider else "",
+            "opencode_fallback_service_tier": self.opencode_fallback_service_tier if self.is_opencode_provider else "",
+            "opencode_critical_rule_score": self.opencode_critical_rule_score if self.is_opencode_provider else 0.0,
+            "opencode_important_rule_score": self.opencode_important_rule_score if self.is_opencode_provider else 0.0,
+            "opencode_importance_force": self.opencode_importance_force if self.is_opencode_provider else "",
             "shadow_compare_providers": self.shadow_compare_providers,
             "trade_memory_file": str(self.trade_memory_file),
             "provider_circuit_failure_threshold": self.provider_circuit_failure_threshold,
@@ -1019,6 +1299,12 @@ _TRADE_MEMORY_STORE: TradeMemoryStore | None = None
 _TRADE_MEMORY_LOCK = Lock()
 _SHADOW_PROVIDER_LOCK = Lock()
 _SHADOW_COMPARISON_LOG_LOCK = Lock()
+# Counterfactual ledger cache.  The ledger is append-only and grows without
+# bound, so it is parsed once and re-parsed only when its size or mtime moves.
+# Re-reading megabytes per request would put a research feature on the critical
+# path of a deadline-bound provider call.
+_SHADOW_LEDGER_LOCK = Lock()
+_SHADOW_LEDGER_CACHE: Dict[str, Any] = {}
 _STRUCTURED_SCHEMA_PREFLIGHT: Dict[str, Any] = {}
 
 def log(msg: str) -> None:
@@ -1069,6 +1355,84 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
             circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
             app_url=cfg.openrouter_app_url,
             app_title=cfg.openrouter_app_title,
+            # Same admission-retry budget as the remote transport: OpenRouter is
+            # equally a paid endpoint that answers 429 under congestion, and it
+            # previously had no admission handling at all.
+            admission_retry_enable=cfg.admission_retry_enable,
+            admission_max_retries=cfg.admission_max_retries,
+            admission_backoff_initial_sec=cfg.admission_backoff_initial_sec,
+            admission_backoff_max_sec=cfg.admission_backoff_max_sec,
+            log=log,
+        )
+    if cfg.is_opencode_provider:
+        # Reads the OpenCode credential AND the OpenAI one.  Both are owned by
+        # this selection (po3_env.PROVIDER_SECRET_KEYS) because the mode is
+        # defined as "OpenCode Go primary, OpenAI Luna fallback": the fallback is
+        # a declared leg, not a foreign secret that happened to survive.  The
+        # OpenRouter and local credentials are still stripped.
+        opencode_key = os.environ.get("OPENCODE_GO_API_KEY", "").strip() or cfg.opencode_api_key
+        if not opencode_key:
+            return UnavailableProvider("OPENCODE_GO_API_KEY=missing")
+        fallback_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not fallback_key:
+            return UnavailableProvider("OPENAI_API_KEY=missing_opencode_fallback")
+        common = dict(
+            circuit_failure_threshold=cfg.provider_circuit_failure_threshold,
+            circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
+            admission_retry_enable=cfg.admission_retry_enable,
+            admission_max_retries=cfg.admission_max_retries,
+            admission_backoff_initial_sec=cfg.admission_backoff_initial_sec,
+            admission_backoff_max_sec=cfg.admission_backoff_max_sec,
+            log=log,
+        )
+        return OpenCodeRoutedProvider(
+            muse=OpenCodeResponsesProvider(
+                base_url=cfg.opencode_base_url,
+                api_key=opencode_key,
+                model=cfg.opencode_muse_model,
+                reasoning_effort=cfg.opencode_muse_reasoning_effort,
+                timeout_sec=cfg.opencode_timeout_sec,
+                max_output_tokens=cfg.opencode_max_output_tokens,
+                reasoning_token_reserve=cfg.opencode_muse_reasoning_token_reserve,
+                **common,
+            ),
+            qwen=OpenCodeMessagesProvider(
+                base_url=cfg.opencode_base_url,
+                api_key=opencode_key,
+                model=cfg.opencode_qwen_model,
+                timeout_sec=cfg.opencode_timeout_sec,
+                max_output_tokens=cfg.opencode_max_output_tokens,
+                context_budget_tokens=cfg.opencode_context_budget_tokens,
+                anthropic_version=cfg.opencode_anthropic_version,
+                enable_thinking=cfg.opencode_enable_thinking,
+                thinking_budget_tokens=cfg.opencode_thinking_budget_tokens,
+                parallelism=cfg.opencode_parallelism,
+                **common,
+            ),
+            # The system's existing OpenAI integration, configured -- not a
+            # second implementation.  This is the same RemoteAPIProvider the
+            # openai_remote selection builds below, with the model, effort and
+            # service tier this mode's fallback contract specifies.
+            fallback=RemoteAPIProvider(
+                api_key=fallback_key,
+                base_url=os.environ.get("OPENAI_BASE_URL", "").strip(),
+                primary_model=cfg.opencode_fallback_model,
+                fallback_models=[],
+                analytics_model=cfg.opencode_fallback_model,
+                reasoning_effort=cfg.opencode_fallback_reasoning_effort,
+                timeout_sec=cfg.openai_timeout_sec,
+                max_output_tokens=cfg.max_output_tokens,
+                prompt_cache_enable=cfg.prompt_cache_enable,
+                prompt_cache_key=cfg.prompt_cache_key,
+                prompt_cache_retention=cfg.prompt_cache_retention,
+                service_tier=cfg.opencode_fallback_service_tier,
+                flex_unavailable_retry_enable=cfg.flex_unavailable_retry_enable,
+                flex_unavailable_max_retries=cfg.flex_unavailable_max_retries,
+                flex_unavailable_cooldown_sec=cfg.flex_unavailable_cooldown_sec,
+                **common,
+            ),
+            policy=cfg.opencode_routing_policy,
+            fallback_service_tier=cfg.opencode_fallback_service_tier,
             log=log,
         )
     if cfg.use_remote_api:
@@ -1246,6 +1610,88 @@ def _trade_memory_store() -> TradeMemoryStore:
         if _TRADE_MEMORY_STORE is None or _TRADE_MEMORY_STORE.path != AI_CONFIG.trade_memory_file:
             _TRADE_MEMORY_STORE = TradeMemoryStore(AI_CONFIG.trade_memory_file)
         return _TRADE_MEMORY_STORE
+
+
+def _shadow_ledger_path() -> Path | None:
+    """Where the EA appends the counterfactual event stream."""
+
+    override = os.environ.get("PO3_SHADOW_LEDGER_PATH", "").strip()
+    if override:
+        return Path(override)
+    lifecycle = FILE_BUS_LIFECYCLE
+    if lifecycle is None:
+        return None
+    return lifecycle.root / "logs" / "shadow_candidates.jsonl"
+
+
+def _shadow_outcome_records() -> list[Any]:
+    """Consolidated shadow variants, re-parsed only when the ledger changes.
+
+    A parse failure is never fatal and never becomes a fabricated prior: the
+    gate logs the condition and the decision proceeds with no shadow evidence,
+    exactly as it does when the ledger does not exist yet.
+    """
+
+    path = _shadow_ledger_path()
+    if path is None or not path.is_file():
+        return []
+    try:
+        stat = path.stat()
+        signature = (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+    except OSError:
+        return []
+    with _SHADOW_LEDGER_LOCK:
+        if _SHADOW_LEDGER_CACHE.get("signature") == signature:
+            return _SHADOW_LEDGER_CACHE.get("records", [])
+        try:
+            read = read_shadow_events(path)
+            consolidated = consolidate_shadow_lifecycle(read.rows)
+        except Exception as exc:
+            log(
+                "[shadow_evidence] state=UNAVAILABLE"
+                f" error={type(exc).__name__} path={path.name}"
+            )
+            _SHADOW_LEDGER_CACHE["signature"] = signature
+            _SHADOW_LEDGER_CACHE["records"] = []
+            return []
+        _SHADOW_LEDGER_CACHE["signature"] = signature
+        _SHADOW_LEDGER_CACHE["records"] = consolidated.variants
+        log(
+            "[shadow_evidence] state=LOADED"
+            f" schema={SHADOW_LEDGER_SCHEMA_VERSION}"
+            f" events={len(read.rows)}"
+            f" legacy_v3_rows_ignored={read.legacy_rows}"
+            f" variants={len(consolidated.variants)}"
+            f" opportunities={len(consolidated.opportunities)}"
+            f" rejected_rows={len(consolidated.rejected)}"
+            f" terminal_conflicts={len(consolidated.conflicts)}"
+        )
+        return consolidated.variants
+
+
+def _shadow_evidence_for_candidate(
+    candidate: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    records: Sequence[Any],
+    decision_timestamp: int,
+    policy: ShadowEvidencePolicy,
+) -> Dict[str, Any]:
+    """Leakage-safe counterfactual history for one candidate.
+
+    ``decision_timestamp`` is the request's own creation time, not wall clock:
+    a replay must see exactly the history the live run saw, and wall clock would
+    hand a replayed 2026-08 request the outcomes of 2026-09.
+    """
+
+    evidence = shadow_historical_evidence_ladder(
+        records,
+        decision_timestamp=decision_timestamp,
+        family=str(candidate.get("setup_family") or ""),
+        setup_taxonomy=str(candidate.get("setup_taxonomy_enum") or ""),
+        decision_state="ABSTAIN",
+        policy=policy,
+    )
+    return compact_shadow_candidate_evidence(evidence)
 
 
 def _archive_request_terminal(path: Path, state: str, reason: str) -> tuple[bool, str]:
@@ -2933,6 +3379,18 @@ def _compact_model_evidence_payload(
             if not isinstance(row, Mapping):
                 continue
             slim = dict(row)
+            # Review roles address candidates only by candidate_index.  The
+            # internal IDs contain frozen lineage components (including an FVG
+            # anchor price) that are not analytical evidence; exposing them led
+            # the critic to compare the anchor with the executable entry and
+            # block valid plans for a fabricated identity mismatch.
+            for internal_identity_field in (
+                "candidate_id",
+                "candidate_hash",
+                "request_execution_fingerprint",
+                "assessed_execution_fingerprint",
+            ):
+                slim.pop(internal_identity_field, None)
             candidate_index = int(slim.get("candidate_index", position))
             # Put the exact legal citation set next to the candidate being
             # assessed.  Remote models otherwise have to correlate the compact
@@ -3602,6 +4060,23 @@ def _score_setup_ai(
                 f" state=INSUFFICIENT_SAMPLE error={type(exc).__name__}"
             )
 
+    # Counterfactual history for this decision.  The cut-off is the request's
+    # own creation time so a cache replay reproduces exactly the evidence the
+    # live run had; wall clock here would leak later outcomes into an older
+    # decision and make every replay statistic optimistic.
+    shadow_policy = ShadowEvidencePolicy.from_env()
+    shadow_decision_timestamp = int(
+        payload.get("request_created_sim_time")
+        or payload.get("setup_snapshot_time")
+        or payload.get("ai_request_time")
+        or payload.get("created_at")
+        or 0
+    )
+    shadow_evidence_available = shadow_policy.enabled and shadow_decision_timestamp > 0
+    shadow_records: list[Any] = []
+    if shadow_evidence_available:
+        shadow_records = _shadow_outcome_records()
+
     evidence_payload = dict(payload)
     evidence_candidates: list[Dict[str, Any]] = []
     for index, candidate in enumerate(candidates):
@@ -3617,6 +4092,13 @@ def _score_setup_ai(
         retrieval = retrieval_by_hash.get(str(candidate.get("candidate_hash") or ""))
         row["historical_evidence_state"] = retrieval.state if retrieval is not None else "INSUFFICIENT_SAMPLE"
         row["retrieved_analogue_ids"] = list(retrieval.analogue_ids) if retrieval is not None else []
+        if shadow_evidence_available:
+            # Attached even when the ledger is empty.  An absent field and
+            # "there is not enough history yet" are different statements, and
+            # only the second one is true here.
+            row["shadow_historical_evidence"] = _shadow_evidence_for_candidate(
+                candidate, payload, shadow_records, shadow_decision_timestamp, shadow_policy
+            )
         evidence_candidates.append(row)
     evidence_payload["candidates"] = evidence_candidates
     evidence_result = build_decision_evidence_envelope(
@@ -3655,9 +4137,9 @@ def _score_setup_ai(
     snapshots_required = _runtime_bool(runtime.get("require_snapshots"), False)
     system_msg = f"""You are the independent Analyst in a disciplined PO3 + FVG trade audit. Assess every candidate independently. Never copy a score, veto, target choice, confidence, or risk multiplier between candidates. Reference candidates only by the supplied candidate_index. Python exclusively owns request IDs, hashes, provider/model identity, candidate IDs/hashes, execution fingerprints, schema versions, and final plan prices; do not return or reconstruct those fields.
 
-WHAT THIS STRATEGY IS. PO3 is Power of Three: accumulation, then manipulation, then distribution. Price builds a range, sweeps liquidity on one side, and expands away in the opposite direction. The deterministic engine reports the events it actually observed, including sweep, displacement, HTF BOS, and LTF BOS/MSS/CHOCH fields with timestamps. Do not assume an event that is false or absent. The attached family_profile is authoritative for which events are mandatory for this candidate: full PO3 families require the complete sweep-displacement-BOS sequence, while micro and Tier-B families may define a deterministic displacement/FVG, reclaim, range, session, breaker, or LTF-shift sequence without requiring HTF BOS. Read each candidate's family_requirement_contract before judging missing evidence. It is a deterministic Python projection of the taxonomy, not an LLM opinion.
+WHAT THIS STRATEGY IS. PO3 is Power of Three: accumulation, then manipulation, then distribution. Price builds a range, sweeps liquidity on one side, and expands away in the opposite direction. The deterministic engine reports the events it actually observed, including sweep, displacement, HTF BOS, and LTF BOS/MSS/CHOCH fields with timestamps. Do not assume an event that is false or absent. The attached family_profile is authoritative for which events are mandatory for this candidate: full PO3 families require the complete sweep-displacement-BOS sequence, while micro and Tier-B families may define a deterministic displacement/FVG, reclaim, range, session, breaker, or LTF-shift sequence without requiring HTF BOS. Read each candidate's family_requirement_contract and family_event_evidence before judging missing evidence. Only a MISSING approval event is missing mandatory evidence. PENDING_ENTRY_TRIGGER is a valid staged plan state: the MQL watchlist waits for and revalidates the trigger before any order can execute. It is not a reason to reject or abstain at AI preapproval. These blocks are deterministic Python projections of the taxonomy and MQL lifecycle, not LLM opinions.
 
-WHAT WE ARE LOOKING FOR. A setup worth capital has the complete, correctly ordered sequence declared by its family_profile, with no profile-required event inferred or missing; displacement/reclaim quality appropriate to that family; an FVG or breaker whose supplied mitigation state is still tradable; compatible regime and higher-timeframe context; viable session timing; a clean path to a supplied feasible target; execution cost small relative to the risk unit; and structural invalidation. Never reject a micro or Tier-B candidate merely because HTF BOS is absent when its family_profile does not require HTF BOS. When family_requirement_contract.htf_bos_required=false, absence of HTF BOS must not appear in missing_required_evidence, missing_confirmations, material_contradictions, major_risks, reasons, narrative_state, rejection_codes, or veto. Only events actually named in family_requirement_contract.required_event_sequence may be classified as missing mandatory family evidence. LTF BOS/MSS/CHOCH is a valid substitute only when the family_profile and structured fields explicitly allow it. Conversely, never waive BOS for a full PO3 family.
+WHAT WE ARE LOOKING FOR. A setup worth capital has the complete, correctly ordered approval sequence declared by its family_profile, with no profile-required approval event inferred or missing; displacement/reclaim quality appropriate to that family; an FVG or breaker whose supplied mitigation state is still tradable; compatible regime and higher-timeframe context; viable session timing; a clean path to a supplied feasible target; execution cost small relative to the risk unit; and structural invalidation. Never reject a micro or Tier-B candidate merely because HTF BOS is absent when its family_profile does not require HTF BOS. When family_requirement_contract.htf_bos_required=false, absence of HTF BOS must not appear in missing_required_evidence, missing_confirmations, material_contradictions, major_risks, reasons, narrative_state, rejection_codes, or veto. Only events actually named in family_requirement_contract.required_event_sequence and marked MISSING in family_event_evidence.approval_events may be classified as missing mandatory family evidence. Events in deferred_execution_triggers are future entry conditions and may be PENDING_ENTRY_TRIGGER at preapproval. LTF BOS/MSS/CHOCH is a valid substitute only when the family_profile and structured fields explicitly allow it. Conversely, never waive BOS for a full PO3 family.
 
 THE SETUP FAMILIES AND THEIR THESES. Each candidate carries a setup_taxonomy_enum, and each name is a claim about why price should move. Judge the claim against the evidence, because the single most valuable thing you do is catch a setup whose own thesis is contradicted by the supplied market state. MICRO_FVG_MID_REVERSAL and MICRO_OTE_REVERSAL claim a retracement into the mid of the imbalance or the optimal trade entry zone reverses. MICRO_FVG_EDGE_REVERSAL claims the reaction comes at the gap edge. MICRO_BREAKER_RETEST claims a broken level now holds as the opposite polarity. MICRO_CONTINUATION_FVG and MICRO_NESTED_CONTINUATION claim an established expansion resumes after a shallow pullback, so they need trend and expansion, not balance. MICRO_RANGE_REENTRY and MICRO_SESSION_REENTRY claim price rejects back inside a range or session boundary, so they need compression and containment; an expansion-dominant regime contradicts them outright. FAILED_BREAKOUT_RECLAIM claims a breakout failed and reclaimed, so it needs evidence the break was rejected, not merely that price returned. FULL_PO3_REVERSAL and FULL_PO3_CONTINUATION are the same logic on the higher-timeframe leg. UNKNOWN_UNCLASSIFIED is never tradeable.
 
@@ -3684,7 +4166,7 @@ Score semantics are strict. rule_score is supplied deterministic evidence and mu
 
 Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_ref_ids must list the exact evidence_catalog ids that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, empty evidence_ref_ids, and empty reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. Set suggested_risk_multiplier strictly per the decision state contract above, and never substitute a non-zero size hint where that contract requires exactly 0.0. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use a hierarchy row only when its available field is true. cross_asset_fallback_blocked is authoritative: when prior_applicability is INSUFFICIENT_SAMPLE_FOR_ASSET_CLASS, Gold/metals global or family history is not evidence for FX, indices, energy, or any other asset class and must not support a rejection, abstention, score penalty, or veto. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported same-asset hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
 
-Target arbitration rule: when target_candidates.arbitration_required is true, do not assume the provisional tp2 is final. Compare keep_current_target, liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. keep_current_target is the target the deterministic engine already selected; when it is marked feasible and no alternative is clearly better, answer chosen_target_model=keep_current with its exact tp2 rather than moving to a different route. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_candidates.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
+Target arbitration rule: when target_choice_menu.arbitration_required is true, do not assume the provisional tp2 is final. Compare keep_current_target, liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. target_semantics is authoritative about label meanings: keep_current is the selectable incumbent route, current_underlying_source is the source of that route's price, family_target_policy is a strategy preference, and liquidity_objective_model describes an alternative. These labels are not aliases and differing values are not an integrity conflict. keep_current_target is the target the deterministic engine already selected; when it is marked feasible and no alternative is clearly better, answer chosen_target_model=keep_current with its exact tp2 rather than moving to a different route. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_choice_menu.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
 The deterministic setup taxonomy is evidence, not a model output. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
 
@@ -3759,6 +4241,17 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     reasoning_effort = (
                         AI_CONFIG.openrouter_reasoning_effort
                         if AI_CONFIG.openrouter_enable_thinking
+                        else "none"
+                    )
+                elif provider_result.provider_mode == PROVIDER_MODE_OPENCODE:
+                    # An OpenCode result is Muse or Qwen; a Luna fallback returns
+                    # PROVIDER_MODE_REMOTE and is handled by the first branch, so
+                    # the ledger records each leg's own budget and effort rather
+                    # than the local server's.
+                    budget = AI_CONFIG.opencode_max_output_tokens
+                    reasoning_effort = (
+                        AI_CONFIG.opencode_muse_reasoning_effort
+                        if provider_result.provider_id == "opencode_go_responses"
                         else "none"
                     )
                 else:
@@ -5843,6 +6336,10 @@ def _write_ai_cost_report(
             output_tokens=as_token_count(output_tokens),
             routed_endpoint=response_routed_endpoint(response),
             service_tier=str(service_tier or ""),
+            # Passed for the same reason the row in the usage ledger reads it:
+            # if one surface prices from the transport's own figure and the
+            # other from the rate table, the two disagree about the same call.
+            provider_reported_cost=response_reported_cost_usd(response),
         )
         row = {
             "timestamp": int(time.time()),
@@ -11942,6 +12439,9 @@ def main() -> None:
         # Routed endpoints publish a per-key concurrency ceiling; exceeding it
         # turns into upstream 429s that spend the request deadline on retries.
         worker_count = min(worker_count, AI_CONFIG.openrouter_parallelism)
+    elif selected_provider.provider_mode == PROVIDER_MODE_OPENCODE:
+        # Same reasoning as OpenRouter: a per-key ceiling on a paid gateway.
+        worker_count = min(worker_count, AI_CONFIG.opencode_parallelism)
     request_pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ai-gate")
 
     log(f"[ai_gate] Bus root: {bus}")

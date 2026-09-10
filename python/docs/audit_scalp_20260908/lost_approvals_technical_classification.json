@@ -1,0 +1,625 @@
+{
+  "summary": {
+    "lost_analyst_approvals": 35,
+    "primary_counts": {
+      "technical_target_semantics": 10,
+      "technical_identity_or_asset_data": 12,
+      "technical_missing_event_representation": 9,
+      "technical_deferred_trigger_semantics": 4
+    },
+    "technical_dominant": 35,
+    "genuine_market_state_primary": 0,
+    "contains_material_technical_issue": 35,
+    "purely_nontechnical": 0,
+    "overlapping_technical_issue_counts": {
+      "target_semantics": 14,
+      "asset_class_missing_or_inconsistent": 9,
+      "candidate_identity_semantics": 4,
+      "missing_family_event_representation": 10,
+      "deferred_execution_trigger_treated_as_preapproval_evidence": 4,
+      "execution_plan_metadata": 1
+    },
+    "caution": "Technical classification means the review was materially affected by payload, identity, or evidence-contract semantics. It does not prove the setup would have filled or profited."
+  },
+  "decisions": [
+    {
+      "number": 1,
+      "request_id": "591813800_1788837043_120154281_1788837654_USDJPY_4874",
+      "symbol": "USDJPY",
+      "taxonomy": "MICRO_CONTINUATION_FVG",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The target selection and declared target model are inconsistent under a required arbitration step."
+    },
+    {
+      "number": 2,
+      "request_id": "591813800_1788837043_120154281_1788843695_EURGBP_21646",
+      "symbol": "EURGBP",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "asset_class_missing_or_inconsistent"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Asset-class identity and applicability are materially inconsistent, so the candidate cannot be independently validated."
+    },
+    {
+      "number": 3,
+      "request_id": "591813800_1788837043_120154281_1788844903_#USNDAQ100_6702",
+      "symbol": "#USNDAQ100",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure",
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "target_semantics",
+        "asset_class_missing_or_inconsistent"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Candidate contains a material asset-class/prior integrity conflict and unresolved target arbitration."
+    },
+    {
+      "number": 4,
+      "request_id": "591813800_1788837043_120154281_1788845507_EURGBP_8273",
+      "symbol": "EURGBP",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "ABSTAIN",
+      "objection_codes": [],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The supplied record confirms a breaker-retest classification and clean validation fields, but does not explicitly evidence the required breaker-formation event. Target arbitration is also required while the declared target model/source and-"
+    },
+    {
+      "number": 5,
+      "request_id": "591813800_1788837043_120154281_1788849135_EURUSD_14486",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_CONTINUATION_FVG",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The selected target configuration is internally inconsistent with the deterministically available target candidates."
+    },
+    {
+      "number": 6,
+      "request_id": "591813800_1788837043_120154281_1788849135_GBPUSD_29009",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Blocking inconsistency between the declared target model and the selected target."
+    },
+    {
+      "number": 7,
+      "request_id": "591813800_1788837043_120154281_1788850343_GBPUSD_14822",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Deterministic target designation is internally inconsistent: the declared model points to an unavailable blocked liquidity target, while the selected target price corresponds to prev_day_low."
+    },
+    {
+      "number": 8,
+      "request_id": "591813800_1788837043_120154281_1788850946_EURUSD_4948",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_CONTINUATION_FVG",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Block due to unresolved and internally inconsistent target arbitration."
+    },
+    {
+      "number": 9,
+      "request_id": "591813800_1788837043_120154281_1788850946_GBPUSD_25499",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure",
+        "ai_veto_target_arbitration_incoherent",
+        "ai_veto_execution_plan_mismatch"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "target_semantics",
+        "asset_class_missing_or_inconsistent",
+        "execution_plan_metadata"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "BLOCK: asset-class/history integrity and target selection are internally inconsistent."
+    },
+    {
+      "number": 10,
+      "request_id": "591813800_1788837043_120154281_1788852155_GBPUSD_32620",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence",
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "asset_class_missing_or_inconsistent",
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Mandatory family sequence evidence is not explicitly established, and asset-class applicability is unresolved."
+    },
+    {
+      "number": 11,
+      "request_id": "591813800_1788837043_120154281_1788852760_EURGBP_311",
+      "symbol": "EURGBP",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Mandatory family-sequence evidence is not explicitly established in the catalog."
+    },
+    {
+      "number": 12,
+      "request_id": "591813800_1788837043_120154281_1788853364_GBPUSD_7310",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "ABSTAIN",
+      "objection_codes": [],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The supplied evidence establishes source context and ordered sweep, displacement, and BOS timestamps, but does not explicitly establish all required family events for breaker formation and clean retest."
+    },
+    {
+      "number": 13,
+      "request_id": "591813800_1788837043_120154281_1788854571_GBPUSD_25553",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "asset_class_missing_or_inconsistent"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Blocked for material asset-class and historical-context integrity inconsistency."
+    },
+    {
+      "number": 14,
+      "request_id": "591813800_1788837043_120154281_1788855779_EURUSD_15387",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_RANGE_REENTRY",
+      "critic_verdict": "ABSTAIN",
+      "objection_codes": [],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The supplied record does not explicitly establish the family-required range event sequence. Optional BOS and follow-through absences are not blocking under the contract."
+    },
+    {
+      "number": 15,
+      "request_id": "591813800_1788837043_120154281_1788855779_GBPUSD_16696",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The execution target configuration is internally inconsistent: the selected target source/TP2 does not align with the declared target model and blocked liquidity candidate."
+    },
+    {
+      "number": 16,
+      "request_id": "591813800_1788837043_120154281_1788856384_#Japan225_19294",
+      "symbol": "#Japan225",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "candidate_identity_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Blocked due to conflicting candidate identity and authoritative entry price."
+    },
+    {
+      "number": 17,
+      "request_id": "591813800_1788837043_120154281_1788857593_GBPUSD_2669",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Target selection metadata is internally inconsistent and the stated liquidity target is blocked."
+    },
+    {
+      "number": 18,
+      "request_id": "591813800_1788837043_120154281_1788858803_#USNDAQ100_16418",
+      "symbol": "#USNDAQ100",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The entry sequence and validation fields are present, but the selected target is obstructed and target arbitration remains unresolved."
+    },
+    {
+      "number": 19,
+      "request_id": "591813800_1788837043_120154281_1788859407_#USNDAQ100_25292",
+      "symbol": "#USNDAQ100",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The execution target decision contains an unresolved obstacle-versus-feasibility contradiction."
+    },
+    {
+      "number": 20,
+      "request_id": "591813800_1788837043_120154281_1788861219_GBPUSD_27795",
+      "symbol": "GBPUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "ABSTAIN",
+      "objection_codes": [],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The supplied record identifies the required sequence and provides source timestamps and a retest score, but does not explicitly evidence breaker formation and clean retest events. These events must not be inferred."
+    },
+    {
+      "number": 21,
+      "request_id": "591813800_1788837043_120154281_1788863033_GOLD_25582",
+      "symbol": "GOLD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Required sequence evidence is incomplete; breaker formation and clean retest cannot be inferred solely from branch labels or scores."
+    },
+    {
+      "number": 22,
+      "request_id": "591813800_1788837043_120154281_1788863637_USDCHF_24069",
+      "symbol": "USDCHF",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Required family sequence evidence is incomplete; score fields and entry-branch labels do not explicitly establish the mandatory breaker formation and clean retest events."
+    },
+    {
+      "number": 23,
+      "request_id": "591813800_1788837043_120154281_1788864846_GOLD_23491",
+      "symbol": "GOLD",
+      "taxonomy": "MICRO_FVG_MID_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "asset_class_missing_or_inconsistent"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Block due to unresolved asset-class data integrity inconsistency."
+    },
+    {
+      "number": 24,
+      "request_id": "591813800_1788837043_120154281_1788867867_GOLD_6308",
+      "symbol": "GOLD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "candidate_identity_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Candidate identity and authoritative execution entry are inconsistent."
+    },
+    {
+      "number": 25,
+      "request_id": "591813800_1788837043_120154281_1788868471_GOLD_6577",
+      "symbol": "GOLD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "candidate_identity_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The candidate has a material entry-identity mismatch between its candidate ID and authoritative execution fields."
+    },
+    {
+      "number": 26,
+      "request_id": "591813800_1788837043_120154281_1788870287_EURUSD_9540",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_deferred_trigger_semantics",
+      "technical_issues_material_to_review": [
+        "deferred_execution_trigger_treated_as_preapproval_evidence"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "The required OTE retracement is not evidenced; the candidate remains entry-waiting with an untouched FVG."
+    },
+    {
+      "number": 27,
+      "request_id": "591813800_1788837043_120154281_1788872706_EURUSD_16880",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_deferred_trigger_semantics",
+      "technical_issues_material_to_review": [
+        "deferred_execution_trigger_treated_as_preapproval_evidence"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Mandatory OTE retracement evidence is not explicitly supplied; the candidate remains entry-waiting with an untouched FVG."
+    },
+    {
+      "number": 28,
+      "request_id": "591813800_1788837043_120154281_1788873917_EURUSD_14162",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "ABSTAIN",
+      "objection_codes": [],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "asset_class_missing_or_inconsistent"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Core sequence and target evidence are present, but asset-class identity and historical applicability are unresolved."
+    },
+    {
+      "number": 29,
+      "request_id": "591813800_1788837043_120154281_1788875127_EURUSD_20111",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Required family-sequence evidence is not explicitly supplied."
+    },
+    {
+      "number": 30,
+      "request_id": "591813800_1788837043_120154281_1788876336_#USNDAQ100_29828",
+      "symbol": "#USNDAQ100",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_missing_event_representation",
+      "technical_issues_material_to_review": [
+        "missing_family_event_representation"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Required sequence evidence is not explicitly supplied; the entry branch and retest score do not establish all contractually required events."
+    },
+    {
+      "number": 31,
+      "request_id": "591813800_1788837043_120154281_1788876336_EURUSD_16990",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence",
+        "ai_veto_data_integrity_failure",
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_deferred_trigger_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics",
+        "asset_class_missing_or_inconsistent",
+        "deferred_execution_trigger_treated_as_preapproval_evidence"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Mandatory OTE retracement and target arbitration are not adequately resolved, and asset-class applicability is inconsistent."
+    },
+    {
+      "number": 32,
+      "request_id": "591813800_1788837043_120154281_1788878149_EURUSD_18077",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_target_semantics",
+      "technical_issues_material_to_review": [
+        "target_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Target selection is not coherently resolved for execution."
+    },
+    {
+      "number": 33,
+      "request_id": "591813800_1788837043_120154281_1788879961_EURUSD_23059",
+      "symbol": "EURUSD",
+      "taxonomy": "MICRO_FVG_MID_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "asset_class_missing_or_inconsistent"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "BLOCK: supplied evidence contains a material asset-class and target-validity integrity conflict."
+    },
+    {
+      "number": 34,
+      "request_id": "591813800_1788837043_120154281_1788879961_GOLD_13695",
+      "symbol": "GOLD",
+      "taxonomy": "MICRO_OTE_REVERSAL",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_missing_mandatory_evidence"
+      ],
+      "primary_classification": "technical_deferred_trigger_semantics",
+      "technical_issues_material_to_review": [
+        "deferred_execution_trigger_treated_as_preapproval_evidence"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Block because the required OTE retracement has not occurred; the setup remains entry-waiting."
+    },
+    {
+      "number": 35,
+      "request_id": "591813800_1788837043_120154281_1788881169_#USNDAQ100_28281",
+      "symbol": "#USNDAQ100",
+      "taxonomy": "MICRO_BREAKER_RETEST",
+      "critic_verdict": "BLOCK",
+      "objection_codes": [
+        "ai_veto_data_integrity_failure",
+        "ai_veto_target_arbitration_incoherent"
+      ],
+      "primary_classification": "technical_identity_or_asset_data",
+      "technical_issues_material_to_review": [
+        "target_semantics",
+        "candidate_identity_semantics"
+      ],
+      "technical_dominant": true,
+      "contains_material_technical_issue": true,
+      "critic_summary": "Blocked due to an entry identity mismatch and unresolved target arbitration."
+    }
+  ]
+}

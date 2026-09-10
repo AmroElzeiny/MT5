@@ -45,6 +45,41 @@ private:
    TradePlan m_scan_candidates[];
    TradePlan m_counterfactual_pending[];
    TradePlan m_shadow_pending[];
+   //--- Shadow tracker identity memory.  Entries are "<id>|<expiry_epoch>" and
+   //--- are pruned by expiry, so the sets stay bounded while still outliving the
+   //--- tracking horizon they have to deduplicate against.
+   string m_shadow_seen_opportunities[];
+   string m_shadow_seen_variants[];
+   string m_shadow_resolved_variants[];
+   bool   m_shadow_index_loaded;
+   bool   m_shadow_index_dirty;
+   //--- Runtime counters, reported by [shadow_tracker] and [final_summary].
+   long   m_shadow_opportunities_total;
+   long   m_shadow_observed_total;
+   long   m_shadow_observation_dedup_total;
+   long   m_shadow_restored_total;
+   long   m_shadow_restored_overdue_resolved_total;
+   long   m_shadow_resolved_total;
+   long   m_shadow_censored_total;
+   long   m_shadow_ambiguous_total;
+   long   m_shadow_data_loss_total;
+   long   m_shadow_market_closed_intervals_total;
+   //--- M1 history the tracker had to ask the terminal to build, and the
+   //--- evaluations that ended waiting for it.  Separating these from
+   //--- data_loss_total is what tells "history not downloaded yet" apart from
+   //--- "price path genuinely unreadable".
+   long   m_shadow_history_requests_total;
+   long   m_shadow_history_pending_total;
+   long   m_shadow_entry_activated_total;
+   long   m_shadow_entry_never_reached_total;
+   long   m_shadow_untrackable_total;
+   long   m_shadow_terminal_duplicate_suppressed_total;
+   long   m_shadow_variant_revisions_total;
+   long   m_shadow_quarantined_total;
+   long   m_shadow_capacity_rejected_total;
+   long   m_shadow_tick_ordered_total;
+   long   m_shadow_progress_events_total;
+   long   m_shadow_event_sequence;
    string m_ai_cooldown_symbols[];
    string m_ai_cooldown_signatures[];
    datetime m_ai_cooldown_until[];
@@ -185,6 +220,15 @@ private:
    bool   m_last_order_construction_attempted;
    string m_ai_wait_log_req_ids[];
    ulong m_ai_wait_log_ms[];
+   // A partial risk-management exit produces an OUT deal that can never finalize
+   // the trade while the position identifier is still open.  That is a STABLE,
+   // CORRECT state, not a retryable failure -- but _FinalizeClosedTrades rescans
+   // the immutable deal history on every MaintainPositions tick, so the deferral
+   // used to be journaled once per second for the whole life of the position
+   // (6,874 identical lines in two hours on 2026-09-07).  These ids record which
+   // positions have already reported the deferral so the line is emitted on the
+   // TRANSITION only, and re-armed when the position actually closes.
+   long m_completion_deferred_position_ids[];
    string m_bucket_policy_json;
    datetime m_bucket_policy_loaded_at;
    datetime m_bucket_policy_last_attempt;
@@ -234,6 +278,34 @@ private:
       return false;
    }
 
+   bool _CompletionDeferralJournaled(const long position_id) const {
+      for(int i=0; i<ArraySize(m_completion_deferred_position_ids); i++){
+         if(m_completion_deferred_position_ids[i] == position_id) return true;
+      }
+      return false;
+   }
+
+   void _MarkCompletionDeferralJournaled(const long position_id) {
+      if(position_id <= 0 || _CompletionDeferralJournaled(position_id)) return;
+      int n = ArraySize(m_completion_deferred_position_ids);
+      ArrayResize(m_completion_deferred_position_ids, n + 1);
+      m_completion_deferred_position_ids[n] = position_id;
+   }
+
+   // Re-arms the deferral log for this position.  Returns true when the position
+   // was actually in the deferred set, so the caller can journal the resumption
+   // and the deferred/resumed pair stays auditable.
+   bool _ClearCompletionDeferralJournaled(const long position_id) {
+      for(int i=ArraySize(m_completion_deferred_position_ids)-1; i>=0; i--){
+         if(m_completion_deferred_position_ids[i] != position_id) continue;
+         int last = ArraySize(m_completion_deferred_position_ids) - 1;
+         if(i != last) m_completion_deferred_position_ids[i] = m_completion_deferred_position_ids[last];
+         ArrayResize(m_completion_deferred_position_ids, last);
+         return true;
+      }
+      return false;
+   }
+
    bool _PendingResearchRecordExists(const TradePlan &arr[],
                                      const string record_key,
                                      const bool use_shadow_hash) const {
@@ -248,6 +320,10 @@ private:
    void _PersistResearchQueues() {
       m_state.SavePlans(m_state.CounterfactualPendingPath(), m_counterfactual_pending);
       m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+      // The identity index is persisted with the queue it protects.  Saving the
+      // pending records without it would let a restart re-observe a variant that
+      // is already being tracked, or re-resolve one already terminal.
+      _PersistShadowTrackerIndex();
    }
 
    bool _IsTesterRuntime() const {
@@ -1085,10 +1161,425 @@ private:
                + (StringLen(detail) > 0 ? " " + detail : ""));
    }
 
+   //==================================================================
+   // Shadow counterfactual lifecycle -- research only.
+   //
+   // Every eligible setup keeps being followed after APPROVE, REJECT, ABSTAIN,
+   // a policy rejection or an execution rejection, so the question "what would
+   // this exact assessed plan have done" has an answer that was never allowed to
+   // influence the trade it describes.  Nothing below is ever trading authority:
+   // every event carries trading_authority=false and can_trade=false.
+   //
+   // Three properties are structural rather than best-effort:
+   //   * identity      -- one opportunity per sweep, one variant per distinct
+   //                      assessed plan, so re-scans, AI retries, duplicate
+   //                      callbacks and EA restarts cannot inflate the sample.
+   //   * activation    -- nothing is measured before the hypothetical entry was
+   //                      actually reached, so a level touched on the way to an
+   //                      entry that never filled is not a win or a loss.
+   //   * terminal-once -- exactly one terminal resolution per variant, enforced
+   //                      by a durable index that outlives the pending queue.
+   //==================================================================
+
+   void _ResetShadowTrackerState() {
+      ArrayResize(m_shadow_seen_opportunities, 0);
+      ArrayResize(m_shadow_seen_variants, 0);
+      ArrayResize(m_shadow_resolved_variants, 0);
+      m_shadow_index_loaded = false;
+      m_shadow_index_dirty = false;
+      m_shadow_opportunities_total = 0;
+      m_shadow_observed_total = 0;
+      m_shadow_observation_dedup_total = 0;
+      m_shadow_restored_total = 0;
+      m_shadow_restored_overdue_resolved_total = 0;
+      m_shadow_resolved_total = 0;
+      m_shadow_censored_total = 0;
+      m_shadow_ambiguous_total = 0;
+      m_shadow_data_loss_total = 0;
+      m_shadow_market_closed_intervals_total = 0;
+      m_shadow_history_requests_total = 0;
+      m_shadow_history_pending_total = 0;
+      m_shadow_entry_activated_total = 0;
+      m_shadow_entry_never_reached_total = 0;
+      m_shadow_untrackable_total = 0;
+      m_shadow_terminal_duplicate_suppressed_total = 0;
+      m_shadow_variant_revisions_total = 0;
+      m_shadow_quarantined_total = 0;
+      m_shadow_capacity_rejected_total = 0;
+      m_shadow_tick_ordered_total = 0;
+      m_shadow_progress_events_total = 0;
+      m_shadow_event_sequence = 0;
+   }
+
+   //--- Identity ------------------------------------------------------
+
+   datetime _ShadowSweepTime(const TradePlan &p) const {
+      if(p.source_t_sweep > 0) return p.source_t_sweep;
+      return p.po3.t_sweep;
+   }
+
+   datetime _ShadowDisplacementTime(const TradePlan &p) const {
+      if(p.source_t_disp > 0) return p.source_t_disp;
+      return p.po3.t_disp;
+   }
+
+   datetime _ShadowBosTime(const TradePlan &p) const {
+      if(p.source_t_bos > 0) return p.source_t_bos;
+      return p.po3.t_bos;
+   }
+
+   string _ShadowSweepSide(const TradePlan &p) const {
+      if(StringLen(p.source_sweep_side) > 0) return _ReasonCode(p.source_sweep_side);
+      if(StringLen(p.po3.sweep_side) > 0) return _ReasonCode(p.po3.sweep_side);
+      return (p.is_buy ? "sell_side" : "buy_side");
+   }
+
+   // Setup lineage for the opportunity identity.  Deliberately the STORY scope,
+   // not the family: two families reading the same sweep are two variants of one
+   // opportunity, and splitting them here would restore exactly the per-branch
+   // duplication this identity exists to remove.
+   string _ShadowOpportunityLineage(const TradePlan &p) const {
+      string lineage = p.setup_story_scope;
+      if(StringLen(lineage) == 0) lineage = p.setup_type;
+      if(StringLen(lineage) == 0) lineage = "unclassified_lineage";
+      return _ReasonCode(lineage);
+   }
+
+   string _ShadowOpportunityId(const TradePlan &p) const {
+      string material = "shadow_opportunity|v4|";
+      material += p.symbol + "|";
+      material += (p.is_buy ? "BUY" : "SELL") + "|";
+      material += _ShadowSweepSide(p) + "|";
+      material += IntegerToString((int)_ShadowSweepTime(p)) + "|";
+      material += IntegerToString((int)_ShadowDisplacementTime(p)) + "|";
+      material += IntegerToString((int)_ShadowBosTime(p)) + "|";
+      material += _ShadowOpportunityLineage(p);
+      return _IntegrityHash(material);
+   }
+
+   // Variant identity.  Prices are rendered at a FIXED 8 decimals rather than at
+   // symbol digits: symbol digits are terminal state, and an identity that moves
+   // when a symbol is absent from Market Watch is not an identity.
+   string _ShadowVariantId(const TradePlan &p, const string opportunity_id) const {
+      string material = "shadow_variant|v4|";
+      material += opportunity_id + "|";
+      material += _ReasonCode(p.entry_branch) + "|";
+      material += IntegerToString((int)p.fvg.t_form) + "|";
+      material += DoubleToString(p.entry_est, 8) + "|";
+      material += DoubleToString(p.sl, 8) + "|";
+      material += DoubleToString(p.tp1, 8) + "|";
+      material += DoubleToString(p.tp2, 8) + "|";
+      material += _ReasonCode(p.target_model) + "|";
+      material += _ReasonCode(p.tp_model) + "|";
+      material += p.request_execution_fingerprint;
+      return _IntegrityHash(material);
+   }
+
+   string _ShadowRecordHashForVariant(const string variant_id) const {
+      return _IntegrityHash(SHADOW_CANDIDATE_SCHEMA_VERSION + "|" + variant_id);
+   }
+
+   //--- Durable identity index ---------------------------------------
+
+   string _ShadowIndexEntryId(const string entry) const {
+      int sep = StringFind(entry, "|");
+      if(sep <= 0) return entry;
+      return StringSubstr(entry, 0, sep);
+   }
+
+   datetime _ShadowIndexEntryExpiry(const string entry) const {
+      int sep = StringFind(entry, "|");
+      if(sep <= 0) return 0;
+      return (datetime)StringToInteger(StringSubstr(entry, sep + 1));
+   }
+
+   bool _ShadowIndexContains(const string &arr[], const string id) const {
+      if(StringLen(id) == 0) return false;
+      for(int i=0; i<ArraySize(arr); i++){
+         if(_ShadowIndexEntryId(arr[i]) == id) return true;
+      }
+      return false;
+   }
+
+   void _ShadowIndexAdd(string &arr[], const string id, const datetime expires_at) {
+      if(StringLen(id) == 0) return;
+      if(_ShadowIndexContains(arr, id)) return;
+      int n = ArraySize(arr);
+      ArrayResize(arr, n + 1);
+      arr[n] = id + "|" + IntegerToString((int)expires_at);
+      m_shadow_index_dirty = true;
+   }
+
+   void _ShadowIndexPrune(string &arr[], const datetime now) {
+      for(int i=ArraySize(arr)-1; i>=0; i--){
+         datetime expires = _ShadowIndexEntryExpiry(arr[i]);
+         if(expires > now) continue;
+         int last = ArraySize(arr) - 1;
+         if(i != last) arr[i] = arr[last];
+         ArrayResize(arr, last);
+         m_shadow_index_dirty = true;
+      }
+   }
+
+   void _ShadowIndexAppendLines(string &out[], const string &arr[], const string kind) const {
+      for(int i=0; i<ArraySize(arr); i++){
+         int n = ArraySize(out);
+         ArrayResize(out, n + 1);
+         out[n] = kind + "|" + arr[i];
+      }
+   }
+
+   datetime _ShadowIdentityExpiry(const datetime observed_at) const {
+      long horizon_sec = (long)MathMax(1, InpShadowCandidateHorizonMinutes) * 60;
+      long retention_sec = (long)MathMax(0, InpShadowIdentityRetentionMinutes) * 60;
+      return (datetime)((long)observed_at + horizon_sec + retention_sec);
+   }
+
+   void _LoadShadowTrackerIndex() {
+      if(m_shadow_index_loaded) return;
+      m_shadow_index_loaded = true;
+      string lines[];
+      ArrayResize(lines, 0);
+      if(!m_state.LoadTextLines(m_state.ShadowTrackerIndexPath(), lines)) return;
+      datetime now = _NowServerOrLocal();
+      int restored = 0;
+      int expired = 0;
+      int corrupt = 0;
+      for(int i=0; i<ArraySize(lines); i++){
+         string line = lines[i];
+         int a = StringFind(line, "|");
+         if(a <= 0){ corrupt++; continue; }
+         int b = StringFind(line, "|", a + 1);
+         if(b <= a){ corrupt++; continue; }
+         string kind = StringSubstr(line, 0, a);
+         string id = StringSubstr(line, a + 1, b - a - 1);
+         datetime expires = (datetime)StringToInteger(StringSubstr(line, b + 1));
+         if(StringLen(id) == 0 || expires <= 0){ corrupt++; continue; }
+         if(expires <= now){ expired++; continue; }
+         if(kind == "opportunity") _ShadowIndexAdd(m_shadow_seen_opportunities, id, expires);
+         else if(kind == "variant") _ShadowIndexAdd(m_shadow_seen_variants, id, expires);
+         else if(kind == "resolved") _ShadowIndexAdd(m_shadow_resolved_variants, id, expires);
+         else { corrupt++; continue; }
+         restored++;
+      }
+      m_shadow_index_dirty = (corrupt > 0 || expired > 0);
+      if(corrupt > 0) m_shadow_quarantined_total += corrupt;
+      _Journal("[shadow_index] restored=" + IntegerToString(restored)
+               + " opportunities=" + IntegerToString(ArraySize(m_shadow_seen_opportunities))
+               + " variants=" + IntegerToString(ArraySize(m_shadow_seen_variants))
+               + " resolved=" + IntegerToString(ArraySize(m_shadow_resolved_variants))
+               + " expired_dropped=" + IntegerToString(expired)
+               + " corrupt_quarantined=" + IntegerToString(corrupt));
+   }
+
+   void _PersistShadowTrackerIndex() {
+      if(!m_shadow_index_loaded) return;
+      if(!m_shadow_index_dirty) return;
+      datetime now = _NowServerOrLocal();
+      _ShadowIndexPrune(m_shadow_seen_opportunities, now);
+      _ShadowIndexPrune(m_shadow_seen_variants, now);
+      _ShadowIndexPrune(m_shadow_resolved_variants, now);
+      string lines[];
+      ArrayResize(lines, 0);
+      _ShadowIndexAppendLines(lines, m_shadow_seen_opportunities, "opportunity");
+      _ShadowIndexAppendLines(lines, m_shadow_seen_variants, "variant");
+      _ShadowIndexAppendLines(lines, m_shadow_resolved_variants, "resolved");
+      if(m_state.SaveTextLines(m_state.ShadowTrackerIndexPath(), lines))
+         m_shadow_index_dirty = false;
+   }
+
+   //--- Event stream --------------------------------------------------
+
+   void _AppendShadowEvent(const string row) {
+      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
+   }
+
+   string _ShadowEventId(const string event_type, const string variant_id, const datetime at) {
+      m_shadow_event_sequence++;
+      return _IntegrityHash(SHADOW_CANDIDATE_SCHEMA_VERSION + "|" + event_type + "|" + variant_id
+                            + "|" + IntegerToString((int)at)
+                            + "|" + IntegerToString((int)m_shadow_event_sequence));
+   }
+
+   // The envelope every shadow event carries.  A consumer can join, filter and
+   // audit the whole stream from these fields alone without re-reading the plan.
+   string _ShadowEventEnvelope(const TradePlan &p, const string event_type, const datetime at) {
+      string j = "";
+      j += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("event_type", event_type) + ",";
+      j += JsonKVStr("event_id", _ShadowEventId(event_type, p.shadow_candidate_variant_id, at)) + ",";
+      j += JsonKVInt("event_at", (int)at) + ",";
+      j += JsonKVStr("sweep_opportunity_id", p.shadow_sweep_opportunity_id) + ",";
+      j += JsonKVStr("candidate_variant_id", p.shadow_candidate_variant_id) + ",";
+      j += JsonKVStr("parent_record_hash", p.shadow_candidate_record_hash) + ",";
+      j += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
+      j += JsonKVStr("execution_fingerprint", p.request_execution_fingerprint) + ",";
+      j += JsonKVStr("symbol", p.symbol) + ",";
+      j += JsonKVStr("family", p.setup_family) + ",";
+      j += JsonKVStr("setup_taxonomy", p.setup_taxonomy_enum) + ",";
+      j += JsonKVStr("decision_state",
+                     (StringLen(p.shadow_decision_state) > 0 ? p.shadow_decision_state : "PENDING_DECISION")) + ",";
+      j += JsonKVStr("decision_source",
+                     (StringLen(p.shadow_decision_source) > 0 ? p.shadow_decision_source : "NOT_YET_DECIDED")) + ",";
+      j += JsonKVStr("tracking_status", p.shadow_outcome_status) + ",";
+      j += JsonKVBool("trading_authority", false) + ",";
+      j += JsonKVBool("can_trade", false) + ",";
+      return j;
+   }
+
+   void _AppendShadowDataQualityFailure(const TradePlan &p, const string failure, const string detail) {
+      datetime at = _NowServerOrLocal();
+      string row = "{";
+      row += _ShadowEventEnvelope(p, "shadow_data_quality_failure", at);
+      row += JsonKVStr("failure", _ReasonCode(failure)) + ",";
+      row += JsonKVStr("detail", detail) + ",";
+      row += JsonKVInt("observed_at", (int)p.shadow_observed_at) + ",";
+      row += JsonKVInt("horizon_at", (int)p.shadow_horizon_at) + ",";
+      row += JsonKVInt("data_retry_count", p.shadow_data_retry_count);
+      row += "}";
+      _AppendShadowEvent(row);
+   }
+
+   void _AppendShadowOpportunityObservation(const TradePlan &p, const datetime observed_at) {
+      string row = "{";
+      row += _ShadowEventEnvelope(p, "shadow_opportunity_observed", observed_at);
+      row += JsonKVStr("sweep_opportunity_lineage", p.shadow_sweep_opportunity_lineage) + ",";
+      row += JsonKVBool("is_buy", p.is_buy) + ",";
+      row += JsonKVStr("direction", p.is_buy ? "BUY" : "SELL") + ",";
+      row += JsonKVStr("sweep_side", _ShadowSweepSide(p)) + ",";
+      row += JsonKVInt("source_sweep_timestamp", (int)_ShadowSweepTime(p)) + ",";
+      row += JsonKVInt("source_displacement_timestamp", (int)_ShadowDisplacementTime(p)) + ",";
+      row += JsonKVInt("source_bos_timestamp", (int)_ShadowBosTime(p)) + ",";
+      row += JsonKVStr("po3_state", p.po3.po3_state) + ",";
+      row += JsonKVStr("context_tier", p.po3.context_tier) + ",";
+      row += JsonKVStr("session", p.po3.session_name) + ",";
+      row += JsonKVStr("killzone", p.killzone_code) + ",";
+      // One statistical unit per sweep.  Variants are children and must not be
+      // counted as independent opportunities when a family rate is computed.
+      row += JsonKVNum("statistical_weight", 1.0, 4);
+      row += "}";
+      _AppendShadowEvent(row);
+   }
+
+   //--- Plan contract -------------------------------------------------
+
+   bool _ShadowPlanTrackable(const TradePlan &p) const {
+      double risk = MathAbs(p.entry_est - p.sl);
+      if(p.entry_est <= 0.0 || p.sl <= 0.0 || p.tp2 <= 0.0 || risk <= 0.0) return false;
+      if(p.is_buy) return (p.sl < p.entry_est && p.tp2 > p.entry_est);
+      return (p.sl > p.entry_est && p.tp2 < p.entry_est);
+   }
+
+   // TP1 is optional in the plan contract, so it is tracked as a first-class
+   // ordered event only when it is a real level between entry and TP2.  A zero
+   // or wrong-side TP1 is reported as unavailable rather than silently treated
+   // as "never reached", which would understate the TP1-before-SL rate.
+   bool _ShadowTp1Valid(const TradePlan &p) const {
+      if(p.tp1 <= 0.0) return false;
+      if(p.is_buy) return (p.tp1 > p.entry_est && p.tp1 <= p.tp2);
+      return (p.tp1 < p.entry_est && p.tp1 >= p.tp2);
+   }
+
+   void _ShadowAddAmbiguity(TradePlan &p, const string reason) {
+      string code = _ReasonCode(reason);
+      if(StringFind(p.shadow_ambiguity_reason, code) >= 0) return;
+      if(StringLen(p.shadow_ambiguity_reason) > 0) p.shadow_ambiguity_reason += ";";
+      p.shadow_ambiguity_reason += code;
+   }
+
+   int _ShadowProgressBit(const string kind) const {
+      if(kind == "entry") return 1;
+      if(kind == "r025") return 2;
+      if(kind == "r050") return 4;
+      if(kind == "tp1") return 8;
+      return 0;
+   }
+
+   bool _ShadowProgressEmitted(const TradePlan &p, const string kind) const {
+      int bit = _ShadowProgressBit(kind);
+      return (bit != 0 && (p.shadow_progress_mask & bit) != 0);
+   }
+
+   void _MarkShadowProgressEmitted(TradePlan &p, const string kind) {
+      int bit = _ShadowProgressBit(kind);
+      if(bit != 0) p.shadow_progress_mask |= bit;
+   }
+
+   void _AppendShadowEntryActivated(TradePlan &p) {
+      if(_ShadowProgressEmitted(p, "entry")) return;
+      _MarkShadowProgressEmitted(p, "entry");
+      m_shadow_entry_activated_total++;
+      m_shadow_progress_events_total++;
+      string row = "{";
+      row += _ShadowEventEnvelope(p, "shadow_entry_activated", p.shadow_entry_activated_at);
+      row += JsonKVBool("entry_activated", true) + ",";
+      row += JsonKVInt("entry_activated_at", (int)p.shadow_entry_activated_at) + ",";
+      row += JsonKVInt("time_to_entry_sec", p.shadow_time_to_entry_sec) + ",";
+      row += JsonKVNum("entry_touch_price", p.shadow_entry_touch_price, 8) + ",";
+      row += JsonKVBool("entry_order_ambiguous", p.shadow_entry_order_ambiguous) + ",";
+      row += JsonKVStr("ordering_source", p.shadow_ordering_source);
+      row += "}";
+      _AppendShadowEvent(row);
+   }
+
+   void _AppendShadowPathProgress(TradePlan &p, const string kind, const datetime at, const double r_level) {
+      if(_ShadowProgressEmitted(p, kind)) return;
+      _MarkShadowProgressEmitted(p, kind);
+      m_shadow_progress_events_total++;
+      string row = "{";
+      row += _ShadowEventEnvelope(p, "shadow_path_progress", at);
+      row += JsonKVStr("progress_kind", kind) + ",";
+      row += JsonKVNum("progress_r", r_level, 4) + ",";
+      row += JsonKVInt("time_from_entry_sec",
+                       (int)MathMax(0, (long)(at - p.shadow_entry_activated_at))) + ",";
+      row += JsonKVNum("mfe_r", p.shadow_mfe_r, 6) + ",";
+      row += JsonKVNum("mae_r", p.shadow_mae_r, 6) + ",";
+      row += JsonKVStr("ordering_source", p.shadow_ordering_source);
+      row += "}";
+      _AppendShadowEvent(row);
+   }
+
+   void _AppendShadowTp1Reached(TradePlan &p) {
+      if(_ShadowProgressEmitted(p, "tp1")) return;
+      _MarkShadowProgressEmitted(p, "tp1");
+      m_shadow_progress_events_total++;
+      string row = "{";
+      row += _ShadowEventEnvelope(p, "shadow_tp1_reached", p.shadow_tp1_hit_at);
+      row += JsonKVBool("tp1_hit", true) + ",";
+      row += JsonKVInt("tp1_hit_at", (int)p.shadow_tp1_hit_at) + ",";
+      row += JsonKVInt("time_to_tp1_sec", p.shadow_time_to_tp1_sec) + ",";
+      row += JsonKVNum("tp1", p.tp1, 8) + ",";
+      row += JsonKVNum("tp1_partial_fraction", MathMax(0.0, MathMin(1.0, InpTP1PartialPct)), 6) + ",";
+      row += JsonKVBool("tp1_before_sl", p.shadow_tp1_before_sl) + ",";
+      row += JsonKVStr("ordering_source", p.shadow_ordering_source);
+      row += "}";
+      _AppendShadowEvent(row);
+   }
+
+   //--- Observation ---------------------------------------------------
+
+   void _NoteShadowRepeatObservation(const string variant_id,
+                                     const string decision_stage,
+                                     const string rejection_reason) {
+      for(int i=0; i<ArraySize(m_shadow_pending); i++){
+         if(m_shadow_pending[i].shadow_candidate_variant_id != variant_id) continue;
+         m_shadow_pending[i].shadow_observation_count++;
+         // The stage is allowed to advance (a candidate first seen pre-AI can
+         // later be rejected by MQL) but the assessed prices are not touched:
+         // that is what preserves the plan the AI actually judged.
+         if(StringLen(decision_stage) > 0) m_shadow_pending[i].shadow_decision_stage = decision_stage;
+         if(StringLen(rejection_reason) > 0) m_shadow_pending[i].shadow_rejection_reason = rejection_reason;
+         return;
+      }
+   }
+
    void _WriteShadowCandidateRecord(const TradePlan &source,
                                     const string decision_stage,
                                     const string rejection_reason) {
       if(!InpShadowCandidateLedgerEnable) return;
+      if(decision_stage == "pre_ai_reject" && !InpShadowTrackPreAiRejects) return;
+      _LoadShadowTrackerIndex();
+
       TradePlan p = source;
       _InitializeNarrativeFields(p);
       if(StringLen(p.candidate_id) == 0)
@@ -1096,21 +1587,45 @@ private:
       if(StringLen(p.candidate_hash) == 0) p.candidate_hash = _CandidateHash(p);
       if(StringLen(p.request_execution_fingerprint) == 0)
          p.request_execution_fingerprint = _ExecutionFingerprint(p);
+
       datetime observed_at = _NowServerOrLocal();
-      string record_hash = _IntegrityHash(SHADOW_CANDIDATE_SCHEMA_VERSION + "|" + p.candidate_hash + "|"
-                                          + p.request_execution_fingerprint + "|"
-                                          + decision_stage + "|" + rejection_reason + "|"
-                                          + IntegerToString((int)observed_at));
-      double risk_dist = MathAbs(p.entry_est - p.sl);
-      bool trackable = (p.entry_est > 0.0 && p.sl > 0.0 && p.tp2 > 0.0 && risk_dist > 0.0 &&
-                        ((p.is_buy && p.sl < p.entry_est && p.tp2 > p.entry_est) ||
-                         (!p.is_buy && p.sl > p.entry_est && p.tp2 < p.entry_est)));
-      p.shadow_candidate_record_hash = record_hash;
+      string opportunity_id = _ShadowOpportunityId(p);
+      string variant_id = _ShadowVariantId(p, opportunity_id);
+      p.shadow_sweep_opportunity_id = opportunity_id;
+      p.shadow_sweep_opportunity_lineage = _ShadowOpportunityLineage(p);
+      p.shadow_candidate_variant_id = variant_id;
+      // The parent record hash is a pure function of the variant identity.  The
+      // pre-v4 hash mixed observed_at in, so every scan of an unchanged setup
+      // minted a new "observation" and a new tracker -- 96 duplicate samples of
+      // one sweep over a 24h horizon at a 15 minute scan interval.
+      p.shadow_candidate_record_hash = _ShadowRecordHashForVariant(variant_id);
       p.shadow_candidate_schema_version = SHADOW_CANDIDATE_SCHEMA_VERSION;
       p.shadow_decision_stage = decision_stage;
       p.shadow_rejection_reason = rejection_reason;
+
+      datetime identity_expiry = _ShadowIdentityExpiry(observed_at);
+      if(!_ShadowIndexContains(m_shadow_seen_opportunities, opportunity_id)){
+         _ShadowIndexAdd(m_shadow_seen_opportunities, opportunity_id, identity_expiry);
+         m_shadow_opportunities_total++;
+         _AppendShadowOpportunityObservation(p, observed_at);
+      }
+
+      // Terminal-once and observe-once.  A variant already resolved must never
+      // be re-observed into a second tracker, or the same sample would be
+      // counted twice under two terminal events.
+      if(_ShadowIndexContains(m_shadow_resolved_variants, variant_id) ||
+         _ShadowIndexContains(m_shadow_seen_variants, variant_id)){
+         m_shadow_observation_dedup_total++;
+         _NoteShadowRepeatObservation(variant_id, decision_stage, rejection_reason);
+         return;
+      }
+
+      bool trackable = _ShadowPlanTrackable(p);
+      bool tp1_valid = (trackable && _ShadowTp1Valid(p));
+
       p.shadow_observed_at = observed_at;
-      p.shadow_horizon_at = observed_at + MathMax(1, InpShadowCandidateHorizonMinutes) * 60;
+      p.shadow_horizon_at = (datetime)((long)observed_at
+                                       + (long)MathMax(1, InpShadowCandidateHorizonMinutes) * 60);
       datetime session_open = 0, session_close = 0, no_entry_from = 0, flatten_from = 0, next_tradable = 0;
       string schedule_reason = "";
       if(InpUseBrokerSymbolSessions &&
@@ -1121,48 +1636,102 @@ private:
          p.broker_session_close = session_close;
          p.shadow_horizon_at = session_close;
       }
-      p.shadow_outcome_status = (trackable ? "PENDING" : "UNTRACKABLE");
-      p.shadow_outcome_reason = (trackable ? "awaiting_hypothetical_price_path" : "invalid_entry_stop_target_contract");
+
+      // Freeze the assessed plan.  Later stages may recalculate prices; when they
+      // do a NEW variant is created and this one is kept, so an abstained plan is
+      // never silently replaced by the numbers of a plan nobody abstained on.
+      p.shadow_assessed_entry = p.entry_est;
+      p.shadow_assessed_sl = p.sl;
+      p.shadow_assessed_tp1 = p.tp1;
+      p.shadow_assessed_tp2 = p.tp2;
+      p.shadow_plan_locked = true;
+      p.shadow_observation_count = 1;
+      p.shadow_scan_cursor = 0;
+      p.shadow_last_evaluated_at = 0;
+      p.shadow_data_retry_count = 0;
+      p.shadow_progress_mask = 0;
+      p.shadow_entry_activated = false;
+      p.shadow_entry_activated_at = 0;
+      p.shadow_time_to_entry_sec = -1;
+      p.shadow_entry_touch_price = 0.0;
+      p.shadow_entry_order_ambiguous = false;
+      p.shadow_entry_never_reached = false;
+      p.shadow_tp1_hit = false;
+      p.shadow_tp1_hit_at = 0;
+      p.shadow_time_to_tp1_sec = -1;
+      p.shadow_tp1_before_sl = false;
+      p.shadow_sl_before_tp1 = false;
+      p.shadow_tp2_hit = false;
+      p.shadow_tp2_hit_at = 0;
+      p.shadow_time_to_tp2_sec = -1;
+      p.shadow_tp2_before_sl = false;
+      p.shadow_sl_before_tp2 = false;
+      p.shadow_tp1_then_sl = false;
+      p.shadow_tp1_then_tp2 = false;
+      p.shadow_neither_target_nor_stop = false;
+      p.shadow_max_favorable_price = 0.0;
+      p.shadow_max_adverse_price = 0.0;
+      p.shadow_result_r_unmanaged = 0.0;
+      p.shadow_result_r_tp1_partial = 0.0;
+      p.shadow_tp1_partial_fraction = MathMax(0.0, MathMin(1.0, InpTP1PartialPct));
+      p.shadow_terminal_event = "";
+      p.shadow_terminal_event_at = 0;
+      p.shadow_ordering_source = "not_yet_observed";
+      p.shadow_ambiguity_status = "NONE";
+      p.shadow_ambiguity_reason = "";
+      p.shadow_mfe_r = 0.0;
+      p.shadow_mae_r = 0.0;
+      p.shadow_outcome_r = 0.0;
       p.shadow_time_to_event_sec = -1;
       p.shadow_time_to_025r_sec = -1;
       p.shadow_time_to_050r_sec = -1;
       p.shadow_time_to_stop_sec = -1;
       p.shadow_time_to_target_sec = -1;
+      p.shadow_time_to_adverse_threshold_sec = -1;
       p.shadow_reached_025r = false;
       p.shadow_reached_050r = false;
       p.shadow_reached_025r_before_adverse = false;
       p.shadow_reached_050r_before_adverse = false;
-      p.shadow_time_to_adverse_threshold_sec = -1;
       p.shadow_025_order_ambiguous = false;
       p.shadow_050_order_ambiguous = false;
       p.shadow_target_before_stop = false;
       p.shadow_stop_before_target = false;
       p.shadow_mfe_before_adverse = false;
-      p.shadow_horizon_result = "PENDING";
-      p.shadow_censoring_status = (trackable ? "PENDING" : "EXCLUDED_INVALID_CONTRACT");
-      p.shadow_ambiguity_reason = "";
       p.shadow_threshold_order_ambiguous = false;
       p.shadow_outcome_ambiguous = !trackable;
+      p.shadow_outcome_status = (trackable ? "PENDING" : "UNTRACKABLE");
+      p.shadow_outcome_reason = (trackable ? "awaiting_entry_activation" : "invalid_entry_stop_target_contract");
+      p.shadow_horizon_result = (trackable ? "PENDING" : "UNTRACKABLE");
+      p.shadow_censoring_status = (trackable ? "PENDING" : "EXCLUDED_INVALID_CONTRACT");
+      p.shadow_data_quality_status = (trackable ? "PENDING_HYPOTHETICAL_OUTCOME" : "UNTRACKABLE_INVALID_CONTRACT");
+
+      bool ai_decision_available = (StringLen(p.ai.decision_schema_version) > 0 &&
+                                    StringLen(p.ai.decision_state) > 0);
+      if(ai_decision_available){
+         p.shadow_decision_state = p.ai.decision_state;
+         p.shadow_decision_source = p.ai.decision_source;
+      }
+
       string row = "{";
-      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
-      row += JsonKVStr("event_type", "candidate_observed") + ",";
-      row += JsonKVStr("record_hash", record_hash) + ",";
+      row += _ShadowEventEnvelope(p, "shadow_candidate_observed", observed_at);
+      row += JsonKVStr("sweep_opportunity_lineage", p.shadow_sweep_opportunity_lineage) + ",";
+      row += JsonKVStr("variant_parent_id", p.shadow_variant_parent_id) + ",";
+      row += JsonKVInt("variant_revision", p.shadow_variant_revision) + ",";
+      row += JsonKVStr("record_hash", p.shadow_candidate_record_hash) + ",";
       row += JsonKVInt("candidate_timestamp", (int)observed_at) + ",";
       row += JsonKVInt("setup_timestamp", (int)p.fvg.t_form) + ",";
-      row += JsonKVInt("source_sweep_timestamp", (int)(p.source_t_sweep > 0 ? p.source_t_sweep : p.po3.t_sweep)) + ",";
+      row += JsonKVInt("source_sweep_timestamp", (int)_ShadowSweepTime(p)) + ",";
+      row += JsonKVInt("source_displacement_timestamp", (int)_ShadowDisplacementTime(p)) + ",";
+      row += JsonKVInt("source_bos_timestamp", (int)_ShadowBosTime(p)) + ",";
       row += JsonKVInt("observed_at", (int)observed_at) + ",";
       row += JsonKVInt("horizon_at", (int)p.shadow_horizon_at) + ",";
       row += JsonKVInt("broker_session_close", (int)p.broker_session_close) + ",";
-      row += JsonKVStr("horizon_termination_policy", p.broker_session_close > 0 && p.shadow_horizon_at == p.broker_session_close
-                       ? "broker_session_close" : "configured_horizon") + ",";
+      row += JsonKVStr("horizon_termination_policy",
+                       (p.broker_session_close > 0 && p.shadow_horizon_at == p.broker_session_close
+                        ? "broker_session_close" : "configured_horizon")) + ",";
       row += JsonKVStr("candidate_id", p.candidate_id) + ",";
-      row += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
-      row += JsonKVBool("trading_authority", false) + ",";
-      row += JsonKVBool("can_trade", false) + ",";
       row += JsonKVStr("decision_stage", decision_stage) + ",";
       row += JsonKVStr("rejection_reason", rejection_reason) + ",";
-      bool ai_decision_available = (StringLen(p.ai.decision_schema_version) > 0 &&
-                                    StringLen(p.ai.decision_state) > 0);
       if(ai_decision_available){
          row += JsonKVBool("model_raw_allow", p.model_raw_allow) + ",";
          row += JsonKVBool("python_final_allow", p.python_final_allow) + ",";
@@ -1175,8 +1744,9 @@ private:
          row += "\"mql_final_allow\":null,";
       row += JsonKVStr("python_decision_reasons", p.python_decision_reasons) + ",";
       row += JsonKVStr("mql_decision_reasons", p.mql_decision_reasons) + ",";
-      row += JsonKVStr("data_quality_status", trackable ? "PENDING_HYPOTHETICAL_OUTCOME" : "UNTRACKABLE_INVALID_CONTRACT") + ",";
-      row += JsonKVStr("symbol", p.symbol) + ",";
+      row += JsonKVStr("data_quality_status", p.shadow_data_quality_status) + ",";
+      row += JsonKVBool("trackable", trackable) + ",";
+      row += JsonKVBool("tp1_tracked_as_event", tp1_valid) + ",";
       row += JsonKVBool("is_buy", p.is_buy) + ",";
       row += JsonKVStr("direction", p.is_buy ? "BUY" : "SELL") + ",";
       row += JsonKVStr("setup_taxonomy_version", p.setup_taxonomy_version) + ",";
@@ -1186,16 +1756,21 @@ private:
       row += JsonKVStr("entry_branch", p.entry_branch) + ",";
       row += JsonKVStr("session", p.po3.session_name) + ",";
       row += JsonKVStr("killzone", p.killzone_code) + ",";
+      row += JsonKVStr("context_tier", p.po3.context_tier) + ",";
+      row += JsonKVStr("po3_state", p.po3.po3_state) + ",";
       row += JsonKVNum("entry", p.entry_est, 8) + ",";
       row += JsonKVNum("sl", p.sl, 8) + ",";
       row += JsonKVNum("tp1", p.tp1, 8) + ",";
       row += JsonKVNum("tp2", p.tp2, 8) + ",";
+      row += JsonKVNum("assessed_entry", p.shadow_assessed_entry, 8) + ",";
+      row += JsonKVNum("assessed_sl", p.shadow_assessed_sl, 8) + ",";
+      row += JsonKVNum("assessed_tp1", p.shadow_assessed_tp1, 8) + ",";
+      row += JsonKVNum("assessed_tp2", p.shadow_assessed_tp2, 8) + ",";
       row += JsonKVNum("net_rr", p.effective_rr2, 6) + ",";
       row += JsonKVStr("target_source", p.target_source) + ",";
       row += JsonKVStr("target_model", p.target_model) + ",";
       row += JsonKVStr("tp_model", p.tp_model) + ",";
       row += JsonKVStr("candidate_execution_fingerprint", p.request_execution_fingerprint) + ",";
-      row += JsonKVStr("execution_fingerprint", p.request_execution_fingerprint) + ",";
       row += JsonKVStr("assessed_execution_fingerprint", p.assessed_execution_fingerprint) + ",";
       row += JsonKVStr("final_execution_fingerprint", p.final_execution_fingerprint) + ",";
       row += JsonKVNum("execution_cost_r", p.execution_cost_r, 6) + ",";
@@ -1245,39 +1820,55 @@ private:
       row += JsonKVNum("trend_strength", p.trend_strength, 6) + ",";
       row += JsonKVNum("session_vol_ratio", p.session_vol_ratio, 6) + ",";
       row += JsonKVNum("fvg_score", p.fvg.score, 6) + ",";
+      row += JsonKVNum("setup_score", p.setup_score, 6) + ",";
       row += JsonKVNum("adverse_context_score", p.adverse_context_score, 6) + ",";
       row += JsonKVNum("vwap_dist_atr", p.vwap_dist_atr, 6) + ",";
       row += JsonKVNum("news_risk", p.news_risk, 6) + ",";
-      row += "\"hypothetical_outcome\":null,\"target_before_stop\":null,\"stop_before_target\":null,";
       row += JsonKVNum("adverse_threshold_r", SHADOW_ADVERSE_THRESHOLD_R, 4) + ",";
-      row += "\"reached_0_25r_before_adverse_threshold\":null,\"reached_0_50r_before_adverse_threshold\":null,";
-      row += "\"reached_0_25r_before_adverse\":null,\"reached_0_50r_before_adverse\":null,";
-      row += "\"mfe_r\":null,\"mae_r\":null,\"time_to_0_25r_sec\":null,\"time_to_0_50r_sec\":null,";
-      row += "\"time_to_stop_sec\":null,\"time_to_target_sec\":null,\"time_to_adverse_threshold_sec\":null,\"time_to_event_sec\":null,";
-      row += "\"horizon_result\":null,\"ambiguity_status\":null,\"censoring_status\":\"PENDING\"";
+      row += JsonKVNum("tp1_partial_fraction", p.shadow_tp1_partial_fraction, 6) + ",";
+      row += JsonKVStr("censoring_status", p.shadow_censoring_status) + ",";
+      row += JsonKVStr("ambiguity_status", p.shadow_ambiguity_status);
       row += "}";
-      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
-      if(trackable && !_PendingResearchRecordExists(m_shadow_pending, record_hash, true)){
-         int n = ArraySize(m_shadow_pending);
-         ArrayResize(m_shadow_pending, n + 1);
-         m_shadow_pending[n] = p;
+      _AppendShadowEvent(row);
+
+      _ShadowIndexAdd(m_shadow_seen_variants, variant_id, identity_expiry);
+      m_shadow_observed_total++;
+
+      if(!trackable){
+         m_shadow_untrackable_total++;
+         // Resolve it here rather than leaving an observation with no terminal.
+         // An untrackable candidate has a known, permanent outcome -- there is
+         // no price contract to follow -- so the one thing it must not be is
+         // indefinitely open.  Emitting the terminal makes "exactly one
+         // terminal per observed variant" an invariant the audit tool can
+         // check, instead of 243 observations the ledger could only describe as
+         // missing.  It is EXCLUDED_INVALID_CONTRACT, so it never enters a
+         // win/loss aggregate.
+         _ShadowFinalize(p, "UNTRACKABLE", observed_at, "EXCLUDED_INVALID_CONTRACT",
+                         "UNTRACKABLE_INVALID_CONTRACT", 0.0,
+                         MathMax(MathAbs(p.entry_est - p.sl), 1.0), false);
+         _CommitShadowTerminalResolution(p);
+         return;
       }
+      if(ArraySize(m_shadow_pending) >= MathMax(1, InpShadowMaxPendingTrackers)){
+         m_shadow_capacity_rejected_total++;
+         _AppendShadowDataQualityFailure(p, "pending_tracker_capacity_reached",
+                                         "pending=" + IntegerToString(ArraySize(m_shadow_pending))
+                                         + " cap=" + IntegerToString(InpShadowMaxPendingTrackers));
+         return;
+      }
+      int n = ArraySize(m_shadow_pending);
+      ArrayResize(m_shadow_pending, n + 1);
+      m_shadow_pending[n] = p;
    }
 
-   bool _FindCandidateAssessmentJson(const AiDecision &dec,
-                                     const string candidate_hash,
-                                     string &assessment) const {
-      assessment = "";
-      int count = JsonArrayObjectCount(dec.candidate_assessments_json);
-      for(int i=0; i<count; i++){
-         string item = "", item_hash = "";
-         if(!JsonArrayGetObject(dec.candidate_assessments_json, i, item)) continue;
-         if(!JsonGetStringStrict(item, "candidate_hash", item_hash)) continue;
-         if(item_hash != candidate_hash) continue;
-         assessment = item;
-         return true;
-      }
-      return false;
+   //--- Decision attribution -----------------------------------------
+
+   bool _ShadowAssessedPlanUnchanged(const TradePlan &tracked, const TradePlan &source) const {
+      return (DoubleToString(tracked.shadow_assessed_entry, 8) == DoubleToString(source.entry_est, 8) &&
+              DoubleToString(tracked.shadow_assessed_sl, 8) == DoubleToString(source.sl, 8) &&
+              DoubleToString(tracked.shadow_assessed_tp1, 8) == DoubleToString(source.tp1, 8) &&
+              DoubleToString(tracked.shadow_assessed_tp2, 8) == DoubleToString(source.tp2, 8));
    }
 
    void _WriteShadowDecisionUpdate(const TradePlan &source,
@@ -1286,6 +1877,7 @@ private:
                                    const string rejection_reason,
                                    const bool mql_final_allow) {
       if(!InpShadowCandidateLedgerEnable) return;
+      _LoadShadowTrackerIndex();
       string assessment = "";
       bool assessment_found = _FindCandidateAssessmentJson(dec, source.candidate_hash, assessment);
       bool model_allow = false, python_allow = false;
@@ -1300,13 +1892,57 @@ private:
             decision_state = "INVALID";
          }
       }
+      // Which candidate the request-level decision_state actually describes.
+      //
+      // An error envelope is schema-required to carry one of APPROVE/REJECT/
+      // ABSTAIN (AIGateBridge.mqh:1984), so a local pipeline failure reaches
+      // MT5 as decision_state="REJECT" with decision_quality_tier=
+      // DEGRADED_NON_TRADING and zero candidate_assessments.  Copying that
+      // string onto every candidate recorded infrastructure failures as AI
+      // rejections in the very ledger built to measure AI decision quality --
+      // 89 of 89 decision events in the 2026-09-08 ledger were
+      // decision_stage=python_not_selected assessment_found=false
+      // decision_state=REJECT, and every one of them came from the
+      // contract_manifest_incompatible envelopes.  The same copy also
+      // attributed a request-level verdict to candidates Python never assessed.
+      //
+      // The request-level state is kept verbatim in its own field; only the
+      // per-candidate attribution is corrected.
+      bool trading_tier = (dec.decision_quality_tier == "FULL_STRUCTURED" ||
+                           dec.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+      bool candidate_is_selected = (StringLen(dec.selected_candidate_hash) > 0 &&
+                                    source.candidate_hash == dec.selected_candidate_hash);
+      string decision_state_authority = "candidate_assessment";
+      if(!assessment_found && decision_state == "UNAVAILABLE"){
+         if(!trading_tier){
+            decision_state = "NOT_ASSESSED";
+            decision_state_authority = "error_envelope_no_candidate_assessment";
+         } else if(candidate_is_selected && StringLen(dec.decision_state) > 0){
+            decision_state = dec.decision_state;
+            decision_state_authority = "request_level_selected_candidate";
+         } else {
+            decision_state = "NOT_ASSESSED";
+            decision_state_authority = "candidate_not_assessed_by_python";
+         }
+      } else if(!assessment_found){
+         decision_state_authority = "candidate_assessment_unparseable";
+      }
+
+      TradePlan carrier = source;
+      string opportunity_id = _ShadowOpportunityId(carrier);
+      string variant_id = _ShadowVariantId(carrier, opportunity_id);
+      carrier.shadow_sweep_opportunity_id = opportunity_id;
+      carrier.shadow_sweep_opportunity_lineage = _ShadowOpportunityLineage(carrier);
+      carrier.shadow_candidate_variant_id = variant_id;
+      carrier.shadow_candidate_record_hash = _ShadowRecordHashForVariant(variant_id);
+      carrier.shadow_decision_state = decision_state;
+      carrier.shadow_decision_source = dec.decision_source;
+      if(StringLen(carrier.shadow_outcome_status) == 0) carrier.shadow_outcome_status = "DECISION_ONLY";
+
+      datetime at = _NowServerOrLocal();
       string row = "{";
-      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
-      row += JsonKVStr("event_type", "candidate_decision_update") + ",";
-      row += JsonKVInt("observed_at", (int)_NowServerOrLocal()) + ",";
+      row += _ShadowEventEnvelope(carrier, "shadow_decision_recorded", at);
       row += JsonKVStr("candidate_id", source.candidate_id) + ",";
-      row += JsonKVStr("candidate_hash", source.candidate_hash) + ",";
-      row += JsonKVStr("execution_fingerprint", source.request_execution_fingerprint) + ",";
       row += JsonKVStr("assessed_execution_fingerprint", source.assessed_execution_fingerprint) + ",";
       row += JsonKVStr("final_execution_fingerprint", source.final_execution_fingerprint) + ",";
       row += JsonKVNum("entry", source.entry_est, 8) + ",";
@@ -1319,9 +1955,16 @@ private:
       row += JsonKVNum("execution_cost_r", source.execution_cost_r, 6) + ",";
       row += JsonKVNum("spread_r", source.spread_r, 6) + ",";
       row += JsonKVStr("decision_stage", decision_stage) + ",";
-      row += JsonKVStr("decision_state", decision_state) + ",";
       row += JsonKVStr("rejection_reason", rejection_reason) + ",";
       row += JsonKVBool("assessment_found", assessment_found) + ",";
+      // The request-level verdict is preserved verbatim beside the corrected
+      // per-candidate attribution, so nothing is lost and neither can be
+      // mistaken for the other.
+      row += JsonKVStr("request_decision_state", dec.decision_state) + ",";
+      row += JsonKVStr("decision_state_authority", decision_state_authority) + ",";
+      row += JsonKVStr("decision_quality_tier", dec.decision_quality_tier) + ",";
+      row += JsonKVBool("trading_tier", trading_tier) + ",";
+      row += JsonKVBool("candidate_selected_by_python", candidate_is_selected) + ",";
       if(assessment_found){
          row += JsonKVBool("model_raw_allow", model_allow) + ",";
          row += JsonKVBool("python_final_allow", python_allow) + ",";
@@ -1346,17 +1989,23 @@ private:
       row += "\"decision_field_authority\":" + (StringLen(dec.decision_field_authority_json) > 0 ? dec.decision_field_authority_json : "{}") + ",";
       row += JsonKVStr("cohort_id", source.cohort_id) + ",";
       row += JsonKVBool("cohort_complete", source.cohort_complete) + ",";
-      row += "\"candidate_assessment\":" + (assessment_found ? assessment : "null") + ",";
-      row += JsonKVBool("trading_authority", false);
+      row += "\"candidate_assessment\":" + (assessment_found ? assessment : "null");
       row += "}";
-      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
+      _AppendShadowEvent(row);
 
+      // Attach the decision to the tracker WITHOUT rewriting the assessed plan.
+      // Pre-v4 this block copied entry/sl/tp1/tp2 from the caller, so a later
+      // recalculation silently replaced the very prices the AI had judged and
+      // the outcome no longer described the decision it was joined to.
       bool changed = false;
+      bool matched_tracker = false;
       for(int i=0; i<ArraySize(m_shadow_pending); i++){
-         if(m_shadow_pending[i].candidate_hash != source.candidate_hash) continue;
-         if(m_shadow_pending[i].request_execution_fingerprint != source.request_execution_fingerprint) continue;
+         if(m_shadow_pending[i].shadow_candidate_variant_id != variant_id) continue;
+         matched_tracker = true;
          m_shadow_pending[i].shadow_decision_stage = decision_stage;
          m_shadow_pending[i].shadow_rejection_reason = rejection_reason;
+         m_shadow_pending[i].shadow_decision_state = decision_state;
+         m_shadow_pending[i].shadow_decision_source = dec.decision_source;
          m_shadow_pending[i].model_raw_allow = model_allow;
          m_shadow_pending[i].python_final_allow = python_allow;
          m_shadow_pending[i].mql_final_allow = mql_final_allow;
@@ -1364,25 +2013,8 @@ private:
          m_shadow_pending[i].mql_decision_reasons = rejection_reason;
          m_shadow_pending[i].ai = dec;
          m_shadow_pending[i].decision_field_authority_json = dec.decision_field_authority_json;
-         m_shadow_pending[i].entry_est = source.entry_est;
-         m_shadow_pending[i].sl = source.sl;
-         m_shadow_pending[i].tp1 = source.tp1;
-         m_shadow_pending[i].tp2 = source.tp2;
-         m_shadow_pending[i].effective_rr2 = source.effective_rr2;
-         m_shadow_pending[i].target_source = source.target_source;
-         m_shadow_pending[i].target_model = source.target_model;
-         m_shadow_pending[i].tp_model = source.tp_model;
-         m_shadow_pending[i].request_execution_fingerprint = source.request_execution_fingerprint;
          m_shadow_pending[i].assessed_execution_fingerprint = source.assessed_execution_fingerprint;
          m_shadow_pending[i].final_execution_fingerprint = source.final_execution_fingerprint;
-         m_shadow_pending[i].execution_cost_r = source.execution_cost_r;
-         m_shadow_pending[i].spread_r = source.spread_r;
-         m_shadow_pending[i].slippage_r = source.slippage_r;
-         m_shadow_pending[i].engine_version = source.engine_version;
-         m_shadow_pending[i].git_commit = source.git_commit;
-         m_shadow_pending[i].dirty_tree_status = source.dirty_tree_status;
-         m_shadow_pending[i].set_file_hash = source.set_file_hash;
-         m_shadow_pending[i].runtime_input_hash = source.runtime_input_hash;
          m_shadow_pending[i].prompt_contract_version = source.prompt_contract_version;
          m_shadow_pending[i].reasoning_configuration = source.reasoning_configuration;
          m_shadow_pending[i].policy_snapshot_id = source.policy_snapshot_id;
@@ -1397,186 +2029,528 @@ private:
          changed = true;
       }
       if(changed) m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+
+      // A decision on a plan whose prices moved after the original observation is
+      // a genuinely different hypothesis.  Record it as a NEW child variant of the
+      // same opportunity and keep the original tracker running.
+      if(!matched_tracker && _ShadowPlanTrackable(source) &&
+         !_ShadowIndexContains(m_shadow_seen_variants, variant_id) &&
+         !_ShadowIndexContains(m_shadow_resolved_variants, variant_id)){
+         TradePlan revision = source;
+         revision.shadow_variant_parent_id = _ShadowPriorVariantForOpportunity(opportunity_id);
+         revision.shadow_variant_revision = (StringLen(revision.shadow_variant_parent_id) > 0 ? 1 : 0);
+         if(revision.shadow_variant_revision > 0) m_shadow_variant_revisions_total++;
+         revision.ai = dec;
+         revision.model_raw_allow = model_allow;
+         revision.python_final_allow = python_allow;
+         revision.mql_final_allow = mql_final_allow;
+         revision.python_decision_reasons = dec.reasons_json;
+         revision.mql_decision_reasons = rejection_reason;
+         _WriteShadowCandidateRecord(revision, decision_stage, rejection_reason);
+         _PersistShadowTrackerIndex();
+         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+      }
+      _PersistShadowTrackerIndex();
    }
 
+   string _ShadowPriorVariantForOpportunity(const string opportunity_id) const {
+      for(int i=0; i<ArraySize(m_shadow_pending); i++){
+         if(m_shadow_pending[i].shadow_sweep_opportunity_id == opportunity_id)
+            return m_shadow_pending[i].shadow_candidate_variant_id;
+      }
+      return "";
+   }
+
+   //--- Path evaluation ----------------------------------------------
+
+   bool _ShadowBarIsContested(const TradePlan &p,
+                              const bool tp1_valid,
+                              const double high,
+                              const double low) const {
+      bool sl_touch = (p.is_buy ? (low <= p.sl) : (high >= p.sl));
+      bool tp1_touch = (tp1_valid && (p.is_buy ? (high >= p.tp1) : (low <= p.tp1)));
+      bool tp2_touch = (p.is_buy ? (high >= p.tp2) : (low <= p.tp2));
+      if(!p.shadow_entry_activated){
+         bool entry_touch = (p.is_buy ? (low <= p.entry_est) : (high >= p.entry_est));
+         if(!entry_touch) return false;
+         // Entry and the stop alone are strictly ordered by geometry: for a buy
+         // the stop sits below the entry, so any path that reaches the stop has
+         // already passed the entry.  Only a favourable level AND the stop in the
+         // same bar leaves the order genuinely unknown.
+         return (sl_touch && (tp1_touch || tp2_touch));
+      }
+      if(p.shadow_tp1_hit) return (sl_touch && tp2_touch);
+      return (sl_touch && (tp1_touch || tp2_touch));
+   }
+
+   // One price observation -- an M1 bar, or a single tick when tick ordering is
+   // available.  Returns true when this step produced a terminal event.
+   bool _ShadowStepPrice(TradePlan &p,
+                         const double risk,
+                         const bool tp1_valid,
+                         const double high,
+                         const double low,
+                         const double close,
+                         const datetime at,
+                         const bool intrabar_ordered) {
+      if(!p.shadow_entry_activated){
+         bool entry_touch = (p.is_buy ? (low <= p.entry_est) : (high >= p.entry_est));
+         if(!entry_touch) return false;
+         p.shadow_entry_activated = true;
+         p.shadow_entry_activated_at = at;
+         p.shadow_entry_touch_price = p.entry_est;
+         p.shadow_time_to_entry_sec = (int)MathMax(0, (long)(at - p.shadow_observed_at));
+         p.shadow_max_favorable_price = p.entry_est;
+         p.shadow_max_adverse_price = p.entry_est;
+         if(!intrabar_ordered){
+            bool sl_same = (p.is_buy ? (low <= p.sl) : (high >= p.sl));
+            bool tp1_same = (tp1_valid && (p.is_buy ? (high >= p.tp1) : (low <= p.tp1)));
+            bool tp2_same = (p.is_buy ? (high >= p.tp2) : (low <= p.tp2));
+            if(sl_same && (tp1_same || tp2_same)){
+               p.shadow_entry_order_ambiguous = true;
+               _ShadowAddAmbiguity(p, "entry_and_opposing_levels_same_m1_bar");
+            }
+         }
+         _AppendShadowEntryActivated(p);
+      }
+
+      double favorable = (p.is_buy ? (high - p.entry_est) : (p.entry_est - low)) / risk;
+      double adverse = (p.is_buy ? (p.entry_est - low) : (high - p.entry_est)) / risk;
+      if(favorable > p.shadow_mfe_r){
+         p.shadow_mfe_r = favorable;
+         p.shadow_max_favorable_price = (p.is_buy ? high : low);
+      }
+      if(adverse > p.shadow_mae_r){
+         p.shadow_mae_r = adverse;
+         p.shadow_max_adverse_price = (p.is_buy ? low : high);
+      }
+
+      bool adverse_threshold_hit = (adverse >= SHADOW_ADVERSE_THRESHOLD_R);
+      bool new_adverse = (p.shadow_time_to_adverse_threshold_sec < 0 && adverse_threshold_hit);
+      int from_entry = (int)MathMax(0, (long)(at - p.shadow_entry_activated_at));
+      if(!p.shadow_reached_025r && favorable >= 0.25){
+         if(new_adverse && !intrabar_ordered){
+            p.shadow_025_order_ambiguous = true;
+            _ShadowAddAmbiguity(p, "favorable_0_25r_and_adverse_threshold_same_m1_bar");
+         }
+         p.shadow_reached_025r = true;
+         p.shadow_time_to_025r_sec = from_entry;
+         p.shadow_reached_025r_before_adverse = (!p.shadow_025_order_ambiguous &&
+                                                 p.shadow_time_to_adverse_threshold_sec < 0);
+         _AppendShadowPathProgress(p, "r025", at, 0.25);
+      }
+      if(!p.shadow_reached_050r && favorable >= 0.50){
+         if(new_adverse && !intrabar_ordered){
+            p.shadow_050_order_ambiguous = true;
+            _ShadowAddAmbiguity(p, "favorable_0_50r_and_adverse_threshold_same_m1_bar");
+         }
+         p.shadow_reached_050r = true;
+         p.shadow_time_to_050r_sec = from_entry;
+         p.shadow_reached_050r_before_adverse = (!p.shadow_050_order_ambiguous &&
+                                                 p.shadow_time_to_adverse_threshold_sec < 0);
+         _AppendShadowPathProgress(p, "r050", at, 0.50);
+      }
+      if(p.shadow_time_to_adverse_threshold_sec < 0 && adverse_threshold_hit)
+         p.shadow_time_to_adverse_threshold_sec = from_entry;
+      p.shadow_threshold_order_ambiguous = (p.shadow_025_order_ambiguous || p.shadow_050_order_ambiguous);
+      p.shadow_mfe_before_adverse = p.shadow_reached_025r_before_adverse;
+
+      bool sl_hit = (p.is_buy ? (low <= p.sl) : (high >= p.sl));
+      bool tp2_hit = (p.is_buy ? (high >= p.tp2) : (low <= p.tp2));
+      bool tp1_hit = (tp1_valid && (p.is_buy ? (high >= p.tp1) : (low <= p.tp1)));
+      // TP2 implies TP1 when TP1 lies between entry and TP2: reaching the far
+      // level requires passing the near one, so the order is geometry, not a
+      // guess.  Recording it keeps the TP1 event complete on gap-through bars.
+      if(tp2_hit && tp1_valid) tp1_hit = true;
+
+      if(!p.shadow_tp1_hit && tp1_hit){
+         if(sl_hit && !intrabar_ordered){
+            p.shadow_outcome_ambiguous = true;
+            _ShadowAddAmbiguity(p, "tp1_and_sl_same_m1_bar_without_tick_sequence");
+            _ShadowFinalize(p, "AMBIGUOUS_TP1_AND_SL_SAME_BAR", at, "EXCLUDED_AMBIGUOUS",
+                            "EXCLUDED_AMBIGUOUS_INTRABAR_ORDER", close, risk, tp1_valid);
+            return true;
+         }
+         p.shadow_tp1_hit = true;
+         p.shadow_tp1_hit_at = at;
+         p.shadow_time_to_tp1_sec = from_entry;
+         p.shadow_tp1_before_sl = true;
+         p.shadow_sl_before_tp1 = false;
+         p.shadow_time_to_target_sec = from_entry;
+         _AppendShadowTp1Reached(p);
+      }
+
+      if(sl_hit && tp2_hit && !intrabar_ordered){
+         p.shadow_outcome_ambiguous = true;
+         _ShadowAddAmbiguity(p, "tp2_and_sl_same_m1_bar_without_tick_sequence");
+         _ShadowFinalize(p, "AMBIGUOUS_TP2_AND_SL_SAME_BAR", at, "EXCLUDED_AMBIGUOUS",
+                         "EXCLUDED_AMBIGUOUS_INTRABAR_ORDER", close, risk, tp1_valid);
+         return true;
+      }
+      if(tp2_hit){
+         p.shadow_tp2_hit = true;
+         p.shadow_tp2_hit_at = at;
+         p.shadow_time_to_tp2_sec = from_entry;
+         p.shadow_tp2_before_sl = true;
+         p.shadow_sl_before_tp2 = false;
+         p.shadow_target_before_stop = true;
+         p.shadow_time_to_target_sec = from_entry;
+         p.shadow_tp1_then_tp2 = p.shadow_tp1_hit;
+         _ShadowFinalize(p, (p.shadow_tp1_hit ? "TP1_THEN_TP2" : "TP2_BEFORE_SL"), at,
+                         "UNCENSORED_TERMINAL", "RESOLVED_CLEAN_PRICE_PATH", close, risk, tp1_valid);
+         return true;
+      }
+      if(sl_hit){
+         p.shadow_stop_before_target = true;
+         p.shadow_time_to_stop_sec = from_entry;
+         p.shadow_sl_before_tp2 = true;
+         p.shadow_tp2_before_sl = false;
+         if(p.shadow_tp1_hit){
+            p.shadow_tp1_then_sl = true;
+            _ShadowFinalize(p, "TP1_THEN_SL", at, "UNCENSORED_TERMINAL",
+                            "RESOLVED_CLEAN_PRICE_PATH", close, risk, tp1_valid);
+         } else {
+            p.shadow_sl_before_tp1 = true;
+            p.shadow_tp1_before_sl = false;
+            _ShadowFinalize(p, "SL_BEFORE_TP1", at, "UNCENSORED_TERMINAL",
+                            "RESOLVED_CLEAN_PRICE_PATH", close, risk, tp1_valid);
+         }
+         return true;
+      }
+      return false;
+   }
+
+   // Replay the real tick stream for one contested bar.  Returns true when ticks
+   // were available and were used; the caller then must not re-apply the bar.
+   bool _ShadowStepBarWithTicks(TradePlan &p,
+                                const double risk,
+                                const bool tp1_valid,
+                                const datetime bar_time,
+                                bool &terminal) {
+      terminal = false;
+      if(!InpShadowUseTickOrdering) return false;
+      MqlTick ticks[];
+      ArraySetAsSeries(ticks, false);
+      ulong from_msc = (ulong)bar_time * 1000;
+      ulong to_msc = from_msc + 59999;
+      int got = CopyTicksRange(p.symbol, ticks, COPY_TICKS_ALL, from_msc, to_msc);
+      if(got <= 1) return false;
+      p.shadow_ordering_source = "tick_stream";
+      m_shadow_tick_ordered_total++;
+      for(int i=0; i<got; i++){
+         double price = ticks[i].bid;
+         if(price <= 0.0) price = ticks[i].last;
+         if(price <= 0.0) price = ticks[i].ask;
+         if(price <= 0.0) continue;
+         datetime tick_at = (datetime)(ticks[i].time_msc / 1000);
+         if(tick_at <= 0) tick_at = bar_time;
+         if(_ShadowStepPrice(p, risk, tp1_valid, price, price, price, tick_at, true)){
+            terminal = true;
+            return true;
+         }
+      }
+      return true;
+   }
+
+   double _ShadowRewardR(const TradePlan &p, const double level, const double risk) const {
+      if(risk <= 0.0) return 0.0;
+      return (p.is_buy ? (level - p.entry_est) : (p.entry_est - level)) / risk;
+   }
+
+   bool _ShadowTerminalCarriesResult(const string terminal_event) const {
+      return (terminal_event == "TP2_BEFORE_SL" ||
+              terminal_event == "TP1_THEN_TP2" ||
+              terminal_event == "TP1_THEN_SL" ||
+              terminal_event == "SL_BEFORE_TP1" ||
+              terminal_event == "HORIZON_CENSORED" ||
+              terminal_event == "SESSION_CLOSE_CENSORED");
+   }
+
+   void _ShadowFinalize(TradePlan &p,
+                        const string terminal_event,
+                        const datetime at,
+                        const string censoring_status,
+                        const string data_quality_status,
+                        const double last_close,
+                        const double risk,
+                        const bool tp1_valid) {
+      p.shadow_terminal_event = terminal_event;
+      p.shadow_terminal_event_at = at;
+      p.shadow_censoring_status = censoring_status;
+      p.shadow_data_quality_status = data_quality_status;
+      p.shadow_horizon_result = terminal_event;
+      p.shadow_evaluated_at = _NowServerOrLocal();
+      p.shadow_ambiguity_status = (p.shadow_outcome_ambiguous || p.shadow_entry_order_ambiguous ||
+                                   p.shadow_threshold_order_ambiguous ? "AMBIGUOUS" : "NONE");
+      p.shadow_time_to_event_sec = (p.shadow_entry_activated && at >= p.shadow_entry_activated_at
+                                    ? (int)(at - p.shadow_entry_activated_at)
+                                    : (at >= p.shadow_observed_at ? (int)(at - p.shadow_observed_at) : -1));
+      p.shadow_neither_target_nor_stop = (p.shadow_entry_activated && !p.shadow_tp2_hit &&
+                                          !p.shadow_sl_before_tp1 && !p.shadow_tp1_then_sl);
+
+      double cost = MathMax(0.0, p.execution_cost_r);
+      double frac = MathMax(0.0, MathMin(1.0, InpTP1PartialPct));
+      p.shadow_tp1_partial_fraction = frac;
+      double rr2 = _ShadowRewardR(p, p.tp2, risk);
+      double rr1 = (tp1_valid ? _ShadowRewardR(p, p.tp1, risk) : 0.0);
+
+      if(terminal_event == "TP2_BEFORE_SL" || terminal_event == "TP1_THEN_TP2"){
+         p.shadow_result_r_unmanaged = rr2 - cost;
+         p.shadow_result_r_tp1_partial = (p.shadow_tp1_hit && tp1_valid
+                                          ? frac * rr1 + (1.0 - frac) * rr2
+                                          : rr2) - cost;
+      } else if(terminal_event == "SL_BEFORE_TP1"){
+         p.shadow_result_r_unmanaged = -1.0 - cost;
+         p.shadow_result_r_tp1_partial = -1.0 - cost;
+      } else if(terminal_event == "TP1_THEN_SL"){
+         p.shadow_result_r_unmanaged = -1.0 - cost;
+         p.shadow_result_r_tp1_partial = (frac * rr1 + (1.0 - frac) * (-1.0)) - cost;
+      } else if(terminal_event == "HORIZON_CENSORED" || terminal_event == "SESSION_CLOSE_CENSORED"){
+         double open_r = _ShadowRewardR(p, last_close, risk);
+         p.shadow_result_r_unmanaged = open_r - cost;
+         p.shadow_result_r_tp1_partial = (p.shadow_tp1_hit && tp1_valid
+                                          ? frac * rr1 + (1.0 - frac) * open_r
+                                          : open_r) - cost;
+      } else {
+         // ENTRY_NEVER_REACHED, AMBIGUOUS_*, DATA_LOSS and UNTRACKABLE have no
+         // defined R.  They are emitted as null rather than as a zero that would
+         // read as a break-even trade in every aggregate.
+         p.shadow_result_r_unmanaged = 0.0;
+         p.shadow_result_r_tp1_partial = 0.0;
+      }
+      p.shadow_outcome_r = p.shadow_result_r_unmanaged;
+      p.shadow_outcome_status = terminal_event;
+      if(terminal_event == "TP2_BEFORE_SL" || terminal_event == "TP1_THEN_TP2")
+         p.shadow_outcome_reason = "target_reached_after_entry_activation";
+      else if(terminal_event == "SL_BEFORE_TP1" || terminal_event == "TP1_THEN_SL")
+         p.shadow_outcome_reason = "stop_reached_after_entry_activation";
+      else if(terminal_event == "HORIZON_CENSORED")
+         p.shadow_outcome_reason = "configured_horizon_reached";
+      else if(terminal_event == "SESSION_CLOSE_CENSORED")
+         p.shadow_outcome_reason = "broker_session_close_reached";
+      else if(terminal_event == "ENTRY_NEVER_REACHED")
+         p.shadow_outcome_reason = "hypothetical_entry_never_activated";
+      else if(terminal_event == "DATA_LOSS")
+         p.shadow_outcome_reason = "price_path_unavailable_after_bounded_retries";
+      else if(terminal_event == "UNTRACKABLE")
+         p.shadow_outcome_reason = "invalid_entry_stop_target_contract";
+      else
+         p.shadow_outcome_reason = "intrabar_order_unresolvable_without_tick_sequence";
+   }
+
+   bool _ShadowM1SeriesAvailable(const string symbol) const {
+      long synchronized = 0;
+      long first_date = 0;
+      if(!SeriesInfoInteger(symbol, PERIOD_M1, SERIES_SYNCHRONIZED, synchronized))
+         return false;
+      if(synchronized == 0)
+         return false;
+      if(!SeriesInfoInteger(symbol, PERIOD_M1, SERIES_FIRSTDATE, first_date))
+         return false;
+      return (first_date > 0);
+   }
+
+   // Ask the terminal to BUILD the M1 series, instead of only asking whether it
+   // already exists.
+   //
+   // The engine scans on H4/M15, so nothing else in the EA ever touches M1 for
+   // the other 87 symbols and their series stays unsynchronized.  The ranged
+   // CopyRates(symbol, tf, from, to, ...) overload returns 0 on an unbuilt
+   // series without reliably starting the build, so the tracker sat in the
+   // "genuine data failure" branch, burned all 30 retries against history that
+   // was never requested, and resolved DATA_LOSS.  Measured in the 2026-09-08
+   // ledger: 103 of 106 non-BITCOIN terminal resolutions were DATA_LOSS, while
+   // BITCOIN -- the one symbol whose M1 the terminal already held -- produced
+   // none at all.  The positional overload is the documented way to initiate an
+   // asynchronous build; it is called for its side effect and the result is
+   // re-read from the series itself on the next evaluation.
+   bool _ShadowEnsureM1History(const string symbol) {
+      if(_ShadowM1SeriesAvailable(symbol)) return true;
+      MqlRates probe[];
+      ArraySetAsSeries(probe, false);
+      CopyRates(symbol, PERIOD_M1, 0, 2, probe);
+      m_shadow_history_requests_total++;
+      return _ShadowM1SeriesAvailable(symbol);
+   }
+
+   // Incremental path evaluation.  The cursor advances with the bars already
+   // consumed, so a tracker is never re-scanned from its observation on every
+   // tick and its accumulated state survives a restart.
    bool _EvaluateShadowCandidate(TradePlan &p, string &reason) {
       reason = "";
-      p.shadow_outcome_ambiguous = false;
-      p.shadow_threshold_order_ambiguous = false;
-      p.shadow_ambiguity_reason = "";
-      p.shadow_reached_025r = false;
-      p.shadow_reached_050r = false;
-      p.shadow_reached_025r_before_adverse = false;
-      p.shadow_reached_050r_before_adverse = false;
-      p.shadow_time_to_adverse_threshold_sec = -1;
-      p.shadow_025_order_ambiguous = false;
-      p.shadow_050_order_ambiguous = false;
-      p.shadow_target_before_stop = false;
-      p.shadow_stop_before_target = false;
-      p.shadow_mfe_before_adverse = false;
-      p.shadow_time_to_event_sec = -1;
-      p.shadow_time_to_025r_sec = -1;
-      p.shadow_time_to_050r_sec = -1;
-      p.shadow_time_to_stop_sec = -1;
-      p.shadow_time_to_target_sec = -1;
-      p.shadow_horizon_result = "PENDING";
-      p.shadow_censoring_status = "PENDING";
-      double entry = p.entry_est;
-      double sl = p.sl;
-      double tp = p.tp2;
-      double risk_dist = MathAbs(entry - sl);
-      if(entry <= 0.0 || sl <= 0.0 || tp <= 0.0 || risk_dist <= 0.0 ||
-         (p.is_buy && !(sl < entry && tp > entry)) ||
-         (!p.is_buy && !(sl > entry && tp < entry))){
-         p.shadow_outcome_status = "UNTRACKABLE";
-         p.shadow_outcome_reason = "invalid_entry_stop_target_contract";
+      double risk = MathAbs(p.entry_est - p.sl);
+      if(!_ShadowPlanTrackable(p)){
          p.shadow_outcome_ambiguous = true;
-         p.shadow_ambiguity_reason = "invalid_entry_stop_target_contract";
-         p.shadow_horizon_result = "UNTRACKABLE";
-         p.shadow_censoring_status = "EXCLUDED_INVALID_CONTRACT";
+         _ShadowAddAmbiguity(p, "invalid_entry_stop_target_contract");
+         _ShadowFinalize(p, "UNTRACKABLE", _NowServerOrLocal(), "EXCLUDED_INVALID_CONTRACT",
+                         "UNTRACKABLE_INVALID_CONTRACT", 0.0, MathMax(risk, 1.0), false);
          reason = p.shadow_outcome_reason;
          return true;
       }
+      bool tp1_valid = _ShadowTp1Valid(p);
       datetime now = _NowServerOrLocal();
       datetime evaluation_end = now;
       if(p.shadow_horizon_at > 0 && evaluation_end > p.shadow_horizon_at)
          evaluation_end = p.shadow_horizon_at;
-      if(evaluation_end <= p.shadow_observed_at){
-         reason = "awaiting_first_closed_price_bar";
-         return false;
+      datetime cursor = (p.shadow_scan_cursor > 0 ? (datetime)((long)p.shadow_scan_cursor + 60)
+                                                  : p.shadow_observed_at);
+      bool horizon_passed = (p.shadow_horizon_at > 0 && now >= p.shadow_horizon_at);
+
+      if(evaluation_end <= cursor){
+         if(!horizon_passed){
+            reason = "awaiting_next_closed_m1_bar";
+            return false;
+         }
+         // Nothing left to read and the horizon is over: censor with what the
+         // path already produced rather than leaving the tracker pending.
+         return _ShadowFinalizeAtHorizon(p, risk, tp1_valid, reason);
       }
+
       MqlRates rates[];
       ArraySetAsSeries(rates, false);
-      int got = CopyRates(p.symbol, PERIOD_M1, p.shadow_observed_at, evaluation_end, rates);
+      int got = CopyRates(p.symbol, PERIOD_M1, cursor, evaluation_end, rates);
       if(got <= 0){
-         if(now < p.shadow_horizon_at){ reason = "price_path_temporarily_unavailable"; return false; }
-         p.shadow_outcome_status = "UNAVAILABLE";
-         p.shadow_outcome_reason = "price_path_unavailable_at_horizon";
+         // CopyRates returns 0 for two different facts: "this symbol's history
+         // cannot be read" and "the market was closed across this range".  Only
+         // the first is a data failure.  Counting a weekend or a session gap as
+         // one resolves a perfectly healthy tracker as DATA_LOSS -- measured:
+         // in a 2026.08.30-09.05 tester run every DATA_LOSS belonged to a
+         // session-gapped symbol, while BITCOIN, which trades continuously,
+         // produced none at all.
+         // Requesting the series is what separates "the market was closed" from
+         // "this symbol's M1 history was never asked for".  Before this call the
+         // second case could not become the first, so it always ended as
+         // DATA_LOSS no matter how many retries were configured.
+         if(_ShadowEnsureM1History(p.symbol)){
+            m_shadow_market_closed_intervals_total++;
+            p.shadow_last_evaluated_at = now;
+            if(!horizon_passed){
+               reason = "no_m1_bars_in_range_market_closed";
+               return false;
+            }
+            // The horizon expired inside a closure: censor with the path that
+            // was actually observed rather than inventing an outcome.
+            return _ShadowFinalizeAtHorizon(p, risk, tp1_valid, reason);
+         }
+         p.shadow_data_retry_count++;
+         p.shadow_last_evaluated_at = now;
+         m_shadow_history_pending_total++;
+         if(!horizon_passed || p.shadow_data_retry_count < MathMax(1, InpShadowMaxDataRetries)){
+            reason = "m1_history_not_synchronized_awaiting_download";
+            return false;
+         }
+         m_shadow_data_loss_total++;
          p.shadow_outcome_ambiguous = true;
-         p.shadow_ambiguity_reason = "price_path_unavailable_at_horizon";
-         p.shadow_horizon_result = "DATA_LOSS";
-         p.shadow_censoring_status = "EXCLUDED_DATA_LOSS";
+         _ShadowAddAmbiguity(p, "m1_series_never_synchronized");
+         // Named for the check that actually failed.  "copy_rates_unavailable"
+         // conflated an unsynchronized series with an unreadable one and made
+         // the largest exclusion class in the ledger undiagnosable.
+         _AppendShadowDataQualityFailure(p, "m1_series_not_synchronized_after_retries",
+                                         "retries=" + IntegerToString(p.shadow_data_retry_count)
+                                         + " history_requests=" + IntegerToString((int)m_shadow_history_requests_total)
+                                         + " series_synchronized=false");
+         _ShadowFinalize(p, "DATA_LOSS", now, "EXCLUDED_DATA_LOSS", "EXCLUDED_DATA_LOSS",
+                         0.0, risk, tp1_valid);
          reason = p.shadow_outcome_reason;
          return true;
       }
+      p.shadow_data_retry_count = 0;
+      p.shadow_last_evaluated_at = now;
+      if(p.shadow_ordering_source == "not_yet_observed") p.shadow_ordering_source = "m1_bar";
 
-      double max_favorable = 0.0;
-      double max_adverse = 0.0;
-      double last_close = entry;
-      datetime event_at = 0;
-      datetime favorable_025_at = 0;
-      datetime favorable_050_at = 0;
-      datetime adverse_threshold_at = 0;
-      bool resolved = false;
+      double last_close = (p.shadow_entry_activated ? p.entry_est : 0.0);
       for(int i=0; i<got; i++){
+         datetime bar_time = rates[i].time;
+         if(bar_time < p.shadow_observed_at) continue;
          last_close = rates[i].close;
-         double favorable = (p.is_buy ? rates[i].high - entry : entry - rates[i].low) / risk_dist;
-         double adverse = (p.is_buy ? rates[i].low - entry : entry - rates[i].high) / risk_dist;
-         max_favorable = MathMax(max_favorable, favorable);
-         max_adverse = MathMin(max_adverse, adverse);
-         bool favorable_025_hit = (favorable >= 0.25);
-         bool favorable_050_hit = (favorable >= 0.50);
-         bool adverse_threshold_hit = (adverse <= -SHADOW_ADVERSE_THRESHOLD_R);
-         if(favorable_025_at == 0 && adverse_threshold_at == 0 && favorable_025_hit && adverse_threshold_hit){
-            p.shadow_025_order_ambiguous = true;
-            p.shadow_ambiguity_reason = "favorable_0_25r_and_adverse_threshold_same_m1_bar";
-         }
-         if(favorable_050_at == 0 && adverse_threshold_at == 0 && favorable_050_hit && adverse_threshold_hit){
-            p.shadow_050_order_ambiguous = true;
-            if(StringLen(p.shadow_ambiguity_reason) > 0) p.shadow_ambiguity_reason += ";";
-            p.shadow_ambiguity_reason += "favorable_0_50r_and_adverse_threshold_same_m1_bar";
-         }
-         if(favorable_025_at == 0 && favorable_025_hit) favorable_025_at = rates[i].time;
-         if(favorable_050_at == 0 && favorable_050_hit) favorable_050_at = rates[i].time;
-         if(adverse_threshold_at == 0 && adverse_threshold_hit) adverse_threshold_at = rates[i].time;
-         p.shadow_threshold_order_ambiguous = (p.shadow_025_order_ambiguous || p.shadow_050_order_ambiguous);
-         bool sl_hit = (p.is_buy ? rates[i].low <= sl : rates[i].high >= sl);
-         bool tp_hit = (p.is_buy ? rates[i].high >= tp : rates[i].low <= tp);
-         if(sl_hit && tp_hit){
-            p.shadow_outcome_status = "AMBIGUOUS";
-            p.shadow_outcome_reason = "sl_and_tp_touched_without_tick_sequence";
-            p.shadow_outcome_ambiguous = true;
-            p.shadow_ambiguity_reason = "sl_and_tp_touched_without_tick_sequence";
-            p.shadow_time_to_stop_sec = (int)MathMax(0, (long)(rates[i].time - p.shadow_observed_at));
-            p.shadow_time_to_target_sec = p.shadow_time_to_stop_sec;
-            p.shadow_horizon_result = "AMBIGUOUS_SAME_BAR_TERMINAL";
-            p.shadow_censoring_status = "EXCLUDED_AMBIGUOUS";
-            event_at = rates[i].time;
-            resolved = true;
-            break;
-         }
-         if(sl_hit || tp_hit){
-            p.shadow_outcome_status = (sl_hit ? "RESOLVED_STOP" : "RESOLVED_TARGET");
-            p.shadow_outcome_reason = "terminal_price_level_reached";
-            p.shadow_outcome_r = (sl_hit ? -1.0 : MathAbs(tp - entry) / risk_dist)
-                                 - MathMax(0.0, p.execution_cost_r);
-            if(sl_hit){
-               p.shadow_stop_before_target = true;
-               p.shadow_time_to_stop_sec = (int)MathMax(0, (long)(rates[i].time - p.shadow_observed_at));
-               p.shadow_horizon_result = "STOP_FIRST";
+         bool terminal = false;
+         if(_ShadowBarIsContested(p, tp1_valid, rates[i].high, rates[i].low)){
+            bool tick_terminal = false;
+            if(_ShadowStepBarWithTicks(p, risk, tp1_valid, bar_time, tick_terminal)){
+               terminal = tick_terminal;
             } else {
-               p.shadow_target_before_stop = true;
-               p.shadow_time_to_target_sec = (int)MathMax(0, (long)(rates[i].time - p.shadow_observed_at));
-               p.shadow_horizon_result = "TARGET_FIRST";
+               terminal = _ShadowStepPrice(p, risk, tp1_valid, rates[i].high, rates[i].low,
+                                           rates[i].close, bar_time, false);
             }
-            p.shadow_censoring_status = "UNCENSORED_TERMINAL";
-            event_at = rates[i].time;
-            resolved = true;
-            break;
+         } else {
+            terminal = _ShadowStepPrice(p, risk, tp1_valid, rates[i].high, rates[i].low,
+                                        rates[i].close, bar_time, false);
+         }
+         p.shadow_scan_cursor = bar_time;
+         if(terminal){
+            reason = p.shadow_outcome_reason;
+            return true;
          }
       }
-      p.shadow_mfe_r = max_favorable;
-      p.shadow_mae_r = max_adverse;
-      p.shadow_reached_025r = (favorable_025_at > 0);
-      p.shadow_reached_050r = (favorable_050_at > 0);
-      p.shadow_time_to_025r_sec = (favorable_025_at > 0
-                                   ? (int)MathMax(0, (long)(favorable_025_at - p.shadow_observed_at)) : -1);
-      p.shadow_time_to_050r_sec = (favorable_050_at > 0
-                                   ? (int)MathMax(0, (long)(favorable_050_at - p.shadow_observed_at)) : -1);
-      p.shadow_time_to_adverse_threshold_sec = (adverse_threshold_at > 0
-                                                ? (int)MathMax(0, (long)(adverse_threshold_at - p.shadow_observed_at)) : -1);
-      if(!p.shadow_025_order_ambiguous && favorable_025_at > 0 &&
-         (adverse_threshold_at == 0 || favorable_025_at < adverse_threshold_at))
-         p.shadow_reached_025r_before_adverse = true;
-      if(!p.shadow_050_order_ambiguous && favorable_050_at > 0 &&
-         (adverse_threshold_at == 0 || favorable_050_at < adverse_threshold_at))
-         p.shadow_reached_050r_before_adverse = true;
-      p.shadow_mfe_before_adverse = p.shadow_reached_025r_before_adverse;
-      if(!resolved && now < p.shadow_horizon_at){
-         p.shadow_outcome_status = "PENDING";
-         p.shadow_outcome_reason = "awaiting_hypothetical_price_path";
+
+      if(!horizon_passed){
+         p.shadow_outcome_status = (p.shadow_entry_activated ? "ACTIVE" : "PENDING");
+         p.shadow_outcome_reason = (p.shadow_entry_activated
+                                    ? "tracking_open_hypothetical_position"
+                                    : "awaiting_entry_activation");
          reason = p.shadow_outcome_reason;
          return false;
       }
-      if(!resolved){
-         p.shadow_outcome_status = "RESOLVED_HORIZON";
-         bool ended_at_session_close = (p.broker_session_close > 0 && p.shadow_horizon_at == p.broker_session_close);
-         p.shadow_outcome_reason = (ended_at_session_close ? "broker_session_close_reached" : "configured_horizon_reached");
-         p.shadow_outcome_r = (p.is_buy ? last_close - entry : entry - last_close) / risk_dist
-                              - MathMax(0.0, p.execution_cost_r);
-         string horizon_prefix = (ended_at_session_close ? "SESSION_CLOSE" : "HORIZON");
-         p.shadow_horizon_result = horizon_prefix + (p.shadow_outcome_r > 0.0 ? "_POSITIVE" :
-                                    (p.shadow_outcome_r < 0.0 ? "_NEGATIVE" : "_FLAT"));
-         p.shadow_censoring_status = (ended_at_session_close
-                                      ? "RIGHT_CENSORED_SESSION_CLOSE"
-                                      : "RIGHT_CENSORED_HORIZON");
-         event_at = evaluation_end;
+      return _ShadowFinalizeAtHorizonWithClose(p, risk, tp1_valid, last_close, reason);
+   }
+
+   bool _ShadowFinalizeAtHorizon(TradePlan &p, const double risk, const bool tp1_valid, string &reason) {
+      double last_close = 0.0;
+      MqlRates tail[];
+      ArraySetAsSeries(tail, false);
+      // One closing observation for the censored result.  If even this is
+      // unavailable the candidate is censored without an R rather than assigned
+      // a fabricated one.
+      if(CopyRates(p.symbol, PERIOD_M1, p.shadow_horizon_at - 300, p.shadow_horizon_at, tail) > 0)
+         last_close = tail[ArraySize(tail) - 1].close;
+      return _ShadowFinalizeAtHorizonWithClose(p, risk, tp1_valid, last_close, reason);
+   }
+
+   bool _ShadowFinalizeAtHorizonWithClose(TradePlan &p,
+                                          const double risk,
+                                          const bool tp1_valid,
+                                          const double last_close,
+                                          string &reason) {
+      bool ended_at_session_close = (p.broker_session_close > 0 &&
+                                     p.shadow_horizon_at == p.broker_session_close);
+      if(!p.shadow_entry_activated){
+         p.shadow_entry_never_reached = true;
+         m_shadow_entry_never_reached_total++;
+         _ShadowFinalize(p, "ENTRY_NEVER_REACHED", p.shadow_horizon_at,
+                         "EXCLUDED_ENTRY_NEVER_ACTIVATED", "EXCLUDED_ENTRY_NEVER_ACTIVATED",
+                         0.0, risk, tp1_valid);
+         reason = p.shadow_outcome_reason;
+         return true;
       }
-      p.shadow_evaluated_at = now;
-      p.shadow_time_to_event_sec = (event_at >= p.shadow_observed_at
-                                    ? (int)(event_at - p.shadow_observed_at) : -1);
+      if(last_close <= 0.0){
+         m_shadow_data_loss_total++;
+         p.shadow_outcome_ambiguous = true;
+         _ShadowAddAmbiguity(p, "horizon_close_unavailable");
+         _AppendShadowDataQualityFailure(p, "horizon_close_unavailable", "activated_without_final_close");
+         _ShadowFinalize(p, "DATA_LOSS", p.shadow_horizon_at, "EXCLUDED_DATA_LOSS",
+                         "EXCLUDED_DATA_LOSS", 0.0, risk, tp1_valid);
+         reason = p.shadow_outcome_reason;
+         return true;
+      }
+      _ShadowFinalize(p,
+                      (ended_at_session_close ? "SESSION_CLOSE_CENSORED" : "HORIZON_CENSORED"),
+                      p.shadow_horizon_at,
+                      (ended_at_session_close ? "RIGHT_CENSORED_SESSION_CLOSE" : "RIGHT_CENSORED_HORIZON"),
+                      "RESOLVED_CENSORED_PRICE_PATH",
+                      last_close, risk, tp1_valid);
       reason = p.shadow_outcome_reason;
       return true;
    }
 
+   //--- Terminal resolution -------------------------------------------
+
    void _AppendShadowOutcomeResolution(const TradePlan &p) {
       string row = "{";
-      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
-      row += JsonKVStr("event_type", "hypothetical_outcome_resolution") + ",";
-      row += JsonKVStr("parent_record_hash", p.shadow_candidate_record_hash) + ",";
-      row += JsonKVStr("candidate_id", p.candidate_id) + ",";
-      row += JsonKVStr("candidate_hash", p.candidate_hash) + ",";
-      row += JsonKVStr("execution_fingerprint", p.request_execution_fingerprint) + ",";
+      row += _ShadowEventEnvelope(p, "shadow_terminal_resolution", p.shadow_terminal_event_at);
+      row += JsonKVStr("sweep_opportunity_lineage", p.shadow_sweep_opportunity_lineage) + ",";
+      row += JsonKVStr("variant_parent_id", p.shadow_variant_parent_id) + ",";
+      row += JsonKVInt("variant_revision", p.shadow_variant_revision) + ",";
+      row += JsonKVInt("observation_count", p.shadow_observation_count) + ",";
       row += JsonKVStr("assessed_execution_fingerprint", p.assessed_execution_fingerprint) + ",";
       row += JsonKVStr("final_execution_fingerprint", p.final_execution_fingerprint) + ",";
       row += JsonKVStr("direction", p.is_buy ? "BUY" : "SELL") + ",";
@@ -1584,25 +2558,112 @@ private:
       row += JsonKVNum("sl", p.sl, 8) + ",";
       row += JsonKVNum("tp1", p.tp1, 8) + ",";
       row += JsonKVNum("tp2", p.tp2, 8) + ",";
+      row += JsonKVNum("assessed_entry", p.shadow_assessed_entry, 8) + ",";
+      row += JsonKVNum("assessed_sl", p.shadow_assessed_sl, 8) + ",";
+      row += JsonKVNum("assessed_tp1", p.shadow_assessed_tp1, 8) + ",";
+      row += JsonKVNum("assessed_tp2", p.shadow_assessed_tp2, 8) + ",";
       row += JsonKVNum("net_rr", p.effective_rr2, 6) + ",";
       row += JsonKVNum("execution_cost_r", p.execution_cost_r, 6) + ",";
       row += JsonKVStr("target_source", p.target_source) + ",";
       row += JsonKVStr("target_model", p.target_model) + ",";
+      row += JsonKVStr("tp_model", p.tp_model) + ",";
+      row += JsonKVStr("setup_family", p.setup_family) + ",";
+      row += JsonKVStr("setup_class", p.setup_class) + ",";
+      row += JsonKVStr("entry_branch", p.entry_branch) + ",";
+      row += JsonKVStr("session", p.po3.session_name) + ",";
+      row += JsonKVStr("killzone", p.killzone_code) + ",";
+      row += JsonKVStr("context_tier", p.po3.context_tier) + ",";
       row += JsonKVStr("decision_stage", p.shadow_decision_stage) + ",";
-      row += JsonKVStr("decision_state", p.ai.decision_state) + ",";
       row += JsonKVStr("rejection_reason", p.shadow_rejection_reason) + ",";
+      // The envelope's decision_state is the CANDIDATE's corrected attribution;
+      // these two say which request it came from and whether that request was
+      // of trading grade at all.  Without the tier an aggregate cannot tell an
+      // AI rejection from a degraded infrastructure envelope, which is the
+      // whole point of separating them.
+      row += JsonKVStr("request_decision_state", p.ai.decision_state) + ",";
+      row += JsonKVStr("decision_quality_tier", p.ai.decision_quality_tier) + ",";
+      row += JsonKVBool("trading_tier",
+                        (p.ai.decision_quality_tier == "FULL_STRUCTURED" ||
+                         p.ai.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED")) + ",";
+      row += JsonKVStr("narrative_state", p.narrative_state) + ",";
+      row += JsonKVStr("python_decision_reasons", p.python_decision_reasons) + ",";
+      row += JsonKVStr("mql_decision_reasons", p.mql_decision_reasons) + ",";
+      row += JsonKVStr("model_version", p.ai.model_version) + ",";
+      row += JsonKVStr("prompt_contract_version", p.prompt_contract_version) + ",";
+      row += JsonKVStr("decision_schema_version", p.ai.decision_schema_version) + ",";
       row += JsonKVBool("model_raw_allow", p.model_raw_allow) + ",";
       row += JsonKVBool("python_final_allow", p.python_final_allow) + ",";
       row += JsonKVBool("mql_final_allow", p.mql_final_allow) + ",";
-      row += JsonKVBool("trading_authority", false) + ",";
-      row += JsonKVBool("can_trade", false) + ",";
+      row += JsonKVInt("observed_at", (int)p.shadow_observed_at) + ",";
+      row += JsonKVInt("horizon_at", (int)p.shadow_horizon_at) + ",";
       row += JsonKVInt("evaluated_at", (int)p.shadow_evaluated_at) + ",";
+      row += JsonKVStr("terminal_event", p.shadow_terminal_event) + ",";
+      row += JsonKVInt("terminal_event_at", (int)p.shadow_terminal_event_at) + ",";
       row += JsonKVStr("hypothetical_outcome", p.shadow_outcome_status) + ",";
       row += JsonKVStr("outcome_reason", p.shadow_outcome_reason) + ",";
-      if(p.shadow_outcome_ambiguous) row += "\"result_r\":null,";
-      else row += JsonKVNum("result_r", p.shadow_outcome_r, 6) + ",";
-      row += JsonKVNum("mfe_r", p.shadow_mfe_r, 6) + ",";
-      row += JsonKVNum("mae_r", p.shadow_mae_r, 6) + ",";
+      row += JsonKVBool("entry_activated", p.shadow_entry_activated) + ",";
+      if(p.shadow_entry_activated){
+         row += JsonKVInt("entry_activated_at", (int)p.shadow_entry_activated_at) + ",";
+         row += JsonKVInt("time_to_entry_sec", p.shadow_time_to_entry_sec) + ",";
+         row += JsonKVNum("entry_touch_price", p.shadow_entry_touch_price, 8) + ",";
+      } else {
+         row += "\"entry_activated_at\":null,\"time_to_entry_sec\":null,\"entry_touch_price\":null,";
+      }
+      row += JsonKVBool("entry_order_ambiguous", p.shadow_entry_order_ambiguous) + ",";
+      row += JsonKVBool("entry_never_reached", p.shadow_entry_never_reached) + ",";
+      row += JsonKVBool("tp1_tracked_as_event", _ShadowTp1Valid(p)) + ",";
+      row += JsonKVBool("tp1_hit", p.shadow_tp1_hit) + ",";
+      if(p.shadow_tp1_hit){
+         row += JsonKVInt("tp1_hit_at", (int)p.shadow_tp1_hit_at) + ",";
+         row += JsonKVInt("time_to_tp1_sec", p.shadow_time_to_tp1_sec) + ",";
+      } else {
+         row += "\"tp1_hit_at\":null,\"time_to_tp1_sec\":null,";
+      }
+      row += JsonKVBool("tp2_hit", p.shadow_tp2_hit) + ",";
+      if(p.shadow_tp2_hit){
+         row += JsonKVInt("tp2_hit_at", (int)p.shadow_tp2_hit_at) + ",";
+         row += JsonKVInt("time_to_tp2_sec", p.shadow_time_to_tp2_sec) + ",";
+      } else {
+         row += "\"tp2_hit_at\":null,\"time_to_tp2_sec\":null,";
+      }
+      // Ordered path booleans are only meaningful on an uncensored, unambiguous,
+      // activated path.  Everywhere else they are null, so an aggregate cannot
+      // silently read "not observed" as "did not happen".
+      bool ordered_valid = (p.shadow_censoring_status == "UNCENSORED_TERMINAL" &&
+                            !p.shadow_outcome_ambiguous && p.shadow_entry_activated);
+      if(ordered_valid){
+         row += JsonKVBool("tp1_before_sl", p.shadow_tp1_before_sl) + ",";
+         row += JsonKVBool("sl_before_tp1", p.shadow_sl_before_tp1) + ",";
+         row += JsonKVBool("tp2_before_sl", p.shadow_tp2_before_sl) + ",";
+         row += JsonKVBool("sl_before_tp2", p.shadow_sl_before_tp2) + ",";
+         row += JsonKVBool("tp1_then_sl", p.shadow_tp1_then_sl) + ",";
+         row += JsonKVBool("tp1_then_tp2", p.shadow_tp1_then_tp2) + ",";
+         row += JsonKVBool("target_before_stop", p.shadow_target_before_stop) + ",";
+         row += JsonKVBool("stop_before_target", p.shadow_stop_before_target) + ",";
+      } else {
+         row += "\"tp1_before_sl\":null,\"sl_before_tp1\":null,";
+         row += "\"tp2_before_sl\":null,\"sl_before_tp2\":null,";
+         row += "\"tp1_then_sl\":null,\"tp1_then_tp2\":null,";
+         row += "\"target_before_stop\":null,\"stop_before_target\":null,";
+      }
+      row += JsonKVBool("neither_target_nor_stop", p.shadow_neither_target_nor_stop) + ",";
+      if(p.shadow_entry_activated){
+         row += JsonKVNum("mfe_r", p.shadow_mfe_r, 6) + ",";
+         row += JsonKVNum("mae_r", p.shadow_mae_r, 6) + ",";
+         row += JsonKVNum("maximum_favorable_price", p.shadow_max_favorable_price, 8) + ",";
+         row += JsonKVNum("maximum_adverse_price", p.shadow_max_adverse_price, 8) + ",";
+      } else {
+         row += "\"mfe_r\":null,\"mae_r\":null,";
+         row += "\"maximum_favorable_price\":null,\"maximum_adverse_price\":null,";
+      }
+      if(_ShadowTerminalCarriesResult(p.shadow_terminal_event) && !p.shadow_outcome_ambiguous){
+         row += JsonKVNum("result_r_unmanaged", p.shadow_result_r_unmanaged, 6) + ",";
+         row += JsonKVNum("result_r_with_configured_tp1_partial", p.shadow_result_r_tp1_partial, 6) + ",";
+         row += JsonKVNum("result_r", p.shadow_result_r_unmanaged, 6) + ",";
+      } else {
+         row += "\"result_r_unmanaged\":null,\"result_r_with_configured_tp1_partial\":null,\"result_r\":null,";
+      }
+      row += JsonKVNum("tp1_partial_fraction", p.shadow_tp1_partial_fraction, 6) + ",";
       row += JsonKVInt("time_to_event_sec", p.shadow_time_to_event_sec) + ",";
       if(p.shadow_time_to_025r_sec >= 0) row += JsonKVInt("time_to_0_25r_sec", p.shadow_time_to_025r_sec) + ",";
       else row += "\"time_to_0_25r_sec\":null,";
@@ -1612,26 +2673,19 @@ private:
       else row += "\"time_to_stop_sec\":null,";
       if(p.shadow_time_to_target_sec >= 0) row += JsonKVInt("time_to_target_sec", p.shadow_time_to_target_sec) + ",";
       else row += "\"time_to_target_sec\":null,";
-      if(p.shadow_time_to_adverse_threshold_sec >= 0) row += JsonKVInt("time_to_adverse_threshold_sec", p.shadow_time_to_adverse_threshold_sec) + ",";
+      if(p.shadow_time_to_adverse_threshold_sec >= 0)
+         row += JsonKVInt("time_to_adverse_threshold_sec", p.shadow_time_to_adverse_threshold_sec) + ",";
       else row += "\"time_to_adverse_threshold_sec\":null,";
-      if(p.shadow_censoring_status == "UNCENSORED_TERMINAL"){
-         row += JsonKVBool("target_before_stop", p.shadow_target_before_stop) + ",";
-         row += JsonKVBool("stop_before_target", p.shadow_stop_before_target) + ",";
-      } else {
-         row += "\"target_before_stop\":null,\"stop_before_target\":null,";
-      }
       row += JsonKVNum("adverse_threshold_r", SHADOW_ADVERSE_THRESHOLD_R, 4) + ",";
       if(p.shadow_025_order_ambiguous){
-         row += "\"reached_0_25r_before_adverse_threshold\":null,\"reached_0_25r_before_adverse\":null,";
+         row += "\"reached_0_25r_before_adverse_threshold\":null,";
       } else {
          row += JsonKVBool("reached_0_25r_before_adverse_threshold", p.shadow_reached_025r_before_adverse) + ",";
-         row += JsonKVBool("reached_0_25r_before_adverse", p.shadow_reached_025r_before_adverse) + ",";
       }
       if(p.shadow_050_order_ambiguous){
-         row += "\"reached_0_50r_before_adverse_threshold\":null,\"reached_0_50r_before_adverse\":null,";
+         row += "\"reached_0_50r_before_adverse_threshold\":null,";
       } else {
          row += JsonKVBool("reached_0_50r_before_adverse_threshold", p.shadow_reached_050r_before_adverse) + ",";
-         row += JsonKVBool("reached_0_50r_before_adverse", p.shadow_reached_050r_before_adverse) + ",";
       }
       row += JsonKVBool("threshold_0_25_order_ambiguous", p.shadow_025_order_ambiguous) + ",";
       row += JsonKVBool("threshold_0_50_order_ambiguous", p.shadow_050_order_ambiguous) + ",";
@@ -1639,45 +2693,313 @@ private:
       row += JsonKVBool("reached_0_50r", p.shadow_reached_050r) + ",";
       row += JsonKVStr("horizon_result", p.shadow_horizon_result) + ",";
       row += JsonKVStr("censoring_status", p.shadow_censoring_status) + ",";
+      row += JsonKVStr("ambiguity_status", p.shadow_ambiguity_status) + ",";
       row += JsonKVStr("ambiguity_reason", p.shadow_ambiguity_reason) + ",";
+      row += JsonKVStr("data_quality_status", p.shadow_data_quality_status) + ",";
+      row += JsonKVStr("ordering_source", p.shadow_ordering_source) + ",";
       row += JsonKVStr("cohort_id", p.cohort_id) + ",";
       row += JsonKVBool("cohort_complete", p.cohort_complete) + ",";
-      row += JsonKVBool("ambiguous", p.shadow_outcome_ambiguous) + ",";
-      row += JsonKVStr("data_quality_status",
-                       (p.shadow_outcome_ambiguous ? "EXCLUDED_AMBIGUOUS" :
-                        (p.shadow_censoring_status == "UNCENSORED_TERMINAL" ? "RESOLVED_CLEAN_PRICE_PATH" :
-                         "RESOLVED_CENSORED_PRICE_PATH")));
+      row += JsonKVBool("ambiguous", p.shadow_outcome_ambiguous);
       row += "}";
-      m_bus.AppendText(m_bus.LogDir() + "\\shadow_candidates.jsonl", row + "\n");
+      _AppendShadowEvent(row);
+   }
+
+   // Exactly one terminal per variant.  The index is consulted BEFORE the event
+   // is written, so a duplicate is suppressed and counted rather than appended.
+   bool _CommitShadowTerminalResolution(TradePlan &p) {
+      string variant_id = p.shadow_candidate_variant_id;
+      if(StringLen(variant_id) == 0){
+         m_shadow_quarantined_total++;
+         _AppendShadowDataQualityFailure(p, "terminal_without_variant_identity", "");
+         return false;
+      }
+      if(_ShadowIndexContains(m_shadow_resolved_variants, variant_id)){
+         m_shadow_terminal_duplicate_suppressed_total++;
+         return false;
+      }
+      _ShadowIndexAdd(m_shadow_resolved_variants, variant_id, _ShadowIdentityExpiry(_NowServerOrLocal()));
+      _AppendShadowOutcomeResolution(p);
+      m_shadow_resolved_total++;
+      if(p.shadow_outcome_ambiguous) m_shadow_ambiguous_total++;
+      if(StringFind(p.shadow_censoring_status, "CENSORED") == 0 ||
+         StringFind(p.shadow_censoring_status, "RIGHT_CENSORED") == 0)
+         m_shadow_censored_total++;
+      return true;
+   }
+
+   bool _ShadowTrackerDue(const TradePlan &p, const datetime now) const {
+      if(p.shadow_last_evaluated_at <= 0) return true;
+      long interval = (long)MathMax(1, InpShadowEvaluationIntervalSeconds);
+      return ((long)(now - p.shadow_last_evaluated_at) >= interval);
    }
 
    void _MaintainShadowCandidateOutcomes() {
+      if(!InpShadowCandidateLedgerEnable) return;
+      if(ArraySize(m_shadow_pending) <= 0){
+         // The observe-once / terminal-once index used to be persisted only
+         // when a PENDING tracker changed, so a scan that produced nothing but
+         // untrackable or deduplicated observations left its identities in
+         // memory only.  A restart then re-observed and could re-resolve them.
+         _PersistShadowTrackerIndex();
+         return;
+      }
+      _LoadShadowTrackerIndex();
+      datetime now = _NowServerOrLocal();
+      int budget = MathMax(1, InpShadowMaxEvaluationsPerTick);
+      int evaluated = 0;
       bool changed = false;
+      // Descending walk with swap-removal: the swapped-in element is always one
+      // already visited, so no tracker is skipped.  The due gate plus the budget
+      // is what keeps an M1-resolution study from costing one CopyRates per
+      // pending tracker per second for information that changes once a minute --
+      // and because an evaluated tracker stops being due, the next call advances
+      // to the ones this call could not afford rather than starving them.
       for(int i=ArraySize(m_shadow_pending)-1; i>=0; i--){
+         if(evaluated >= budget) break;
+         if(!_ShadowTrackerDue(m_shadow_pending[i], now)) continue;
+         evaluated++;
          TradePlan p = m_shadow_pending[i];
          string reason = "";
          if(!_EvaluateShadowCandidate(p, reason)){
             m_shadow_pending[i] = p;
+            changed = true;
             continue;
          }
-         _AppendShadowOutcomeResolution(p);
+         _CommitShadowTerminalResolution(p);
          int last = ArraySize(m_shadow_pending) - 1;
          if(i != last) m_shadow_pending[i] = m_shadow_pending[last];
          ArrayResize(m_shadow_pending, last);
          changed = true;
       }
-      if(changed) m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+      if(changed){
+         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+         _PersistShadowTrackerIndex();
+      }
    }
 
-   void _WriteRejectedShadowCandidate(const TradePlan &base,
+   //--- Restart recovery ----------------------------------------------
+
+   //--- Exactly why a restored tracker could not be re-admitted.  Reported as a
+   //--- reason code rather than a bare count so the quarantine file is
+   //--- reconcilable without re-deriving the classification.
+   string _ShadowRestoreQuarantineReason(const TradePlan &p) const {
+      if(p.shadow_candidate_schema_version != SHADOW_CANDIDATE_SCHEMA_VERSION)
+         return "incompatible_shadow_schema_version";
+      if(StringLen(p.shadow_candidate_variant_id) == 0)
+         return "missing_candidate_variant_identity";
+      if(StringLen(p.shadow_candidate_record_hash) == 0)
+         return "missing_parent_record_hash";
+      return "untrackable_entry_stop_target_contract";
+   }
+
+   void _AppendShadowQuarantineLine(string &lines[], const TradePlan &p, const string reason) {
+      string row = "{";
+      row += JsonKVStr("schema_version", SHADOW_CANDIDATE_SCHEMA_VERSION) + ",";
+      row += JsonKVStr("event_type", "shadow_tracker_quarantined") + ",";
+      row += JsonKVInt("quarantined_at", (int)_NowServerOrLocal()) + ",";
+      row += JsonKVStr("reason", reason) + ",";
+      row += JsonKVStr("recorded_schema_version", p.shadow_candidate_schema_version) + ",";
+      row += JsonKVStr("candidate_variant_id", p.shadow_candidate_variant_id) + ",";
+      row += JsonKVStr("sweep_opportunity_id", p.shadow_sweep_opportunity_id) + ",";
+      row += JsonKVStr("parent_record_hash", p.shadow_candidate_record_hash) + ",";
+      row += JsonKVStr("symbol", p.symbol) + ",";
+      row += JsonKVInt("observed_at", (int)p.shadow_observed_at) + ",";
+      row += JsonKVInt("horizon_at", (int)p.shadow_horizon_at) + ",";
+      row += JsonKVBool("trading_authority", false) + ",";
+      // The plan itself is retained verbatim: a quarantined record has to remain
+      // reconstructible by a later build, not merely countable by this one.
+      row += "\"plan\":" + m_state.TradePlanToJson(p);
+      row += "}";
+      int n = ArraySize(lines);
+      ArrayResize(lines, n + 1);
+      lines[n] = row;
+   }
+
+   void _RestoreShadowPendingTrackers() {
+      _LoadShadowTrackerIndex();
+      TradePlan restored[];
+      ArrayResize(restored, 0);
+      if(!m_state.LoadPlans(m_state.ShadowPendingPath(), restored)) return;
+      ArrayResize(m_shadow_pending, 0);
+      // An unresolved candidate is never deleted.  A record this build cannot
+      // address -- a pre-v4 schema, a lost identity, an unusable price contract
+      // -- is written to the quarantine file WITH its reason, so the sample
+      // survives for reconciliation instead of vanishing at the next restart.
+      string quarantine_lines[];
+      if(!m_state.LoadTextLines(m_state.ShadowQuarantinePath(), quarantine_lines))
+         ArrayResize(quarantine_lines, 0);
+      int quarantined = 0;
+      int already_resolved = 0;
+      int duplicates = 0;
+      for(int i=0; i<ArraySize(restored); i++){
+         TradePlan p = restored[i];
+         if(p.shadow_candidate_schema_version != SHADOW_CANDIDATE_SCHEMA_VERSION ||
+            StringLen(p.shadow_candidate_record_hash) == 0 ||
+            StringLen(p.shadow_candidate_variant_id) == 0 ||
+            !_ShadowPlanTrackable(p)){
+            quarantined++;
+            _AppendShadowQuarantineLine(quarantine_lines, p,
+                                        _ShadowRestoreQuarantineReason(p));
+            continue;
+         }
+         if(_ShadowIndexContains(m_shadow_resolved_variants, p.shadow_candidate_variant_id)){
+            already_resolved++;
+            continue;
+         }
+         bool duplicate = false;
+         for(int j=0; j<ArraySize(m_shadow_pending); j++){
+            if(m_shadow_pending[j].shadow_candidate_variant_id != p.shadow_candidate_variant_id) continue;
+            duplicate = true;
+            break;
+         }
+         if(duplicate){ duplicates++; continue; }
+         // A restored variant must stay known to the dedup index even if the
+         // index file was lost, or the next scan of the same sweep would mint a
+         // second tracker for a candidate already being followed.
+         _ShadowIndexAdd(m_shadow_seen_variants, p.shadow_candidate_variant_id,
+                         _ShadowIdentityExpiry(p.shadow_observed_at));
+         _ShadowIndexAdd(m_shadow_seen_opportunities, p.shadow_sweep_opportunity_id,
+                         _ShadowIdentityExpiry(p.shadow_observed_at));
+         int n = ArraySize(m_shadow_pending);
+         ArrayResize(m_shadow_pending, n + 1);
+         m_shadow_pending[n] = p;
+      }
+      m_shadow_restored_total += ArraySize(m_shadow_pending);
+      m_shadow_quarantined_total += quarantined;
+      if(quarantined > 0 || already_resolved > 0 || duplicates > 0)
+         m_shadow_index_dirty = true;
+      bool quarantine_written = true;
+      if(quarantined > 0)
+         quarantine_written = m_state.SaveTextLines(m_state.ShadowQuarantinePath(), quarantine_lines);
+      _Journal("[shadow_restore] file_records=" + IntegerToString(ArraySize(restored))
+               + " restored=" + IntegerToString(ArraySize(m_shadow_pending))
+               + " quarantined_incompatible=" + IntegerToString(quarantined)
+               + " quarantine_retained=" + (quarantine_written ? "true" : "false")
+               + " quarantine_file_records=" + IntegerToString(ArraySize(quarantine_lines))
+               + " already_resolved_dropped=" + IntegerToString(already_resolved)
+               + " duplicate_dropped=" + IntegerToString(duplicates)
+               + " schema=" + SHADOW_CANDIDATE_SCHEMA_VERSION);
+      if(quarantined > 0 && !quarantine_written)
+         _Journal("[shadow_tracker_warning] quarantine_persist_failed=" + IntegerToString(quarantined)
+                  + " path=" + m_state.ShadowQuarantinePath()
+                  + " reason=unresolved_candidates_must_never_be_discarded");
+   }
+
+   // Overdue trackers are resolved at Init, not left to the per-tick budget.
+   // A restart after a horizon has already ended must produce the terminal
+   // record immediately while the history is still available.
+   void _ResolveOverdueShadowTrackersOnInit() {
+      if(!InpShadowCandidateLedgerEnable) return;
+      int total = ArraySize(m_shadow_pending);
+      if(total <= 0) return;
+      datetime now = _NowServerOrLocal();
+      int resolved = 0;
+      int still_pending = 0;
+      for(int i=ArraySize(m_shadow_pending)-1; i>=0; i--){
+         if(m_shadow_pending[i].shadow_horizon_at > now){ still_pending++; continue; }
+         TradePlan p = m_shadow_pending[i];
+         string reason = "";
+         if(!_EvaluateShadowCandidate(p, reason)){
+            m_shadow_pending[i] = p;
+            still_pending++;
+            continue;
+         }
+         if(_CommitShadowTerminalResolution(p)) resolved++;
+         int last = ArraySize(m_shadow_pending) - 1;
+         if(i != last) m_shadow_pending[i] = m_shadow_pending[last];
+         ArrayResize(m_shadow_pending, last);
+      }
+      m_shadow_restored_overdue_resolved_total += resolved;
+      if(resolved > 0 || total != ArraySize(m_shadow_pending)){
+         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+         _PersistShadowTrackerIndex();
+      }
+      _Journal("[shadow_restore_overdue] examined=" + IntegerToString(total)
+               + " resolved_immediately=" + IntegerToString(resolved)
+               + " still_pending=" + IntegerToString(ArraySize(m_shadow_pending)));
+   }
+
+   int _ShadowExpiredPendingCount() const {
+      datetime now = _NowServerOrLocal();
+      int expired = 0;
+      for(int i=0; i<ArraySize(m_shadow_pending); i++){
+         if(m_shadow_pending[i].shadow_horizon_at > 0 && m_shadow_pending[i].shadow_horizon_at < now)
+            expired++;
+      }
+      return expired;
+   }
+
+   void _LogShadowTrackerSummary() const {
+      if(!InpShadowCandidateLedgerEnable) return;
+      int expired_pending = _ShadowExpiredPendingCount();
+      _Journal("[shadow_tracker] schema=" + SHADOW_CANDIDATE_SCHEMA_VERSION
+               + " opportunities_total=" + IntegerToString((int)m_shadow_opportunities_total)
+               + " observed_total=" + IntegerToString((int)m_shadow_observed_total)
+               + " deduplicated_total=" + IntegerToString((int)m_shadow_observation_dedup_total)
+               + " variant_revisions_total=" + IntegerToString((int)m_shadow_variant_revisions_total)
+               + " pending=" + IntegerToString(ArraySize(m_shadow_pending))
+               + " restored_total=" + IntegerToString((int)m_shadow_restored_total)
+               + " restored_overdue_resolved_total=" + IntegerToString((int)m_shadow_restored_overdue_resolved_total)
+               + " resolved_total=" + IntegerToString((int)m_shadow_resolved_total)
+               + " censored_total=" + IntegerToString((int)m_shadow_censored_total)
+               + " ambiguous_total=" + IntegerToString((int)m_shadow_ambiguous_total)
+               + " data_loss_total=" + IntegerToString((int)m_shadow_data_loss_total)
+               + " market_closed_intervals_total=" + IntegerToString((int)m_shadow_market_closed_intervals_total)
+               + " history_requests_total=" + IntegerToString((int)m_shadow_history_requests_total)
+               + " history_pending_total=" + IntegerToString((int)m_shadow_history_pending_total)
+               + " entry_activated_total=" + IntegerToString((int)m_shadow_entry_activated_total)
+               + " entry_never_reached_total=" + IntegerToString((int)m_shadow_entry_never_reached_total)
+               + " untrackable_total=" + IntegerToString((int)m_shadow_untrackable_total)
+               + " terminal_duplicate_suppressed_total=" + IntegerToString((int)m_shadow_terminal_duplicate_suppressed_total)
+               + " quarantined_total=" + IntegerToString((int)m_shadow_quarantined_total)
+               + " capacity_rejected_total=" + IntegerToString((int)m_shadow_capacity_rejected_total)
+               + " tick_ordered_bars_total=" + IntegerToString((int)m_shadow_tick_ordered_total)
+               + " progress_events_total=" + IntegerToString((int)m_shadow_progress_events_total)
+               + " expired_pending=" + IntegerToString(expired_pending)
+               + " trading_authority=false");
+      if(expired_pending > 0)
+         _Journal("[shadow_tracker_warning] expired_pending=" + IntegerToString(expired_pending)
+                  + " reason=horizon_passed_without_terminal_resolution"
+                  + " action=retry_bounded_then_data_loss"
+                  + " max_retries=" + IntegerToString(InpShadowMaxDataRetries));
+      if(m_shadow_capacity_rejected_total > 0)
+         _Journal("[shadow_tracker_warning] capacity_rejected_total="
+                  + IntegerToString((int)m_shadow_capacity_rejected_total)
+                  + " cap=" + IntegerToString(InpShadowMaxPendingTrackers)
+                  + " reason=pending_tracker_capacity_reached");
+   }
+
+   void _WriteRejectedShadowCandidate(const TradePlan &built,
                                       const FVGZone &zone,
                                       const string branch,
                                       const string reason) {
-      TradePlan shadow = base;
+      // The branch builder publishes its working plan on every exit, so a
+      // rejection that happened AFTER prices were built carries a real,
+      // trackable counterfactual.  Passing the untouched base here -- as the
+      // pre-v4 code did -- threw those prices away and made 100% of pre-AI
+      // rejections UNTRACKABLE_INVALID_CONTRACT.
+      TradePlan shadow = built;
+      if(StringLen(shadow.symbol) == 0) return;
       shadow.fvg = zone;
       shadow.entry_branch = branch;
       shadow.entry_model = branch;
       _WriteShadowCandidateRecord(shadow, "pre_ai_reject", reason);
+   }
+
+   bool _FindCandidateAssessmentJson(const AiDecision &dec,
+                                     const string candidate_hash,
+                                     string &assessment) const {
+      assessment = "";
+      int count = JsonArrayObjectCount(dec.candidate_assessments_json);
+      for(int i=0; i<count; i++){
+         string item = "", item_hash = "";
+         if(!JsonArrayGetObject(dec.candidate_assessments_json, i, item)) continue;
+         if(!JsonGetStringStrict(item, "candidate_hash", item_hash)) continue;
+         if(item_hash != candidate_hash) continue;
+         assessment = item;
+         return true;
+      }
+      return false;
    }
 
    string _NormToken(string value) const {
@@ -2496,6 +3818,7 @@ private:
                + " maintain_positions_seconds=" + DoubleToString((double)m_mp_us / 1000000.0, 3)
                + " maintain_positions_us_per_call="
                + DoubleToString(m_mp_calls > 0 ? (double)m_mp_us / (double)m_mp_calls : 0.0, 1));
+      _LogShadowTrackerSummary();
       _LogJournalDedupSummary();
    }
 
@@ -3177,17 +4500,28 @@ private:
    }
 
    string _AssetClassForSymbol(const string symbol) const {
+      string value = symbol;
+      StringToUpper(value);
+      if(StringFind(value, "XAU") >= 0 || StringFind(value, "GOLD") >= 0 ||
+         StringFind(value, "XAG") >= 0 || StringFind(value, "SILVER") >= 0 ||
+         StringFind(value, "XPT") >= 0 || StringFind(value, "XPD") >= 0) return "metals";
+      if(StringFind(value, "WTI") >= 0 || StringFind(value, "BRENT") >= 0 ||
+         StringFind(value, "OIL") >= 0 || StringFind(value, "NGAS") >= 0) return "energy";
+      if(StringFind(value, "BTC") >= 0 || StringFind(value, "ETH") >= 0 ||
+         StringFind(value, "SOL") >= 0 || StringFind(value, "LTC") >= 0 ||
+         StringFind(value, "XRP") >= 0) return "crypto";
+      if(StringFind(value, "US30") >= 0 || StringFind(value, "USNDAQ") >= 0 ||
+         StringFind(value, "NASDAQ") >= 0 || StringFind(value, "NAS100") >= 0 ||
+         StringFind(value, "USSPX") >= 0 || StringFind(value, "SPX") >= 0 ||
+         StringFind(value, "US500") >= 0 || StringFind(value, "GERMANY") >= 0 ||
+         StringFind(value, "GER40") >= 0 || StringFind(value, "DE40") >= 0 ||
+         StringFind(value, "DAX") >= 0 || StringFind(value, "UK100") >= 0 ||
+         StringFind(value, "JAPAN") >= 0 || StringFind(value, "JP225") >= 0 ||
+         StringFind(value, "US2000") >= 0 || StringFind(value, "FRANCE") >= 0 ||
+         StringFind(value, "FRA40") >= 0 || StringFind(value, "EURO50") >= 0) return "indices";
       string base = "", quote = "";
-      if(_ExtractFxPair(symbol, base, quote)){
-         if(base == "BTC" || base == "ETH" || base == "LTC" || base == "XRP") return "crypto";
-         if(base == "XAU" || base == "XAG" || base == "XPT" || base == "XPD") return "metal";
-         return "forex";
-      }
-      if(StringFind(symbol, "BTC") >= 0 || StringFind(symbol, "ETH") >= 0) return "crypto";
-      if(StringFind(symbol, "XAU") >= 0 || StringFind(symbol, "XAG") >= 0) return "metal";
-      if(StringFind(symbol, "US30") >= 0 || StringFind(symbol, "NAS") >= 0 || StringFind(symbol, "DE40") >= 0 ||
-         StringFind(symbol, "JP225") >= 0 || StringFind(symbol, "UK100") >= 0) return "index";
-      return "cfd";
+      if(_ExtractFxPair(symbol, base, quote)) return "fx";
+      return "other";
    }
 
    string _UsdExposureKey(const TradePlan &p) const {
@@ -13529,12 +14863,23 @@ private:
       // checks cannot prove that the position is fully closed.  The immutable
       // DEAL_POSITION_ID/POSITION_IDENTIFIER relationship is authoritative.
       if(position_id > 0 && _FindPositionTicketByIdentifier(position_id) > 0){
-         _Journal("[trade_completion_deferred] reason=position_identifier_still_open"
-                  + " position_id=" + IntegerToString(position_id)
-                  + " key_hint=" + key
-                  + " partial_exit_not_final=true");
+         // Steady state, not a failure: journal the transition once per position
+         // instead of once per MaintainPositions tick.  The deferral itself is
+         // unchanged -- the trade is still not finalized while the identifier lives.
+         if(!_CompletionDeferralJournaled(position_id)){
+            _MarkCompletionDeferralJournaled(position_id);
+            _Journal("[trade_completion_deferred] reason=position_identifier_still_open"
+                     + " position_id=" + IntegerToString(position_id)
+                     + " key_hint=" + key
+                     + " partial_exit_not_final=true"
+                     + " journal_mode=once_per_position_until_closed");
+         }
          return false;
       }
+      if(position_id > 0 && _ClearCompletionDeferralJournaled(position_id))
+         _Journal("[trade_completion_resumed] reason=position_identifier_closed"
+                  + " position_id=" + IntegerToString(position_id)
+                  + " key_hint=" + key);
       if(position_id > 0 && _PathExists(_CompletedPositionMarkerPath(position_id))) return false;
       if(_PathExists(_TradeResultPath(key))) return false;
       if(_HasOpenPositionWithKey(key)) return false;
@@ -14448,7 +15793,7 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
          _AssessedFingerprintFromDecision(p, p.ai) != p.assessed_execution_fingerprint)
          return _RejectPlacement(p, "execution_fingerprint_mismatch");
       string rollover_reason = "";
-      if(PO3EntryBlockedByRollover(_NowServerOrLocal(), rollover_reason))
+      if(PO3EntryBlockedByRolloverForSymbol(p.symbol, _NowServerOrLocal(), rollover_reason))
          return _RejectPlacement(p, rollover_reason);
       if(!_ExclusiveModelPreExecutionOk(p)) return false;
       if(_ShouldSkipForGlobalOpenPositions()) return _RejectPlacement(p, "another managed position is already open");
@@ -15209,6 +16554,7 @@ public:
       ArrayResize(m_context_policy, 0);
       _ResetSetupFunnel();
       _ResetFinalCounters();
+      _ResetShadowTrackerState();
    }
 
    string RuntimeInputHash() {
@@ -15539,17 +16885,12 @@ public:
             ArrayResize(m_counterfactual_pending, last);
          }
       }
-      if(m_state.LoadPlans(m_state.ShadowPendingPath(), tmp)){
-         _CopyPlans(m_shadow_pending, tmp);
-         for(int i=ArraySize(m_shadow_pending)-1; i>=0; i--){
-            if(m_shadow_pending[i].shadow_candidate_schema_version == SHADOW_CANDIDATE_SCHEMA_VERSION &&
-               m_shadow_pending[i].shadow_outcome_status == "PENDING" &&
-               StringLen(m_shadow_pending[i].shadow_candidate_record_hash) > 0) continue;
-            int last = ArraySize(m_shadow_pending) - 1;
-            if(i != last) m_shadow_pending[i] = m_shadow_pending[last];
-            ArrayResize(m_shadow_pending, last);
-         }
-      }
+      // Shadow trackers are restored through their own path: the identity index
+      // has to load first (terminal-once), incompatible records are quarantined
+      // rather than silently dropped, and anything already past its horizon is
+      // resolved here instead of waiting on the per-tick evaluation budget.
+      _RestoreShadowPendingTrackers();
+      _ResolveOverdueShadowTrackersOnInit();
       PenaltyState penalty_tmp[];
       if(m_state.LoadPenaltyStates(m_state.PenaltyPath(), penalty_tmp)) { m_penalty.RestoreStates(penalty_tmp); }
       _RecoverManagedExposureOnInit();
@@ -15744,8 +17085,19 @@ public:
       }
    }
 
+   // Whole-scan freeze.  This aborts the scan for EVERY symbol, so it may only
+   // fire on a condition that is genuinely book-wide.  The trading freeze is
+   // one.  The pre-close flatten is only one while its scope is all
+   // instruments: under a forex-only scope, halting the scan would stop crypto,
+   // indices and metals trading for a close-out that will never touch them.
+   // Those symbols are still blocked individually at placement time by
+   // PO3EntryBlockedByRolloverForSymbol, so nothing in scope escapes.
    bool EntryFreezeActive(string &reason) {
-      return PO3EntryBlockedByRollover(_NowServerOrLocal(), reason);
+      datetime now = _NowServerOrLocal();
+      if(!InpPreCloseFlattenForexOnly && PO3PreCloseFlattenActive(now, reason)) return true;
+      if(PO3TradingFreezeActive(now, reason)) return true;
+      reason = "";
+      return false;
    }
 
    void MaintainRolloverProtection() {
@@ -15753,7 +17105,10 @@ public:
       datetime now = _NowServerOrLocal();
       string reason = "";
       if(PO3PreCloseFlattenActive(now, reason)){
-         bool acted = _FlattenManagedExposureWithReason(m_trade, reason);
+         // Scoped sweep: only symbols inside the configured pre-close scope are
+         // closed.  Everything else is journalled as retained, so "we left it
+         // open" is a recorded decision rather than a silent omission.
+         bool acted = _FlattenManagedExposureScoped(m_trade, reason, true);
          if(acted){
             _Journal("rollover protection flattened managed exposure reason=" + reason);
             m_last_rollover_log = now;
@@ -16163,7 +17518,7 @@ public:
             ZeroMemory(p);
             string reject_reason = "";
             if(!_TryBuildCandidateFromBranch(base, fvg_cands[i], branches[b], p, reject_reason)){
-               _WriteRejectedShadowCandidate(base, fvg_cands[i], branches[b], reject_reason);
+               _WriteRejectedShadowCandidate(p, fvg_cands[i], branches[b], reject_reason);
                if(reject_reason == "exclusive_breaker_retest_virgin_strong_origin_only")
                   continue;
                string reject_stage = "branch";
@@ -16400,7 +17755,7 @@ public:
             ZeroMemory(p);
             string reject_reason = "";
              if(!_TryBuildCandidateFromBranch(base, fvg_cands[i], branches[b], p, reject_reason)){
-                _WriteRejectedShadowCandidate(base, fvg_cands[i], branches[b], reject_reason);
+                _WriteRejectedShadowCandidate(p, fvg_cands[i], branches[b], reject_reason);
                 if(reject_reason == "exclusive_breaker_retest_virgin_strong_origin_only")
                    continue;
                 if(StringFind(reject_reason, "branch_disabled_") == 0) branch_disabled_count++;
@@ -17225,7 +18580,7 @@ public:
 
          PO3State watch_state = (p.po3.state != PO3_IDLE ? p.po3.state : PO3StateFromString(p.po3.po3_state));
          // Which sequence this setup is DEFINED by.  _DeterministicExecutionGate has
-         // guarded its sweep/displacement/BOS checks with this predicate since §4o;
+         // guarded its sweep/displacement/BOS checks with this predicate since В§4o;
          // this gate never consulted it, so it demanded a closed BOS from families
          // that have none by definition.  #Germany40 (micro_continuation_fvg, story
          // "...|none_continuation|...") was approved, armed, and then touched its
@@ -17440,7 +18795,7 @@ public:
          if(now <= 0) now = TimeLocal();
 
          string rollover_reason = "";
-         if(PO3EntryBlockedByRollover(now, rollover_reason)){
+         if(PO3EntryBlockedByRolloverForSymbol(sym, now, rollover_reason)){
             _Journal(sym + " deleting pending order ticket=" + IntegerToString((int)ticket)
                      + " reason=" + rollover_reason);
             if(m_trade.OrderDelete(ticket)) _TrackPendingOrderDelete("rollover_entry_freeze");

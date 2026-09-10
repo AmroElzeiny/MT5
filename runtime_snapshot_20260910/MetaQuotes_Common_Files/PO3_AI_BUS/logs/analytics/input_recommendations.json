@@ -1,0 +1,353 @@
+{
+  "mode": "advisory_only",
+  "auto_apply": false,
+  "valid_trades": 550,
+  "decision_thresholds": {
+    "total_action_trades": 400,
+    "first_action_trades": 100,
+    "bucket_trades": 50,
+    "family_weak_trades": 100,
+    "family_suppress_trades": 50,
+    "symbol_weak_trades": 100,
+    "symbol_suppress_trades": 50,
+    "session_weekday_min_trades": 100,
+    "session_weekday_strong_trades": 100,
+    "session_weekday_upgrade_trades": 100
+  },
+  "editable_scope": {
+    "runtime_policy_files": {
+      "active_policy.json": [
+        "soft_setup_floor",
+        "hard_setup_floor",
+        "setup_floor_penalty_mult",
+        "ote_softness_frac",
+        "default_risk_multiplier",
+        "runner_sequence_floor",
+        "runner_liquidity_rr_floor",
+        "runner_cost_r_ceiling",
+        "runner_alignment_floor",
+        "runner_adverse_ceiling",
+        "runner_ev_floor"
+      ],
+      "context_policy.ndjson": [
+        "action",
+        "score_bias",
+        "risk_multiplier",
+        "expected_value_bias"
+      ],
+      "subtype_policy.ndjson": [
+        "action",
+        "score_penalty",
+        "risk_multiplier"
+      ],
+      "session_weekday_policy.ndjson": [
+        "action",
+        "risk_multiplier",
+        "rr_floor_delta",
+        "score_bias"
+      ]
+    },
+    "advisory_only_mt5_inputs": [
+      "InpRiskPerTradePct",
+      "InpMinLiveRR2",
+      "InpStandardTradeCostRCeiling",
+      "InpStandardTradeLiquidityRRFloor",
+      "InpRunnerLiquidityRRFloor",
+      "InpRunnerSequenceQualityFloor",
+      "InpRunnerHtfAlignmentFloor",
+      "InpRunnerCostRCeiling",
+      "InpRunnerAdverseContextCeiling",
+      "InpSetupFloorReversal",
+      "InpSetupFloorBreaker",
+      "InpSetupFloorContinuation",
+      "InpSetupFloorSession",
+      "InpSetupFloorRange",
+      "InpSetupFloorFullPO3",
+      "InpSetupFloorMicroPO3",
+      "InpSetupFloorMicroBisiSibi",
+      "InpSetupFloorContinuationFamily",
+      "InpSetupFloorRangeFamily",
+      "InpSetupFloorFailedBreakout",
+      "InpMinRRFullPO3",
+      "InpMinRRMicroPO3",
+      "InpMinRRContinuation",
+      "InpMinRRRange",
+      "InpMinRRFailedBreakout",
+      "InpAiScoreFullPO3",
+      "InpAiScoreMicroPO3",
+      "InpAiScoreContinuation",
+      "InpAiScoreRange",
+      "InpAiScoreFailedBreakout",
+      "InpMaxOpenPositions",
+      "InpMaxTradesPerScan",
+      "InpMaxTotalRiskEnable",
+      "InpMaxTotalRiskMoney",
+      "InpAutoSuppressWeakFamiliesLive",
+      "InpUseSnapshotAI",
+      "InpRequireSnapshots",
+      "Market Watch symbol list"
+    ],
+    "env_governance": [
+      "EXPECTANCY_MIN_TRADES_BEFORE_ACTION",
+      "EXPECTANCY_FIRST_ACTION_MIN_TRADES",
+      "POLICY_MIN_TOTAL_CLOSED_TRADES",
+      "POLICY_MIN_BUCKET_TRADES",
+      "POLICY_MIN_PROFIT_FACTOR_AFTER_COSTS",
+      "POLICY_MAX_TRAIN_TEST_GAP_R",
+      "POLICY_MIN_POSITIVE_FOLD_RATE",
+      "POLICY_MAX_DRAWDOWN_R",
+      "POLICY_MAX_STEP_FRACTION"
+    ],
+    "hard_boundary": "The report writes policy files and advisory recommendations only. It does not directly rewrite MT5 input files."
+  },
+  "recommendation_count": 11,
+  "recommendations": [
+    {
+      "category": "global_edge",
+      "severity": "high",
+      "action": "tighten_selectivity_and_risk",
+      "inputs": [
+        "InpRiskPerTradePct",
+        "InpMinLiveRR2",
+        "InpStandardTradeCostRCeiling",
+        "InpSetupFloorFullPO3 / InpSetupFloorMicroPO3 / family floors"
+      ],
+      "suggested_change": "Reduce risk 25-50%, raise minimum live RR by about +0.10R, lower trade-cost ceiling by 0.03-0.05R, and raise weak-family setup floors by 2-5 points.",
+      "reason": "Profit factor is below the governed activation threshold, so frequency should be traded for quality.",
+      "evidence": {
+        "valid_trades": 550,
+        "profit_factor": 1.0444935009789438,
+        "required_profit_factor": 1.15
+      },
+      "min_valid_trades": 100,
+      "auto_apply": false
+    },
+    {
+      "category": "risk_path",
+      "severity": "high",
+      "action": "reduce_exposure_until_drawdown_recovers",
+      "inputs": [
+        "InpRiskPerTradePct",
+        "InpMaxOpenPositions",
+        "InpMaxTradesPerScan",
+        "InpMaxTotalRiskEnable",
+        "InpMaxTotalRiskMoney",
+        "InpPolicyShadowMode"
+      ],
+      "suggested_change": "Keep shadow mode on, cut per-trade risk, reduce concurrent exposure, and enable aggregate risk caps before allowing adaptive activation.",
+      "reason": "Max drawdown is above the governed safety limit.",
+      "evidence": {
+        "valid_trades": 550,
+        "max_drawdown_r": 371.70927399999994,
+        "allowed_max_drawdown_r": 10.0
+      },
+      "min_valid_trades": 100,
+      "auto_apply": false
+    },
+    {
+      "category": "setup_family",
+      "severity": "high",
+      "action": "suppress",
+      "inputs": [
+        "InpEnableContinuationReentry",
+        "InpSetupFloorContinuationFamily",
+        "InpMinRRContinuation"
+      ],
+      "suggested_change": "Disable the branch/family where an input exists, or raise its setup floor by 5-8 points and set risk multiplier to 0 in policy.",
+      "reason": "negative_expectancy_after_50",
+      "evidence": {
+        "setup_family": "micro_continuation_fvg",
+        "count": 139,
+        "avg_r": -0.2836274892086331,
+        "profit_factor": 0.9482391093638181
+      },
+      "min_valid_trades": 50,
+      "auto_apply": false
+    },
+    {
+      "category": "setup_family",
+      "severity": "high",
+      "action": "suppress",
+      "inputs": [
+        "InpEnableFvgEdge / InpEnableBreakerRetest",
+        "InpSetupFloorMicroBisiSibi",
+        "InpMinRRMicroPO3"
+      ],
+      "suggested_change": "Disable the branch/family where an input exists, or raise its setup floor by 5-8 points and set risk multiplier to 0 in policy.",
+      "reason": "negative_expectancy_after_50",
+      "evidence": {
+        "setup_family": "micro_bisi_sibi_edge",
+        "count": 354,
+        "avg_r": -0.5332218333333332,
+        "profit_factor": 1.4962918144742863
+      },
+      "min_valid_trades": 50,
+      "auto_apply": false
+    },
+    {
+      "category": "stability",
+      "severity": "high",
+      "action": "do_not_live_activate_unstable_learning",
+      "inputs": [
+        "InpPolicyShadowMode",
+        "InpPolicyMinPositiveFoldRate",
+        "InpPolicyMaxTrainTestGapR"
+      ],
+      "suggested_change": "Keep shadow mode on. Do not lower walk-forward gates to force activation; tighten the weak families instead.",
+      "reason": "The edge is not stable enough across time folds.",
+      "evidence": {
+        "positive_fold_rate": 0.3333333333333333,
+        "required_positive_fold_rate": 0.6,
+        "avg_train_test_gap_r": 0.7048771237364725
+      },
+      "min_valid_trades": 50,
+      "auto_apply": false
+    },
+    {
+      "category": "symbol_selection",
+      "severity": "high",
+      "action": "suppress",
+      "inputs": [
+        "Market Watch symbol list",
+        "InpSkipIfSymbolOpen",
+        "InpMaxTradesPerScan"
+      ],
+      "suggested_change": "Remove or pause this symbol from Market Watch until its bucket improves.",
+      "reason": "symbol_pf_lt_0_95_after_50",
+      "evidence": {
+        "symbol": "EURUSD",
+        "count": 55,
+        "avg_r": -0.8566690181818183,
+        "profit_factor": 0.42169477315135934
+      },
+      "min_valid_trades": 100,
+      "auto_apply": false
+    },
+    {
+      "category": "symbol_selection",
+      "severity": "high",
+      "action": "suppress",
+      "inputs": [
+        "Market Watch symbol list",
+        "InpSkipIfSymbolOpen",
+        "InpMaxTradesPerScan"
+      ],
+      "suggested_change": "Remove or pause this symbol from Market Watch until its bucket improves.",
+      "reason": "symbol_pf_lt_0_95_after_50",
+      "evidence": {
+        "symbol": "XAUUSD",
+        "count": 86,
+        "avg_r": 0.06361902325581396,
+        "profit_factor": 0.9152256676755561
+      },
+      "min_valid_trades": 100,
+      "auto_apply": false
+    },
+    {
+      "category": "target_quality",
+      "severity": "medium",
+      "action": "tighten_target_acceptance",
+      "inputs": [
+        "InpMinLiveRR2",
+        "InpStandardTradeLiquidityRRFloor",
+        "InpMaxTargetAtrMult",
+        "InpMaxTargetAdrFrac"
+      ],
+      "suggested_change": "Demand better real target quality before entry; avoid long synthetic targets where capture ratio stays weak.",
+      "reason": "Target capture is weak for this target/obstacle combination.",
+      "evidence": {
+        "target_source": "synthetic_rr_fallback",
+        "obstacle_kind": "unknown",
+        "count": 55,
+        "avg_r": -0.10758212727272727,
+        "avg_capture_ratio": -0.10245916883116882,
+        "win_rate": 0.5636363636363636,
+        "avg_effective_rr2": 1.049999999999999
+      },
+      "min_valid_trades": 10,
+      "auto_apply": false
+    },
+    {
+      "category": "target_quality",
+      "severity": "medium",
+      "action": "tighten_target_acceptance",
+      "inputs": [
+        "InpMinLiveRR2",
+        "InpStandardTradeLiquidityRRFloor",
+        "InpMaxTargetAtrMult",
+        "InpMaxTargetAdrFrac"
+      ],
+      "suggested_change": "Demand better real target quality before entry; avoid long synthetic targets where capture ratio stays weak.",
+      "reason": "Target capture is weak for this target/obstacle combination.",
+      "evidence": {
+        "target_source": "synthetic_rr_fallback",
+        "obstacle_kind": "crossed_htf_opposing_imbalance",
+        "count": 150,
+        "avg_r": -0.2719288266666667,
+        "avg_capture_ratio": -0.2630221564378652,
+        "win_rate": 0.52,
+        "avg_effective_rr2": 1.0427240800000002
+      },
+      "min_valid_trades": 10,
+      "auto_apply": false
+    },
+    {
+      "category": "target_quality",
+      "severity": "medium",
+      "action": "tighten_target_acceptance",
+      "inputs": [
+        "InpMinLiveRR2",
+        "InpStandardTradeLiquidityRRFloor",
+        "InpMaxTargetAtrMult",
+        "InpMaxTargetAdrFrac"
+      ],
+      "suggested_change": "Demand better real target quality before entry; avoid long synthetic targets where capture ratio stays weak.",
+      "reason": "Target capture is weak for this target/obstacle combination.",
+      "evidence": {
+        "target_source": "ai_selected_synthetic_rr_fallback",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "count": 36,
+        "avg_r": -0.6771096666666667,
+        "avg_capture_ratio": -0.35183170616596154,
+        "win_rate": 0.3888888888888889,
+        "avg_effective_rr2": 1.5644545555555565
+      },
+      "min_valid_trades": 10,
+      "auto_apply": false
+    },
+    {
+      "category": "target_quality",
+      "severity": "medium",
+      "action": "tighten_target_acceptance",
+      "inputs": [
+        "InpMinLiveRR2",
+        "InpStandardTradeLiquidityRRFloor",
+        "InpMaxTargetAtrMult",
+        "InpMaxTargetAdrFrac"
+      ],
+      "suggested_change": "Demand better real target quality before entry; avoid long synthetic targets where capture ratio stays weak.",
+      "reason": "Target capture is weak for this target/obstacle combination.",
+      "evidence": {
+        "target_source": "synthetic_rr_fallback",
+        "obstacle_kind": "crossed_opposing_imbalance",
+        "count": 278,
+        "avg_r": -0.6777910323741007,
+        "avg_capture_ratio": -0.6492589951467104,
+        "win_rate": 0.39568345323741005,
+        "avg_effective_rr2": 1.0449200035971278
+      },
+      "min_valid_trades": 10,
+      "auto_apply": false
+    }
+  ],
+  "notes": [
+    "Recommendations are generated from valid closed-trade evidence only.",
+    "The report never lowers governance safety gates just to force activation.",
+    "Apply input changes manually or through a separately governed change workflow."
+  ],
+  "active_policy_reference": {
+    "policy_id": "policy_1782964017_v14379",
+    "activation_state": "blocked",
+    "shadow_mode": false
+  }
+}
