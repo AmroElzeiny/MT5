@@ -11,13 +11,13 @@
   "prompt_contract_version": "20260724_canonical_frozen_request_v12",
   "provider_id": "opencode_go_responses",
   "provider_mode": "OPENCODE_API",
-  "provider_process_id": 25160,
-  "python_session_id": "python_25160_1789004663",
+  "provider_process_id": 7212,
+  "python_session_id": "python_7212_1789072049",
   "run_manifest_version": "20260731_correlated_run_manifest_v1",
   "runtime_input_hash": "",
-  "started_at": 1789004663.4290385,
+  "started_at": 1789072049.2662287,
   "test_period_from": "",
   "test_period_to": "",
-  "test_run_id": "run_d5017e2a43b42a28",
+  "test_run_id": "run_cf9fbeb9ab378de4",
   "tester_mode": ""
 }

@@ -1,0 +1,4 @@
+InpVerboseLogs=true
+InpRejectTelemetry=true
+InpAllowRuleOnlyInTester=true
+InpTesterFailClosedIfNewsFileMissing=false

@@ -1,0 +1,500 @@
+# VPS runtime environment template - PO3 AI gate (AI_PROVIDER_SELECT=opencode)
+# Generated from the working local runtime environment on 2026-09-10.
+# ALL CREDENTIAL VALUES ARE REMOVED. Copy this file to python/.env on the VPS
+# and fill in the blank credential values before starting ai_gate.py.
+
+# OpenAI API credentials
+OPENAI_BASE_URL=
+
+OPENAI_API_KEY=
+# Live trade-decision AI gate.
+# ---- OpenAI block: the OpenCode FALLBACK leg (AI_PROVIDER_SELECT=opencode) ----
+# NOTE 2026-09-09: under the opencode selection OPENAI_API_KEY is REQUIRED and
+# IS used -- Luna is the declared fallback leg of that mode.  The model, effort
+# and tier for that leg come from OPENCODE_FALLBACK_* below, NOT from
+# AI_GATE_MODEL / AI_GATE_REASONING_EFFORT, which this selection does not read.
+# Restored 2026-09-07 by user decision: back to the official OpenAI Responses
+# transport (RemoteAPIProvider, ai_provider.py:951 provider_id=openai_remote_api).
+# Under this selection ai_gate.py:505-507 takes the model from AI_GATE_MODEL and
+# the fallbacks from AI_GATE_FALLBACK_MODELS, and ai_gate.py:514 takes the effort
+# from AI_GATE_REASONING_EFFORT -- so all three keys below ARE read.  po3_env.py:36
+# strips OPENROUTER_API_KEY/OPENROUTER_BASE_URL from the process for this
+# selection, so the OpenRouter key further down cannot reach any transport.
+#
+# THE MODEL.  gpt-5.6-luna is the model this project last ran on OpenAI
+# (.env.bak_pre_openrouter_deepseek_20260907) and it is priced in
+# openai_usage_logger.py:49, so calls are cost-accounted instead of recorded at
+# $0.00.  The "~deepseek/..." id that was here is an OpenRouter-only alias and
+# would be rejected by api.openai.com.
+AI_GATE_MODEL=gpt-5.6-luna
+# NOTE: identical to the primary, so ai_gate.py:511 (name != selected_model)
+# filters it out and the effective fallback list is EMPTY.  Left unchanged --
+# that is the pre-existing OpenAI posture and an empty list is fail-closed, but
+# it means there is no second model behind a primary-model outage.
+AI_GATE_FALLBACK_MODELS=gpt-5.6-luna
+# Left at high (the .env.example recommendation).  The last OpenAI run used
+# low; this is the one knob that differs from that run.
+AI_GATE_REASONING_EFFORT=low
+AI_MAX_OUTPUT_TOKENS=
+AI_GATE_WORKERS=3
+AI_ALLOW_RULE_ONLY_FALLBACK=false
+AI_ALLOW_RULE_ONLY_LIVE=false
+AI_LIVE_FAIL_CLOSED_ON_FAILURE=true
+
+
+# Switched openai_remote -> openrouter on 2026-09-08 by user decision.
+#
+# History kept deliberately, because both prior reasons were re-checked before
+# flipping back rather than assumed:
+#   2026-09-05  openrouter -> openai_remote, because the OpenRouter account
+#               answered HTTP 402 (zero credits) and because two live approvals
+#               died as rr_below_live_floor after the glm-5.3-flash panel took
+#               ~20 minutes (analyst alone 776s / 16048 output tokens).
+#   2026-09-07  Re-measured before switching back.  /api/v1/credits still reports
+#               total_credits=0, but a real chat-completions call on this key
+#               SUCCEEDED (see the model note below), so 402 is not a current
+#               blocker.  The latency reason was model-specific, not
+#               transport-specific, and the model is no longer glm.
+#   2026-09-07  openrouter -> openai_remote.  User decision, no
+#               OpenRouter failure observed -- the transport is simply not the
+#               one wanted.  AI_GATE_MODEL returned to gpt-5.6-luna with it,
+#               because the DeepSeek alias is not an api.openai.com model id.
+#
+# Valid values: openai_remote | openrouter | local.
+# AI_USE_REMOTE_API below stays commented out: if it is set it must AGREE with
+# this line; the legacy boolean cannot represent openrouter, otherwise the gate fails closed
+# (po3_env.py:59-63).
+#   2026-09-09  openrouter -> opencode.  User decision.  No OpenRouter failure
+#               observed; the OpenCode Go transport is the one wanted, with the
+#               OpenAI Luna low/flex path kept as its declared fallback leg.
+#
+# Valid values: openai_remote | local | openrouter | opencode.
+AI_PROVIDER_SELECT=opencode
+
+# ---- OpenRouter block: INERT (AI_PROVIDER_SELECT=opencode) ----
+# The OpenAI credential is stripped from the process by po3_env.py before this
+# transport is built, so provider selection remains single-authority.
+# Every key ai_gate.py reads for this transport is listed here explicitly, each
+# at its code default unless a comment says otherwise.  Defaults are the ones in
+# AIGateRuntimeConfig.from_env (ai_gate.py:521) and they agree with .env.example.
+#
+# Retuned 2026-09-08 by user request: gpt-5.6-luna, reasoning effort low, flex
+# endpoint preferred.  This block is active on the next gate start.
+# Every value below was measured against the live OpenRouter catalogue and real
+# calls on this key that day, not copied from documentation.
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=
+
+# THE MODEL.  The id is namespaced: a bare "gpt-5.6-luna" is the api.openai.com
+# id and is NOT routable here -- on this transport it must carry the "openai/"
+# vendor prefix.  ai_gate.py takes AI_GATE_MODEL under the openai_remote
+# selection and OPENROUTER_MODEL under this one, so the two files' ids differ on
+# purpose and neither is a typo.
+#
+# Verified 2026-09-08 against the live catalogue and real calls on this key:
+#   GET /api/v1/models
+#       -> id "openai/gpt-5.6-luna", name "OpenAI: GPT-5.6 Luna",
+#          context_length 1,050,000.
+#   GET /api/v1/models/openai/gpt-5.6-luna/endpoints
+#       -> 7 endpoints.  supported_parameters on every one contains reasoning,
+#          reasoning_effort, seed, response_format, structured_outputs -- and
+#          NOT ONE of them contains temperature or top_p.  See the sampling
+#          note below; that omission is load-bearing, not cosmetic.
+#   POST /chat/completions, exactly the body this transport builds
+#        (reasoning{enabled:true,effort:low}, provider.require_parameters=true,
+#         provider.order=[openai/flex,openai])
+#       -> HTTP 200, finish_reason=stop, provider "OpenAI", usage.cost
+#          0.0000061 for 7 prompt + 9 completion tokens == $0.10/Mtok in and
+#          $0.60/Mtok out, which is the flex rate, not the standard one.
+#
+# Unlike the DeepSeek alias this replaced, this id is NOT an always-latest
+# alias: response.model returns "openai/gpt-5.6-luna" and the release behind it
+# is openai/gpt-5.6-luna-20260709.  Nothing changes under the id without this
+# file changing.
+OPENROUTER_MODEL=openai/gpt-5.6-luna
+
+# Per-role overrides.  Blank = inherit OPENROUTER_MODEL (ai_gate.py:824 via
+# _env_lookup, which treats blank as unset).  Written out rather than left blank
+# so the three panel roles are visibly one model -- change all four together, or
+# blank these three and change only OPENROUTER_MODEL.
+OPENROUTER_ANALYST_MODEL=openai/gpt-5.6-luna
+OPENROUTER_CRITIC_MODEL=openai/gpt-5.6-luna
+OPENROUTER_ADJUDICATOR_MODEL=openai/gpt-5.6-luna
+OPENROUTER_FALLBACK_MODELS=
+OPENROUTER_HEALTHCHECK_PATH=/models
+
+# Reasoning.  ENABLE_THINKING=true is what actually puts
+# reasoning={"enabled":true,"effort":...} on the wire (ai_provider.py:2344);
+# with it false the transport sends {"enabled":false} and the effort below is
+# ignored entirely.  Accepted values: minimal|low|medium|high|xhigh
+# (ai_gate.py:631).
+#
+# Effort is "low" by user decision, matching AI_GATE_REASONING_EFFORT on the
+# OpenAI block so the two transports ask the same model for the same depth of
+# work and their decisions stay comparable.
+#
+# The reserve is load-bearing, not decoration: max_tokens on this transport
+# bounds reasoning tokens AND content together, so ai_provider.py:2368 adds the
+# reserve on top of the schema budget.  Measured previously on this transport: a
+# 10,800-token budget went entirely to 10,798 reasoning tokens and returned
+# finish_reason=length with empty content.  Kept at 24000 even at low effort --
+# it is a ceiling, not a spend, and 25000+24000 is well inside this model's
+# 128,000 max_completion_tokens.
+OPENROUTER_ENABLE_THINKING=true
+OPENROUTER_REASONING_EFFORT=low
+OPENROUTER_REASONING_TOKEN_RESERVE=
+
+# Structured output is decided per ENDPOINT, not per model.  require_parameters
+# (ai_provider.py:2357) is what keeps OpenRouter off an endpoint that treats the
+# strict schema as a hint -- a silent authority change rather than a visible
+# failure.  Not hypothetical for this model either: of the 7 endpoints published
+# for openai/gpt-5.6-luna, the Amazon Bedrock row advertises neither
+# response_format nor structured_outputs, and require_parameters is the only
+# thing excluding it.
+OPENROUTER_REQUIRE_JSON_SCHEMA=true
+OPENROUTER_REQUIRE_STRUCTURED_PROVIDER=true
+
+# Flex first, standard OpenAI second.  This is what "use flex" means on this
+# transport: OpenRouter exposes no service_tier parameter, so AI_SERVICE_TIER
+# and AI_USE_FLEX further down do NOT reach it.  The flex tier is a separate
+# ENDPOINT -- published with tag "openai/flex" at $0.10/$0.60 per Mtok against
+# tag "openai" at $0.20/$1.20 -- so the tier is chosen by routing order and by
+# nothing else.
+#
+# Two entries, not one, on purpose.  ai_provider.py:2360 sets
+# allow_fallbacks=false whenever this list is non-empty, which restricts routing
+# to exactly the entries listed; OpenRouter still walks them IN ORDER, so a flex
+# outage or a flex rate-limit lands on standard OpenAI instead of failing the
+# decision closed.  That is "flex if possible" rather than "flex or nothing" --
+# a live setup is worth more than half a cent.  Azure and Amazon Bedrock are
+# deliberately outside the list: same model, different operator and different
+# data path, and neither was measured here.
+#
+# Uptime measured 2026-09-08 on the openai/flex endpoint: 99.99% over the last
+# 30m, 99.83% over the last day.
+#
+# Re-pin only from measurements taken on THIS model.  The historical glm lesson
+# is kept because it is transport-level and still true: on 2026-09-05 a BITCOIN
+# decision was APPROVED but the three-role panel took 1208s, price moved
+# 79119.65 -> 79616.96, and the approval died as rr_below_live_floor.  Latency
+# outranks a half-cent per decision -- an approval that arrives after the setup
+# is gone is worth nothing.
+OPENROUTER_ALLOWED_PROVIDERS=openai/flex,openai
+
+OPENROUTER_TIMEOUT_SEC=900
+OPENROUTER_MAX_RETRIES=2
+OPENROUTER_MAX_OUTPUT_TOKENS=
+
+# Sampling: DELIBERATELY EMPTY, and empty here is not the same as absent.
+# ai_gate.py:346 (_env_float_or_none) reads a present-but-empty value as "do not
+# put this key on the wire at all"; delete these two lines and the 0.15/0.85
+# defaults go back on the request.
+#
+# Required, not preference.  No endpoint of openai/gpt-5.6-luna advertises
+# temperature or top_p, and OPENROUTER_REQUIRE_STRUCTURED_PROVIDER=true above
+# sends provider.require_parameters=true, which filters routing down to
+# endpoints accepting EVERY parameter supplied.  Measured 2026-09-08 on this
+# key, same body otherwise: temperature alone -> HTTP 404, top_p alone -> HTTP
+# 404, both -> HTTP 404, each with
+#   "No endpoints found that can handle the requested parameters"
+#   failed_routing_step="Filter by Parameters"
+# and with both omitted the identical request returned HTTP 200.  So this is not
+# a tuning choice: with these two set, EVERY decision on this transport dies
+# before the model is reached.
+#
+# The direct OpenAI transport already sends temperature=None/top_p=None for this
+# same model family (ai_provider.py:996), so the two transports now agree.
+#
+# Determinism is unaffected: seed IS supported by every luna endpoint and stays
+# pinned.
+OPENROUTER_TEMPERATURE=
+OPENROUTER_TOP_P=
+OPENROUTER_SEED=42
+
+# Keep enough concurrent request capacity for the setups produced by each
+# 15-minute scan. The file-bus claim loop is bounded to the real worker count
+# (ai_gate.py run --workers N), so increasing transport parallelism cannot
+# create an unbounded internal queue.  Left at 6 against 9 workers on purpose:
+# it is the only brake this transport has against an account-level 429, and
+# OpenRouter's routing has no admission-retry equivalent to the OpenAI path's.
+# ai_gate.py clamps this to 1..8.
+OPENROUTER_PARALLELISM=6
+OPENROUTER_CONTEXT_BUDGET_TOKENS=
+OPENROUTER_APP_URL=
+OPENROUTER_APP_TITLE=PO3_AIGate
+# ---- end of the OpenRouter block ----
+
+# ---- OpenCode Go block: ACTIVE (AI_PROVIDER_SELECT=opencode) ----
+# Added 2026-09-09.  Every value below was measured against the live endpoint on
+# that date with this key, not copied from documentation.
+#
+# One selection, three legs:
+#
+#   normal    muse-spark-1.3-contributor   POST <base>/responses
+#   important qwen3.8-flash                POST <base>/messages  (Anthropic dialect)
+#   critical  OpenAI gpt-5.6-luna          the system's EXISTING OpenAI transport
+#
+# Every OpenCode call -- Muse and Qwen alike -- falls back ONCE to Luna on a
+# timeout, a provider/API failure, malformed JSON, a schema-validation failure,
+# or an otherwise unusable response.  The fallback answer is then validated by
+# the same strict contract, so an invalid OpenCode response never reaches a
+# downstream consumer.  There is no second fallback: a Luna failure is terminal.
+#
+# This is the one selection that reads TWO credentials, and that is deliberate:
+# the Luna fallback is a declared leg of the mode, not an optional extra, so
+# OPENAI_API_KEY is required here and the mode fails closed without it.  The
+# OpenRouter and local credentials are still stripped from the process by
+# po3_env.py, so provider selection remains single-authority.
+#
+# One base URL serves both dialects; the two endpoints are the same host with
+# different paths and the provider adapter appends the right one.
+#
+# TWO WIRE REQUIREMENTS ARE NOT CONFIGURABLE HERE, because getting them wrong is
+# a total outage rather than a tuning choice.  Both are enforced in
+# ai_provider.py and pinned by tests:
+#   * user-agent -- the edge answers HTTP 403 "error code: 1010" to urllib's
+#     default agent.  Every other agent tried was accepted, so the raw urllib
+#     transport sends "opencode/1.0.0" and the OpenAI SDK keeps its own.
+#   * x-opencode-session -- both endpoints answer HTTP 400 "MissingSessionID"
+#     without it.  It is derived from the request id, so one request names one
+#     session and a replay names the same one again.
+OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
+OPENCODE_GO_API_KEY=
+
+# THE MODELS.  Both verified present in GET <base>/models on 2026-09-09 (35 ids).
+# Note qwen3.8-flash is NOT routable on /responses -- that endpoint answers
+# "Model qwen3.8-flash is not supported for format openai" -- which is exactly
+# why the important leg speaks the Anthropic dialect instead.
+OPENCODE_MUSE_MODEL=muse-spark-1.3-contributor
+OPENCODE_QWEN_MODEL=qwen3.8-flash
+
+# Muse reasoning.  Sent as the Responses-API `reasoning.effort`.  Verified
+# accepted at "high" (HTTP 200, 555-821 reasoning tokens reported in
+# usage.output_tokens_details), which is the strongest level this dialect
+# defines, so it is the setting for this workload.  `auto`, `none` or an empty
+# value omit the key entirely rather than put an unsupported value on the wire.
+OPENCODE_MUSE_REASONING_EFFORT=high
+# Reasoning reserve, added ON TOP of the schema-derived output budget above.
+# max_output_tokens bounds reasoning tokens AND content together on this API, so
+# the schema budget is not a content budget -- it is a budget the reasoning
+# spends first.  Measured 2026-09-09 replaying a real archived live request:
+# Muse at effort=high returned `status=incomplete incomplete_reason=
+# max_output_tokens` with an EMPTY message on every analyst call, while the
+# smaller critic and adjudicator roles completed normally on the same budget.
+# Same trap and same remedy as OPENROUTER_REASONING_TOKEN_RESERVE above; the
+# value matches it.  It is a ceiling, not a spend.
+OPENCODE_MUSE_REASONING_TOKEN_RESERVE=
+
+# Importance directing.  OFF (the default) sends every request to Muse and the
+# classifier is not consulted at all.  ON classifies each request
+# DETERMINISTICALLY from signals it already carries -- no extra model call is
+# ever made to decide a route -- and logs the classification and its reason on
+# every call:
+#
+#   normal    not live-forward (backtest/replay/research/analytics), or a
+#             non-trading shadow repeat
+#   important live-forward below the critical score, or live with no published
+#             deterministic score (absent evidence never picks the cheap route)
+#   critical  live-forward whose best candidate rule_score >= the threshold below
+#
+# rule_score is the deterministic 0..10 technical-quality score Python already
+# computes per candidate; it is a routing input only and carries no trading
+# authority.  OPENCODE_IMPORTANCE_FORCE pins one class for testing (empty = off).
+OPENCODE_CALL_DIRECTING=false
+OPENCODE_CRITICAL_RULE_SCORE=8.5
+OPENCODE_IMPORTANT_RULE_SCORE=0.0
+OPENCODE_IMPORTANCE_FORCE=
+
+# The Luna fallback leg.  These configure the system's EXISTING OpenAI transport
+# (RemoteAPIProvider); there is no second OpenAI implementation.  The tier is
+# restated on the request because the gate supplies "auto" for every non-OpenAI
+# provider mode, which would otherwise silently override the configured flex.
+OPENCODE_FALLBACK_MODEL=gpt-5.6-luna
+OPENCODE_FALLBACK_REASONING_EFFORT=low
+OPENCODE_FALLBACK_SERVICE_TIER=flex
+
+# Transport.  A malformed OpenCode answer is never re-asked of the model that
+# produced it -- the fallback is the cheaper and better answer -- so there is no
+# retry setting here by design.  The absolute request deadline still bounds
+# everything, and a fallback that cannot fit inside it is skipped rather than
+# started.
+OPENCODE_TIMEOUT_SEC=900
+OPENCODE_MAX_OUTPUT_TOKENS=
+OPENCODE_CONTEXT_BUDGET_TOKENS=
+OPENCODE_PARALLELISM=3
+
+# Anthropic-dialect settings for the Qwen leg.  Extended thinking is OFF: the
+# model already returns `thinking` blocks without being asked (observed in every
+# live /messages probe), those blocks are never treated as content, and enabling
+# the parameter would only spend max_tokens on reasoning the transport discards.
+# When it is enabled the budget is added ON TOP of the schema-derived output
+# budget, because max_tokens bounds thinking and content together in this dialect.
+OPENCODE_ANTHROPIC_VERSION=2023-06-01
+OPENCODE_ENABLE_THINKING=false
+OPENCODE_THINKING_BUDGET_TOKENS=
+# ---- end of the OpenCode Go block ----
+
+# Expectancy / learning audit AI
+EXPECTANCY_AI_AUDIT_ENABLE=false
+EXPECTANCY_AI_MODEL=gpt-5.4-nano
+EXPECTANCY_AI_REASONING_EFFORT=low
+EXPECTANCY_AI_DECISION_WEIGHT=0.75
+EXPECTANCY_AI_MAX_OUTPUT_TOKENS=
+EXPECTANCY_AI_MIN_VALID_TRADES=100
+EXPECTANCY_AI_AUDIT_MIN_NEW_TRADES=400
+EXPECTANCY_AI_AUDIT_MAX_AGE_HOURS=0
+
+# Virtual system ledger. This intentionally ignores broker/account balance.
+PO3_VIRTUAL_START_BALANCE=100000
+
+# Governed policy safety gates
+ANALYTICS_AUTO_ACTIVATE=false
+POLICY_SHADOW_MODE=false
+EXPECTANCY_MIN_TRADES_BEFORE_ACTION=400
+EXPECTANCY_FIRST_ACTION_MIN_TRADES=100
+EXPECTANCY_MIN_BUCKET_TRADES_BEFORE_ACTION=50
+EXPECTANCY_SESSION_WEEKDAY_MIN_TRADES=100
+EXPECTANCY_SESSION_WEEKDAY_STRONG_TRADES=100
+EXPECTANCY_SESSION_WEEKDAY_UPGRADE_TRADES=100
+POLICY_MAX_STEP_FRACTION=0.05
+POLICY_MIN_TOTAL_CLOSED_TRADES=400
+POLICY_MIN_BUCKET_TRADES=50
+POLICY_MIN_PROFIT_FACTOR_AFTER_COSTS=1.15
+POLICY_MAX_TRAIN_TEST_GAP_R=0.25
+POLICY_MIN_POSITIVE_FOLD_RATE=0.60
+POLICY_MAX_DRAWDOWN_R=10.0
+
+# Dashboard output
+PO3_DASHBOARD_TITLE=PO3 Codex Virtual Ledger
+PO3_DASHBOARD_OUTPUT=dashboard.html
+
+# AI prompt caching
+AI_PROMPT_CACHE_ENABLE=true
+AI_PROMPT_CACHE_KEY=
+AI_PROMPT_CACHE_RETENTION=24h
+
+# Setup-signature AI decision cache
+AI_DECISION_CACHE_ENABLE=true
+AI_DECISION_CACHE_TTL_SEC=1800
+AI_DECISION_CACHE_FILE=data/ai_decision_cache.jsonl
+
+# Batch API: research/backtest only; live entry approvals stay immediate
+AI_USE_BATCH_API=false
+AI_BATCH_ONLY_FOR_BACKTEST=false
+AI_BATCH_OUTPUT_DIR=data/ai_batch
+AI_BATCH_MAX_PENDING=1000
+
+# Flex processing: LIVE-ACTIVE as of 2026-09-05 (user decision).
+# service_tier/flex exist only on RemoteAPIProvider (ai_provider.py:794-1276),
+# which is exactly the transport selected now, so "flex" IS put on the wire
+# (ai_provider.py:1085-1087).  All three confirmation switches below are true,
+# which is what the live guard requires.
+# Trade-off accepted: flex is cheaper per token but is capacity-scheduled, so a
+# call can be rejected for capacity.  That is handled, not ignored --
+# ai_provider.py:1232-1249 retries a flex CAPACITY rejection (never a real
+# failure) up to AI_FLEX_UNAVAILABLE_MAX_RETRIES with a cooldown, and the retry
+# is excluded from the one-authoritative-call-per-request budget.
+AI_USE_FLEX=true
+AI_ALLOW_FLEX_FOR_LIVE=true
+AI_FLEX_LIVE_ACK=true
+AI_SERVICE_TIER=flex
+AI_OPENAI_TIMEOUT_SEC=1800
+AI_OPENAI_FLEX_TIMEOUT_SEC=1800
+AI_FLEX_UNAVAILABLE_RETRY_ENABLE=true
+AI_FLEX_UNAVAILABLE_MAX_RETRIES=2
+AI_FLEX_UNAVAILABLE_COOLDOWN_SEC=10
+
+# Panel short-circuit: the critic/adjudicator resolver only demotes, so it
+# cannot rescue an analyst verdict that already cannot approve. Live only.
+AI_PANEL_SHORTCIRCUIT_ENABLE=true
+AI_PANEL_SHORTCIRCUIT_MARGIN=2.0
+
+
+# Live safety
+AI_REQUIRE_RUNTIME_INPUTS_LIVE=true
+AI_REJECT_ON_MISSING_RUNTIME_INPUTS_LIVE=true
+AI_HARD_PRE_GATE_BEFORE_OPENAI=true
+AI_LOG_SKIPPED_CALLS=true
+
+# Snapshots remain disabled unless explicitly enabled
+
+# AI cost reporting
+AI_COST_REPORT_ENABLE=true
+AI_COST_REPORT_FILE=logs/ai_cost_report.jsonl
+# Provider-neutral AI transport. Remote mode is active; local settings are standby only.
+
+# Local OpenAI-compatible server. Used only when AI_USE_REMOTE_API=false.
+LOCAL_AI_MODEL_PATH=
+LOCAL_AI_RETRIEVAL_TOP_K=7
+LOCAL_AI_ALLOW_NON_LOOPBACK_ACK=false
+
+# Provider runtime and non-authoritative research controls.
+AI_PROVIDER_CIRCUIT_FAILURE_THRESHOLD=3
+AI_PROVIDER_CIRCUIT_COOLDOWN_SEC=60
+AI_TRADE_MEMORY_FILE=data/ai_trade_memory.sqlite3
+AI_LEGACY_MIN_SELF_REPORTED_CONFIDENCE_DIAGNOSTIC=0.45
+AI_LIVE_BUCKET_PRIORS_FILE=data/live_bucket_priors.json
+AI_REQUIRE_LIVE_BUCKET_PRIORS=true
+# 365, not 30.  The artifact holds 81 closed trades over 2026-02-16..2026-04-10
+# and there have been 0 new closed trades since, so regenerating it would emit
+# byte-identical statistics under a fresh mtime -- staleness here measures the
+# file's timestamp (runtime_governance.py:615 uses st_mtime, not generated_at),
+# not the age of the evidence.  Every other check still binds: the file must
+# exist, be schema-valid, and carry a clean ledger.  Raising this is an explicit
+# statement that 81 trades from Feb-Apr are accepted as the live prior; it is
+# not a disable (0 would be), so it expires again and forces a re-decision.
+AI_LIVE_BUCKET_PRIORS_MAX_AGE_DAYS=365
+AI_REQUEST_RESPONSE_FINGERPRINT_FILE=logs/ai_request_response_fingerprints.jsonl
+
+# Live authority requires a valid REPEATABLE group; shadow repeats never trade.
+AI_REQUIRE_REPEATABILITY_LIVE=false
+AI_SHADOW_REPEAT_ENABLE=true
+AI_SHADOW_REPEAT_SAMPLE_RATE=0.02
+AI_SHADOW_REPEAT_COUNT=3
+AI_SHADOW_REPEAT_MIN_EVALUATED_CANDIDATES=30
+AI_SHADOW_REPEAT_MAX_SCORE_STDDEV=0.75
+AI_SHADOW_REPEAT_MIN_DECISION_AGREEMENT=0.90
+AI_SHADOW_REPEAT_MIN_CHOSEN_CANDIDATE_AGREEMENT=0.90
+AI_SHADOW_REPEAT_MIN_VETO_AGREEMENT=0.90
+AI_SHADOW_REPEAT_MIN_TARGET_CHOICE_AGREEMENT=0.85
+AI_SHADOW_REPEAT_ARTIFACT_FILE=data/ai_repeatability_artifact.json
+
+
+#AI_USE_REMOTE_API=true
+LOCAL_AI_BASE_URL=http://127.0.0.1:1234/v1
+LOCAL_AI_API_KEY=
+LOCAL_AI_MODEL=chatgpt-browser-review
+LOCAL_AI_ANALYST_MODEL=chatgpt-browser-review
+LOCAL_AI_CRITIC_MODEL=chatgpt-browser-review
+LOCAL_AI_ADJUDICATOR_MODEL=chatgpt-browser-review
+LOCAL_AI_FALLBACK_MODELS=
+LOCAL_AI_HEALTHCHECK_PATH=/models
+LOCAL_AI_TIMEOUT_SEC=1800
+LOCAL_AI_MAX_RETRIES=0
+LOCAL_AI_MAX_OUTPUT_TOKENS=
+LOCAL_AI_TEMPERATURE=0.15
+LOCAL_AI_TOP_P=0.85
+LOCAL_AI_SEED=42
+LOCAL_AI_ENABLE_THINKING=false
+LOCAL_AI_REQUIRE_JSON_SCHEMA=true
+LOCAL_AI_PARALLELISM=3
+# INERT: these six keys are written by the launch scripts and by this file, but
+# no Python code reads them -- there is no per-role timeout. Verified by a
+# repo-wide search: the only hits are .env* files, run_*.ps1 writers, and a test
+# asserting a launcher writes them. Editing them changes nothing.
+# The real per-call bound is OPENROUTER_TIMEOUT_SEC (default 900) and it is
+# additionally clamped to the absolute remaining budget by the deadline object,
+# so a call can never outlive AI_MT5_TERMINAL_TIMEOUT_SEC.
+LOCAL_AI_ANALYST_TIMEOUT_SEC=900
+LOCAL_AI_CRITIC_TIMEOUT_SEC=450
+LOCAL_AI_ADJUDICATOR_TIMEOUT_SEC=300
+AI_PROVIDER_ANALYST_TIMEOUT_SEC=1200
+AI_PROVIDER_CRITIC_TIMEOUT_SEC=600
+AI_PROVIDER_ADJUDICATOR_TIMEOUT_SEC=400
+LOCAL_AI_CONTEXT_BUDGET_TOKENS=
+AI_MT5_TERMINAL_TIMEOUT_SEC=2700
+AI_RESPONSE_WRITE_MARGIN_SEC=15
+AI_MIN_PROVIDER_ATTEMPT_SEC=10
+AI_LIVE_CANDIDATE_BUDGET=3
+AI_SHADOW_COMPARE_PROVIDERS=false
+AI_ENABLE_SNAPSHOTS=false
