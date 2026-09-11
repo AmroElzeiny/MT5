@@ -1,0 +1,20 @@
+{
+  "virtual_start_balance": 100000.0,
+  "summary": {
+    "virtual_start_balance": 100000.0,
+    "virtual_balance": 100000.0,
+    "virtual_equity": 100000.0,
+    "gross_balance": 100000.0,
+    "gross_profit": 0.0,
+    "gross_loss": 0.0,
+    "net_pnl": 0.0,
+    "net_pct": 0.0,
+    "profitable_days": 0,
+    "losing_days": 0,
+    "best_trade_pct": 0.0,
+    "worst_trade_pct": 0.0,
+    "best_weekday": "unknown",
+    "worst_weekday": "unknown"
+  },
+  "trades": []
+}

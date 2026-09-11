@@ -1,0 +1,31 @@
+{
+  "rows": [
+    {
+      "target_source": "synthetic_rr_fallback",
+      "obstacle_kind": "crossed_htf_opposing_imbalance",
+      "count": 11,
+      "avg_r": 0.9208026363636364,
+      "avg_capture_ratio": 0.8769548917748917,
+      "win_rate": 0.9090909090909091,
+      "avg_effective_rr2": 1.0500000000000003
+    },
+    {
+      "target_source": "synthetic_rr_fallback",
+      "obstacle_kind": "crossed_opposing_imbalance",
+      "count": 39,
+      "avg_r": 0.6593391025641026,
+      "avg_capture_ratio": 0.6279420024420023,
+      "win_rate": 0.7692307692307693,
+      "avg_effective_rr2": 1.0499999999999996
+    },
+    {
+      "target_source": "unknown",
+      "obstacle_kind": "unknown",
+      "count": 22,
+      "avg_r": 0.0,
+      "avg_capture_ratio": 0.0,
+      "win_rate": 0.0,
+      "avg_effective_rr2": 0.0
+    }
+  ]
+}

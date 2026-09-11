@@ -1,0 +1,1501 @@
+{
+  "artifact_hash": "4f029f0f4f9b89b5d027dc6b1ee524e5fe850f31091fbae6be19326ad58de835",
+  "bucket_count": 32,
+  "clean_record_count": 81,
+  "completed_trade_count": 81,
+  "contract_manifest_hash": "1518826968",
+  "data_window": {
+    "end": "1775803160",
+    "start": "1771206280"
+  },
+  "decision_schema_version": "20260724_canonical_frozen_request_v10",
+  "generated_at": "2026-08-12T01:25:10.611624Z",
+  "ledger_hash": "3dba17c8dee94ffd8edc77eb90636caf412daba63dd50b0a7d41f40002f08dd9",
+  "ledger_integrity_status": "clean_only",
+  "levels": {
+    "asset_class": {
+      "metals": {
+        "avg_minutes_to_0_25r_mfe": 13.074074074074074,
+        "clean_sample_size": 81,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.32098765432098764,
+        "effective_sample_size": 81.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 46,
+        "mean_net_r": -0.09619246913580244,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3213787454578638,
+          "upper": 0.128993807186259
+        },
+        "prior_hash": "291a70818e0b647f95fc4e7e8ec535e2f1637336b45bc9f1e7b3800ad3aac46c",
+        "raw_prior": {
+          "mean_net_r": -0.09619246913580244,
+          "sample_size": 81
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "asset_class:metals"
+        ],
+        "shrinkage_weight": 0.6477122917926252,
+        "shrunk_estimate": -0.09619246913580244,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.037037037037037035,
+        "uncertainty_interval": {
+          "lower": -0.3400465383510698,
+          "standard_error": 0.1244153414363609,
+          "upper": 0.14766160007946494
+        },
+        "wins": 35
+      }
+    },
+    "branch": {
+      "unknown": {
+        "avg_minutes_to_0_25r_mfe": 13.074074074074074,
+        "clean_sample_size": 81,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.32098765432098764,
+        "effective_sample_size": 81.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 46,
+        "mean_net_r": -0.09619246913580244,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.0954179273935434,
+          "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3410897270440653,
+          "upper": 0.14918168292385112
+        },
+        "prior_hash": "f4124d9257e15a7b7f460dd2da1cf4445002a4a972f63b510c93fababb7584ad",
+        "raw_prior": {
+          "mean_net_r": -0.09619246913580244,
+          "sample_size": 81
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg",
+          "branch:unknown"
+        ],
+        "shrinkage_weight": 0.6921443187815036,
+        "shrunk_estimate": -0.09595402206010713,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.037037037037037035,
+        "uncertainty_interval": {
+          "lower": -0.3400465383510698,
+          "standard_error": 0.1244153414363609,
+          "upper": 0.14766160007946494
+        },
+        "wins": 35
+      }
+    },
+    "family": {
+      "micro_bisi_sibi_edge": {
+        "avg_minutes_to_0_25r_mfe": 5.166666666666667,
+        "clean_sample_size": 24,
+        "data_window": {
+          "end": "1775749300",
+          "start": "1771216660"
+        },
+        "dr_structural_invalid_rate": 0.20833333333333334,
+        "effective_sample_size": 24.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 14,
+        "mean_net_r": -0.13257254166666665,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3722618330627746,
+          "upper": 0.15539617184178575
+        },
+        "prior_hash": "7afa56e7487cfc220c97a3ec1a5b4a9f3a42ed54b4790b9ff917c57aba09e9b7",
+        "raw_prior": {
+          "mean_net_r": -0.13257254166666665,
+          "sample_size": 24
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_bisi_sibi_edge"
+        ],
+        "shrinkage_weight": 0.3364578634170532,
+        "shrunk_estimate": -0.10843283061049444,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.041666666666666664,
+        "uncertainty_interval": {
+          "lower": -0.5402990112289996,
+          "standard_error": 0.20802370896037395,
+          "upper": 0.2751539278956663
+        },
+        "wins": 10
+      },
+      "micro_continuation_fvg": {
+        "avg_minutes_to_0_25r_mfe": 29.4,
+        "clean_sample_size": 30,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.26666666666666666,
+        "effective_sample_size": 30.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 16,
+        "mean_net_r": -0.09423323333333332,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.34343510239791986,
+          "upper": 0.15259924761083313
+        },
+        "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb",
+        "raw_prior": {
+          "mean_net_r": -0.09423323333333332,
+          "sample_size": 30
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg"
+        ],
+        "shrinkage_weight": 0.3953284955710367,
+        "shrunk_estimate": -0.0954179273935434,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.06666666666666667,
+        "uncertainty_interval": {
+          "lower": -0.4296687711702829,
+          "standard_error": 0.1711405805290559,
+          "upper": 0.24120230450361624
+        },
+        "wins": 14
+      },
+      "micro_po3_reversal": {
+        "avg_minutes_to_0_25r_mfe": 3.0,
+        "clean_sample_size": 6,
+        "data_window": {
+          "end": "1774972780",
+          "start": "1771535320"
+        },
+        "dr_structural_invalid_rate": 0.16666666666666666,
+        "effective_sample_size": 6.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 4,
+        "mean_net_r": -0.3290386666666666,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.37296155107289086,
+          "upper": 0.13559767550641874
+        },
+        "prior_hash": "8b26625f178f9755d9c3aea2774a05aac23bfe96e9cfd7864d708fb4f2cebb26",
+        "raw_prior": {
+          "mean_net_r": -0.3290386666666666,
+          "sample_size": 6
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_po3_reversal"
+        ],
+        "shrinkage_weight": 0.09658508013407713,
+        "shrunk_estimate": -0.1186819377832361,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -1.1764815408706484,
+          "standard_error": 0.4323688133693785,
+          "upper": 0.5184042075373152
+        },
+        "wins": 2
+      },
+      "micro_range_reentry": {
+        "avg_minutes_to_0_25r_mfe": 1.6666666666666667,
+        "clean_sample_size": 21,
+        "data_window": {
+          "end": "1775729320",
+          "start": "1771423960"
+        },
+        "dr_structural_invalid_rate": 0.5714285714285714,
+        "effective_sample_size": 21.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 12,
+        "mean_net_r": 0.009113333333333373,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3859202227344649,
+          "upper": 0.25414843894923433
+        },
+        "prior_hash": "7480a6ce8645d28b714d42df8e9c1d316bed0b94fddbcc4645ec168e54efffcb",
+        "raw_prior": {
+          "mean_net_r": 0.009113333333333373,
+          "sample_size": 21
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_range_reentry"
+        ],
+        "shrinkage_weight": 0.2877958909440884,
+        "shrunk_estimate": -0.0658858918926153,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -0.630577149384248,
+          "standard_error": 0.3263726952640722,
+          "upper": 0.6488038160509149
+        },
+        "wins": 9
+      }
+    },
+    "family_session": {
+      "micro_bisi_sibi_edge|ASIA": {
+        "avg_minutes_to_0_25r_mfe": 4.846153846153846,
+        "clean_sample_size": 13,
+        "data_window": {
+          "end": "1775534440",
+          "start": "1771216660"
+        },
+        "dr_structural_invalid_rate": 0.23076923076923078,
+        "effective_sample_size": 13.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 7,
+        "mean_net_r": -0.06389299999999998,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 24.0,
+          "mean_net_r": -0.10843283061049444,
+          "prior_hash": "7afa56e7487cfc220c97a3ec1a5b4a9f3a42ed54b4790b9ff917c57aba09e9b7"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.438793254153207,
+          "upper": 0.24391831145252008
+        },
+        "prior_hash": "a5627241403af58177d5d85d67ee900f74cf6e0b5bb6912a1351976c4a9ba7da",
+        "raw_prior": {
+          "mean_net_r": -0.06389299999999998,
+          "sample_size": 13
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_bisi_sibi_edge",
+          "family_session:micro_bisi_sibi_edge|ASIA"
+        ],
+        "shrinkage_weight": 0.24686576283386727,
+        "shrunk_estimate": -0.09743747135034349,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -0.6417662808512917,
+          "standard_error": 0.2948333065567815,
+          "upper": 0.5139802808512918
+        },
+        "wins": 6
+      },
+      "micro_bisi_sibi_edge|LON": {
+        "avg_minutes_to_0_25r_mfe": 6.1,
+        "clean_sample_size": 10,
+        "data_window": {
+          "end": "1775749300",
+          "start": "1771254940"
+        },
+        "dr_structural_invalid_rate": 0.2,
+        "effective_sample_size": 10.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 7,
+        "mean_net_r": -0.3392712,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 24.0,
+          "mean_net_r": -0.10843283061049444,
+          "prior_hash": "7afa56e7487cfc220c97a3ec1a5b4a9f3a42ed54b4790b9ff917c57aba09e9b7"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4857988160188004,
+          "upper": 0.17663491809364437
+        },
+        "prior_hash": "b048879139357dee8f8e0995ed0b7f66a916265d4eb84076239be8092fbc13c3",
+        "raw_prior": {
+          "mean_net_r": -0.3392712,
+          "sample_size": 10
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_bisi_sibi_edge",
+          "family_session:micro_bisi_sibi_edge|LON"
+        ],
+        "shrinkage_weight": 0.199919616804318,
+        "shrunk_estimate": -0.154581948962578,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.1,
+        "uncertainty_interval": {
+          "lower": -0.940175001219535,
+          "standard_error": 0.3065835720507832,
+          "upper": 0.261632601219535
+        },
+        "wins": 3
+      },
+      "micro_bisi_sibi_edge|OFF": {
+        "avg_minutes_to_0_25r_mfe": 0.0,
+        "clean_sample_size": 1,
+        "data_window": {
+          "end": "1774465820",
+          "start": "1774465820"
+        },
+        "dr_structural_invalid_rate": 0.0,
+        "effective_sample_size": 1.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 0,
+        "mean_net_r": 1.04158,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 24.0,
+          "mean_net_r": -0.10843283061049444,
+          "prior_hash": "7afa56e7487cfc220c97a3ec1a5b4a9f3a42ed54b4790b9ff917c57aba09e9b7"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3608154184011416,
+          "upper": 0.1625706855153261
+        },
+        "prior_hash": "f6dd6ca29cc6a1a15292d7438770e733078486fcd77f67832a1f75ba2259b3fc",
+        "raw_prior": {
+          "mean_net_r": 1.04158,
+          "sample_size": 1
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_bisi_sibi_edge",
+          "family_session:micro_bisi_sibi_edge|OFF"
+        ],
+        "shrinkage_weight": 0.00809596547078881,
+        "shrunk_estimate": -0.09912236644290778,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": 1.04158,
+          "standard_error": null,
+          "upper": 1.04158
+        },
+        "wins": 1
+      },
+      "micro_continuation_fvg|ASIA": {
+        "avg_minutes_to_0_25r_mfe": 42.53333333333333,
+        "clean_sample_size": 15,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.3333333333333333,
+        "effective_sample_size": 15.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 10,
+        "mean_net_r": -0.3715696,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.0954179273935434,
+          "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4821132642880662,
+          "upper": 0.14030574521522632
+        },
+        "prior_hash": "b7410912d5f1ef6aff732fd28166ea836f8499b6a40985f906806075af07681c",
+        "raw_prior": {
+          "mean_net_r": -0.3715696,
+          "sample_size": 15
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg",
+          "family_session:micro_continuation_fvg|ASIA"
+        ],
+        "shrinkage_weight": 0.27334917594524705,
+        "shrunk_estimate": -0.17090375953641995,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.06666666666666667,
+        "uncertainty_interval": {
+          "lower": -0.850764826040197,
+          "standard_error": 0.24448736022459028,
+          "upper": 0.10762562604019693
+        },
+        "wins": 5
+      },
+      "micro_continuation_fvg|LON": {
+        "avg_minutes_to_0_25r_mfe": 3.1666666666666665,
+        "clean_sample_size": 6,
+        "data_window": {
+          "end": "1774433320",
+          "start": "1772018500"
+        },
+        "dr_structural_invalid_rate": 0.16666666666666666,
+        "effective_sample_size": 6.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 1,
+        "mean_net_r": 0.697075,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.0954179273935434,
+          "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.2977971328089238,
+          "upper": 0.3011889142075833
+        },
+        "prior_hash": "3e04ac67405063654d9c8aa6bc42fda676876518edaff9d468b724ad0bddafe1",
+        "raw_prior": {
+          "mean_net_r": 0.697075,
+          "sample_size": 6
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg",
+          "family_session:micro_continuation_fvg|LON"
+        ],
+        "shrinkage_weight": 0.12254218900384899,
+        "shrunk_estimate": 0.0016958906993297662,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": 0.02899148766048565,
+          "standard_error": 0.3408589348670992,
+          "upper": 1.3651585123395145
+        },
+        "wins": 5
+      },
+      "micro_continuation_fvg|NY": {
+        "avg_minutes_to_0_25r_mfe": 3.0,
+        "clean_sample_size": 3,
+        "data_window": {
+          "end": "1771976140",
+          "start": "1771545240"
+        },
+        "dr_structural_invalid_rate": 0.6666666666666666,
+        "effective_sample_size": 3.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 3,
+        "mean_net_r": -0.680071,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.0954179273935434,
+          "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4077366310062096,
+          "upper": 0.13975358122154588
+        },
+        "prior_hash": "d6fa3da3963705832b388fca71ef662dd279551562d7c59570b9e9921feae67d",
+        "raw_prior": {
+          "mean_net_r": -0.680071,
+          "sample_size": 3
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg",
+          "family_session:micro_continuation_fvg|NY"
+        ],
+        "shrinkage_weight": 0.06597690032966484,
+        "shrunk_estimate": -0.1339915248923319,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -1.3180417948462795,
+          "standard_error": 0.32549530349299977,
+          "upper": -0.04210020515372048
+        },
+        "wins": 0
+      },
+      "micro_continuation_fvg|OFF": {
+        "avg_minutes_to_0_25r_mfe": 36.0,
+        "clean_sample_size": 6,
+        "data_window": {
+          "end": "1775667640",
+          "start": "1771286040"
+        },
+        "dr_structural_invalid_rate": 0.0,
+        "effective_sample_size": 6.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 2,
+        "mean_net_r": 0.10071833333333335,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.0954179273935434,
+          "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.36074965421122296,
+          "upper": 0.2194171582567288
+        },
+        "prior_hash": "ae8623ebae9c15472a17b893f401d5f6f00d8d98786837dc9f24471cbab084f6",
+        "raw_prior": {
+          "mean_net_r": 0.10071833333333335,
+          "sample_size": 6
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg",
+          "family_session:micro_continuation_fvg|OFF"
+        ],
+        "shrinkage_weight": 0.12619634597176008,
+        "shrunk_estimate": -0.07066624797724713,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.16666666666666666,
+        "uncertainty_interval": {
+          "lower": -0.4806383762326293,
+          "standard_error": 0.29661056610508296,
+          "upper": 0.682075042899296
+        },
+        "wins": 4
+      },
+      "micro_po3_reversal|LON": {
+        "avg_minutes_to_0_25r_mfe": 0.0,
+        "clean_sample_size": 4,
+        "data_window": {
+          "end": "1774972780",
+          "start": "1771862440"
+        },
+        "dr_structural_invalid_rate": 0.25,
+        "effective_sample_size": 4.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 4,
+        "mean_net_r": -1.01267125,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 6.0,
+          "mean_net_r": -0.1186819377832361,
+          "prior_hash": "8b26625f178f9755d9c3aea2774a05aac23bfe96e9cfd7864d708fb4f2cebb26"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4644443711485444,
+          "upper": -0.02720025619572558
+        },
+        "prior_hash": "629f96e8df82dffb8423eb003f4ee4e5ae75bfd0f691f89e607854a580ab483e",
+        "raw_prior": {
+          "mean_net_r": -1.01267125,
+          "sample_size": 4
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_po3_reversal",
+          "family_session:micro_po3_reversal|LON"
+        ],
+        "shrinkage_weight": 0.1422168857630274,
+        "shrunk_estimate": -0.24582231367213503,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -1.016224266219735,
+          "standard_error": 0.0018127633774158117,
+          "upper": -1.0091182337802649
+        },
+        "wins": 0
+      },
+      "micro_po3_reversal|NY": {
+        "avg_minutes_to_0_25r_mfe": 1.0,
+        "clean_sample_size": 1,
+        "data_window": {
+          "end": "1773785240",
+          "start": "1773785240"
+        },
+        "dr_structural_invalid_rate": 0.0,
+        "effective_sample_size": 1.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 0,
+        "mean_net_r": 1.037182,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 6.0,
+          "mean_net_r": -0.1186819377832361,
+          "prior_hash": "8b26625f178f9755d9c3aea2774a05aac23bfe96e9cfd7864d708fb4f2cebb26"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3584732189398519,
+          "upper": 0.1448608835885081
+        },
+        "prior_hash": "a896dd39e654e73ad8dc816a3cefb7912792315d02191c40727ab1540dbe3783",
+        "raw_prior": {
+          "mean_net_r": 1.037182,
+          "sample_size": 1
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_po3_reversal",
+          "family_session:micro_po3_reversal|NY"
+        ],
+        "shrinkage_weight": 0.01027436683450822,
+        "shrunk_estimate": -0.10680616767567194,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": 1.037182,
+          "standard_error": null,
+          "upper": 1.037182
+        },
+        "wins": 1
+      },
+      "micro_po3_reversal|OFF": {
+        "avg_minutes_to_0_25r_mfe": 17.0,
+        "clean_sample_size": 1,
+        "data_window": {
+          "end": "1771535320",
+          "start": "1771535320"
+        },
+        "dr_structural_invalid_rate": 0.0,
+        "effective_sample_size": 1.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 0,
+        "mean_net_r": 1.039271,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 6.0,
+          "mean_net_r": -0.1186819377832361,
+          "prior_hash": "8b26625f178f9755d9c3aea2774a05aac23bfe96e9cfd7864d708fb4f2cebb26"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3584517557875346,
+          "upper": 0.1448823467408254
+        },
+        "prior_hash": "147818bae2f922dc92301b47fa5780f09055e84c35a5480599eb6575d60dfcf0",
+        "raw_prior": {
+          "mean_net_r": 1.039271,
+          "sample_size": 1
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_po3_reversal",
+          "family_session:micro_po3_reversal|OFF"
+        ],
+        "shrinkage_weight": 0.01027436683450822,
+        "shrunk_estimate": -0.10678470452335466,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": 1.039271,
+          "standard_error": null,
+          "upper": 1.039271
+        },
+        "wins": 1
+      },
+      "micro_range_reentry|ASIA": {
+        "avg_minutes_to_0_25r_mfe": 3.25,
+        "clean_sample_size": 8,
+        "data_window": {
+          "end": "1775729320",
+          "start": "1771921300"
+        },
+        "dr_structural_invalid_rate": 0.5,
+        "effective_sample_size": 8.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 6,
+        "mean_net_r": -0.500526625,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 21.0,
+          "mean_net_r": -0.0658858918926153,
+          "prior_hash": "7480a6ce8645d28b714d42df8e9c1d316bed0b94fddbcc4645ec168e54efffcb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.5153822809119528,
+          "upper": 0.23834503540247326
+        },
+        "prior_hash": "7d6408a90f753ed5d2030742072d86720861dcec02e9e5ccbf6cc40c157a53dc",
+        "raw_prior": {
+          "mean_net_r": -0.500526625,
+          "sample_size": 8
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_range_reentry",
+          "family_session:micro_range_reentry|ASIA"
+        ],
+        "shrinkage_weight": 0.16710981122926521,
+        "shrunk_estimate": -0.1385186227547398,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -1.1606327140308217,
+          "standard_error": 0.3367888209340926,
+          "upper": 0.15957946403082157
+        },
+        "wins": 2
+      },
+      "micro_range_reentry|LON": {
+        "avg_minutes_to_0_25r_mfe": 0.7,
+        "clean_sample_size": 10,
+        "data_window": {
+          "end": "1775654200",
+          "start": "1771423960"
+        },
+        "dr_structural_invalid_rate": 0.6,
+        "effective_sample_size": 10.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 5,
+        "mean_net_r": 0.409264,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 21.0,
+          "mean_net_r": -0.0658858918926153,
+          "prior_hash": "7480a6ce8645d28b714d42df8e9c1d316bed0b94fddbcc4645ec168e54efffcb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.45248075298087587,
+          "upper": 0.4851745633617876
+        },
+        "prior_hash": "e3cb19de2d80c0ae16eb3f2472c3530b6e1a31ac0ce5e33ea4aa0dd7e9ba8c27",
+        "raw_prior": {
+          "mean_net_r": 0.409264,
+          "sample_size": 10
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_range_reentry",
+          "family_session:micro_range_reentry|LON"
+        ],
+        "shrinkage_weight": 0.17306706470146038,
+        "shrunk_estimate": 0.01634690519045586,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -0.7705140815442126,
+          "standard_error": 0.6019275926245984,
+          "upper": 1.5890420815442128
+        },
+        "wins": 5
+      },
+      "micro_range_reentry|NY": {
+        "avg_minutes_to_0_25r_mfe": 0.0,
+        "clean_sample_size": 1,
+        "data_window": {
+          "end": "1773791640",
+          "start": "1773791640"
+        },
+        "dr_structural_invalid_rate": 0.0,
+        "effective_sample_size": 1.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 0,
+        "mean_net_r": 0.083756,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 21.0,
+          "mean_net_r": -0.0658858918926153,
+          "prior_hash": "7480a6ce8645d28b714d42df8e9c1d316bed0b94fddbcc4645ec168e54efffcb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.38201630470247344,
+          "upper": 0.2527321481456332
+        },
+        "prior_hash": "0440e2940e52d23f573e958e18518be108fc50e33f8740fe11783cb72d477faa",
+        "raw_prior": {
+          "mean_net_r": 0.083756,
+          "sample_size": 1
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_range_reentry",
+          "family_session:micro_range_reentry|NY"
+        ],
+        "shrinkage_weight": 0.008311934569015968,
+        "shrunk_estimate": -0.06464207827842011,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": 0.083756,
+          "standard_error": null,
+          "upper": 0.083756
+        },
+        "wins": 1
+      },
+      "micro_range_reentry|OFF": {
+        "avg_minutes_to_0_25r_mfe": 1.0,
+        "clean_sample_size": 2,
+        "data_window": {
+          "end": "1775159440",
+          "start": "1772826820"
+        },
+        "dr_structural_invalid_rate": 1.0,
+        "effective_sample_size": 2.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 1,
+        "mean_net_r": 0.009598499999999954,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 21.0,
+          "mean_net_r": -0.0658858918926153,
+          "prior_hash": "7480a6ce8645d28b714d42df8e9c1d316bed0b94fddbcc4645ec168e54efffcb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4375572999291529,
+          "upper": 0.31062891849282254
+        },
+        "prior_hash": "3c6abab76dc6f71dd97fe0e3a8212f1aec0624b4dbc70fa0010f6a92043db459",
+        "raw_prior": {
+          "mean_net_r": 0.009598499999999954,
+          "sample_size": 2
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_range_reentry",
+          "family_session:micro_range_reentry|OFF"
+        ],
+        "shrinkage_weight": 0.03208214458288579,
+        "shrunk_estimate": -0.0634641907181652,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -1.9954471999999996,
+          "standard_error": 1.0229825,
+          "upper": 2.0146441999999998
+        },
+        "wins": 1
+      }
+    },
+    "family_symbol": {
+      "micro_bisi_sibi_edge|GOLD": {
+        "avg_minutes_to_0_25r_mfe": 5.166666666666667,
+        "clean_sample_size": 24,
+        "data_window": {
+          "end": "1775749300",
+          "start": "1771216660"
+        },
+        "dr_structural_invalid_rate": 0.20833333333333334,
+        "effective_sample_size": 24.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 14,
+        "mean_net_r": -0.13257254166666665,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 24.0,
+          "mean_net_r": -0.10843283061049444,
+          "prior_hash": "7afa56e7487cfc220c97a3ec1a5b4a9f3a42ed54b4790b9ff917c57aba09e9b7"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4383734590436792,
+          "upper": 0.20251300671694994
+        },
+        "prior_hash": "3aa4813c1f99266b4ce469eaf307a515ba1370351a0b3c2a3243d9261f2ea997",
+        "raw_prior": {
+          "mean_net_r": -0.13257254166666665,
+          "sample_size": 24
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_bisi_sibi_edge",
+          "family_symbol:micro_bisi_sibi_edge|GOLD"
+        ],
+        "shrinkage_weight": 0.3934345167085939,
+        "shrunk_estimate": -0.11793022616336465,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.041666666666666664,
+        "uncertainty_interval": {
+          "lower": -0.5402990112289996,
+          "standard_error": 0.20802370896037395,
+          "upper": 0.2751539278956663
+        },
+        "wins": 10
+      },
+      "micro_continuation_fvg|GOLD": {
+        "avg_minutes_to_0_25r_mfe": 29.4,
+        "clean_sample_size": 30,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.26666666666666666,
+        "effective_sample_size": 30.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 16,
+        "mean_net_r": -0.09423323333333332,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.0954179273935434,
+          "prior_hash": "75378892ef544f62e3fc5dbc74105a2c94f7b0b458c42dc64fc2a92e9bf831bb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3817471300244018,
+          "upper": 0.1919639506530743
+        },
+        "prior_hash": "6c318ec2079521c4c06e60ec4c33a8134eff067669c05960ca032c1c8ba19671",
+        "raw_prior": {
+          "mean_net_r": -0.09423323333333332,
+          "sample_size": 30
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_continuation_fvg",
+          "family_symbol:micro_continuation_fvg|GOLD"
+        ],
+        "shrinkage_weight": 0.4442815453859079,
+        "shrunk_estimate": -0.09489158968566376,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.06666666666666667,
+        "uncertainty_interval": {
+          "lower": -0.4296687711702829,
+          "standard_error": 0.1711405805290559,
+          "upper": 0.24120230450361624
+        },
+        "wins": 14
+      },
+      "micro_po3_reversal|GOLD": {
+        "avg_minutes_to_0_25r_mfe": 3.0,
+        "clean_sample_size": 6,
+        "data_window": {
+          "end": "1774972780",
+          "start": "1771535320"
+        },
+        "dr_structural_invalid_rate": 0.16666666666666666,
+        "effective_sample_size": 6.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 4,
+        "mean_net_r": -0.3290386666666666,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 6.0,
+          "mean_net_r": -0.1186819377832361,
+          "prior_hash": "8b26625f178f9755d9c3aea2774a05aac23bfe96e9cfd7864d708fb4f2cebb26"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.492016605721581,
+          "upper": 0.19231692726054744
+        },
+        "prior_hash": "199bf3bcc31651ed065b2433a904c8df2fd80306a68b84ca0c803b08b864a5ae",
+        "raw_prior": {
+          "mean_net_r": -0.3290386666666666,
+          "sample_size": 6
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_po3_reversal",
+          "family_symbol:micro_po3_reversal|GOLD"
+        ],
+        "shrinkage_weight": 0.14816688590243504,
+        "shrunk_estimate": -0.1498498392305168,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -1.1764815408706484,
+          "standard_error": 0.4323688133693785,
+          "upper": 0.5184042075373152
+        },
+        "wins": 2
+      },
+      "micro_range_reentry|GOLD": {
+        "avg_minutes_to_0_25r_mfe": 1.6666666666666667,
+        "clean_sample_size": 21,
+        "data_window": {
+          "end": "1775729320",
+          "start": "1771423960"
+        },
+        "dr_structural_invalid_rate": 0.5714285714285714,
+        "effective_sample_size": 21.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 12,
+        "mean_net_r": 0.009113333333333373,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 21.0,
+          "mean_net_r": -0.0658858918926153,
+          "prior_hash": "7480a6ce8645d28b714d42df8e9c1d316bed0b94fddbcc4645ec168e54efffcb"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4707554830340833,
+          "upper": 0.39099595070185045
+        },
+        "prior_hash": "e03c40a8d339a24ff35dfd37e2492629e27f096f50ca48c122ce752c098e19a8",
+        "raw_prior": {
+          "mean_net_r": 0.009113333333333373,
+          "sample_size": 21
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "family:micro_range_reentry",
+          "family_symbol:micro_range_reentry|GOLD"
+        ],
+        "shrinkage_weight": 0.3467519250785685,
+        "shrunk_estimate": -0.03987976616611647,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -0.630577149384248,
+          "standard_error": 0.3263726952640722,
+          "upper": 0.6488038160509149
+        },
+        "wins": 9
+      }
+    },
+    "global": {
+      "ALL": {
+        "avg_minutes_to_0_25r_mfe": 13.074074074074074,
+        "clean_sample_size": 81,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.32098765432098764,
+        "effective_sample_size": 81.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 46,
+        "mean_net_r": -0.09619246913580244,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 0.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": ""
+        },
+        "posterior_uncertainty": {
+          "lower": -0.2870563474976974,
+          "upper": 0.09467140922609256
+        },
+        "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579",
+        "raw_prior": {
+          "mean_net_r": -0.09619246913580244,
+          "sample_size": 81
+        },
+        "selected_hierarchy_path": [
+          "global:ALL"
+        ],
+        "shrinkage_weight": 0.7826971228165392,
+        "shrunk_estimate": -0.09619246913580244,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.037037037037037035,
+        "uncertainty_interval": {
+          "lower": -0.3400465383510698,
+          "standard_error": 0.1244153414363609,
+          "upper": 0.14766160007946494
+        },
+        "wins": 35
+      }
+    },
+    "killzone": {
+      "K": {
+        "avg_minutes_to_0_25r_mfe": 2.5,
+        "clean_sample_size": 4,
+        "data_window": {
+          "end": "1775729320",
+          "start": "1771500520"
+        },
+        "dr_structural_invalid_rate": 0.5,
+        "effective_sample_size": 4.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 1,
+        "mean_net_r": 0.5267470000000001,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 30.0,
+          "mean_net_r": -0.04912158924592579,
+          "prior_hash": "559983a73e64e3fdd2bb9a843827f579aea88ab92d97e029032a7a94d6937aa0"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.36290343865487834,
+          "upper": 0.35254034617947494
+        },
+        "prior_hash": "a0ebc50606bcd980f5f026dbf85d756627f23678e407c6b61aae74c125c89165",
+        "raw_prior": {
+          "mean_net_r": 0.5267470000000001,
+          "sample_size": 4
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "session:LON",
+          "killzone:K"
+        ],
+        "shrinkage_weight": 0.07630220475432002,
+        "shrunk_estimate": -0.0051815462377017354,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -0.4753557009400926,
+          "standard_error": 0.5112768882347412,
+          "upper": 1.5288497009400928
+        },
+        "wins": 3
+      },
+      "NK": {
+        "avg_minutes_to_0_25r_mfe": 13.623376623376624,
+        "clean_sample_size": 77,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.3116883116883117,
+        "effective_sample_size": 77.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 45,
+        "mean_net_r": -0.12855296103896102,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 36.0,
+          "mean_net_r": -0.18133159119174336,
+          "prior_hash": "ac61d9cd58cfab85d1f7e2f918ecd45f675b30b44d04f0281f4ea37993a6ed25"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3954237224750977,
+          "upper": 0.10374405502781821
+        },
+        "prior_hash": "e9785e3de395ba974387d4f5fd4e85811209b2f4640cf6596a84f4a06c7c7c00",
+        "raw_prior": {
+          "mean_net_r": -0.12855296103896102,
+          "sample_size": 77
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "session:ASIA",
+          "killzone:NK"
+        ],
+        "shrinkage_weight": 0.6724645441793937,
+        "shrunk_estimate": -0.1458398337236398,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.03896103896103896,
+        "uncertainty_interval": {
+          "lower": -0.3789827624116042,
+          "standard_error": 0.12777030682277715,
+          "upper": 0.12187684033368218
+        },
+        "wins": 32
+      }
+    },
+    "session": {
+      "ASIA": {
+        "avg_minutes_to_0_25r_mfe": 20.194444444444443,
+        "clean_sample_size": 36,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.3333333333333333,
+        "effective_sample_size": 36.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 23,
+        "mean_net_r": -0.28912127777777774,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.4291787328670848,
+          "upper": 0.06651555048359817
+        },
+        "prior_hash": "ac61d9cd58cfab85d1f7e2f918ecd45f675b30b44d04f0281f4ea37993a6ed25",
+        "raw_prior": {
+          "mean_net_r": -0.28912127777777774,
+          "sample_size": 36
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "session:ASIA"
+        ],
+        "shrinkage_weight": 0.4412981278184149,
+        "shrunk_estimate": -0.18133159119174336,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.027777777777777776,
+        "uncertainty_interval": {
+          "lower": -0.6091116122049791,
+          "standard_error": 0.16326037470775584,
+          "upper": 0.030869056649423687
+        },
+        "wins": 13
+      },
+      "LON": {
+        "avg_minutes_to_0_25r_mfe": 2.9,
+        "clean_sample_size": 30,
+        "data_window": {
+          "end": "1775749300",
+          "start": "1771254940"
+        },
+        "dr_structural_invalid_rate": 0.3333333333333333,
+        "effective_sample_size": 30.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 17,
+        "mean_net_r": 0.02772310000000004,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.3536143014650567,
+          "upper": 0.2553711229732052
+        },
+        "prior_hash": "559983a73e64e3fdd2bb9a843827f579aea88ab92d97e029032a7a94d6937aa0",
+        "raw_prior": {
+          "mean_net_r": 0.02772310000000004,
+          "sample_size": 30
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "session:LON"
+        ],
+        "shrinkage_weight": 0.3798625162128771,
+        "shrunk_estimate": -0.04912158924592579,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.03333333333333333,
+        "uncertainty_interval": {
+          "lower": -0.4622722509538306,
+          "standard_error": 0.24999762803766873,
+          "upper": 0.5177184509538307
+        },
+        "wins": 13
+      },
+      "NY": {
+        "avg_minutes_to_0_25r_mfe": 2.0,
+        "clean_sample_size": 5,
+        "data_window": {
+          "end": "1773791640",
+          "start": "1771545240"
+        },
+        "dr_structural_invalid_rate": 0.4,
+        "effective_sample_size": 5.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 3,
+        "mean_net_r": -0.183855,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.34178049139248246,
+          "upper": 0.13458647146522013
+        },
+        "prior_hash": "06189eb6b486a3848938a4d263558beb7ea8706e3c9b3e90cc073ca8d2550653",
+        "raw_prior": {
+          "mean_net_r": -0.183855,
+          "sample_size": 5
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "session:NY"
+        ],
+        "shrinkage_weight": 0.08446642772953336,
+        "shrunk_estimate": -0.10359700996363116,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.0,
+        "uncertainty_interval": {
+          "lower": -0.9349367582807258,
+          "standard_error": 0.38320497871465603,
+          "upper": 0.5672267582807258
+        },
+        "wins": 2
+      },
+      "OFF": {
+        "avg_minutes_to_0_25r_mfe": 23.5,
+        "clean_sample_size": 10,
+        "data_window": {
+          "end": "1775667640",
+          "start": "1771286040"
+        },
+        "dr_structural_invalid_rate": 0.2,
+        "effective_sample_size": 10.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 3,
+        "mean_net_r": 0.2704358,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "6b1842aee98b468737d64ebe5abf99c531a4fb5cf13e82225a4305b722e86579"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.2800062996320744,
+          "upper": 0.21088498128082123
+        },
+        "prior_hash": "51f235bb7890e1a64ea5458f4a7a6eecba0e401ba4b6b2b87138636fc28e108b",
+        "raw_prior": {
+          "mean_net_r": 0.2704358,
+          "sample_size": 10
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "session:OFF"
+        ],
+        "shrinkage_weight": 0.16810435841581778,
+        "shrunk_estimate": -0.03456065917562661,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.1,
+        "uncertainty_interval": {
+          "lower": -0.24511782828224538,
+          "standard_error": 0.2630375654501252,
+          "upper": 0.7859894282822454
+        },
+        "wins": 7
+      }
+    },
+    "symbol": {
+      "GOLD": {
+        "avg_minutes_to_0_25r_mfe": 13.074074074074074,
+        "clean_sample_size": 81,
+        "data_window": {
+          "end": "1775803160",
+          "start": "1771206280"
+        },
+        "dr_structural_invalid_rate": 0.32098765432098764,
+        "effective_sample_size": 81.0,
+        "ledger_integrity_status": "clean_only",
+        "losses": 46,
+        "mean_net_r": -0.09619246913580244,
+        "neutral": 0,
+        "parent_prior": {
+          "effective_sample_size": 81.0,
+          "mean_net_r": -0.09619246913580244,
+          "prior_hash": "291a70818e0b647f95fc4e7e8ec535e2f1637336b45bc9f1e7b3800ad3aac46c"
+        },
+        "posterior_uncertainty": {
+          "lower": -0.33347010437543234,
+          "upper": 0.14108516610382751
+        },
+        "prior_hash": "34689132ca8d738ec48d757f5251f0d29e71e5b5e9cf92f801ff46586a48c7cf",
+        "raw_prior": {
+          "mean_net_r": -0.09619246913580244,
+          "sample_size": 81
+        },
+        "selected_hierarchy_path": [
+          "global:ALL",
+          "asset_class:metals",
+          "symbol:GOLD"
+        ],
+        "shrinkage_weight": 0.6477122917926252,
+        "shrunk_estimate": -0.09619246913580244,
+        "source_versions": [
+          "5.5-version-z-canonical-request-20260724-v8|unknown|tester_bootstrap_no_prompt_v1"
+        ],
+        "stale": false,
+        "stuck_no_mfe_rate": 0.037037037037037035,
+        "uncertainty_interval": {
+          "lower": -0.3400465383510698,
+          "standard_error": 0.1244153414363609,
+          "upper": 0.14766160007946494
+        },
+        "wins": 35
+      }
+    }
+  },
+  "prior_version": "20260717_hierarchical_prior_v1",
+  "rejected_record_count": 0,
+  "schema_version": "20260717_hierarchical_prior_v1",
+  "stale_after_days": 30,
+  "taxonomy_version": "20260716_setup_taxonomy_v1"
+}

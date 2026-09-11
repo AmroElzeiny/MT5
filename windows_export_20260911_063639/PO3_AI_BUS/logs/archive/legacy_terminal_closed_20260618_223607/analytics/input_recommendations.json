@@ -1,0 +1,43 @@
+{
+  "mode": "advisory_only",
+  "auto_apply": false,
+  "valid_trades": 0,
+  "recommendation_count": 1,
+  "recommendations": [
+    {
+      "category": "data_quality",
+      "severity": "critical",
+      "action": "block_input_optimization",
+      "inputs": [
+        "trade_result_*.json",
+        "position_id",
+        "planned_entry",
+        "planned_sl",
+        "entry_branch",
+        "realized_r"
+      ],
+      "suggested_change": "Do not tune performance inputs from this sample. Collect fresh closed trades after the analytics metadata fix.",
+      "reason": "All loaded trade-result records were rejected by the quality gate.",
+      "evidence": {
+        "loaded_files": 17,
+        "ignored_records": 17,
+        "ignored_reasons": {
+          "legacy_trade_result_schema": 17,
+          "missing_trade_id": 17
+        }
+      },
+      "min_valid_trades": 30,
+      "auto_apply": false
+    }
+  ],
+  "notes": [
+    "Recommendations are generated from valid closed-trade evidence only.",
+    "The report never lowers governance safety gates just to force activation.",
+    "Apply input changes manually or through a separately governed change workflow."
+  ],
+  "active_policy_reference": {
+    "policy_id": "policy_1781811328_v1",
+    "activation_state": "shadow",
+    "shadow_mode": true
+  }
+}

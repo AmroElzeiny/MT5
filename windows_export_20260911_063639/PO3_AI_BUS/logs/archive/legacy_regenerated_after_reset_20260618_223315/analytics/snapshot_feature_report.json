@@ -1,0 +1,13 @@
+{
+  "rows": [
+    {
+      "snapshot_state": "no_snapshots",
+      "setup_class": "micro_bisi_sibi_edge.breaker_retest.virgin_fvg",
+      "count": 14,
+      "avg_r": 0.12140578571428573,
+      "avg_expected_value_r": 0.5839063571428571,
+      "avg_stop_quality": 7.378079214285713,
+      "win_rate": 0.35714285714285715
+    }
+  ]
+}

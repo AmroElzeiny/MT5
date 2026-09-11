@@ -1,0 +1,554 @@
+{
+  "generated_at": 1781811256,
+  "report": {
+    "overall": {
+      "count": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": 0.0,
+      "avg_r": 0.0,
+      "avg_effective_rr2": 0.0,
+      "avg_expected_value_r": 0.0,
+      "avg_net_expected_r": 0.0,
+      "avg_gross_expected_r": 0.0,
+      "avg_execution_cost_r": 0.0,
+      "avg_slippage_r": 0.0,
+      "avg_commission_r": 0.0,
+      "avg_pnl": 0.0,
+      "sum_pnl": 0.0,
+      "profit_factor": 0.0,
+      "max_drawdown_r": 0.0,
+      "avg_fill_slippage_r": 0.0,
+      "avg_mfe_r": 0.0,
+      "avg_mae_r": 0.0,
+      "avg_duration_minutes": 0.0,
+      "avg_stop_quality": 0.0,
+      "r_ci_low": 0.0,
+      "r_ci_high": 0.0,
+      "bootstrap_positive_rate": 0.0
+    },
+    "grouped": {
+      "symbol": [],
+      "session_name": [],
+      "in_killzone": [],
+      "setup_family": [],
+      "entry_branch": [],
+      "po3_subtype": [],
+      "fvg_subtype": [],
+      "regime_bucket": [],
+      "volatility_profile": [],
+      "setup_class": [],
+      "ai_score_bucket": [],
+      "execution_cost_bucket": [],
+      "ai_decision_source": [],
+      "weekday_name": [],
+      "session_weekday_key": []
+    },
+    "family_expectancy_policy": [],
+    "symbol_expectancy_policy": [],
+    "adaptive_policy_readiness": {
+      "activate_adaptive_policy": false,
+      "checks": {
+        "total_trades_ge_500": false,
+        "family_trades_ge_50": false,
+        "symbol_trades_ge_30": false,
+        "profit_factor_after_costs_gt_1_10": false,
+        "walk_forward_positive_fold_rate_ge_60pct": false
+      },
+      "walk_forward_summary": {
+        "folds": 0,
+        "positive_fold_rate": 0.0,
+        "avg_train_r": 0.0,
+        "avg_test_r": 0.0,
+        "avg_train_ev": 0.0,
+        "avg_test_ev": 0.0,
+        "avg_gap": 0.0
+      }
+    },
+    "walk_forward": [],
+    "data_quality": {
+      "loaded_files": 17,
+      "used_records": 0,
+      "ignored_records": 17,
+      "ignored_reasons": {
+        "legacy_trade_result_schema": 17,
+        "missing_trade_id": 17
+      },
+      "ignored_examples": [
+        {
+          "file": "trade_result_[sl 1.41367].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 1.41367]",
+          "position_id": "",
+          "symbol": "USDCAD",
+          "realized_pnl": -7.23,
+          "realized_r": -1.17561
+        },
+        {
+          "file": "trade_result_[sl 1.88190].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 1.88190]",
+          "position_id": "",
+          "symbol": "GBPAUD",
+          "realized_pnl": -5.41,
+          "realized_r": -1.064961
+        },
+        {
+          "file": "trade_result_[sl 199.875].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 199.875]",
+          "position_id": "",
+          "symbol": "CHFJPY",
+          "realized_pnl": -5.12,
+          "realized_r": -1.068894
+        },
+        {
+          "file": "trade_result_[sl 200.794].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 200.794]",
+          "position_id": "",
+          "symbol": "CHFJPY",
+          "realized_pnl": -5.03,
+          "realized_r": -1.869888
+        },
+        {
+          "file": "trade_result_[sl 213.316].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 213.316]",
+          "position_id": "",
+          "symbol": "GBPJPY",
+          "realized_pnl": -7.57,
+          "realized_r": -1.051389
+        },
+        {
+          "file": "trade_result_[sl 92.592].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 92.592]",
+          "position_id": "",
+          "symbol": "NZDJPY",
+          "realized_pnl": -1.92,
+          "realized_r": -0.237037
+        },
+        {
+          "file": "trade_result_[sl 92.761].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[sl 92.761]",
+          "position_id": "",
+          "symbol": "NZDJPY",
+          "realized_pnl": -6.11,
+          "realized_r": -0.754321
+        },
+        {
+          "file": "trade_result_[tp 0.70079].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[tp 0.70079]",
+          "position_id": "",
+          "symbol": "AUDUSD",
+          "realized_pnl": 5.4,
+          "realized_r": 6.428571
+        },
+        {
+          "file": "trade_result_[tp 0.70192].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[tp 0.70192]",
+          "position_id": "",
+          "symbol": "AUDUSD",
+          "realized_pnl": 3.91,
+          "realized_r": 3.833333
+        },
+        {
+          "file": "trade_result_[tp 1.31948].json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "[tp 1.31948]",
+          "position_id": "",
+          "symbol": "GBPUSD",
+          "realized_pnl": 6.04,
+          "realized_r": 3.798742
+        },
+        {
+          "file": "trade_result_AUDUSD_6457342.json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "AUDUSD_6457342",
+          "position_id": "",
+          "symbol": "AUDUSD",
+          "realized_pnl": -8.5,
+          "realized_r": -10.119048
+        },
+        {
+          "file": "trade_result_CHFJPY_6457454.json",
+          "reasons": [
+            "legacy_trade_result_schema",
+            "missing_trade_id"
+          ],
+          "trade_key": "CHFJPY_6457454",
+          "position_id": "",
+          "symbol": "CHFJPY",
+          "realized_pnl": -8.5,
+          "realized_r": -3.159851
+        }
+      ],
+      "parse_failures": 0,
+      "identity_meta_keys": 646,
+      "identity_enriched_from_trade_key_meta": 0,
+      "source_filter_excluded": 0,
+      "analyzed_records": 0
+    }
+  },
+  "context_policy": [],
+  "subtype_policy": [],
+  "symbol_expectancy_policy": [],
+  "family_expectancy_policy": [],
+  "adaptive_policy_readiness": {
+    "activate_adaptive_policy": false,
+    "checks": {
+      "total_trades_ge_500": false,
+      "family_trades_ge_50": false,
+      "symbol_trades_ge_30": false,
+      "profit_factor_after_costs_gt_1_10": false,
+      "walk_forward_positive_fold_rate_ge_60pct": false
+    },
+    "walk_forward_summary": {
+      "folds": 0,
+      "positive_fold_rate": 0.0,
+      "avg_train_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_train_ev": 0.0,
+      "avg_test_ev": 0.0,
+      "avg_gap": 0.0
+    }
+  },
+  "target_efficiency": [],
+  "snapshot_feature_report": [],
+  "session_weekday_policy": [],
+  "system_trade_history": {
+    "virtual_start_balance": 100000.0,
+    "summary": {
+      "virtual_start_balance": 100000.0,
+      "virtual_balance": 100000.0,
+      "virtual_equity": 100000.0,
+      "gross_balance": 100000.0,
+      "gross_profit": 0.0,
+      "gross_loss": 0.0,
+      "net_pnl": 0.0,
+      "net_pct": 0.0,
+      "profitable_days": 0,
+      "losing_days": 0,
+      "best_trade_pct": 0.0,
+      "worst_trade_pct": 0.0,
+      "best_weekday": "unknown",
+      "worst_weekday": "unknown"
+    },
+    "trades": []
+  },
+  "overfitting_diagnostics": {
+    "global_walk_forward": {
+      "folds": 0,
+      "positive_fold_rate": 0.0,
+      "avg_train_r": 0.0,
+      "avg_test_r": 0.0,
+      "avg_train_ev": 0.0,
+      "avg_test_ev": 0.0,
+      "avg_gap": 0.0
+    },
+    "unstable_bucket_count": 0,
+    "unstable_buckets": [],
+    "max_avg_gap": 0.0,
+    "avg_bucket_gap": 0.0
+  },
+  "active_policy": {
+    "policy_id": "policy_1781811256_v1",
+    "version": 1,
+    "activated_at": 0,
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "soft_setup_floor": 35.0,
+    "hard_setup_floor": 29.0,
+    "setup_floor_penalty_mult": 0.75,
+    "ote_softness_frac": 0.08,
+    "default_risk_multiplier": 0.9,
+    "runner_sequence_floor": 6.6,
+    "runner_liquidity_rr_floor": 2.1,
+    "runner_cost_r_ceiling": 0.22,
+    "runner_alignment_floor": 6.1,
+    "runner_adverse_ceiling": 3.2,
+    "runner_ev_floor": 0.0,
+    "shadow_mode": true,
+    "activation_state": "shadow",
+    "ai_review_passed": true
+  },
+  "governance": {
+    "evidence_score": 0.0,
+    "evidence_passed": false,
+    "walk_forward_passed": false,
+    "change_rate_passed": true,
+    "min_total_trades": 200,
+    "min_bucket_trades": 50,
+    "max_relevant_bucket": 0,
+    "r_ci_low": 0.0,
+    "profit_factor_after_costs": 0.0,
+    "max_drawdown_r": 0.0,
+    "min_profit_factor_after_costs": 1.15,
+    "max_allowed_drawdown_r": 12.0,
+    "min_positive_fold_rate": 0.6,
+    "max_train_test_gap_r": 0.25,
+    "change_count": 0,
+    "changed_fields": [],
+    "activate_ok": false,
+    "subtype_policy_count": 0,
+    "shadow_mode": true,
+    "governance_passed": false,
+    "ai_audit_status": "skipped",
+    "ai_review_passed": true,
+    "ai_decision_weight": 0.75
+  },
+  "data_quality": {
+    "loaded_files": 17,
+    "used_records": 0,
+    "ignored_records": 17,
+    "ignored_reasons": {
+      "legacy_trade_result_schema": 17,
+      "missing_trade_id": 17
+    },
+    "ignored_examples": [
+      {
+        "file": "trade_result_[sl 1.41367].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 1.41367]",
+        "position_id": "",
+        "symbol": "USDCAD",
+        "realized_pnl": -7.23,
+        "realized_r": -1.17561
+      },
+      {
+        "file": "trade_result_[sl 1.88190].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 1.88190]",
+        "position_id": "",
+        "symbol": "GBPAUD",
+        "realized_pnl": -5.41,
+        "realized_r": -1.064961
+      },
+      {
+        "file": "trade_result_[sl 199.875].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 199.875]",
+        "position_id": "",
+        "symbol": "CHFJPY",
+        "realized_pnl": -5.12,
+        "realized_r": -1.068894
+      },
+      {
+        "file": "trade_result_[sl 200.794].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 200.794]",
+        "position_id": "",
+        "symbol": "CHFJPY",
+        "realized_pnl": -5.03,
+        "realized_r": -1.869888
+      },
+      {
+        "file": "trade_result_[sl 213.316].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 213.316]",
+        "position_id": "",
+        "symbol": "GBPJPY",
+        "realized_pnl": -7.57,
+        "realized_r": -1.051389
+      },
+      {
+        "file": "trade_result_[sl 92.592].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 92.592]",
+        "position_id": "",
+        "symbol": "NZDJPY",
+        "realized_pnl": -1.92,
+        "realized_r": -0.237037
+      },
+      {
+        "file": "trade_result_[sl 92.761].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[sl 92.761]",
+        "position_id": "",
+        "symbol": "NZDJPY",
+        "realized_pnl": -6.11,
+        "realized_r": -0.754321
+      },
+      {
+        "file": "trade_result_[tp 0.70079].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[tp 0.70079]",
+        "position_id": "",
+        "symbol": "AUDUSD",
+        "realized_pnl": 5.4,
+        "realized_r": 6.428571
+      },
+      {
+        "file": "trade_result_[tp 0.70192].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[tp 0.70192]",
+        "position_id": "",
+        "symbol": "AUDUSD",
+        "realized_pnl": 3.91,
+        "realized_r": 3.833333
+      },
+      {
+        "file": "trade_result_[tp 1.31948].json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "[tp 1.31948]",
+        "position_id": "",
+        "symbol": "GBPUSD",
+        "realized_pnl": 6.04,
+        "realized_r": 3.798742
+      },
+      {
+        "file": "trade_result_AUDUSD_6457342.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "AUDUSD_6457342",
+        "position_id": "",
+        "symbol": "AUDUSD",
+        "realized_pnl": -8.5,
+        "realized_r": -10.119048
+      },
+      {
+        "file": "trade_result_CHFJPY_6457454.json",
+        "reasons": [
+          "legacy_trade_result_schema",
+          "missing_trade_id"
+        ],
+        "trade_key": "CHFJPY_6457454",
+        "position_id": "",
+        "symbol": "CHFJPY",
+        "realized_pnl": -8.5,
+        "realized_r": -3.159851
+      }
+    ],
+    "parse_failures": 0,
+    "identity_meta_keys": 646,
+    "identity_enriched_from_trade_key_meta": 0,
+    "source_filter_excluded": 0,
+    "analyzed_records": 0
+  },
+  "input_recommendations": {
+    "mode": "advisory_only",
+    "auto_apply": false,
+    "valid_trades": 0,
+    "recommendation_count": 1,
+    "recommendations": [
+      {
+        "category": "data_quality",
+        "severity": "critical",
+        "action": "block_input_optimization",
+        "inputs": [
+          "trade_result_*.json",
+          "position_id",
+          "planned_entry",
+          "planned_sl",
+          "entry_branch",
+          "realized_r"
+        ],
+        "suggested_change": "Do not tune performance inputs from this sample. Collect fresh closed trades after the analytics metadata fix.",
+        "reason": "All loaded trade-result records were rejected by the quality gate.",
+        "evidence": {
+          "loaded_files": 17,
+          "ignored_records": 17,
+          "ignored_reasons": {
+            "legacy_trade_result_schema": 17,
+            "missing_trade_id": 17
+          }
+        },
+        "min_valid_trades": 30,
+        "auto_apply": false
+      }
+    ],
+    "notes": [
+      "Recommendations are generated from valid closed-trade evidence only.",
+      "The report never lowers governance safety gates just to force activation.",
+      "Apply input changes manually or through a separately governed change workflow."
+    ],
+    "active_policy_reference": {
+      "policy_id": "policy_1781811256_v1",
+      "activation_state": "shadow",
+      "shadow_mode": true
+    }
+  },
+  "ai_audit": {
+    "enabled": false,
+    "model": "gpt-5.5",
+    "reasoning_effort": "high",
+    "decision_weight": 0.75,
+    "status": "skipped",
+    "agree": null,
+    "confidence": 0.0,
+    "weighted_confidence": 0.0,
+    "activation_veto": false,
+    "summary": "EXPECTANCY_AI_AUDIT_ENABLE is off."
+  }
+}

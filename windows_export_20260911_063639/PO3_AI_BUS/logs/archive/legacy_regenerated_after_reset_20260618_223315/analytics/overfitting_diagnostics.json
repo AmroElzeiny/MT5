@@ -1,0 +1,15 @@
+{
+  "global_walk_forward": {
+    "folds": 2,
+    "positive_fold_rate": 0.5,
+    "avg_train_r": 0.49925549999999996,
+    "avg_test_r": -0.013264333333333357,
+    "avg_train_ev": -0.015557821448630656,
+    "avg_test_ev": 0.7321089344085877,
+    "avg_gap": 0.5125198333333334
+  },
+  "unstable_bucket_count": 0,
+  "unstable_buckets": [],
+  "max_avg_gap": 0.0,
+  "avg_bucket_gap": 0.0
+}

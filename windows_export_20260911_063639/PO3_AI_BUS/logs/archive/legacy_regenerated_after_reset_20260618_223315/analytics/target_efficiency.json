@@ -1,0 +1,13 @@
+{
+  "rows": [
+    {
+      "target_source": "synthetic_rr_fallback",
+      "obstacle_kind": "crossed_opposing_imbalance",
+      "count": 25,
+      "avg_r": 0.16919551999999988,
+      "avg_capture_ratio": 0.16113859047619034,
+      "win_rate": 0.36,
+      "avg_effective_rr2": 1.0500000000000005
+    }
+  ]
+}

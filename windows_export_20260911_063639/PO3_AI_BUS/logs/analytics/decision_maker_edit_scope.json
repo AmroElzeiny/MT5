@@ -1,0 +1,86 @@
+{
+  "runtime_policy_files": {
+    "active_policy.json": [
+      "soft_setup_floor",
+      "hard_setup_floor",
+      "setup_floor_penalty_mult",
+      "ote_softness_frac",
+      "default_risk_multiplier",
+      "runner_sequence_floor",
+      "runner_liquidity_rr_floor",
+      "runner_cost_r_ceiling",
+      "runner_alignment_floor",
+      "runner_adverse_ceiling",
+      "runner_ev_floor"
+    ],
+    "context_policy.ndjson": [
+      "action",
+      "score_bias",
+      "risk_multiplier",
+      "expected_value_bias"
+    ],
+    "subtype_policy.ndjson": [
+      "action",
+      "score_penalty",
+      "risk_multiplier"
+    ],
+    "session_weekday_policy.ndjson": [
+      "action",
+      "risk_multiplier",
+      "rr_floor_delta",
+      "score_bias"
+    ]
+  },
+  "advisory_only_mt5_inputs": [
+    "InpRiskPerTradePct",
+    "InpMinLiveRR2",
+    "InpStandardTradeCostRCeiling",
+    "InpStandardTradeLiquidityRRFloor",
+    "InpRunnerLiquidityRRFloor",
+    "InpRunnerSequenceQualityFloor",
+    "InpRunnerHtfAlignmentFloor",
+    "InpRunnerCostRCeiling",
+    "InpRunnerAdverseContextCeiling",
+    "InpSetupFloorReversal",
+    "InpSetupFloorBreaker",
+    "InpSetupFloorContinuation",
+    "InpSetupFloorSession",
+    "InpSetupFloorRange",
+    "InpSetupFloorFullPO3",
+    "InpSetupFloorMicroPO3",
+    "InpSetupFloorMicroBisiSibi",
+    "InpSetupFloorContinuationFamily",
+    "InpSetupFloorRangeFamily",
+    "InpSetupFloorFailedBreakout",
+    "InpMinRRFullPO3",
+    "InpMinRRMicroPO3",
+    "InpMinRRContinuation",
+    "InpMinRRRange",
+    "InpMinRRFailedBreakout",
+    "InpAiScoreFullPO3",
+    "InpAiScoreMicroPO3",
+    "InpAiScoreContinuation",
+    "InpAiScoreRange",
+    "InpAiScoreFailedBreakout",
+    "InpMaxOpenPositions",
+    "InpMaxTradesPerScan",
+    "InpMaxTotalRiskEnable",
+    "InpMaxTotalRiskMoney",
+    "InpAutoSuppressWeakFamiliesLive",
+    "InpUseSnapshotAI",
+    "InpRequireSnapshots",
+    "Market Watch symbol list"
+  ],
+  "env_governance": [
+    "EXPECTANCY_MIN_TRADES_BEFORE_ACTION",
+    "EXPECTANCY_FIRST_ACTION_MIN_TRADES",
+    "POLICY_MIN_TOTAL_CLOSED_TRADES",
+    "POLICY_MIN_BUCKET_TRADES",
+    "POLICY_MIN_PROFIT_FACTOR_AFTER_COSTS",
+    "POLICY_MAX_TRAIN_TEST_GAP_R",
+    "POLICY_MIN_POSITIVE_FOLD_RATE",
+    "POLICY_MAX_DRAWDOWN_R",
+    "POLICY_MAX_STEP_FRACTION"
+  ],
+  "hard_boundary": "The report writes policy files and advisory recommendations only. It does not directly rewrite MT5 input files."
+}

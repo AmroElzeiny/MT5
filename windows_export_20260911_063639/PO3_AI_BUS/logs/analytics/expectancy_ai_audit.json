@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "model": "gpt-5.4-nano",
+  "reasoning_effort": "low",
+  "decision_weight": 0.75,
+  "status": "skipped",
+  "agree": null,
+  "confidence": 0.0,
+  "weighted_confidence": 0.0,
+  "activation_veto": false,
+  "summary": "EXPECTANCY_AI_AUDIT_ENABLE is off."
+}

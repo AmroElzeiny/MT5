@@ -1,0 +1,9 @@
+{
+  "clean_count": 83,
+  "completed_count": 83,
+  "global_status": "CLEAN",
+  "ledger_hash": "e47f2663d1c4308b1bcf585fe4cd2481a694950aacfcfc7a127855150d8d18a2",
+  "rejected_count": 0,
+  "schema_version": "20260812_completed_memory_ledger_audit_v1",
+  "source": "C:\\Users\\amroe\\Downloads\\NovaAIS_Systems\\Trading\\PO3_Codex\\MT5\\python\\data\\ai_trade_memory.sqlite3"
+}
