@@ -229,6 +229,15 @@ private:
    // positions have already reported the deferral so the line is emitted on the
    // TRANSITION only, and re-armed when the position actually closes.
    long m_completion_deferred_position_ids[];
+   // Same class of bug as above (unbounded once-per-tick journaling): when a
+   // closed position has no trade metadata, or fails identity verification,
+   // _WriteClosedTradeOutcome returns false every call, so the local
+   // processed_keys[] in _FinalizeClosedTrades never absorbs it and the
+   // [execution_identity_quarantine] line repeats every timer tick for as
+   // long as the deal stays inside InpAnalyticsHistoryDays (570 lines in 90
+   // seconds for 5 positions, observed 2026-09-10). Journal these once per
+   // position per EA run instead.
+   string m_quarantine_journaled_keys[];
    string m_bucket_policy_json;
    datetime m_bucket_policy_loaded_at;
    datetime m_bucket_policy_last_attempt;
@@ -276,6 +285,17 @@ private:
          if(arr[i] == value) return true;
       }
       return false;
+   }
+
+   bool _QuarantineJournaled(const string key) const {
+      return _HasStringValue(m_quarantine_journaled_keys, key);
+   }
+
+   void _MarkQuarantineJournaled(const string key) {
+      if(_QuarantineJournaled(key)) return;
+      int n = ArraySize(m_quarantine_journaled_keys);
+      ArrayResize(m_quarantine_journaled_keys, n + 1);
+      m_quarantine_journaled_keys[n] = key;
    }
 
    bool _CompletionDeferralJournaled(const long position_id) const {
@@ -14893,19 +14913,29 @@ private:
       // such as "expert_exit" or "sl ..." are not stable dedupe identities.
       if(have_meta && _PathExists(_TradeResultPath(key))) return false;
       if(!have_meta){
-         _Journal("[execution_identity_quarantine] reason=closed_trade_metadata_missing"
-                  + " position_id=" + IntegerToString(position_id)
-                  + " symbol=" + symbol_hint
-                  + " analytics_excluded=true");
+         string quarantine_key_missing = "metadata_missing:" + IntegerToString(position_id) + ":" + symbol_hint;
+         if(!_QuarantineJournaled(quarantine_key_missing)){
+            _MarkQuarantineJournaled(quarantine_key_missing);
+            _Journal("[execution_identity_quarantine] reason=closed_trade_metadata_missing"
+                     + " position_id=" + IntegerToString(position_id)
+                     + " symbol=" + symbol_hint
+                     + " analytics_excluded=true"
+                     + " journal_mode=once_per_position_per_run");
+         }
          return false;
       }
       if(!meta.execution_identity_verified || meta.execution_identity_quarantined ||
          position_id <= 0 || meta.broker_position_identifier != position_id){
-         _Journal("[execution_identity_quarantine] reason=closed_trade_identity_not_verified"
-                  + " position_id=" + IntegerToString(position_id)
-                  + " stored_position_id=" + IntegerToString(meta.broker_position_identifier)
-                  + " candidate_hash=" + meta.candidate_hash
-                  + " analytics_excluded=true");
+         string quarantine_key_unverified = "identity_not_verified:" + IntegerToString(position_id);
+         if(!_QuarantineJournaled(quarantine_key_unverified)){
+            _MarkQuarantineJournaled(quarantine_key_unverified);
+            _Journal("[execution_identity_quarantine] reason=closed_trade_identity_not_verified"
+                     + " position_id=" + IntegerToString(position_id)
+                     + " stored_position_id=" + IntegerToString(meta.broker_position_identifier)
+                     + " candidate_hash=" + meta.candidate_hash
+                     + " analytics_excluded=true"
+                     + " journal_mode=once_per_position_per_run");
+         }
          return false;
       }
 
