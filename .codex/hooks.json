@@ -1,0 +1,24 @@
+{
+    "hooks":  {
+                  "PreToolUse":  [
+                                     {
+                                         "matcher":  "^(apply_patch|Write|Edit)$",
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "command",
+                                                           "command":  "powershell -NoProfile -ExecutionPolicy Bypass -File \".codex\\\\hooks\\\\mt5-delegation-gate.ps1\""
+                                                       }
+                                                   ]
+                                     },
+                                     {
+                                         "matcher":  "^(Bash|shell|shell_command|exec_command|powershell)$",
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "command",
+                                                           "command":  "powershell -NoProfile -ExecutionPolicy Bypass -File \".codex\\\\hooks\\\\mt5-shell-gate.ps1\""
+                                                       }
+                                                   ]
+                                     }
+                                 ]
+              }
+}

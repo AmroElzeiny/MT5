@@ -1,0 +1,14 @@
+﻿ M CLAUDE.md
+ M python/data/ai_repeatability_artifact.json
+ M python/data/ai_trade_memory.sqlite3
+ M python/data/artifact_compatibility_report_latest.json
+ M python/data/startup_policy_manifest_latest.json
+ M python/logs/ai_cost_report.jsonl
+ M python/logs/ai_request_response_fingerprints.jsonl
+?? .claude/
+?? .codex/
+?? .mt5-orchestrator/
+?? .opencode/
+?? AGENTS.md
+?? CLAUDE.md.bak-orchestrator-20260912-234352
+?? tools/

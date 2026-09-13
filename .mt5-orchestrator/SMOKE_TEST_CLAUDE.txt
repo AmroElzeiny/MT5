@@ -1,0 +1,23 @@
+You are Claude Code, the architect and final judge.
+
+Run a read-only smoke test of the dual front-end orchestration system.
+
+Do not modify product code.
+Do not perform any authenticated trading/exchange mutation.
+
+Create `.mt5-orchestrator/current/MISSION.md` with stable requirements:
+
+R1: prove the front-end can read repository instructions and current git baseline.
+R2: prove delegation to the OpenCode supervisor works.
+R3: prove the supervisor can use at least one cheap read-only worker/explorer when useful.
+R4: prove an independent reviewer can verify a material claim.
+R5: produce valid JSON and Markdown supervisor reports.
+R6: prove PROGRESS.json is updated.
+R7: make zero product-code changes.
+R8: record actual models and duration.
+
+Use Standard tier and RuntimeMode Offline.
+Do not bypass hooks.
+After completion independently review the evidence and final diff.
+
+Delegate with `-FrontEnd Claude`.

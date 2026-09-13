@@ -1,0 +1,17 @@
+Audit the current MT5 system without modifying product code.
+
+Use RuntimeMode Offline.
+
+Map from executable code and runtime contracts:
+- active Python entrypoints;
+- MQL5 EA/includes and their contract versions;
+- request/response/file-bus lifecycle;
+- decision authority;
+- risk-sizing owner;
+- retry/restart/late-response behavior;
+- repo source vs deployed runtime assumptions;
+- test/compile surfaces;
+- duplicated owners or stale paths.
+
+Do not place a trade.
+Return a prioritized authority/risk map and implementation plan with evidence.

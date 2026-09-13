@@ -680,7 +680,7 @@ input int    InpSymbolFlattenRetrySeconds = 30;
 
 // --- Shadow candidate research (never trading authority) ---
 input bool   InpShadowCandidateLedgerEnable = true;
-input int    InpShadowCandidateHorizonMinutes = 1440;
+input int    InpShadowCandidateHorizonMinutes = 4320;   // RET-001: 3-day shadow outcome horizon
 // Track pre-AI rejections too.  A rejection whose plan prices were built is a
 // real counterfactual; one rejected before prices exist is recorded as
 // UNTRACKABLE and never enters the pending queue.

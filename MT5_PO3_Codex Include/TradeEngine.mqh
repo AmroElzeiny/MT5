@@ -42,6 +42,23 @@ private:
 
    TradePlan m_watchlist[];
    TradePlan m_pending_ai[];
+   //--- Request ids whose pending-AI groups were restored from durable state at
+   //--- startup, not queued by this process.  A group marked here must clear the
+   //--- extra fail-closed recovery gate (live-market entry-distance
+   //--- revalidation against the canonical InpMaxEntryDriftR contract, plus the
+   //--- ordinary watchlist/execution gates) before an approval can reach the
+   //--- watchlist or modify a broker order.  The mark is removed when the group
+   //--- leaves the pending queue.
+   string m_recovered_pending_req_ids[];
+   //--- Bounded recovery diagnostics (OBS-001).  Counters only; no value here
+   //--- changes a trading decision.
+   long   m_recovered_groups_total;
+   long   m_recovered_consume_response_total;
+   long   m_recovered_await_inflight_total;
+   long   m_recovered_missing_artifacts_total;
+   long   m_recovered_deadline_expired_total;
+   long   m_recovered_invalid_contract_total;
+   long   m_recovered_entry_gate_rejected_total;
    TradePlan m_scan_candidates[];
    TradePlan m_counterfactual_pending[];
    TradePlan m_shadow_pending[];
@@ -535,6 +552,67 @@ private:
       ulong now = _WallClockMs();
       if(now >= started_ms) return (now - started_ms);
       return 0;
+   }
+
+   //--- Pending-AI restart recovery helpers (REC-001..REC-006, OBS-001) -------
+
+   void _ResetPendingAiRecoveryState() {
+      ArrayResize(m_recovered_pending_req_ids, 0);
+      m_recovered_groups_total = 0;
+      m_recovered_consume_response_total = 0;
+      m_recovered_await_inflight_total = 0;
+      m_recovered_missing_artifacts_total = 0;
+      m_recovered_deadline_expired_total = 0;
+      m_recovered_invalid_contract_total = 0;
+      m_recovered_entry_gate_rejected_total = 0;
+   }
+
+   // REC-001.  A pending-AI group transition is durable at the transition site,
+   // not only on the periodic persist, so an abnormal loss cannot orphan a
+   // just-queued request nor resurrect an already-consumed group from an older
+   // snapshot.  Uses the same tmp-then-move writer as every other state file.
+   void _PersistPendingAiState() {
+      m_state.SavePlans(m_state.PendingAiPath(), m_pending_ai);
+   }
+
+   bool _IsRecoveredPendingReq(const string req_id) const {
+      if(StringLen(req_id) == 0) return false;
+      for(int i=0; i<ArraySize(m_recovered_pending_req_ids); i++){
+         if(m_recovered_pending_req_ids[i] == req_id) return true;
+      }
+      return false;
+   }
+
+   void _MarkRecoveredPendingReq(const string req_id) {
+      if(StringLen(req_id) == 0) return;
+      if(_IsRecoveredPendingReq(req_id)) return;
+      int n = ArraySize(m_recovered_pending_req_ids);
+      ArrayResize(m_recovered_pending_req_ids, n + 1);
+      m_recovered_pending_req_ids[n] = req_id;
+   }
+
+   void _ForgetRecoveredPendingReq(const string req_id) {
+      for(int i=ArraySize(m_recovered_pending_req_ids)-1; i>=0; i--){
+         if(m_recovered_pending_req_ids[i] != req_id) continue;
+         int last = ArraySize(m_recovered_pending_req_ids) - 1;
+         m_recovered_pending_req_ids[i] = m_recovered_pending_req_ids[last];
+         ArrayResize(m_recovered_pending_req_ids, last);
+      }
+   }
+
+   // Drop recovered marks whose group no longer exists, so a mark can never
+   // leak onto an unrelated later group.
+   void _PruneRecoveredPendingReqIds() {
+      for(int i=ArraySize(m_recovered_pending_req_ids)-1; i>=0; i--){
+         bool present = false;
+         for(int j=0; j<ArraySize(m_pending_ai); j++){
+            if(m_pending_ai[j].req_id == m_recovered_pending_req_ids[i]){ present = true; break; }
+         }
+         if(present) continue;
+         int last = ArraySize(m_recovered_pending_req_ids) - 1;
+         m_recovered_pending_req_ids[i] = m_recovered_pending_req_ids[last];
+         ArrayResize(m_recovered_pending_req_ids, last);
+      }
    }
 
    int _RequiredConfirmationSignals() const {
@@ -1330,6 +1408,22 @@ private:
       m_shadow_index_dirty = true;
    }
 
+   // RET-002.  Lengthen an existing identity-index entry so observe-once /
+   // terminal-once retention outlives a migrated horizon.  It never shortens an
+   // expiry, and it is only ever called for the seen (unresolved) sets, so no
+   // terminal is reopened.
+   void _ShadowIndexExtendExpiry(string &arr[], const string id, const datetime expires_at) {
+      if(StringLen(id) == 0) return;
+      for(int i=0; i<ArraySize(arr); i++){
+         if(_ShadowIndexEntryId(arr[i]) != id) continue;
+         if(_ShadowIndexEntryExpiry(arr[i]) >= expires_at) return;
+         arr[i] = id + "|" + IntegerToString((int)expires_at);
+         m_shadow_index_dirty = true;
+         return;
+      }
+      _ShadowIndexAdd(arr, id, expires_at);
+   }
+
    void _ShadowIndexPrune(string &arr[], const datetime now) {
       for(int i=ArraySize(arr)-1; i>=0; i--){
          datetime expires = _ShadowIndexEntryExpiry(arr[i]);
@@ -1353,6 +1447,24 @@ private:
       long horizon_sec = (long)MathMax(1, InpShadowCandidateHorizonMinutes) * 60;
       long retention_sec = (long)MathMax(0, InpShadowIdentityRetentionMinutes) * 60;
       return (datetime)((long)observed_at + horizon_sec + retention_sec);
+   }
+
+   // RET-002.  A tracker persisted under a shorter outcome horizon keeps its
+   // accumulated progress but is extended to the effective configured horizon on
+   // restore.  It never shortens a later explicit horizon, and it leaves a
+   // broker-session-capped terminal alone because that cap is an explicit earlier
+   // decision, not a stale value.  Returns true only when the horizon moved.
+   bool _MigrateRestoredShadowHorizon(TradePlan &p, datetime &old_horizon) {
+      old_horizon = p.shadow_horizon_at;
+      if(p.shadow_observed_at <= 0) return false;
+      long horizon_sec = (long)MathMax(1, InpShadowCandidateHorizonMinutes) * 60;
+      datetime canonical_horizon = (datetime)((long)p.shadow_observed_at + horizon_sec);
+      bool session_capped = (p.broker_session_close > 0 &&
+                             p.shadow_horizon_at == p.broker_session_close);
+      if(session_capped) return false;
+      if(p.shadow_horizon_at >= canonical_horizon) return false;
+      p.shadow_horizon_at = canonical_horizon;
+      return true;
    }
 
    void _LoadShadowTrackerIndex() {
@@ -2851,6 +2963,7 @@ private:
       int quarantined = 0;
       int already_resolved = 0;
       int duplicates = 0;
+      int horizon_migrated = 0;
       for(int i=0; i<ArraySize(restored); i++){
          TradePlan p = restored[i];
          if(p.shadow_candidate_schema_version != SHADOW_CANDIDATE_SCHEMA_VERSION ||
@@ -2880,12 +2993,38 @@ private:
                          _ShadowIdentityExpiry(p.shadow_observed_at));
          _ShadowIndexAdd(m_shadow_seen_opportunities, p.shadow_sweep_opportunity_id,
                          _ShadowIdentityExpiry(p.shadow_observed_at));
+         // RET-002.  Extend a tracker persisted under a shorter horizon, keeping
+         // its accumulated progress, mask and counterfactual path untouched, and
+         // extend the identity-index retention so observe-once/terminal-once
+         // outlives the migrated horizon.  Persisted and logged once per tracker.
+         datetime old_horizon = 0;
+         if(_MigrateRestoredShadowHorizon(p, old_horizon)){
+            horizon_migrated++;
+            datetime migrated_expiry = _ShadowIdentityExpiry(p.shadow_observed_at);
+            _ShadowIndexExtendExpiry(m_shadow_seen_variants, p.shadow_candidate_variant_id, migrated_expiry);
+            _ShadowIndexExtendExpiry(m_shadow_seen_opportunities, p.shadow_sweep_opportunity_id, migrated_expiry);
+            _Journal("[shadow_horizon_migration] variant_id=" + p.shadow_candidate_variant_id
+                     + " symbol=" + p.symbol
+                     + " old_horizon_at=" + IntegerToString((int)old_horizon)
+                     + " new_horizon_at=" + IntegerToString((int)p.shadow_horizon_at)
+                     + " observed_at=" + IntegerToString((int)p.shadow_observed_at)
+                     + " configured_horizon_minutes=" + IntegerToString(InpShadowCandidateHorizonMinutes)
+                     + " identity_expiry=" + IntegerToString((int)migrated_expiry)
+                     + " progress_preserved=true terminal_reopened=false trading_authority=false");
+         }
          int n = ArraySize(m_shadow_pending);
          ArrayResize(m_shadow_pending, n + 1);
          m_shadow_pending[n] = p;
       }
       m_shadow_restored_total += ArraySize(m_shadow_pending);
       m_shadow_quarantined_total += quarantined;
+      if(horizon_migrated > 0){
+         // Durably persist the migrated pending state and the extended identity
+         // index so the system updates itself without manual file editing.
+         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+         m_shadow_index_dirty = true;
+         _PersistShadowTrackerIndex();
+      }
       if(quarantined > 0 || already_resolved > 0 || duplicates > 0)
          m_shadow_index_dirty = true;
       bool quarantine_written = true;
@@ -2898,6 +3037,8 @@ private:
                + " quarantine_file_records=" + IntegerToString(ArraySize(quarantine_lines))
                + " already_resolved_dropped=" + IntegerToString(already_resolved)
                + " duplicate_dropped=" + IntegerToString(duplicates)
+               + " horizon_migrated=" + IntegerToString(horizon_migrated)
+               + " configured_horizon_minutes=" + IntegerToString(InpShadowCandidateHorizonMinutes)
                + " schema=" + SHADOW_CANDIDATE_SCHEMA_VERSION);
       if(quarantined > 0 && !quarantine_written)
          _Journal("[shadow_tracker_warning] quarantine_persist_failed=" + IntegerToString(quarantined)
@@ -6961,6 +7102,8 @@ private:
       datetime sim_now = TimeCurrent();
       for(int i=0; i<ArraySize(plans); i++){
          plans[i].req_id = req_id;
+         plans[i].request_session_id = m_ai.SessionId();
+         plans[i].request_nonce = m_ai.RequestNonce(req_id);
          if(plans[i].setup_snapshot_time <= 0) plans[i].setup_snapshot_time = sim_now;
          plans[i].ai_request_time = sim_now;
          plans[i].ai_advisory_time = 0;
@@ -6970,6 +7113,8 @@ private:
          plans[i].ai_requested_wall_ms = _WallClockMs();
          m_pending_ai[base + i] = plans[i];
       }
+      // REC-001: enqueue is a material transition -- checkpoint immediately.
+      _PersistPendingAiState();
       m_funnel_ai_cache_hit++;
       m_total_ai_cache_hits++;
       _Journal(plans[0].symbol + " tester AI cache hit candidates=" + IntegerToString(ArraySize(plans))
@@ -9879,6 +10024,62 @@ private:
                      : MathAbs(p.assessed_entry - p.assessed_sl));
       double tick = _PlanTickSize(p.symbol);
       return MathMax(risk * c.max_entry_drift_r, tick * c.max_entry_drift_ticks);
+   }
+
+   // REC-005.  A recovered approval may only reach the watchlist while the live
+   // market is still inside the canonical adverse entry-distance contract.  The
+   // limit reuses the one authority -- InpMaxEntryDriftR through
+   // ExecutionAdjustmentContract / _ContractMaxEntryDrift -- instead of inventing
+   // a second threshold.  Adverse is measured from the planned entry on the
+   // entry-side quote: a buy that must be chased higher, or a sell that must be
+   // chased lower, is beyond the contract.  Fail closed; never chase.
+   bool _RecoveredEntryWithinContract(const TradePlan &p, string &reason) {
+      reason = "ok";
+      if(p.entry_est <= 0.0){
+         reason = "recovered_missing_planned_entry";
+         _Journal("[recovered_entry_gate] symbol=" + p.symbol
+                  + " action=reject reason=" + reason);
+         return false;
+      }
+      double px = SymbolInfoDouble(p.symbol, p.is_buy ? SYMBOL_ASK : SYMBOL_BID);
+      if(px <= 0.0){
+         reason = "recovered_missing_live_quote";
+         _Journal("[recovered_entry_gate] symbol=" + p.symbol
+                  + " action=reject reason=" + reason);
+         return false;
+      }
+      ExecutionAdjustmentContract c;
+      _BuildExecutionAdjustmentContract(p, c);
+      double max_drift = _ContractMaxEntryDrift(p, c);
+      if(max_drift <= 0.0){
+         reason = "recovered_entry_drift_unbounded";
+         _Journal("[recovered_entry_gate] symbol=" + p.symbol
+                  + " action=reject reason=" + reason);
+         return false;
+      }
+      double adverse = (p.is_buy ? (px - p.entry_est) : (p.entry_est - px));
+      if(adverse > max_drift){
+         reason = "recovered_entry_drift_exceeds_contract";
+         m_recovered_entry_gate_rejected_total++;
+         _Journal("[recovered_entry_gate] symbol=" + p.symbol
+                  + " action=reject reason=" + reason
+                  + " planned_entry=" + _FmtPrice(p.symbol, p.entry_est)
+                  + " assessed_entry=" + _FmtPrice(p.symbol, p.assessed_entry)
+                  + " live_entry_side_price=" + _FmtPrice(p.symbol, px)
+                  + " adverse_drift=" + DoubleToString(adverse, 8)
+                  + " max_entry_drift=" + DoubleToString(max_drift, 8)
+                  + " max_entry_drift_r=" + DoubleToString(c.max_entry_drift_r, 6)
+                  + " max_entry_drift_ticks=" + DoubleToString(c.max_entry_drift_ticks, 6)
+                  + " action_detail=never_chase");
+         return false;
+      }
+      _Journal("[recovered_entry_gate] symbol=" + p.symbol
+               + " action=accept"
+               + " planned_entry=" + _FmtPrice(p.symbol, p.entry_est)
+               + " live_entry_side_price=" + _FmtPrice(p.symbol, px)
+               + " adverse_drift=" + DoubleToString(adverse, 8)
+               + " max_entry_drift=" + DoubleToString(max_drift, 8));
+      return true;
    }
 
    //+---------------------------------------------------------------+
@@ -13248,6 +13449,8 @@ private:
             datetime sim_now = TimeCurrent();
             for(int i=0; i<count; i++){
                cands[i].req_id = req_id;
+               cands[i].request_session_id = m_ai.SessionId();
+               cands[i].request_nonce = m_ai.RequestNonce(req_id);
                if(cands[i].setup_snapshot_time <= 0) cands[i].setup_snapshot_time = sim_now;
                cands[i].ai_request_time = sim_now;
                cands[i].ai_advisory_time = 0;
@@ -13257,6 +13460,8 @@ private:
                cands[i].ai_requested_wall_ms = _WallClockMs();
                m_pending_ai[base + i] = cands[i];
             }
+            // REC-001: enqueue is a material transition -- checkpoint immediately.
+            _PersistPendingAiState();
             return true;
          }
          string send_fail_reason = (MQLInfoInteger(MQL_TESTER) ? "ai_transport_error" : "send_failed");
@@ -13275,12 +13480,17 @@ private:
 
    void _RemovePendingGroup(const string req_id) {
       _ForgetAiWaitLog(req_id);
+      _ForgetRecoveredPendingReq(req_id);
+      m_ai.ClearRestoredRequestBinding(req_id);
       for(int i=ArraySize(m_pending_ai)-1; i>=0; i--){
          if(m_pending_ai[i].req_id != req_id) continue;
          int last = ArraySize(m_pending_ai)-1;
          m_pending_ai[i] = m_pending_ai[last];
          ArrayResize(m_pending_ai, last);
       }
+      // REC-001: the removal is a material transition -- a crash after this point
+      // must not resurrect an already-consumed group from an older snapshot.
+      _PersistPendingAiState();
    }
 
    bool _RejectPendingGroupAsNonTrading(const string req_id, const string reason) {
@@ -13294,6 +13504,149 @@ private:
                + " decision_quality_tier=RULE_ONLY_NON_TRADING action=reject_all_candidates");
       _RemovePendingGroup(req_id);
       return false;
+   }
+
+   // REC-003 / REC-006.  Live-startup reconciliation of restored pending-AI
+   // groups against the durable file-bus evidence.  A restored group is admitted
+   // only when a request, a processing claim, or a response exists on disk.
+   // A group whose original deadline has already expired, or whose plan contract
+   // is incomplete, is terminally rejected with a precise reason and its
+   // artifacts are archived, so a later restart cannot consume a response the
+   // running process would have rejected.  Every admitted group is marked
+   // recovered so its approval path revalidates the live market (REC-005).
+   // This never calls the provider and never synthesizes an approval.
+   void _ReconcileRestoredPendingAi() {
+      int total_groups = _PendingAIRequestCountInternal();
+      if(total_groups <= 0){
+         if(ArraySize(m_pending_ai) > 0){
+            _PrunePlanArray(m_pending_ai, true);
+            _PersistPendingAiState();
+         }
+         return;
+      }
+      string req_ids[];
+      ArrayResize(req_ids, 0);
+      for(int i=0; i<ArraySize(m_pending_ai); i++){
+         string req_id = m_pending_ai[i].req_id;
+         if(StringLen(req_id) == 0 || _HasStringValue(req_ids, req_id)) continue;
+         int n = ArraySize(req_ids);
+         ArrayResize(req_ids, n + 1);
+         req_ids[n] = req_id;
+      }
+      for(int r=0; r<ArraySize(req_ids); r++){
+         string req_id = req_ids[r];
+         m_recovered_groups_total++;
+         bool has_req  = m_bus.Exists(_ReqPath(req_id));
+         bool has_proc = m_bus.Exists(m_bus.ProcessingDir() + "\\" + req_id + ".json");
+         bool has_resp = m_bus.Exists(_RespPath(req_id));
+         bool timed_out = false;
+         bool invalid_contract = false;
+         string group_symbol = "";
+         for(int i=0; i<ArraySize(m_pending_ai); i++){
+            if(m_pending_ai[i].req_id != req_id) continue;
+            if(StringLen(group_symbol) == 0) group_symbol = m_pending_ai[i].symbol;
+            if(_PendingAiTimedOut(m_pending_ai[i])) timed_out = true;
+            if(m_pending_ai[i].created_at <= 0 || m_pending_ai[i].ai_requested_at <= 0 ||
+               StringLen(m_pending_ai[i].candidate_id) == 0 ||
+               StringLen(m_pending_ai[i].candidate_hash) == 0 ||
+               StringLen(m_pending_ai[i].request_execution_fingerprint) == 0)
+               invalid_contract = true;
+         }
+         if(invalid_contract){
+            m_recovered_invalid_contract_total++;
+            _ArchivePendingArtifacts(req_id, "quarantined");
+            if(has_proc) _ArchiveBusArtifact(m_bus.ProcessingDir() + "\\" + req_id + ".json", "quarantined");
+            _RemovePendingGroup(req_id);
+            _Journal("[pending_ai_recovery] req_id=" + req_id + " symbol=" + group_symbol
+                     + " action=terminally_rejected reason=recovered_pending_plan_invalid_contract"
+                     + " has_request=" + (has_req ? "true" : "false")
+                     + " has_processing=" + (has_proc ? "true" : "false")
+                     + " has_response=" + (has_resp ? "true" : "false"));
+            continue;
+         }
+         if(timed_out){
+            m_recovered_deadline_expired_total++;
+            _ArchivePendingArtifacts(req_id, (has_resp ? "stale" : "timed_out"));
+            if(has_proc) _ArchiveBusArtifact(m_bus.ProcessingDir() + "\\" + req_id + ".json", "timed_out");
+            _RemovePendingGroup(req_id);
+            _Journal("[pending_ai_recovery] req_id=" + req_id + " symbol=" + group_symbol
+                     + " action=terminally_rejected reason=recovered_request_deadline_expired"
+                     + " has_request=" + (has_req ? "true" : "false")
+                     + " has_processing=" + (has_proc ? "true" : "false")
+                     + " has_response=" + (has_resp ? "true" : "false")
+                     + " timeout_min=" + IntegerToString(_PendingAiTimeoutMinutes()));
+            continue;
+         }
+         if(!has_req && !has_proc && !has_resp){
+            m_recovered_missing_artifacts_total++;
+            _RemovePendingGroup(req_id);
+            _Journal("[pending_ai_recovery] req_id=" + req_id + " symbol=" + group_symbol
+                     + " action=terminally_rejected"
+                     + " reason=recovered_request_response_and_processing_artifacts_missing"
+                     + " has_request=false has_processing=false has_response=false");
+            continue;
+         }
+         // Cross-restart request binding (REC-003).  Resolve the session/nonce the
+         // pre-restart request was created under: prefer the durable plan field,
+         // fall back to the request/processing artifact, else fail closed --
+         // never accept a response we cannot independently bind.
+         string bind_session = "";
+         string bind_nonce = "";
+         for(int i=0; i<ArraySize(m_pending_ai); i++){
+            if(m_pending_ai[i].req_id != req_id) continue;
+            if(StringLen(m_pending_ai[i].request_session_id) > 0){
+               bind_session = m_pending_ai[i].request_session_id;
+               bind_nonce = m_pending_ai[i].request_nonce;
+               break;
+            }
+         }
+         if(StringLen(bind_session) == 0 && has_req){
+            string req_txt = "";
+            if(m_bus.ReadText(_ReqPath(req_id), req_txt)){
+               bind_session = JsonGetString(req_txt, "session_id", "");
+               bind_nonce = JsonGetString(req_txt, "request_nonce", "");
+            }
+         }
+         if(StringLen(bind_session) == 0 && has_proc){
+            string proc_txt = "";
+            if(m_bus.ReadText(m_bus.ProcessingDir() + "\\" + req_id + ".json", proc_txt)){
+               bind_session = JsonGetString(proc_txt, "session_id", "");
+               bind_nonce = JsonGetString(proc_txt, "request_nonce", "");
+            }
+         }
+         if(StringLen(bind_session) == 0 || StringLen(bind_nonce) == 0){
+            m_recovered_invalid_contract_total++;
+            _ArchivePendingArtifacts(req_id, "quarantined");
+            if(has_proc) _ArchiveBusArtifact(m_bus.ProcessingDir() + "\\" + req_id + ".json", "quarantined");
+            _RemovePendingGroup(req_id);
+            _Journal("[pending_ai_recovery] req_id=" + req_id + " symbol=" + group_symbol
+                     + " action=terminally_rejected reason=recovered_request_binding_unavailable"
+                     + " has_request=" + (has_req ? "true" : "false")
+                     + " has_processing=" + (has_proc ? "true" : "false")
+                     + " has_response=" + (has_resp ? "true" : "false"));
+            continue;
+         }
+         m_ai.RegisterRestoredRequestBinding(req_id, bind_session, bind_nonce);
+         _MarkRecoveredPendingReq(req_id);
+         if(has_resp) m_recovered_consume_response_total++;
+         else m_recovered_await_inflight_total++;
+         _Journal("[pending_ai_recovery] req_id=" + req_id + " symbol=" + group_symbol
+                  + " action=" + (has_resp ? "consume_completed_response" : "await_inflight_request")
+                  + " has_request=" + (has_req ? "true" : "false")
+                  + " has_processing=" + (has_proc ? "true" : "false")
+                  + " has_response=" + (has_resp ? "true" : "false")
+                  + " recovery_gate=entry_distance_revalidation_required"
+                  + " provider_recall=false trading_authority_reused=false");
+      }
+      _PersistPendingAiState();
+      _Journal("[pending_ai_recovery_summary] groups_examined=" + IntegerToString(ArraySize(req_ids))
+               + " recovered=" + IntegerToString(ArraySize(m_recovered_pending_req_ids))
+               + " consume_response=" + IntegerToString((int)m_recovered_consume_response_total)
+               + " await_inflight=" + IntegerToString((int)m_recovered_await_inflight_total)
+               + " missing_artifacts=" + IntegerToString((int)m_recovered_missing_artifacts_total)
+               + " deadline_expired=" + IntegerToString((int)m_recovered_deadline_expired_total)
+               + " invalid_contract=" + IntegerToString((int)m_recovered_invalid_contract_total)
+               + " trading_authority_reused=false");
    }
 
    void _UpdateNarrativeFromLive(TradePlan &p, const PO3Context &live_po3) {
@@ -16585,6 +16938,7 @@ public:
       _ResetSetupFunnel();
       _ResetFinalCounters();
       _ResetShadowTrackerState();
+      _ResetPendingAiRecoveryState();
    }
 
    string RuntimeInputHash() {
@@ -16887,22 +17241,33 @@ public:
       }
       if(m_state.LoadPlans(m_state.PendingAiPath(), tmp)) {
          _CopyPlans(m_pending_ai, tmp);
-         if(MQLInfoInteger(MQL_TESTER) && ArraySize(m_pending_ai) > 0){
-            string req_ids[];
-            ArrayResize(req_ids, 0);
-            for(int i=0; i<ArraySize(m_pending_ai); i++){
-               string req_id = m_pending_ai[i].req_id;
-               if(StringLen(req_id) == 0 || _HasStringValue(req_ids, req_id)) continue;
-               int n = ArraySize(req_ids);
-               ArrayResize(req_ids, n+1);
-               req_ids[n] = req_id;
-               _ArchivePendingArtifacts(req_id, "shutdown");
+         if(MQLInfoInteger(MQL_TESTER)){
+            if(ArraySize(m_pending_ai) > 0){
+               string req_ids[];
+               ArrayResize(req_ids, 0);
+               for(int i=0; i<ArraySize(m_pending_ai); i++){
+                  string req_id = m_pending_ai[i].req_id;
+                  if(StringLen(req_id) == 0 || _HasStringValue(req_ids, req_id)) continue;
+                  int n = ArraySize(req_ids);
+                  ArrayResize(req_ids, n+1);
+                  req_ids[n] = req_id;
+                  _ArchivePendingArtifacts(req_id, "shutdown");
+               }
+               _Journal("tester init clearing restored pending_ai requests=" + IntegerToString(ArraySize(req_ids))
+                        + " candidates=" + IntegerToString(ArraySize(m_pending_ai)));
+               ArrayResize(m_pending_ai, 0);
             }
-            _Journal("tester init clearing restored pending_ai requests=" + IntegerToString(ArraySize(req_ids))
-                     + " candidates=" + IntegerToString(ArraySize(m_pending_ai)));
-            ArrayResize(m_pending_ai, 0);
+            _PrunePlanArray(m_pending_ai, true);
+         } else {
+            // REC-003.  Reconcile restored live pending groups against the bus
+            // artifacts before PrunePlanArray can drop a group without archiving
+            // its request/response.  Reconciliation also marks every admitted
+            // group recovered for the REC-005 live-market revalidation.
+            _ReconcileRestoredPendingAi();
+            _PrunePlanArray(m_pending_ai, true);
+            _PruneRecoveredPendingReqIds();
+            _PersistPendingAiState();
          }
-         _PrunePlanArray(m_pending_ai, true);
       }
       if(m_state.LoadPlans(m_state.CounterfactualPendingPath(), tmp)){
          _CopyPlans(m_counterfactual_pending, tmp);
@@ -16969,29 +17334,44 @@ public:
    }
 
    void Deinit() {
-      // A decision pending at shutdown cannot be resumed against a later
-      // market state. Fail it closed and archive any remaining bus artifact.
-      string shutdown_req_ids[];
-      ArrayResize(shutdown_req_ids, 0);
-      AiDecision shutdown_decision;
-      ZeroMemory(shutdown_decision);
-      shutdown_decision.decision_state = "REJECT";
-      shutdown_decision.decision_quality_tier = "DEGRADED_NON_TRADING";
-      shutdown_decision.decision_schema_version = AI_DECISION_SCHEMA_VERSION;
-      for(int i=0; i<ArraySize(m_pending_ai); i++){
-         _WriteShadowDecisionUpdate(m_pending_ai[i], shutdown_decision,
-                                    "mql_shutdown_reject", "shutdown_pending_ai", false);
-         string req_id = m_pending_ai[i].req_id;
-         if(StringLen(req_id) == 0 || _HasStringValue(shutdown_req_ids, req_id)) continue;
-         int n = ArraySize(shutdown_req_ids);
-         ArrayResize(shutdown_req_ids, n + 1);
-         shutdown_req_ids[n] = req_id;
-         _ArchivePendingArtifacts(req_id, "shutdown");
+      bool tester_runtime = (bool)MQLInfoInteger(MQL_TESTER);
+      if(tester_runtime){
+         // Tester semantics are deliberately non-resumable: the simulated clock
+         // and the frozen request snapshot do not survive the run, so a pending
+         // group is failed closed and archived rather than carried into a new
+         // run.  This is explicit and tested.
+         string shutdown_req_ids[];
+         ArrayResize(shutdown_req_ids, 0);
+         AiDecision shutdown_decision;
+         ZeroMemory(shutdown_decision);
+         shutdown_decision.decision_state = "REJECT";
+         shutdown_decision.decision_quality_tier = "DEGRADED_NON_TRADING";
+         shutdown_decision.decision_schema_version = AI_DECISION_SCHEMA_VERSION;
+         for(int i=0; i<ArraySize(m_pending_ai); i++){
+            _WriteShadowDecisionUpdate(m_pending_ai[i], shutdown_decision,
+                                       "mql_shutdown_reject", "shutdown_pending_ai", false);
+            string req_id = m_pending_ai[i].req_id;
+            if(StringLen(req_id) == 0 || _HasStringValue(shutdown_req_ids, req_id)) continue;
+            int n = ArraySize(shutdown_req_ids);
+            ArrayResize(shutdown_req_ids, n + 1);
+            shutdown_req_ids[n] = req_id;
+            _ArchivePendingArtifacts(req_id, "shutdown");
+         }
+         if(ArraySize(shutdown_req_ids) > 0)
+            _Journal("[file_bus_recovery] shutdown_pending_requests=" + IntegerToString(ArraySize(shutdown_req_ids))
+                     + " action=archived_shutdown_and_failed_closed tester=true");
+         ArrayResize(m_pending_ai, 0);
+      } else {
+         // REC-002.  A live clean shutdown must preserve resumable pending groups
+         // and their immutable request lineage.  The EA stopping is not an AI
+         // rejection, so no rejection is synthesized, no response is fabricated,
+         // and request/response artifacts are left in place for the startup
+         // reconciliation (REC-003) to consume exactly once.
+         _Journal("[file_bus_recovery] shutdown_pending_requests="
+                  + IntegerToString(_PendingAIRequestCountInternal())
+                  + " action=preserved_for_restart_recovery tester=false"
+                  + " note=no_rejection_no_archival_on_clean_shutdown");
       }
-      if(ArraySize(shutdown_req_ids) > 0)
-         _Journal("[file_bus_recovery] shutdown_pending_requests=" + IntegerToString(ArraySize(shutdown_req_ids))
-                  + " action=archived_shutdown_and_failed_closed");
-      ArrayResize(m_pending_ai, 0);
 
       // persist watchlist/research state
       _FinalizeClosedTrades();
@@ -16999,9 +17379,9 @@ public:
       _MaintainShadowCandidateOutcomes();
       _LogFinalSummary();
       _PrunePlanArray(m_watchlist, false);
-      _PrunePlanArray(m_pending_ai, true);
+      if(tester_runtime) _PrunePlanArray(m_pending_ai, true);
       m_state.SavePlans(m_state.WatchlistPath(), m_watchlist);
-      m_state.SavePlans(m_state.PendingAiPath(), m_pending_ai);
+      _PersistPendingAiState();
       _PersistResearchQueues();
       _PersistPenaltyStates();
    }
@@ -17849,6 +18229,7 @@ public:
 
    void ProcessPendingAI() {
       _PruneAiCooldowns();
+      bool pending_pruned = false;
       for(int i=ArraySize(m_pending_ai)-1; i>=0; i--){
          bool stale = false;
          string reason = "";
@@ -17864,7 +18245,9 @@ public:
          int last = ArraySize(m_pending_ai) - 1;
          m_pending_ai[i] = m_pending_ai[last];
          ArrayResize(m_pending_ai, last);
+         pending_pruned = true;
       }
+      if(pending_pruned) _PersistPendingAiState();
 
       string req_ids[];
       ArrayResize(req_ids, 0);
@@ -17904,11 +18287,24 @@ public:
             if(has_response){
                int timeout_min = _PendingAiTimeoutMinutes();
                ulong timeout_ms = (ulong)MathMax(1, timeout_min) * 60 * 1000;
-               if(oldest_wall_request > 0 &&
-                  _WallElapsedMs(oldest_wall_request) >= timeout_ms){
+               bool wall_late = (oldest_wall_request > 0 &&
+                                 _WallElapsedMs(oldest_wall_request) >= timeout_ms);
+               // Across a process restart the monotonic wall anchor may be absent
+               // (legacy state) or invalid (host reboot).  Fall back to the
+               // persisted server-time request age so a response the running
+               // process would have rejected as late is still rejected here; a
+               // response is never promoted merely because its wall anchor
+               // survived badly.
+               bool age_late = false;
+               if(!MQLInfoInteger(MQL_TESTER) && oldest_request > 0 &&
+                  now >= oldest_request && (now - oldest_request) >= (timeout_min * 60))
+                  age_late = true;
+               if(wall_late || age_late){
                   _Journal("[stale_response_rejected] request_id=" + req_ids[r]
-                           + " reason=ai_response_late_wall_deadline"
-                           + " elapsed_wall_ms=" + IntegerToString((long)_WallElapsedMs(oldest_wall_request))
+                           + " reason=" + (wall_late ? "ai_response_late_wall_deadline"
+                                                     : "ai_response_late_server_age")
+                           + " elapsed_wall_ms=" + IntegerToString((long)(oldest_wall_request > 0 ? _WallElapsedMs(oldest_wall_request) : 0))
+                           + " elapsed_server_sec=" + IntegerToString(oldest_request > 0 ? (int)(now - oldest_request) : 0)
                            + " configured_timeout_ms=" + IntegerToString((long)timeout_ms));
                   _LogSetupReject(group_symbol, "ai_wait_timeout", "ai_wait_timeout_real_time",
                                   "req_id=" + req_ids[r]
@@ -18409,7 +18805,33 @@ public:
                      + " target_source=" + selected.target_source
                      + " tp2=" + _FmtPrice(selected.symbol, selected.tp2)
                      + " target_reason=" + selected.target_decision_reason);
-            _AddToWatchlist(selected);
+            // REC-005.  A group restored from durable state is revalidated against
+            // the live market before it may enter the watchlist.  The ordinary
+            // gates (schema/identity/assessed fingerprint/target arbitration ran
+            // above) and _AddToWatchlist's own live precheck still apply; this adds
+            // the canonical adverse entry-distance limit measured from the planned
+            // entry, which a stale in-memory approval never had to pass.
+            if(_IsRecoveredPendingReq(req_ids[r])){
+               string recovered_entry_reason = "";
+               if(!_RecoveredEntryWithinContract(selected, recovered_entry_reason)){
+                  _WriteShadowDecisionUpdate(selected, dec, "mql_rejected_recovered_entry_gate",
+                                             recovered_entry_reason, false);
+                  _LogSetupReject(group_symbol, "recovered_entry_gate", recovered_entry_reason,
+                                  "req_id=" + req_ids[r]
+                                  + " planned_entry=" + _FmtPrice(selected.symbol, selected.entry_est)
+                                  + " live_price=" + _FmtPrice(selected.symbol,
+                                                               SymbolInfoDouble(selected.symbol, selected.is_buy ? SYMBOL_ASK : SYMBOL_BID)));
+                  _ArchivePendingArtifacts(req_ids[r], "rejected");
+                  _RemovePendingGroup(req_ids[r]);
+                  continue;
+               }
+            }
+            // REC-006.  Persist the watchlist at the insertion point BEFORE the
+            // pending group is durably removed, so a crash between the two cannot
+            // both lose the approved plan and drop the recoverable response.
+            if(_AddToWatchlist(selected))
+               m_state.SavePlans(m_state.WatchlistPath(), m_watchlist);
+            _RemovePendingGroup(req_ids[r]);
          } else {
             _RememberAiCooldown(group_symbol, group_signature, reject_reason);
             string reject_stage = ((reject_reason == "candidate_hash_mismatch" ||

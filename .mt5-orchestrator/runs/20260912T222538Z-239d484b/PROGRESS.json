@@ -1,0 +1,12 @@
+{
+    "run_id":  "20260912T222538Z-239d484b",
+    "active_role":  "supervisor",
+    "active_model":  "opencode-go/deepseek-v4.1-flash",
+    "updated_at_utc":  "2026-09-12T22:31:46.1982623Z",
+    "completed_work_packages":  [
+
+                                ],
+    "status":  "in_progress",
+    "current_action":  "Authority map complete; implementing WP1 pending-AI recovery",
+    "current_work_package":  "WP1"
+}

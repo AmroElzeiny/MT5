@@ -16,6 +16,13 @@ private:
    CFileBus *m_bus;
    datetime m_next_allowed; // backoff if AI failed recently
    string m_session_id;
+   // Restored-request bindings (REC-003).  A pre-restart response echoes the
+   // request's session id and nonce; registering the durable binding for a
+   // restored request id lets exactly that response validate without weakening
+   // the stale-response guard (the request id itself already embeds the session).
+   string m_restored_binding_req_ids[];
+   string m_restored_binding_sessions[];
+   string m_restored_binding_nonces[];
 
    // Replay identity.  DecisionInputHash() is component 4 of every tester cache
    // signature, so it decides which recorded cohort a run can reach.  It used to
@@ -357,6 +364,16 @@ private:
 
    string _RequestNonce(const string req_id) const {
       return IntegerToString((int)(_Fnv1a(m_session_id + "|" + req_id) % 2147483647));
+   }
+
+   bool _RestoredBindingMatches(const string req_id, const string session_id, const string nonce) const {
+      if(StringLen(req_id) == 0) return false;
+      for(int i=0; i<ArraySize(m_restored_binding_req_ids); i++){
+         if(m_restored_binding_req_ids[i] != req_id) continue;
+         return (m_restored_binding_sessions[i] == session_id &&
+                 m_restored_binding_nonces[i] == nonce);
+      }
+      return false;
    }
 
    string _WorkloadMode() const {
@@ -981,6 +998,9 @@ public:
       m_next_allowed=0;
       m_session_id = IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
                      + IntegerToString((int)TimeLocal()) + "_" + IntegerToString((int)GetTickCount());
+      ArrayResize(m_restored_binding_req_ids, 0);
+      ArrayResize(m_restored_binding_sessions, 0);
+      ArrayResize(m_restored_binding_nonces, 0);
       m_identity_frozen = false;
       m_frozen_runtime_input_hash = "";
       m_frozen_decision_input_hash = "";
@@ -1056,6 +1076,38 @@ public:
    string BehaviorContractHash() const { return _BehaviorContractHash(); }
    string SessionId() const { return m_session_id; }
    string RequestNonce(const string req_id) const { return _RequestNonce(req_id); }
+
+   // REC-003.  Register the durable session/nonce a restored request was created
+   // under, so exactly its response can validate after a restart.
+   void RegisterRestoredRequestBinding(const string req_id, const string session_id, const string nonce) {
+      if(StringLen(req_id) == 0 || StringLen(session_id) == 0) return;
+      for(int i=0; i<ArraySize(m_restored_binding_req_ids); i++){
+         if(m_restored_binding_req_ids[i] != req_id) continue;
+         m_restored_binding_sessions[i] = session_id;
+         m_restored_binding_nonces[i] = nonce;
+         return;
+      }
+      int n = ArraySize(m_restored_binding_req_ids);
+      ArrayResize(m_restored_binding_req_ids, n + 1);
+      ArrayResize(m_restored_binding_sessions, n + 1);
+      ArrayResize(m_restored_binding_nonces, n + 1);
+      m_restored_binding_req_ids[n] = req_id;
+      m_restored_binding_sessions[n] = session_id;
+      m_restored_binding_nonces[n] = nonce;
+   }
+
+   void ClearRestoredRequestBinding(const string req_id) {
+      for(int i=ArraySize(m_restored_binding_req_ids)-1; i>=0; i--){
+         if(m_restored_binding_req_ids[i] != req_id) continue;
+         int last = ArraySize(m_restored_binding_req_ids) - 1;
+         m_restored_binding_req_ids[i] = m_restored_binding_req_ids[last];
+         m_restored_binding_sessions[i] = m_restored_binding_sessions[last];
+         m_restored_binding_nonces[i] = m_restored_binding_nonces[last];
+         ArrayResize(m_restored_binding_req_ids, last);
+         ArrayResize(m_restored_binding_sessions, last);
+         ArrayResize(m_restored_binding_nonces, last);
+      }
+   }
    string ResponseBindingHash(const string req_id, const AiDecision &dec) const {
        string material = req_id + "|" + m_session_id + "|" + _RequestNonce(req_id)
                           + "|" + dec.request_identity_hash
@@ -1842,8 +1894,13 @@ public:
       if(response_quality_alias_present && response_quality_alias != decision_quality_tier)
          _AppendSchemaField(invalid, "response_quality_alias_mismatch");
       if(rid != req_id) _AppendSchemaField(invalid, "id_mismatch");
-      if(out.response_session_id != m_session_id) _AppendSchemaField(invalid, "response_session_id_mismatch");
-      if(out.response_request_nonce != _RequestNonce(req_id)) _AppendSchemaField(invalid, "response_nonce_mismatch");
+      bool current_binding_ok = (out.response_session_id == m_session_id &&
+                                 out.response_request_nonce == _RequestNonce(req_id));
+      bool restored_binding_ok = _RestoredBindingMatches(req_id, out.response_session_id, out.response_request_nonce);
+      if(!current_binding_ok && !restored_binding_ok){
+         if(out.response_session_id != m_session_id) _AppendSchemaField(invalid, "response_session_id_mismatch");
+         if(out.response_request_nonce != _RequestNonce(req_id)) _AppendSchemaField(invalid, "response_nonce_mismatch");
+      }
       if(out.workload_mode != _WorkloadMode()) _AppendSchemaField(invalid, "response_workload_mode_mismatch");
 
       out.decision_schema_version = decision_schema;

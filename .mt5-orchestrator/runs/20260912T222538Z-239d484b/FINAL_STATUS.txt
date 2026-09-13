@@ -1,0 +1,24 @@
+﻿ M CLAUDE.md
+ M "MT5_PO3_Codex Include/AIGateBridge.mqh"
+ M "MT5_PO3_Codex Include/Config.mqh"
+ M "MT5_PO3_Codex Include/StateStore.mqh"
+ M "MT5_PO3_Codex Include/TradeEngine.mqh"
+ M "MT5_PO3_Codex Include/Types.mqh"
+ M python/data/ai_repeatability_artifact.json
+ M python/data/ai_trade_memory.sqlite3
+ M python/data/artifact_compatibility_report_latest.json
+ M python/data/startup_policy_manifest_latest.json
+ M python/data/unknown_setup_taxonomy.jsonl
+ M python/logs/ai_cost_report.jsonl
+ M python/logs/ai_request_response_fingerprints.jsonl
+ M scalp_v2_full.set
+?? .claude/
+?? .codex/
+?? .mt5-orchestrator/
+?? .opencode/
+?? AGENTS.md
+?? CLAUDE.md.bak-orchestrator-20260912-234352
+?? python/tests/__pycache__/test_pending_ai_recovery_lifecycle.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_pending_ai_recovery_lifecycle.cpython-311.pyc
+?? python/tests/test_pending_ai_recovery_lifecycle.py
+?? tools/

@@ -1,0 +1,36 @@
+﻿RUN_ID: 20260912T222538Z-239d484b
+RUN_DIR: .mt5-orchestrator/runs/20260912T222538Z-239d484b
+FRONT_END: Codex
+TIER: Deep
+RuntimeMode: Offline
+TARGET_WALL_CLOCK_MINUTES: 180
+TARGET_MATERIAL_MODEL_INVOCATIONS: 12
+
+Execute the attached mission under the repository and orchestration policies.
+
+The front-end (Codex) owns architecture and final judgment.
+You own delegated execution between event-based checkpoints.
+
+Read:
+- CLAUDE.md
+- AGENTS.md when present
+- .mt5-orchestrator/policy/ROUTING_POLICY.md
+- .mt5-orchestrator/policy/BUDGET_POLICY.md
+- .mt5-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+- .mt5-orchestrator/models/ROLE_MODEL_MAP.md
+- .mt5-orchestrator/models/LIVE_MODELS.md
+- .mt5-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+
+Update PROGRESS.json at material role/work-package handoffs.
+
+Use the normal low-cost model set only.
+Do not loop past the mission budget to avoid escalation.
+
+Required final evidence:
+- .mt5-orchestrator/runs/20260912T222538Z-239d484b/SUPERVISOR_REPORT.json
+- .mt5-orchestrator/runs/20260912T222538Z-239d484b/SUPERVISOR_REPORT.md
+
+If front-end help is required:
+- .mt5-orchestrator/runs/20260912T222538Z-239d484b/ESCALATION.json
+
+Do not claim completion without evidence.

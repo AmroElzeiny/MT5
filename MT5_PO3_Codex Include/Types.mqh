@@ -730,6 +730,12 @@ struct TradePlan {
 
    // AI
    string req_id;
+   // Durable request binding for restart recovery (REC-003).  A response echoes
+   // the session id and nonce the request was created under; both are minted per
+   // process, so they must survive the restart or a pre-restart response can
+   // never validate.
+   string request_session_id;
+   string request_nonce;
    AiDecision ai;
    bool   model_raw_allow;
    bool   python_final_allow;

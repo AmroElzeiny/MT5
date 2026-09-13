@@ -347,6 +347,11 @@ private:
       j += JsonKVInt("ai_result_age_sim_minutes", p.ai_result_age_sim_minutes) + ",";
       j += JsonKVBool("tester_ai_result_stale", p.tester_ai_result_stale) + ",";
       j += JsonKVInt("ai_requested_at", (int)p.ai_requested_at) + ",";
+      // The monotonic wall anchor must survive a restart: without it a recovered
+      // response cannot be checked against the deadline the running process would
+      // have enforced.  Stored as an integer-millisecond number (tick count,
+      // below 2^53, exactly representable).
+      j += JsonKVNum("ai_requested_wall_ms", (double)p.ai_requested_wall_ms, 0) + ",";
       j += JsonKVInt("last_score_refresh", (int)p.last_score_refresh) + ",";
       j += JsonKVStr("ai_decision_source", p.ai_decision_source) + ",";
       j += JsonKVBool("ai_allow", p.ai.allow) + ",";
@@ -735,6 +740,8 @@ private:
       j += JsonKVBool("trailing_stop_improved", p.trailing_stop_improved) + ",";
       j += JsonKVNum("target_efficiency", p.target_efficiency, 6) + ",";
       j += JsonKVStr("req_id", p.req_id) + ",";
+      j += JsonKVStr("request_session_id", p.request_session_id) + ",";
+      j += JsonKVStr("request_nonce", p.request_nonce) + ",";
       // FVG
       j += "\"fvg\":{";
       j += JsonKVBool("bullish", p.fvg.bullish) + ",";
@@ -1242,6 +1249,7 @@ private:
       p.ai_result_age_sim_minutes = (int)JsonGetNumber(json, "ai_result_age_sim_minutes", 0);
       p.tester_ai_result_stale = JsonGetBool(json, "tester_ai_result_stale", false);
       p.ai_requested_at = (datetime)(int)JsonGetNumber(json, "ai_requested_at", 0);
+      p.ai_requested_wall_ms = (ulong)JsonGetNumber(json, "ai_requested_wall_ms", 0);
       p.last_score_refresh = (datetime)(int)JsonGetNumber(json, "last_score_refresh", 0);
       p.ai_decision_source = JsonGetString(json, "ai_decision_source", "");
       p.ai.allow = JsonGetBool(json, "ai_allow", false);
@@ -1727,6 +1735,8 @@ private:
       p.trailing_stop_improved = JsonGetBool(json, "trailing_stop_improved", false);
       p.target_efficiency = JsonGetNumber(json, "target_efficiency", 0);
       p.req_id = JsonGetString(json, "req_id", "");
+      p.request_session_id = JsonGetString(json, "request_session_id", "");
+      p.request_nonce = JsonGetString(json, "request_nonce", "");
 
       string fvg_json = JsonGetObject(json, "fvg", "");
       if(StringLen(fvg_json) == 0) fvg_json = json;
