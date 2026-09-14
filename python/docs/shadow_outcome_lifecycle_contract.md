@@ -106,11 +106,16 @@ trading_authority=false, can_trade=false
 | `shadow_opportunity_observed` | first time a sweep is seen | direction, sweep_side, lineage, session, killzone, context_tier, po3_state, source sweep/displacement/BOS timestamps, `statistical_weight` |
 | `shadow_candidate_observed` | first time a variant is seen | `observed_at`, `horizon_at`, entry branch, setup class, target model, the **assessed** entry/sl/tp1/tp2, variant revision/parent |
 | `shadow_decision_recorded` | an AI or policy decision lands | decision state/source/stage, rejection reason, model + prompt + decision schema versions, python/mql reasons, the full candidate assessment |
-| `shadow_entry_activated` | the hypothetical entry is first touched | `entry_activated_at`, `time_to_entry_sec`, `entry_touch_price`, `entry_order_ambiguous` |
-| `shadow_path_progress` | +0.25R, +0.50R | milestone name, time from activation, R level |
-| `shadow_tp1_reached` | TP1 first touched | `tp1_hit_at`, `time_to_tp1_sec` |
-| `shadow_terminal_resolution` | exactly once per variant | the full outcome block (§5) |
+| `shadow_entry_activated` | the hypothetical entry is first touched — **written at the next station** (§4a) | `entry_activated_at`, `time_to_entry_sec`, `entry_touch_price`, `entry_order_ambiguous` |
+| `shadow_path_progress` | +0.25R, +0.50R — **written at the next station** (§4a) | milestone name, time from activation, R level, the `mfe_r`/`mae_r` at the moment the milestone was reached |
+| `shadow_tp1_reached` | TP1 first touched (a station) | `tp1_hit_at`, `time_to_tp1_sec`, `station=TP1`, `time_from_entry_to_station_sec`, `next_station=TP2_OR_SL` |
+| `shadow_terminal_resolution` | exactly once per variant | the full outcome block (§5), including the station durations |
 | `shadow_data_quality_failure` | a bounded retry failed | failure code and detail |
+
+`event_at` is always the time the event **happened**, never the time it was
+written. Because activation and the milestones are written at the next station,
+they can sit in the file after rows that happened later; consumers order by
+`event_at` (the consolidator already does).
 
 A delta whose `parent_record_hash`, `candidate_hash` or `execution_fingerprint`
 disagrees with its parent observation is **rejected**, never guessed onto a
@@ -177,6 +182,65 @@ entry, so reaching the stop means the entry was passed); only a favourable level
 **and** the stop in one bar is genuinely ambiguous. Contested bars are replayed
 with `CopyTicksRange(COPY_TICKS_ALL)` when `InpShadowUseTickOrdering` is on;
 `ordering_source` records `tick_sequence` or `m1_bar`. Ordering is never invented.
+
+## 4a. Station-driven tracking (2026-09-13)
+
+A hypothetical position changes only at a **station**: the entry, TP1, and then
+TP2 or SL. The tracker therefore never polls.
+
+**Why.** The previous loop re-read every pending tracker's M1 path once a minute
+and rewrote the whole pending queue after *every* evaluation. With thousands of
+trackers and a budget of 25 per call there was always one due, so the 26–68 MB
+queue was rewritten on nearly every tick. Measured in the 2026-09-13 03:35
+Strategy Tester run: `maintain_positions_seconds=6460.7`, of which
+`mp_tail_seconds=6460.4` — all of it — and the test advanced 27 simulated hours
+in two wall hours. The same loop also read the still-forming M1 bar and moved the
+cursor past it, so the rest of that minute was never examined.
+
+**How.**
+
+1. `_MaintainShadowCandidateOutcomes` returns after one comparison unless a new
+   M1 bar has **closed** (or a previous pass left due trackers beyond its budget).
+2. On a new closed bar, `_ShadowScreenForStations` reads each tracked symbol
+   **once**, from the earliest bar any of its trackers still needs, and
+   `_ShadowBarTouchesStation` compares each tracker's next station:
+   before activation the entry; after activation SL and TP2, plus TP1 until hit.
+   +0.25R / +0.50R are milestones, not stations.
+3. A touched station marks the tracker due with the station bar; the replay
+   (`_EvaluateShadowCandidate(p, reason, through_bar)`) reads **closed** bars from
+   the persisted cursor through that bar, with tick ordering on contested bars,
+   exactly as before. At the horizon every remaining bar is read.
+4. Writing happens only at a station. Activation and milestones found by a replay
+   stay in memory and are flushed by `_FlushShadowPathEvents` immediately before
+   the next `shadow_tp1_reached` or `shadow_terminal_resolution` row.
+5. Durability at a station is the small identity index, not the queue: every
+   written path event is recorded as `progress|<variant>#<kind>|<expiry>` and is
+   consulted before writing, and the terminal-once `resolved` set is written in
+   the same pass. The pending queue is saved by `_PersistResearchQueues` (scan end
+   and shutdown) only when it changed. A restored tracker is re-screened from its
+   cursor, which reproduces the same state because closed bars are immutable.
+
+After TP1 the tracker follows the next station and times the leg from the TP1
+touch:
+
+| Field (terminal row) | Meaning |
+|---|---|
+| `terminal_station` | `TP2` or `SL` for a clean terminal, else `null` |
+| `time_from_entry_to_station_sec` | entry → that station, clean terminals only |
+| `station_after_tp1` | `TP2`, `SL`, `AMBIGUOUS_TP2_OR_SL`, or `NONE_<terminal>` when the horizon/session/data ended the leg; `null` without TP1 |
+| `time_from_tp1_to_station_sec` | TP1 touch → TP2 or SL; `null` otherwise |
+
+`summarize_group` reports `median_entry_to_tp1_sec`, `median_entry_to_tp2_sec`,
+`median_entry_to_sl_sec`, `median_tp1_to_tp2_sec` and `median_tp1_to_sl_sec`
+over clean samples.
+
+The schema version is unchanged: every new field is additive, and the pending
+records written before the change restore with `-1`/empty values ("not
+measured"), never zero.
+
+`[shadow_tracker]` adds `tracking_mode=station_driven`, `screen_passes_total`,
+`screen_bars_total`, `station_evaluations_total`, `stations_total` and
+`emitted_progress_index`.
 
 ---
 
@@ -251,10 +315,11 @@ Three states are now distinguished and reported by name:
 | series not synchronized | `m1_history_not_synchronized_awaiting_download`, the series is requested, the tracker stays pending |
 | still not synchronized when the horizon and the budget are both spent | exactly one `DATA_LOSS` terminal plus a `shadow_data_quality_failure` with `failure=m1_series_not_synchronized_after_retries` |
 
-`InpShadowMaxDataRetries` (default 30) bounds the wait; `_ShadowTrackerDue`
-spaces evaluations by `InpShadowEvaluationIntervalSeconds`, so the budget is a
-wall-clock bound, not a tick count. A candidate is never left pending forever,
-and a data-loss record never enters the statistics.
+`InpShadowMaxDataRetries` (default 30) bounds the wait. Before the horizon an
+unsynchronized symbol is only *requested* by the screen (§4a); after the horizon
+`_ShadowTrackerDue` spaces the retries by `InpShadowEvaluationIntervalSeconds`,
+so the budget is a time bound, not a tick count. A candidate is never left
+pending forever, and a data-loss record never enters the statistics.
 
 Two counters separate the recoverable case from the terminal one:
 `history_requests_total` and `history_pending_total`, beside `data_loss_total`.

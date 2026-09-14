@@ -1,0 +1,2364 @@
+﻿opencode.exe : 
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> mt5-supervisor-deep · deepseek-v4.1-flash
+
+→ Read .mt5-orchestrator/policy/ROUTING_POLICY.md
+→ Read .mt5-orchestrator/policy/BUDGET_POLICY.md
+→ Read .mt5-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+→ Read .mt5-orchestrator/models/ROLE_MODEL_MAP.md
+I'll start by reading the required policy and context files, then verify the baseline state.
+→ Read .mt5-orchestrator/models/LIVE_MODELS.md
+→ Read .mt5-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/PROGRESS.json
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/BASELINE_STATUS.txt
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/BASELINE_COMMIT.txt
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/BASELINE_BRANCH.txt
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/USAGE_BEFORE.txt
+→ Read OPENCODE_GO_BILLING_EVIDENCE.md
+Now let me examine the key context files and verify the data sources exist.
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; Test-Path -LiteralPath 
+$bus; Get-ChildItem -LiteralPath $bus -Directory | Select-Object -ExpandProperty Name; Write-Output "---logs---"; 
+Get-ChildItem -LiteralPath "$bus\logs" -File | Select-Object Name,@{N='MB';E={[math]::Round($_.Length/1MB,1)}} | 
+Format-Table -AutoSize; Write-Output "---counts---"; (Get-ChildItem -LiteralPath "$bus\response_debug" -File 
+-ErrorAction SilentlyContinue | Measure-Object).Count; (Get-ChildItem -LiteralPath "$bus\completed" -File -ErrorAction 
+SilentlyContinue | Measure-Object).Count
+True
+archive
+bybit
+completed
+config
+locks
+locks_stale_20260907
+logs
+PO3_AI_BUS
+processing
+quarantined
+rejected
+requests
+request_ledger
+responses
+response_debug
+shutdown
+snapshots
+stale
+timed_out
+---logs---
+
+Name                                                                                              MB
+----                                                                                              --
+ai_cache.ndjson                                                                                    0
+ai_gate.log                                                                                       61
+analytics_reset.json                                                                               0
+artifact_compatibility_report.json                                                                 0
+bus_cohort_inventory.json                                                                          0
+bybit_spot.log                                                                                   0.1
+completed_ai_trades.jsonl                                                                        0.6
+completed_scope_live_account_591813800_magic_5303191_position_id_325229449.json                    0
+completed_scope_live_account_591813800_magic_5303191_position_id_326116439.json                    0
+completed_scope_live_account_903871_magic_5303191_position_id_37757928.json                        0
+completed_scope_live_account_903871_magic_5303191_position_id_37760609.json                        0
+completed_scope_live_account_903871_magic_5303191_position_id_37774492.json                        0
+completed_scope_live_account_903871_magic_5303191_position_id_37880443.json                        0
+completed_scope_live_account_903871_magic_5303191_position_id_37890190.json                        0
+completed_scope_live_account_903871_magic_5303191_position_id_38011454.json                        0
+completed_scope_tester_session_591813800_1785715200_4689656_magic_5303191_position_id_7.json       0
+completed_scope_tester_session_591813800_1785715200_52907875_magic_5303191_position_id_2.json      0
+completed_scope_tester_session_591813800_1785888000_23204015_magic_5303001_position_id_2.json      0
+completed_scope_tester_session_591813800_1785888000_23204015_magic_5303001_position_id_5.json      0
+completed_scope_tester_session_591813800_1788307200_131506125_magic_5303191_position_id_12.json    0
+completed_scope_tester_session_591813800_1788307200_131506125_magic_5303191_position_id_3.json     0
+completed_scope_tester_session_591813800_1788307200_131506125_magic_5303191_position_id_5.json     0
+completed_scope_tester_session_591813800_1788307200_131506125_magic_5303191_position_id_8.json     0
+counterfactual_pending.ndjson                                                                      0
+degraded_response_census_20260905.ndjson                                                         0.2
+execution_authority_events.jsonl                                                                 0.4
+management_counterfactual_updates.jsonl                                                            0
+management_experiments.jsonl                                                                       0
+openai_usage.csv                                                                                 3.7
+openai_usage.ndjson                                                                             13.3
+penalty.ndjson                                                                                     0
+pending_ai.ndjson                                                                                0.3
+runtime_validation_latest.json                                                                     0
+run_manifest.json                                                                                  0
+shadow_candidates.jsonl                                                                          210
+shadow_candidate_pending.ndjson                                                                    0
+startup_policy_manifest.json                                                                       0
+startup_policy_manifest_mql.json                                                                   0
+trade_deal_2.json                                                                                0.2
+trade_deal_299785123.json                                                                        0.1
+trade_deal_300610073.json                                                                        0.1
+trade_deal_301358223.json                                                                        0.1
+trade_deal_301606261.json                                                                        0.1
+trade_deal_32813947.json                                                                         0.1
+trade_deal_32816089.json                                                                         0.1
+trade_deal_32829006.json                                                                         0.1
+trade_deal_32930292.json                                                                         0.1
+trade_deal_32939825.json                                                                         0.1
+trade_deal_33055645.json                                                                         0.1
+trade_deal_4.json                                                                                0.1
+trade_deal_5.json                                                                                  0
+trade_deal_7.json                                                                                0.2
+trade_deal_8.json                                                                                  0
+trade_deal_9.json                                                                                0.2
+trade_key_1780277995_20551_0.json                                                                  0
+trade_key_1780278595_22678_0.json                                                                  0
+trade_key_1780278895_18815_0.json                                                                  0
+trade_key_1780282495_24032_0.json                                                                  0
+trade_key_1780284899_6035_0.json                                                                   0
+trade_key_1780316399_18341_0.json                                                                  0
+trade_key_1780321799_24032_0.json                                                                  0
+trade_key_1780339799_5935_0.json                                                                   0
+trade_key_1780379399_23029_0.json                                                                  0
+trade_key_1780384799_28312_0.json                                                                  0
+trade_key_1781102695_22503_0.json                                                                0.1
+trade_key_1781140799_7740_0.json                                                                   0
+trade_key_1781143499_10056_0.json                                                                  0
+trade_key_1781144399_18446_0.json                                                                  0
+trade_key_1781237099_7795_0.json                                                                   0
+trade_key_1781266799_11454_0.json                                                                  0
+trade_key_1781271299_6447_0.json                                                                   0
+trade_key_1781278499_25239_0.json                                                                  0
+trade_key_1781285699_7351_0.json                                                                   0
+trade_key_1781286599_1299_0.json                                                                   0
+trade_key_1781290199_19319_0.json                                                                  0
+trade_key_1781291099_28370_0.json                                                                  0
+trade_key_1785770399_5505_0.json                                                                 0.1
+trade_key_1785791999_15395_0.json                                                                0.1
+trade_key_1785791999_23705_0.json                                                                0.1
+trade_key_1785894295_28255_0.json                                                                  0
+trade_key_1785898495_21639_0.json                                                                  0
+trade_key_1785898795_7480_0.json                                                                   0
+trade_key_1785900295_26038_0.json                                                                  0
+trade_key_1785900595_5842_0.json                                                                   0
+trade_key_1785902699_8796_0.json                                                                 0.1
+trade_key_1785902699_993_0.json                                                                  0.1
+trade_key_1785915299_130_0.json                                                                  0.1
+trade_key_1785915299_6960_0.json                                                                 0.1
+trade_key_1785933295_13982_0.json                                                                  0
+trade_key_1785933595_1740_0.json                                                                   0
+trade_key_1785960299_17150_0.json                                                                0.1
+trade_key_1785960299_593_0.json                                                                  0.1
+trade_key_1785960299_8822_0.json                                                                 0.1
+trade_key_1785963899_557_0.json                                                                  0.1
+trade_key_1785963899_8959_0.json                                                                 0.1
+trade_key_1785970199_23035_0.json                                                                0.1
+trade_key_1785970199_38_0.json                                                                   0.1
+trade_key_1786101599_14726_0.json                                                                0.1
+trade_key_1786101599_26709_0.json                                                                0.1
+trade_key_1786135799_29161_0.json                                                                0.1
+trade_key_1786135799_5767_0.json                                                                 0.1
+trade_key_1786139399_20510_0.json                                                                0.1
+trade_key_1786139399_21702_0.json                                                                0.1
+trade_key_1786565147_25168_0.json                                                                0.1
+trade_key_1786943752_4602_0.json                                                                 0.1
+trade_key_1786945579_8707_0.json                                                                 0.1
+trade_key_1788320730_24217_0.json                                                                0.2
+trade_key_1788330964_28615_0.json                                                                0.2
+trade_key_1788338790_8448_0.json                                                                 0.1
+trade_key_1788348121_7668_0.json                                                                 0.2
+trade_key_1788350529_5865_0.json                                                                 0.1
+trade_key_1788352335_19227_0.json                                                                0.1
+trade_key_1788352636_18733_0.json                                                                0.1
+trade_key_1788354141_11692_0.json                                                                0.2
+trade_key_1788496033_19064_0.json                                                                0.1
+trade_key_1788542111_10122_0.json                                                                0.1
+trade_key_1788614078_11558_0.json                                                                0.1
+trade_key_1788615902_143_0.json                                                                  0.1
+trade_key_1788796169_21235_0.json                                                                0.1
+trade_key_1788798905_30775_0.json                                                                0.1
+trade_key_1788841276_10116_0.json                                                                0.1
+trade_key_1788843090_30500_0.json                                                                0.1
+trade_key_1788844298_8673_0.json                                                                 0.1
+trade_key_1788848528_30947_0.json                                                                0.1
+trade_key_1788878750_11626_0.json                                                                0.1
+trade_key_1788925756_20396_0.json                                                                0.1
+trade_key_1788926963_28154_0.json                                                                0.1
+trade_key_1788929394_12076_0.json                                                                0.1
+trade_key_1788929395_20998_0.json                                                                0.1
+trade_key_1788931823_21361_0.json                                                                0.1
+trade_key_1788935462_4164_0.json                                                                 0.1
+trade_key_1788940310_30883_0.json                                                                0.1
+trade_key_1788941527_14566_0.json                                                                0.1
+trade_key_1788942137_4392_0.json                                                                 0.1
+trade_key_1788943966_13452_0.json                                                                0.1
+trade_key_1788946409_5666_0.json                                                                 0.1
+trade_key_1788948247_4055_0.json                                                                 0.1
+trade_key_1788951314_22055_0.json                                                                0.1
+trade_key_1788986995_6445_0.json                                                                 0.1
+trade_key_1788994470_24802_0.json                                                                0.1
+trade_key_1789003517_5694_0.json                                                                 0.1
+trade_key_1789007409_27525_0.json                                                                0.1
+trade_key_1789019484_5932_0.json                                                                 0.1
+trade_key_1789037722_14999_0.json                                                                0.1
+trade_key_1789064580_24228_0.json                                                                0.1
+trade_key_1789067404_29439_0.json                                                                0.1
+trade_key_1789070179_24884_0.json                                                                0.1
+trade_key_1789076784_21054_0.json                                                                0.1
+trade_key_1789077711_16880_0.json                                                                0.1
+trade_key_1789156541_15912_0.json                                                                0.1
+trade_key_1789156548_4581_0.json                                                                 0.1
+trade_key_1789157159_26961_0.json                                                                0.1
+trade_key_1789158393_26316_0.json                                                                0.1
+trade_key_1789159016_10428_0.json                                                                0.1
+trade_key_1789159633_15616_0.json                                                                0.1
+trade_key_1789160251_2751_0.json                                                                 0.1
+trade_key_1789162107_24137_0.json                                                                0.1
+trade_key_1789165824_23675_0.json                                                                0.1
+trade_key_1789168122_8812_0.json                                                                 0.1
+trade_key_FULL-ASIA-NK-NZDCHF-44422.json                                                         0.1
+trade_key_FULL-ASIA-NK-USDCAD-42525.json                                                         0.1
+trade_key_FULL-ASIA-NK-USDCAD-50211.json                                                         0.1
+trade_key_FULL-LON-NK-#JAPAN-69103.json                                                          0.1
+trade_key_MBC-ASIA-NK-#USNDA-37813.json                                                            0
+trade_key_MBC-ASIA-NK-#USNDA-42682.json                                                            0
+trade_key_MBC-ASIA-NK-#USNDA-62409.json                                                            0
+trade_key_MBC-ASIA-NK-#USNDA-85491.json                                                            0
+trade_key_MBC-ASIA-NK-AUDJPY-32845.json                                                          0.1
+trade_key_MBC-ASIA-NK-AUDJPY-36290.json                                                          0.1
+trade_key_MBC-ASIA-NK-AUDUSD-96152.json                                                          0.1
+trade_key_MBC-ASIA-NK-GBPCAD-76506.json                                                          0.1
+trade_key_MBC-ASIA-NK-GOLD-37949.json                                                              0
+trade_key_MBC-ASIA-NK-GOLD-55517.json                                                              0
+trade_key_MBC-ASIA-NK-GOLD-73972.json                                                              0
+trade_key_MBC-ASIA-NK-USDCAD-26917.json                                                          0.1
+trade_key_MBC-ASIA-NK-USDCHF-99687.json                                                          0.1
+trade_key_MBC-LON-NK-#USNDA-59868.json                                                             0
+trade_key_MBC-LON-NK-#USNDA-89624.json                                                             0
+trade_key_MBC-LON-NK-EURCAD-04737.json                                                           0.1
+trade_key_MBC-LON-NK-GOLD-55220.json                                                               0
+trade_key_MBC-LON-NK-GOLD-69026.json                                                               0
+trade_key_MBC-NY-K-NAS100-91450.json                                                             0.1
+trade_key_MBC-NY-K-USDCAD-57964.json                                                             0.1
+trade_key_MBC-NY-NK-AUDUSD-16938.json                                                            0.1
+trade_key_MBC-NY-NK-GBPCHF-00920.json                                                            0.1
+trade_key_MBC-OFF-NK-#USNDA-31749.json                                                             0
+trade_key_MBC-OFF-NK-AUDJPY-09592.json                                                           0.1
+trade_key_MBC-OFF-NK-EURUSD-99739.json                                                           0.1
+trade_key_MBC-OFF-NK-NZDJPY-77294.json                                                           0.1
+trade_key_MPC-ASIA-NK-#GERMA-11055.json                                                          0.1
+trade_key_MPC-ASIA-NK-#GERMA-51170.json                                                          0.1
+trade_key_MPC-ASIA-NK-AUDJPY-87334.json                                                          0.1
+trade_key_MPC-ASIA-NK-AUDJPY-97824.json                                                          0.1
+trade_key_MPC-ASIA-NK-AUDUSD-48732.json                                                          0.1
+trade_key_MPC-ASIA-NK-EURUSD-05154.json                                                          0.1
+trade_key_MPC-ASIA-NK-EURUSD-19483.json                                                          0.1
+trade_key_MPC-ASIA-NK-GBPCAD-83766.json                                                          0.2
+trade_key_MPC-ASIA-NK-GBPUSD-08944.json                                                          0.1
+trade_key_MPC-ASIA-NK-GOLD-01445.json                                                              0
+trade_key_MPC-ASIA-NK-GOLD-40400.json                                                            0.1
+trade_key_MPC-ASIA-NK-GOLD-45355.json                                                            0.1
+trade_key_MPC-ASIA-NK-GOLD-59194.json                                                              0
+trade_key_MPC-ASIA-NK-GOLD-59491.json                                                              0
+trade_key_MPC-ASIA-NK-GOLD-69733.json                                                              0
+trade_key_MPC-ASIA-NK-GOLD-86817.json                                                              0
+trade_key_MPC-ASIA-NK-GOLD-91058.json                                                            0.1
+trade_key_MPC-ASIA-NK-NZDCAD-76390.json                                                          0.1
+trade_key_MPC-LON-NK-#JAPAN-43049.json                                                           0.1
+trade_key_MPC-LON-NK-#JAPAN-81419.json                                                           0.1
+trade_key_MPC-LON-NK-AUDJPY-15725.json                                                           0.2
+trade_key_MPC-LON-NK-BITCOI-89139.json                                                           0.1
+trade_key_MPC-LON-NK-EURCHF-06297.json                                                           0.1
+trade_key_MPC-LON-NK-GBPJPY-89824.json                                                           0.2
+trade_key_MPC-LON-NK-GBPUSD-48747.json                                                           0.1
+trade_key_MPC-LON-NK-GOLD-83381.json                                                             0.1
+trade_key_MPC-LON-NK-SILVER-51625.json                                                           0.1
+trade_key_MPC-LON-NK-SILVER-93354.json                                                           0.1
+trade_key_MPC-LON-NK-USDCHF-29443.json                                                           0.1
+trade_key_MPC-NY-K-CADJPY-00839.json                                                             0.1
+trade_key_MPC-NY-K-GBPJPY-28130.json                                                             0.1
+trade_key_MPC-NY-NK-#GERMA-55054.json                                                            0.1
+trade_key_MPC-NY-NK-EURUSD-05154.json                                                            0.1
+trade_key_MPC-NY-NK-GBPJPY-28130.json                                                            0.1
+trade_key_MPC-NY-NK-GBPJPY-36287.json                                                            0.1
+trade_key_MPC-NY-NK-GBPUSD-50237.json                                                            0.1
+trade_key_MPC-OFF-NK-GBPAUD-79767.json                                                           0.1
+trade_key_MPC-OFF-NK-GBPCAD-41962.json                                                           0.1
+trade_key_MPC-OFF-NK-GER40-25006.json                                                            0.1
+trade_key_MPC-OFF-NK-NZDJPY-49815.json                                                           0.1
+trade_key_MPC-OFF-NK-NZDJPY-55963.json                                                           0.1
+trade_key_MPC-OFF-NK-NZDUSD-00203.json                                                           0.1
+trade_key_MPC-OFF-NK-XAUUSD-80265.json                                                           0.1
+trade_key_RNG-OFF-NK-GOLD-54357.json                                                             0.1
+trade_key_SES-ASIA-NK-#USNDA-78791.json                                                            0
+trade_key_SES-ASIA-NK-GBPUSD-87509.json                                                          0.1
+trade_key_SES-LON-NK-#USNDA-78791.json                                                             0
+trade_key_SES-NY-K-GBPJPY-88654.json                                                             0.1
+trade_key_SES-OFF-NK-#USNDA-78791.json                                                             0
+trade_order_10.json                                                                              0.1
+trade_order_11.json                                                                              0.1
+trade_order_12.json                                                                              0.2
+trade_order_2.json                                                                               0.2
+trade_order_299616065.json                                                                       0.1
+trade_order_3.json                                                                               0.2
+trade_order_325185007.json                                                                       0.1
+trade_order_325229449.json                                                                       0.1
+trade_order_325628652.json                                                                       0.1
+trade_order_325638305.json                                                                       0.1
+trade_order_326116439.json                                                                       0.1
+trade_order_326925954.json                                                                       0.1
+trade_order_326931481.json                                                                       0.1
+trade_order_326957081.json                                                                       0.1
+trade_order_326976321.json                                                                       0.1
+trade_order_327020779.json                                                                       0.1
+trade_order_327069642.json                                                                       0.1
+trade_order_327096864.json                                                                       0.1
+trade_order_327141917.json                                                                       0.1
+trade_order_327152161.json                                                                       0.1
+trade_order_327189562.json                                                                       0.1
+trade_order_37757928.json                                                                        0.1
+trade_order_37760609.json                                                                        0.1
+trade_order_37774492.json                                                                        0.1
+trade_order_37880443.json                                                                        0.1
+trade_order_37890190.json                                                                        0.1
+trade_order_38011101.json                                                                        0.1
+trade_order_38011270.json                                                                        0.1
+trade_order_38011454.json                                                                        0.1
+trade_order_4.json                                                                               0.1
+trade_order_5.json                                                                               0.1
+trade_order_6.json                                                                               0.1
+trade_order_7.json                                                                               0.1
+trade_order_8.json                                                                               0.2
+trade_position_12.json                                                                           0.2
+trade_position_2.json                                                                            0.1
+trade_position_3.json                                                                            0.2
+trade_position_325229449.json                                                                    0.1
+trade_position_326116439.json                                                                    0.1
+trade_position_326931481.json                                                                    0.1
+trade_position_327189562.json                                                                    0.1
+trade_position_37757928.json                                                                     0.1
+trade_position_37760609.json                                                                     0.1
+trade_position_37774492.json                                                                     0.1
+trade_position_37880443.json                                                                     0.1
+trade_position_37890190.json                                                                     0.1
+trade_position_38011454.json                                                                     0.1
+trade_position_5.json                                                                            0.1
+trade_position_7.json                                                                            0.1
+trade_position_8.json                                                                            0.2
+trade_position_id_12.json                                                                        0.2
+trade_position_id_2.json                                                                         0.1
+trade_position_id_3.json                                                                         0.2
+trade_position_id_325229449.json                                                                 0.1
+trade_position_id_326116439.json                                                                 0.1
+trade_position_id_326931481.json                                                                 0.1
+trade_position_id_327189562.json                                                                 0.1
+trade_position_id_37757928.json                                                                  0.1
+trade_position_id_37760609.json                                                                  0.1
+trade_position_id_37774492.json                                                                  0.1
+trade_position_id_37880443.json                                                                  0.1
+trade_position_id_37890190.json                                                                  0.1
+trade_position_id_38011454.json                                                                  0.1
+trade_position_id_5.json                                                                         0.1
+trade_position_id_7.json                                                                         0.1
+trade_position_id_8.json                                                                         0.2
+trade_ticket_10.json                                                                             0.1
+trade_ticket_11.json                                                                             0.1
+trade_ticket_12.json                                                                             0.2
+trade_ticket_2.json                                                                              0.2
+trade_ticket_299616065.json                                                                      0.1
+trade_ticket_3.json                                                                              0.2
+trade_ticket_325185007.json                                                                      0.1
+trade_ticket_325229449.json                                                                      0.1
+trade_ticket_325628652.json                                                                      0.1
+trade_ticket_325638305.json                                                                      0.1
+trade_ticket_326116439.json                                                                      0.1
+trade_ticket_326925954.json                                                                      0.1
+trade_ticket_326931481.json                                                                      0.1
+trade_ticket_326957081.json                                                                      0.1
+trade_ticket_326976321.json                                                                      0.1
+trade_ticket_327020779.json                                                                      0.1
+trade_ticket_327069642.json                                                                      0.1
+trade_ticket_327096864.json                                                                      0.1
+trade_ticket_327141917.json                                                                      0.1
+trade_ticket_327152161.json                                                                      0.1
+trade_ticket_327189562.json                                                                      0.1
+trade_ticket_37757928.json                                                                       0.1
+trade_ticket_37760609.json                                                                       0.1
+trade_ticket_37774492.json                                                                       0.1
+trade_ticket_37880443.json                                                                       0.1
+trade_ticket_37890190.json                                                                       0.1
+trade_ticket_38011101.json                                                                       0.1
+trade_ticket_38011270.json                                                                       0.1
+trade_ticket_38011454.json                                                                       0.1
+trade_ticket_4.json                                                                              0.1
+trade_ticket_5.json                                                                              0.1
+trade_ticket_6.json                                                                              0.1
+trade_ticket_7.json                                                                              0.1
+trade_ticket_8.json                                                                              0.2
+transport_failure_requeue.ndjson                                                                 0.2
+transport_failure_requeue_inventory.json                                                           0
+transport_failure_requeue_result.json                                                              0
+watchlist.ndjson                                                                                   0
+
+
+---counts---
+3458
+517
+
+$ python --version; Write-Output "---venv---"; Test-Path -LiteralPath "python\.venv\Scripts\python.exe"; 
+Write-Output "---git---"; git status --short | Select-Object -First 5; git rev-parse HEAD
+Python 3.12.10
+---venv---
+True
+---git---
+ M .mt5-orchestrator/current/MISSION.md
+ M .mt5-orchestrator/current/RUN.json
+ M .mt5-orchestrator/models/LIVE_MODELS.md
+ M .mt5-orchestrator/policy/BUDGET_POLICY.md
+ M .mt5-orchestrator/policy/ROUTING_POLICY.md
+e6cae59e3c50668db4b7b7d1f4d8ed16c628b521
+
+→ Read python/opencode_go_accounting.py
+→ Read python/tests/test_opencode_go_cost_correctness.py
+Let me examine the key source files and data structure to scope the work.
+
+$ & "python\.venv\Scripts\python.exe" -c "import tiktoken; enc=tiktoken.get_encoding('o200k_base'); 
+print('tiktoken OK', len(enc.encode('hello world')))" 2>&1; Write-Output "---sys python---"; python -c "import 
+tiktoken" 2>&1
+python.exe : Traceback (most recent call last):
+At line:1 char:1
++ & "python\.venv\Scripts\python.exe" -c "import tiktoken; enc=tiktoken ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'tiktoken'
+---sys python---
+python : Traceback (most recent call last):
+At line:1 char:192
++ ... &1; Write-Output "---sys python---"; python -c "import tiktoken" 2>&1
++                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'tiktoken'
+
+tiktoken is not installed. Let me check what tokenizer options exist and sample the data structures.
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $f = Get-ChildItem 
+-LiteralPath "$bus\response_debug" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1; 
+Write-Output $f.FullName; $j = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json; Write-Output "---top 
+keys---"; $j.PSObject.Properties.Name; Write-Output "---provider_usage---"; $j.provider_usage | ConvertTo-Json -Depth 5
+C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS\response_debug\591813800_1785715200_30565812
+5_1785806100_BITCOIN_16201.json
+---top keys---
+id
+response
+missing_fields
+payload_summary
+reasons_raw
+---provider_usage---
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; Get-Content 
+-LiteralPath "$bus\logs\openai_usage.ndjson" -TotalCount 2; Write-Output "---last row---"; Get-Content -LiteralPath 
+"$bus\logs\openai_usage.ndjson" -Tail 1; Write-Output "---opencode attempt ledger?---"; Test-Path -LiteralPath 
+"$bus\logs\opencode_go_attempts.ndjson"
+{"ts_utc":"2026-06-19T14:44:41+00:00","source":"ai_gate","operation":"trade_gate.create_structured","status":"ok","requ
+est_id":"1781891074_CADJPY_5078","response_id":"resp_00f1799ca5c2d2f8016a3555d64e908191ab7ba29b69346132","model":"gpt-5
+.4-mini","reasoning_effort":"low","max_output_tokens":25000,"input_tokens":4442,"cached_input_tokens":0,"output_tokens"
+:385,"reasoning_output_tokens":177,"total_tokens":4827,"estimated_cost_usd":0.005064,"error_type":"","error_message":""
+,"raw_usage":{"input_tokens":4442,"input_tokens_details":{"cached_tokens":0},"output_tokens":385,"output_tokens_details
+":{"reasoning_tokens":177},"total_tokens":4827},"extra":{"symbol":"CADJPY","snapshot_count":0}}
+{"ts_utc":"2026-06-19T14:44:42+00:00","source":"ai_gate","operation":"trade_gate.create_structured","status":"ok","requ
+est_id":"1781891074_D30EUR_4624","response_id":"resp_0fef9a53d008e7af016a3555d64ec081a0b54d82fbe3e56c3c","model":"gpt-5
+.4-mini","reasoning_effort":"low","max_output_tokens":25000,"input_tokens":4476,"cached_input_tokens":0,"output_tokens"
+:422,"reasoning_output_tokens":203,"total_tokens":4898,"estimated_cost_usd":0.005256,"error_type":"","error_message":""
+,"raw_usage":{"input_tokens":4476,"input_tokens_details":{"cached_tokens":0},"output_tokens":422,"output_tokens_details
+":{"reasoning_tokens":203},"total_tokens":4898},"extra":{"symbol":"D30EUR","snapshot_count":0}}
+---last row---
+{"ts_utc":"2026-09-13T12:56:28+00:00","source":"ai_gate","operation":"trade_gate.provider_neutral_adjudicator","status"
+:"ok","request_id":"591813800_1785715200_305658125_1785800835_GOLD_3961","response_id":"resp_0bbdde89dea8b507016aa69d77
+562887d2bca5e24e3532737f","provider_mode":"REMOTE_API","provider_id":"openai_remote_api","endpoint_class":"official_rem
+ote","model_fingerprint":"","model":"gpt-5.6-luna","reasoning_effort":"low","max_output_tokens":25000,"input_tokens":15
+828,"cached_input_tokens":1130,"output_tokens":195,"reasoning_output_tokens":85,"total_tokens":16023,"estimated_cost_us
+d":0.0015981,"service_tier":"flex","price_multiplier":0.5,"routed_endpoint":"","pricing_status":"priced","tokens_per_se
+cond":null,"estimated_context_tokens":null,"error_type":"","error_message":"","raw_usage":{"input_tokens":15828,"input_
+tokens_details":{"cached_tokens":1130,"cache_write_tokens":14695},"output_tokens":195,"output_tokens_details":{"reasoni
+ng_tokens":85},"total_tokens":16023},"extra":{"symbol":"GOLD","role":"adjudicator","service_tier":"","flex_used":false}
+}
+---opencode attempt ledger?---
+False
+
+$ & "python\.venv\Scripts\python.exe" -m pip list 2>&1 | Select-String -Pattern 
+"tiktoken|transformers|tokenizers|sentencepiece|numpy|regex|tqdm" ; Write-Output "---all count---"; (& 
+"python\.venv\Scripts\python.exe" -m pip list 2>&1 | Measure-Object).Count
+tqdm               4.67.1
+---all count---
+36
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $f = 
+"$bus\response_debug\591813800_1785715200_305658125_1785806100_BITCOIN_16201.json"; $j = Get-Content -LiteralPath $f 
+-Raw | ConvertFrom-Json; Write-Output "response keys:"; $j.response.PSObject.Properties.Name; Write-Output 
+"payload_summary:"; $j.payload_summary | ConvertTo-Json -Depth 3 | Select-Object -First 40
+response keys:
+id
+session_id
+request_nonce
+request_identity_version
+identity_schema_version
+canonicalization_version
+request_identity_hash
+contract_manifest_hash
+contract_manifest
+request_created_sim_time
+request_created_wall_time
+candidate_count
+ordered_candidate_identities
+workload_mode
+live_forward_contract_version
+behavior_contract_hash
+architecture_contract_version
+semantic_cache_schema_version
+cohort_schema_version
+hierarchical_outcome_model_version
+response_id
+provider_contract_version
+provider_mode
+provider_id
+endpoint_class
+endpoint_identity_hash
+configured_models_hash
+model_returned
+actual_model_id
+fallback_model
+model_fingerprint
+reasoning_configuration
+evidence_envelope_version
+family_profile_version
+memory_schema_version
+retrieval_policy_version
+role_contract_version
+consensus_resolver_version
+generation_settings_hash
+input_fingerprint
+retrieved_analogue_ids
+historical_evidence_state
+analyst_response_fingerprint
+critic_response_fingerprint
+adjudicator_response_fingerprint
+final_resolver_reason
+provider_health_state
+role_latencies
+provider_retry_counts
+provider_usage
+estimated_context_tokens
+unsupported_generation_parameters
+analyst_output
+critic_output
+adjudicator_output
+bucket_prior_hash
+calibration_artifact_id
+request_fingerprint
+request_fingerprint_contract
+hierarchical_prior_artifact_hash
+hierarchical_prior_schema_version
+repeatability_schema_version
+repeatability_status
+repeatability_required_live
+repeatability_artifact_state
+repeatability_rejection_code
+repeatability_score_threshold_authority
+repeatability_trading_eligible
+repeatability_group_key
+repeatability_authority_hash
+decision_schema_version
+decision_quality_tier
+response_quality
+mandatory_fields_complete
+missing_mandatory_fields
+invalid_mandatory_fields
+decision_state
+selected_candidate_id
+selected_candidate_hash
+request_execution_fingerprint
+assessed_execution_fingerprint
+selected_target_identity
+selected_target_price
+assessed_entry
+assessed_sl
+assessed_tp1
+assessed_tp2
+candidate_assessments
+allow
+raw_allow
+model_raw_allow
+python_final_allow
+mql_final_allow
+decision_field_authority
+rule_score
+llm_quality_score
+blended_legacy_score
+legacy_agreement_confidence
+llm_self_reported_confidence
+calibrated_win_probability
+expected_net_r
+oos_predicted_probability
+calibration_bucket
+calibration_sample_size
+calibration_lower_bound
+calibration_upper_bound
+calibration_model_version
+calibration_data_window_start
+calibration_data_window_end
+calibration_available
+score
+chosen_index
+confidence
+migration_aliases
+decision_source
+reasons
+decision_id
+rejection_codes
+narrative_state
+invalidation_risks
+missing_confirmations
+suggested_risk_multiplier
+model_version
+setup_family
+setup_class
+entry_branch
+llm_quality_score_threshold
+llm_quality_threshold_source
+global_llm_quality_as_hard_floor
+llm_quality_threshold_passed
+llm_quality_reject_reason
+structure_quality_score
+entry_timing_score
+follow_through_probability
+invalidation_risk
+chop_risk
+cost_risk
+symbol_bucket_risk
+session_bucket_risk
+post_entry_failure_risk
+final_trade_expectancy_score
+llm_numeric_diagnostics_authority
+veto_enabled
+veto_code
+veto_evidence_fields
+veto_reason
+veto
+bucket_prior_override_justification
+target_arbitration
+chosen_target_model
+chosen_tp1
+chosen_tp2
+chosen_rr1
+chosen_rr2
+rejected_target_models
+target_blocker_kind
+target_blocker_severity
+target_blocker_class
+target_blocker_is_trade_killer
+target_decision_reason
+target_blocker_severity_present
+target_blocker_class_present
+target_blocker_is_trade_killer_present
+target_decision_reason_present
+why_not_liquidity_target
+why_not_partial_before_obstacle
+why_not_capped_before_obstacle
+why_not_synthetic_fallback
+target_arbitration_schema_version
+prompt_contract_version
+target_comparison
+response_binding_hash
+response_fingerprint
+full_structured_response_hash
+response_fingerprint_contract
+test_run_id
+payload_summary:
+{
+    "keys":  [
+                 "adr_pct",
+                 "adx_value",
+                 "analytics_key",
+                 "asia_high",
+                 "asia_low",
+                 "assessed_execution_fingerprint",
+                 "atr_pct",
+                 "behavior_contract_hash_mql",
+                 "bos_level",
+                 "broker_comment",
+                 "candidate_count",
+                 "candidate_hash",
+                 "candidate_id",
+                 "candidates",
+                 "canonicalization_version",
+                 "compression_score",
+                 "configured_stop_model",
+                 "contract_manifest",
+                 "contract_manifest_hash",
+                 "contract_manifest_version",
+                 "decision_input_hash",
+                 "decision_schema_version",
+                 "diagnostic_legacy_setup_score",
+                 "dr_high",
+                 "dr_low",
+                 "dr_mid",
+                 "engine_version",
+                 "entry_branch",
+                 "entry_est",
+                 "entry_model",
+                 "execution_cost_r",
+                 "expansion_score",
+                 "final_setup_class",
+                 "fvg",
+                 "fvg_execution_class",
+                 "fvg_id",
+                 "heuristic_quality_estimate",
+                 "hierarchical_prior_artifact_hash",
+                 "hierarchical_prior_schema_version",
+                 "htf_choch",
+                 "htf_mss",
+                 "id",
+                 "identity_schema_version",
+                 "in_killzone",
+                 "input_schema_version",
+                 "is_buy",
+                 "is_mpc",
+                 "killzone_code",
+                 "killzone_name",
+                 "liquidity_cluster_count",
+                 "liquidity_kind",
+                 "liquidity_rr",
+                 "liquidity_target",
+                 "live_forward_contract_version",
+                 "london_high",
+                 "london_low",
+                 "ltf_bos",
+                 "ltf_choch",
+                 "ltf_mss",
+                 "management_profile",
+                 "manip_high",
+                 "manip_low",
+                 "model_code",
+                 "net_reward_after_cost_r",
+                 "news_risk",
+                 "newyork_high",
+                 "newyork_low",
+                 "ordered_candidate_identities",
+                 "plan",
+                 "po3",
+                 "po3_scope",
+                 "po3_session_code",
+                 "po3_state",
+                 "po3_state_id",
+                 "po3_state_reason",
+                 "portfolio",
+                 "prev_day_high",
+                 "prev_day_low",
+                 "prev_week_high",
+                 "prev_week_low",
+                 "regime",
+                 "request_created_sim_time",
+                 "request_created_wall_time",
+                 "request_execution_fingerprint",
+                 "request_fingerprint",
+                 "request_fingerprint_contract",
+                 "request_identity",
+                 "request_identity_hash",
+                 "request_identity_version",
+                 "request_nonce",
+                 "runner_downgraded",
+                 "runtime",
+                 "runtime_input_hash",
+                 "runtime_inputs",
+                 "session_code",
+                 "session_high",
+                 "session_id",
+                 "session_low",
+                 "session_name",
+                 "session_vol_ratio",
+                 "setup_class",
+                 "setup_code",
+                 "setup_family",
+                 "setup_id",
+                 "setup_taxonomy_enum",
+                 "setup_taxonomy_version",
+                 "sl",
+                 "snapshot_metadata",
+                 "snapshots",
+                 "stop_model",
+                 "story",
+                 "structure_type",
+                 "sweep_side",
+                 "sweep_strength",
+                 "symbol",
+                 "t_bos",
+                 "t_disp",
+                 "t_sweep",
+                 "target_candidates",
+                 "target_model",
+                 "target_source",
+                 "taxonomy_mapping_source",
+                 "test_run_id",
+                 "tester_cache_key",
+                 "tester_cache_signature",
+                 "tp2",
+                 "tp_model",
+                 "trend_slope_pct",
+                 "trend_strength",
+                 "vwap_dist_atr",
+                 "watchlist",
+                 "workload_mode"
+             ],
+    "runtime_input_hash":  "953319433",
+    "runtime_inputs":  {
+                           "ai_decision_schema_version":  "20260724_canonical_frozen_request_v10",
+                           "ai_max_chop_risk":  0.65,
+                           "ai_max_invalidation_risk":  0.62,
+                           "ai_max_post_entry_failure_risk":  0.62,
+                           "ai_min_final_expectancy_score":  6.8,
+                           "ai_min_follow_through_prob":  0.58,
+                           "ai_prompt_contract_version":  "20260724_canonical_frozen_request_v12",
+                           "ai_strict":  true,
+                           "ai_target_arbitration_schema_version":  "20260717_target_fingerprint_authority_v6",
+                           "ai_veto_enable":  true,
+                           "ai_wait_poll_ms":  250,
+                           "ai_wait_timeout_ms":  1800000,
+                           "allow_ai_to_use_liquidity_target_behind_minor_blocker":  true,
+                           "allow_partial_before_obstacle":  true,
+                           "allow_synthetic_rr_target":  true,
+                           "analytics_virtual_balance":  100000.0,
+                           "asia_killzone_end_hour":  2,
+                           "asia_killzone_end_minute":  0,
+                           "asia_killzone_start_hour":  0,
+                           "asia_killzone_start_minute":  0,
+                           "backend_pnl_mode":  "closed_deal_pnl",
+                           "blocker_kill_severity":  9.0,
+                           "blocker_major_severity":  6.5,
+                           "blocker_minor_max_severity":  3.5,
+                           "broker_cost_history_enable":  true,
+                           "broker_cost_min_samples":  20,
+                           "broker_cost_stressed_percentile":  0.95,
+                           "bucket_risk_policy_file":  "PO3_AI_BUS\\config\\bucket_risk_policy.json",
+                           "commission_fallback_per_lot_round_turn":  0.01,
+                           "commission_model_schema_version":  "20260717_broker_cost_v1",
+                           "confirm_tf":  5,
+                           "counterfactual_horizon_minutes":  480,
+                           "decision_input_hash":  "1260939021",
+                           "enable_asia_killzone":  false,
+                           "enable_bucket_risk_policy":  true,
+                           "enable_mpc_trading":  true,
+                           "engine_input_schema":  "po3-fvg-ai-provider-version-z-20260724-v7",
+                           "engine_version":  "5.5-version-z-canonical-request-20260724-v8",
+                           "entry_tf":  15,
+                           "exclusive_trading_enabled":  false,
+                           "execution_reduce_risk_cost_r":  0.07,
+                           "execution_reject_cost_r":  0.1,
+                           "fallback_rr2":  1.05,
+                           "fallback_rr_buffer_r":  0.05,
+                           "global_llm_quality_as_hard_floor":  false,
+                           "hard_reject_crossed_obstacle_target":  false,
+                           "hierarchical_prior_schema_version":  "20260717_hierarchical_prior_v1",
+                           "htf":  16385,
+                           "invalidation_asset_class_policy_enable":  false,
+                           "invalidation_asset_class_policy_file":  "PO3_AI_BUS\\config\\invalidation_policy.v1.json",
+                           "invalidation_asset_class_policy_hash":  "640752513",
+                           "invalidation_confirmation_mode":  0,
+                           "invalidation_persistence_seconds":  15,
+                           "invalidation_policy_schema_version":  "20260717_invalidation_asset_class_v1",
+                           "invalidation_spread_buffer_mult":  1.0,
+                           "legacy_min_ai_confidence_diagnostic":  0.0,
+                           "llm_quality_score_continuation":  7.3,
+                           "llm_quality_score_failed_breakout":  7.2,
+                           "llm_quality_score_full_po3":  6.8,
+                           "llm_quality_score_micro_po3":  7.2,
+                           "llm_quality_score_range":  7.0,
+                           "london_killzone_end_hour":  11,
+                           "london_killzone_end_minute":  0,
+                           "london_killzone_start_hour":  10,
+                           "london_killzone_start_minute":  0,
+                           "management_action_max_retries":  20,
+                           "management_action_retry_cooldown_sec":  30,
+                           "management_counterfactual_schema_version":  "20260717_management_counterfactual_v2",
+                           "management_experiment_schema_version":  "20260717_management_experiment_v1",
+                           "management_schema_version":  "20260718_management_action_lifecycle_v4",
+                           "max_entry_drift_r":  0.4,
+                           "max_open_positions":  50,
+                           "max_spread_risk_frac":  0.22,
+                           "max_spread_ticks":  60,
+                           "max_target_adr_frac":  0.7,
+                           "max_target_atr_mult":  6.0,
+                           "max_total_risk_enable":  true,
+                           "max_total_risk_money":  0.0,
+                           "max_total_risk_pct":  3.0,
+                           "max_trades_per_scan":  8,
+                           "max_trades_per_sweep":  1,
+                           "micro_scalp_max_cost_frac_of_planned_r":  0.1,
+                           "min_live_rr2":  0.9,
+                           "min_llm_quality_score_trend":  7.0,
+                           "newyork_killzone_end_hour":  17,
+                           "newyork_killzone_end_minute":  0,
+                           "newyork_killzone_start_hour":  16,
+                           "newyork_killzone_start_minute":  0,
+                           "normalized_fvg_asset_class_policy_file":  
+"PO3_AI_BUS\\config\\normalized_fvg_policy.v2.json",
+                           "normalized_fvg_asset_class_policy_hash":  "1441715152",
+                           "normalized_fvg_atr_frac":  0.01,
+                           "normalized_fvg_min_asset_class_samples":  100,
+                           "normalized_fvg_mode":  1,
+                           "normalized_fvg_schema_version":  "20260717_normalized_fvg_v2",
+                           "normalized_fvg_session_noise_frac":  0.1,
+                           "normalized_fvg_spread_mult":  1.0,
+                           "obstacle_reject_r":  0.7,
+                           "only_breaker_retest_virgin_strong_origin":  false,
+                           "reject_synthetic_fallback_after_crossed_obstacle":  true,
+                           "repeatability_schema_version":  "20260718_provider_neutral_repeatability_v3",
+                           "require_ai_target_arbitration_on_obstacle":  true,
+                           "require_displacement":  true,
+                           "require_snapshots":  false,
+                           "risk_factor_gate_enable":  false,
+                           "risk_factor_policy_file":  "PO3_AI_BUS\\config\\risk_factor_policy.v1.json",
+                           "risk_factor_schema_version":  "20260717_risk_factor_v1",
+                           "risk_per_trade_money":  0.0,
+                           "risk_per_trade_pct":  1.0,
+                           "runtime_input_hash":  "953319433",
+                           "shadow_candidate_horizon_minutes":  1440,
+                           "shadow_candidate_schema_version":  "20260908_shadow_lifecycle_v4",
+                           "standard_trade_liquidity_rr_floor":  1.1,
+                           "stop_model":  "structural_sweep",
+                           "strategy_mode":  3,
+                           "strategy_preset":  "scalp_po3",
+                           "suppress_continuation_stale_fvg":  false,
+                           "suppress_continuation_touched_fvg":  false,
+                           "suppress_micro_bisi_sibi_edge":  false,
+                           "suppress_stale_fvg_branches":  true,
+                           "suppress_touched_continuation_unless_retested":  true,
+                           "symbol_flatten_before_close_min":  20,
+                           "symbol_no_entry_before_close_min":  45,
+                           "tester_ai_cache":  false,
+                           "tester_ai_mode":  0,
+                           "tester_allow_live_wait_debug_trading":  false,
+                           "tester_freeze_ai_execution_snapshot":  true,
+                           "tester_max_ai_result_age_sim_minutes":  15,
+                           "tester_reject_stale_ai_results":  true,
+                           "thesis_invalidation_policy":  0,
+                           "trade_only_killzones":  false,
+                           "use_ai":  true,
+                           "use_broker_symbol_sessions":  true,
+                           "use_snapshot_ai":  false,
+                           "virtual_ledger_mode":  "fixed_virtual_balance"
+                       },
+    "po3":  {
+                "has_sweep":  true,
+                "po3_scope":  "intraday_po3",
+                "setup_family":  "micro_breaker_retest",
+                "requires_sweep_story":  false,
+                "t_sweep":  1785751200,
+                "t_disp":  1785758400,
+                "t_bos":  1785772800,
+                "dr_high":  63779.16,
+                "dr_low":  62578.65,
+                "session_name":  "LONDON",
+                "in_killzone":  false,
+                "liquidity_target":  65715.12
+            },
+    "source_story":  {
+                         "accumulation":  {
+                                              "range_high":  63779.16,
+                                              "range_low":  62578.65,
+                                              "range_mid":  63178.905
+                                          },
+                         "distribution":  {
+                                              "bos_level":  62849.99,
+                                              "cluster_count":  4,
+                                              "target":  65715.12,
+                                              "target_is_high":  true,
+                                              "target_kind":  "prev_week_high",
+                                              "time":  1785772800
+                                          },
+                         "manipulation":  {
+                                              "strength":  0.049212,
+                                              "time":  1785751200,
+                                              "toward_sellside":  true
+                                          },
+                         "source_context_tier":  "A",
+                         "source_dr_high":  63779.16,
+                         "source_dr_low":  62578.65,
+                         "source_liquidity_kind":  "prev_week_high",
+                         "source_liquidity_target":  65715.12,
+                         "source_manip_high":  62671.92,
+                         "source_manip_low":  62519.57,
+                         "source_sweep_side":  "sell_side",
+                         "source_t_bos":  1785772800,
+                         "source_t_disp":  1785758400,
+                         "source_t_sweep":  1785751200
+                     },
+    "plan":  {
+                 "entry_est":  62916.06,
+                 "entry_model":  "breaker_retest",
+                 "sl":  62511.87,
+                 "tp1":  63279.831,
+                 "tp2":  63779.16,
+                 "rr2":  2.1354,
+                 "liquidity_rr":  6.9251,
+                 "diagnostic_legacy_setup_score":  null
+             },
+    "target_candidates":  {
+                              "arbitration_required":  true,
+                              "current_target_source":  "asia_session_high",
+                              "current_tp_model":  "asia_session_high",
+                              "current_tp2":  63779.16,
+                              "current_rr2":  2.1354,
+                              "obstacle_kind":  "crossed_opposing_imbalance",
+                              "obstacle_price":  62916.99,
+                              "obstacle_r":  2.1354,
+                              "obstacle_distance_r":  0.0023,
+                              "obstacle_tf":  "entry_tf",
+                              "obstacle_strength_features":  "severity=5.50;class=moderate",
+                              "effective_fallback_rr":  1.05,
+                              "blocker_features":  {
+                                                       "capped_rr":  0.0023,
+                                                       "diagnostic_legacy_setup_score":  134.7924,
+                                                       "displacement_quality":  6.9719,
+                                                       "distance_from_obstacle_to_liquidity_target_r":  6.9228,
+                                                       "effective_fallback_rr":  1.05,
+                                                       "fallback_rr":  1.05,
+                                                       "htf_alignment_score":  7.2,
+                                                       "is_htf_obstacle":  false,
+                                                       "is_ltf_obstacle":  true,
+                                                       "killzone":  "NK",
+                                                       "liquidity_rr":  6.9251,
+                                                       "obstacle_age_bars":  32,
+                                                       "obstacle_distance_r":  0.0023,
+                                                       "obstacle_freshness":  "stale",
+                                                       "obstacle_kind":  "crossed_opposing_imbalance",
+                                                       "obstacle_mitigated_percent":  0.0,
+                                                       "obstacle_mitigation_state":  "virgin",
+                                                       "obstacle_price":  62916.99,
+                                                       "obstacle_retested":  false,
+                                                       "obstacle_tf":  "entry_tf",
+                                                       "obstacle_width_atr":  0.0,
+                                                       "obstacle_width_price":  193.44,
+                                                       "session":  "LONDON",
+                                                       "tp1_before_obstacle_possible":  false
+                                                   },
+                              "liquidity_target":  {
+                                                       "available":  false,
+                                                       "model":  "next_liquidity_session_range",
+                                                       "tp":  null,
+                                                       "tp1":  null,
+                                                       "rr":  null,
+                                                       "rr1":  null,
+                                                       "tp1_reward_price":  null,
+                                                       "tp1_min_required_reward":  null,
+                                                       "tp2":  65715.12,
+                                                       "rr2":  6.9251,
+                                                       "configured_rr":  null,
+                                                       "effective_rr2":  null,
+                                                       "reward_distance_price":  2799.06,
+                                                       "max_allowed_distance":  1003.27271442,
+                                                       "exceeds_max_target_distance":  true,
+                                                       "min_rr_pass":  true,
+                                                       "max_rr_pass":  false,
+                                                       "feasible_for_tp2":  false,
+                                                       "feasible_for_tp1_only":  false,
+                                                       "infeasible_reason":  "exceeds_max_target_distance",
+                                                       "reason":  null,
+                                                       "valid_structurally":  true,
+                                                       "blocked_by_obstacle":  true,
+                                                       "partial_allowed":  null,
+                                                       "crosses_obstacle":  null
+                                                   },
+                              "partial_before_obstacle_then_liquidity":  {
+                                                                             "available":  false,
+                                                                             "model":  
+"partial_before_obstacle_then_liquidity",
+                                                                             "tp":  null,
+                                                                             "tp1":  62916.97,
+                                                                             "rr":  null,
+                                                                             "rr1":  0.0023,
+                                                                             "tp1_reward_price":  0.91,
+                                                                             "tp1_min_required_reward":  262.7235,
+                                                                             "tp2":  65715.12,
+                                                                             "rr2":  6.9251,
+                                                                             "configured_rr":  null,
+                                                                             "effective_rr2":  null,
+                                                                             "reward_distance_price":  2799.06,
+                                                                             "max_allowed_distance":  1003.27271442,
+                                                                             "exceeds_max_target_distance":  true,
+                                                                             "min_rr_pass":  null,
+                                                                             "max_rr_pass":  false,
+                                                                             "feasible_for_tp2":  false,
+                                                                             "feasible_for_tp1_only":  false,
+                                                                             "infeasible_reason":  
+"partial_leg_below_tp1_floor",
+                                                                             "reason":  null,
+                                                                             "valid_structurally":  null,
+                                                                             "blocked_by_obstacle":  null,
+                                                                             "partial_allowed":  null,
+                                                                             "crosses_obstacle":  null
+                                                                         },
+                              "capped_before_obstacle":  {
+                                                             "available":  false,
+                                                             "model":  "capped_before_opposing_imbalance",
+                                                             "tp":  null,
+                                                             "tp1":  null,
+                                                             "rr":  null,
+                                                             "rr1":  null,
+                                                             "tp1_reward_price":  null,
+                                                             "tp1_min_required_reward":  null,
+                                                             "tp2":  62916.97,
+                                                             "rr2":  0.0023,
+                                                             "configured_rr":  null,
+                                                             "effective_rr2":  null,
+                                                             "reward_distance_price":  0.91,
+                                                             "max_allowed_distance":  1003.27271442,
+                                                             "exceeds_max_target_distance":  false,
+                                                             "min_rr_pass":  false,
+                                                             "max_rr_pass":  true,
+                                                             "feasible_for_tp2":  false,
+                                                             "feasible_for_tp1_only":  false,
+                                                             "infeasible_reason":  "rr_below_min",
+                                                             "reason":  null,
+                                                             "valid_structurally":  null,
+                                                             "blocked_by_obstacle":  null,
+                                                             "partial_allowed":  true,
+                                                             "crosses_obstacle":  null
+                                                         },
+                              "synthetic_rr_fallback":  {
+                                                            "available":  false,
+                                                            "model":  "synthetic_rr_fallback",
+                                                            "tp":  63340.4595,
+                                                            "tp1":  null,
+                                                            "rr":  1.05,
+                                                            "rr1":  null,
+                                                            "tp1_reward_price":  null,
+                                                            "tp1_min_required_reward":  null,
+                                                            "tp2":  63340.4595,
+                                                            "rr2":  1.05,
+                                                            "configured_rr":  1.05,
+                                                            "effective_rr2":  1.05,
+                                                            "reward_distance_price":  424.3995,
+                                                            "max_allowed_distance":  1003.27271442,
+                                                            "exceeds_max_target_distance":  false,
+                                                            "min_rr_pass":  true,
+                                                            "max_rr_pass":  true,
+                                                            "feasible_for_tp2":  false,
+                                                            "feasible_for_tp1_only":  false,
+                                                            "infeasible_reason":  "target_already_reached",
+                                                            "reason":  null,
+                                                            "valid_structurally":  null,
+                                                            "blocked_by_obstacle":  null,
+                                                            "partial_allowed":  null,
+                                                            "crosses_obstacle":  true
+                                                        },
+                              "synthetic_rr_capped_to_max_distance":  {
+                                                                          "available":  false,
+                                                                          "model":  
+"synthetic_rr_capped_to_max_distance",
+                                                                          "tp":  0.0,
+                                                                          "tp1":  null,
+                                                                          "rr":  0.0,
+                                                                          "rr1":  null,
+                                                                          "tp1_reward_price":  null,
+                                                                          "tp1_min_required_reward":  null,
+                                                                          "tp2":  0.0,
+                                                                          "rr2":  0.0,
+                                                                          "configured_rr":  1.05,
+                                                                          "effective_rr2":  null,
+                                                                          "reward_distance_price":  null,
+                                                                          "max_allowed_distance":  null,
+                                                                          "exceeds_max_target_distance":  null,
+                                                                          "min_rr_pass":  null,
+                                                                          "max_rr_pass":  null,
+                                                                          "feasible_for_tp2":  false,
+                                                                          "feasible_for_tp1_only":  false,
+                                                                          "infeasible_reason":  "unavailable",
+                                                                          "reason":  "",
+                                                                          "valid_structurally":  null,
+                                                                          "blocked_by_obstacle":  null,
+                                                                          "partial_allowed":  null,
+                                                                          "crosses_obstacle":  null
+                                                                      },
+                              "keep_current_target":  {
+                                                          "available":  true,
+                                                          "model":  "keep_current",
+                                                          "tp":  null,
+                                                          "tp1":  null,
+                                                          "rr":  null,
+                                                          "rr1":  null,
+                                                          "tp1_reward_price":  null,
+                                                          "tp1_min_required_reward":  null,
+                                                          "tp2":  63779.16,
+                                                          "rr2":  2.1354,
+                                                          "configured_rr":  null,
+                                                          "effective_rr2":  null,
+                                                          "reward_distance_price":  863.1,
+                                                          "max_allowed_distance":  1003.27271442,
+                                                          "exceeds_max_target_distance":  false,
+                                                          "min_rr_pass":  true,
+                                                          "max_rr_pass":  true,
+                                                          "feasible_for_tp2":  true,
+                                                          "feasible_for_tp1_only":  false,
+                                                          "infeasible_reason":  "",
+                                                          "reason":  null,
+                                                          "valid_structurally":  null,
+                                                          "blocked_by_obstacle":  null,
+                                                          "partial_allowed":  null,
+                                                          "crosses_obstacle":  null
+                                                      }
+                          },
+    "regime":  {
+                   "atr_pct":  0.005862,
+                   "trend_strength":  0.463978,
+                   "trend_slope_pct":  0.00011052,
+                   "adx_value":  25.3138,
+                   "adr_pct":  0.02278,
+                   "session_vol_ratio":  0.401801,
+                   "vwap_dist_atr":  2.924151,
+                   "compression_score":  0.0,
+                   "expansion_score":  1.418294,
+                   "news_risk":  0.0
+               },
+    "snapshots":  {
+                      "htf_path":  "",
+                      "ltf_path":  "",
+                      "htf_exists":  false,
+                      "ltf_exists":  false
+                  },
+    "cand_count":  8,
+    "candidate_indexes":  [
+                              0,
+                              1,
+                              2,
+                              3,
+                              4
+                          ]
+}
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $files = Get-ChildItem 
+-LiteralPath "$bus\response_debug" -File; Write-Output ("total: " + $files.Count); $sample = $files | Where-Object { 
+$_.Name -match "GOLD|AUDJPY|USDCHF" } | Select-Object -First 3; foreach ($s in $sample) { $j = Get-Content 
+-LiteralPath $s.FullName -Raw | ConvertFrom-Json; Write-Output ("=== " + $s.Name); 
+$j.response.PSObject.Properties.Name -join ", " }
+total: 3458
+=== 591813800_1785715200_13176437_1785719999_GOLD_14242.json
+id, session_id, request_nonce, request_identity_version, identity_schema_version, canonicalization_version, 
+request_identity_hash, contract_manifest_hash, contract_manifest, request_created_sim_time, request_created_wall_time, 
+candidate_count, ordered_candidate_identities, workload_mode, live_forward_contract_version, behavior_contract_hash, 
+architecture_contract_version, semantic_cache_schema_version, cohort_schema_version, 
+hierarchical_outcome_model_version, response_id, provider_contract_version, provider_mode, provider_id, 
+endpoint_class, endpoint_identity_hash, configured_models_hash, model_returned, actual_model_id, fallback_model, 
+model_fingerprint, reasoning_configuration, evidence_envelope_version, family_profile_version, memory_schema_version, 
+retrieval_policy_version, role_contract_version, consensus_resolver_version, generation_settings_hash, 
+input_fingerprint, retrieved_analogue_ids, historical_evidence_state, analyst_response_fingerprint, 
+critic_response_fingerprint, adjudicator_response_fingerprint, final_resolver_reason, provider_health_state, 
+role_latencies, provider_retry_counts, provider_usage, estimated_context_tokens, unsupported_generation_parameters, 
+analyst_output, critic_output, adjudicator_output, bucket_prior_hash, calibration_artifact_id, request_fingerprint, 
+request_fingerprint_contract, hierarchical_prior_artifact_hash, hierarchical_prior_schema_version, 
+repeatability_schema_version, repeatability_status, repeatability_required_live, repeatability_artifact_state, 
+repeatability_rejection_code, repeatability_score_threshold_authority, repeatability_trading_eligible, 
+repeatability_group_key, repeatability_authority_hash, decision_schema_version, decision_quality_tier, 
+response_quality, mandatory_fields_complete, missing_mandatory_fields, invalid_mandatory_fields, decision_state, 
+selected_candidate_id, selected_candidate_hash, request_execution_fingerprint, assessed_execution_fingerprint, 
+selected_target_identity, selected_target_price, assessed_entry, assessed_sl, assessed_tp1, assessed_tp2, 
+candidate_assessments, allow, raw_allow, model_raw_allow, python_final_allow, mql_final_allow, 
+decision_field_authority, rule_score, llm_quality_score, blended_legacy_score, legacy_agreement_confidence, 
+llm_self_reported_confidence, calibrated_win_probability, expected_net_r, oos_predicted_probability, 
+calibration_bucket, calibration_sample_size, calibration_lower_bound, calibration_upper_bound, 
+calibration_model_version, calibration_data_window_start, calibration_data_window_end, calibration_available, score, 
+chosen_index, confidence, migration_aliases, decision_source, reasons, decision_id, rejection_codes, narrative_state, 
+invalidation_risks, missing_confirmations, suggested_risk_multiplier, model_version, setup_family, setup_class, 
+entry_branch, llm_quality_score_threshold, llm_quality_threshold_source, global_llm_quality_as_hard_floor, 
+llm_quality_threshold_passed, llm_quality_reject_reason, structure_quality_score, entry_timing_score, 
+follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, 
+post_entry_failure_risk, final_trade_expectancy_score, llm_numeric_diagnostics_authority, veto_enabled, veto_code, 
+veto_evidence_fields, veto_reason, veto, bucket_prior_override_justification, target_arbitration, chosen_target_model, 
+chosen_tp1, chosen_tp2, chosen_rr1, chosen_rr2, rejected_target_models, target_blocker_kind, target_blocker_severity, 
+target_blocker_class, target_blocker_is_trade_killer, target_decision_reason, target_blocker_severity_present, 
+target_blocker_class_present, target_blocker_is_trade_killer_present, target_decision_reason_present, 
+why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, why_not_synthetic_fallback, 
+target_arbitration_schema_version, prompt_contract_version, target_comparison, response_binding_hash, 
+response_fingerprint, full_structured_response_hash, response_fingerprint_contract, test_run_id
+=== 591813800_1785715200_13176437_1785726299_GOLD_28332.json
+id, session_id, request_nonce, request_identity_version, identity_schema_version, canonicalization_version, 
+request_identity_hash, contract_manifest_hash, contract_manifest, request_created_sim_time, request_created_wall_time, 
+candidate_count, ordered_candidate_identities, workload_mode, live_forward_contract_version, behavior_contract_hash, 
+architecture_contract_version, semantic_cache_schema_version, cohort_schema_version, 
+hierarchical_outcome_model_version, response_id, provider_contract_version, provider_mode, provider_id, 
+endpoint_class, endpoint_identity_hash, configured_models_hash, model_returned, actual_model_id, fallback_model, 
+model_fingerprint, reasoning_configuration, evidence_envelope_version, family_profile_version, memory_schema_version, 
+retrieval_policy_version, role_contract_version, consensus_resolver_version, generation_settings_hash, 
+input_fingerprint, retrieved_analogue_ids, historical_evidence_state, analyst_response_fingerprint, 
+critic_response_fingerprint, adjudicator_response_fingerprint, final_resolver_reason, provider_health_state, 
+role_latencies, provider_retry_counts, provider_usage, estimated_context_tokens, unsupported_generation_parameters, 
+analyst_output, critic_output, adjudicator_output, bucket_prior_hash, calibration_artifact_id, request_fingerprint, 
+request_fingerprint_contract, hierarchical_prior_artifact_hash, hierarchical_prior_schema_version, 
+repeatability_schema_version, repeatability_status, repeatability_required_live, repeatability_artifact_state, 
+repeatability_rejection_code, repeatability_score_threshold_authority, repeatability_trading_eligible, 
+repeatability_group_key, repeatability_authority_hash, decision_schema_version, decision_quality_tier, 
+response_quality, mandatory_fields_complete, missing_mandatory_fields, invalid_mandatory_fields, decision_state, 
+selected_candidate_id, selected_candidate_hash, request_execution_fingerprint, assessed_execution_fingerprint, 
+selected_target_identity, selected_target_price, assessed_entry, assessed_sl, assessed_tp1, assessed_tp2, 
+candidate_assessments, allow, raw_allow, model_raw_allow, python_final_allow, mql_final_allow, 
+decision_field_authority, rule_score, llm_quality_score, blended_legacy_score, legacy_agreement_confidence, 
+llm_self_reported_confidence, calibrated_win_probability, expected_net_r, oos_predicted_probability, 
+calibration_bucket, calibration_sample_size, calibration_lower_bound, calibration_upper_bound, 
+calibration_model_version, calibration_data_window_start, calibration_data_window_end, calibration_available, score, 
+chosen_index, confidence, migration_aliases, decision_source, reasons, decision_id, rejection_codes, narrative_state, 
+invalidation_risks, missing_confirmations, suggested_risk_multiplier, model_version, setup_family, setup_class, 
+entry_branch, llm_quality_score_threshold, llm_quality_threshold_source, global_llm_quality_as_hard_floor, 
+llm_quality_threshold_passed, llm_quality_reject_reason, structure_quality_score, entry_timing_score, 
+follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, 
+post_entry_failure_risk, final_trade_expectancy_score, llm_numeric_diagnostics_authority, veto_enabled, veto_code, 
+veto_evidence_fields, veto_reason, veto, bucket_prior_override_justification, target_arbitration, chosen_target_model, 
+chosen_tp1, chosen_tp2, chosen_rr1, chosen_rr2, rejected_target_models, target_blocker_kind, target_blocker_severity, 
+target_blocker_class, target_blocker_is_trade_killer, target_decision_reason, target_blocker_severity_present, 
+target_blocker_class_present, target_blocker_is_trade_killer_present, target_decision_reason_present, 
+why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, why_not_synthetic_fallback, 
+target_arbitration_schema_version, prompt_contract_version, target_comparison, response_binding_hash, 
+response_fingerprint, full_structured_response_hash, response_fingerprint_contract, test_run_id
+=== 591813800_1785715200_13176437_1785729899_GOLD_14638.json
+id, session_id, request_nonce, request_identity_version, identity_schema_version, canonicalization_version, 
+request_identity_hash, contract_manifest_hash, contract_manifest, request_created_sim_time, request_created_wall_time, 
+candidate_count, ordered_candidate_identities, workload_mode, live_forward_contract_version, behavior_contract_hash, 
+architecture_contract_version, semantic_cache_schema_version, cohort_schema_version, 
+hierarchical_outcome_model_version, response_id, provider_contract_version, provider_mode, provider_id, 
+endpoint_class, endpoint_identity_hash, configured_models_hash, model_returned, actual_model_id, fallback_model, 
+model_fingerprint, reasoning_configuration, evidence_envelope_version, family_profile_version, memory_schema_version, 
+retrieval_policy_version, role_contract_version, consensus_resolver_version, generation_settings_hash, 
+input_fingerprint, retrieved_analogue_ids, historical_evidence_state, analyst_response_fingerprint, 
+critic_response_fingerprint, adjudicator_response_fingerprint, final_resolver_reason, provider_health_state, 
+role_latencies, provider_retry_counts, provider_usage, estimated_context_tokens, unsupported_generation_parameters, 
+analyst_output, critic_output, adjudicator_output, bucket_prior_hash, calibration_artifact_id, request_fingerprint, 
+request_fingerprint_contract, hierarchical_prior_artifact_hash, hierarchical_prior_schema_version, 
+repeatability_schema_version, repeatability_status, repeatability_required_live, repeatability_artifact_state, 
+repeatability_rejection_code, repeatability_score_threshold_authority, repeatability_trading_eligible, 
+repeatability_group_key, repeatability_authority_hash, decision_schema_version, decision_quality_tier, 
+response_quality, mandatory_fields_complete, missing_mandatory_fields, invalid_mandatory_fields, decision_state, 
+selected_candidate_id, selected_candidate_hash, request_execution_fingerprint, assessed_execution_fingerprint, 
+selected_target_identity, selected_target_price, assessed_entry, assessed_sl, assessed_tp1, assessed_tp2, 
+candidate_assessments, allow, raw_allow, model_raw_allow, python_final_allow, mql_final_allow, 
+decision_field_authority, rule_score, llm_quality_score, blended_legacy_score, legacy_agreement_confidence, 
+llm_self_reported_confidence, calibrated_win_probability, expected_net_r, oos_predicted_probability, 
+calibration_bucket, calibration_sample_size, calibration_lower_bound, calibration_upper_bound, 
+calibration_model_version, calibration_data_window_start, calibration_data_window_end, calibration_available, score, 
+chosen_index, confidence, migration_aliases, decision_source, reasons, decision_id, rejection_codes, narrative_state, 
+invalidation_risks, missing_confirmations, suggested_risk_multiplier, model_version, setup_family, setup_class, 
+entry_branch, llm_quality_score_threshold, llm_quality_threshold_source, global_llm_quality_as_hard_floor, 
+llm_quality_threshold_passed, llm_quality_reject_reason, structure_quality_score, entry_timing_score, 
+follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, 
+post_entry_failure_risk, final_trade_expectancy_score, llm_numeric_diagnostics_authority, veto_enabled, veto_code, 
+veto_evidence_fields, veto_reason, veto, bucket_prior_override_justification, target_arbitration, chosen_target_model, 
+chosen_tp1, chosen_tp2, chosen_rr1, chosen_rr2, rejected_target_models, target_blocker_kind, target_blocker_severity, 
+target_blocker_class, target_blocker_is_trade_killer, target_decision_reason, target_blocker_severity_present, 
+target_blocker_class_present, target_blocker_is_trade_killer_present, target_decision_reason_present, 
+why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, why_not_synthetic_fallback, 
+target_arbitration_schema_version, prompt_contract_version, target_comparison, response_binding_hash, 
+response_fingerprint, full_structured_response_hash, response_fingerprint_contract, test_run_id
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; Get-ChildItem 
+-LiteralPath "$bus\completed" -File | Select-Object -First 3 | ForEach-Object { Write-Output ("=== " + $_.Name + " (" 
++ [math]::Round($_.Length/1KB,1) + " KB)") }; Write-Output "---rejected---"; Get-ChildItem -LiteralPath 
+"$bus\rejected" -File | Select-Object -First 3 | ForEach-Object { Write-Output ("=== " + $_.Name + " (" + 
+[math]::Round($_.Length/1KB,1) + " KB)") }
+=== python_10236_1789295269__591813800_1785715200_305658125_1785723306_USDCAD_20589.json (192.5 KB)
+=== python_10236_1789295269__591813800_1785715200_305658125_1785723306_USDCAD_20589.json.meta.json (0.2 KB)
+=== python_10236_1789295269__591813800_1785715200_305658125_1785728114_BITCOIN_15507.json (196.4 KB)
+---rejected---
+=== python_10236_1789295269__591813800_1785715200_305658125_1785723306_EURUSD_486.json (155.8 KB)
+=== python_10236_1789295269__591813800_1785715200_305658125_1785723306_EURUSD_486.json.meta.json (0.3 KB)
+=== python_10236_1789295269__591813800_1785715200_305658125_1785723907_GBPUSD_22761.json (193.8 KB)
+
+→ Read python/ai_gate.py [offset=3270, limit=300]
+→ Read python/ai_gate.py [offset=4230, limit=100]
+Let me read the key code regions to scope the reconstruction path.
+→ Read python/tests/test_harness_provider_integration.py
+→ Read python/evidence_catalog.py [limit=140, offset=190]
+→ Read python/decision_pipeline.py [limit=320, offset=225]
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $f = Get-ChildItem 
+-LiteralPath "$bus\completed" -File -Filter "*.json" | Where-Object { $_.Name -notlike "*.meta.json" } | Select-Object 
+-First 1; Write-Output $f.Name; $j = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json; Write-Output 
+"top-level keys:"; $j.PSObject.Properties.Name -join ", "; Write-Output "---meta----"; $m = Get-Content -LiteralPath 
+($f.FullName + ".meta.json") -Raw; Write-Output $m
+python_10236_1789295269__591813800_1785715200_305658125_1785723306_USDCAD_20589.json
+top-level keys:
+id, session_id, request_nonce, request_identity_version, request_created_sim_time, request_created_wall_time, 
+engine_version, input_schema_version, contract_manifest_version, contract_manifest_hash, contract_manifest, 
+workload_mode, live_forward_contract_version, behavior_contract_hash_mql, symbol, is_buy, candidate_hash, 
+request_execution_fingerprint, assessed_execution_fingerprint, runtime_input_hash, decision_input_hash, 
+decision_schema_version, tester_cache_signature, tester_cache_key, runtime, runtime_inputs, snapshot_metadata, po3, 
+regime, plan, target_candidates, watchlist, portfolio, snapshots, fvg, story, candidates, t_sweep, t_disp, t_bos, 
+po3_state, po3_state_id, po3_state_reason, sweep_side, structure_type, final_setup_class, po3_scope, dr_high, dr_low, 
+dr_mid, manip_low, manip_high, bos_level, sweep_strength, session_name, po3_session_code, killzone_name, in_killzone, 
+session_high, session_low, asia_high, asia_low, london_high, london_low, newyork_high, newyork_low, prev_day_high, 
+prev_day_low, prev_week_high, prev_week_low, liquidity_target, liquidity_kind, liquidity_cluster_count, htf_mss, 
+htf_choch, ltf_bos, ltf_mss, ltf_choch, atr_pct, trend_strength, trend_slope_pct, adx_value, adr_pct, 
+session_vol_ratio, vwap_dist_atr, compression_score, expansion_score, news_risk, entry_est, configured_stop_model, 
+stop_model, entry_model, entry_branch, tp_model, target_source, model_code, setup_code, is_mpc, session_code, 
+killzone_code, broker_comment, sl, tp2, diagnostic_legacy_setup_score, heuristic_quality_estimate, 
+setup_taxonomy_version, setup_taxonomy_enum, taxonomy_mapping_source, setup_family, setup_class, fvg_execution_class, 
+management_profile, target_model, analytics_key, execution_cost_r, net_reward_after_cost_r, runner_downgraded, 
+liquidity_rr, setup_id, fvg_id, candidate_id
+---meta----
+{"archived_at":"2026-09-13T10:31:25.837801Z","file_bus_lifecycle_version":"20260724_file_bus_lifecycle_v3","reason":"py
+thon_final_allow_true","session_id":"python_10236_1789295269","terminal_state":"completed"}
+
+$ cd python; rg -n "def _score_setup_impl|def score_setup|_score_setup_impl\(|def generate_structured|def 
+_request_kwargs|def _wire_responses_kwargs|def build_provider_exchange_contract" ai_gate.py ai_provider.py | 
+Select-Object -First 40
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:12
++ cd python; rg -n "def _score_setup_impl|def score_setup|_score_setup_ ...
++            ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+$ cd python; rg -n "def build_decision_evidence_envelope" decision_evidence.py; rg -n "def 
+as_catalog_row|AUTHORITY_INTERNAL_IDENTITY|_GLOBAL_SECTIONS" evidence_catalog.py | Select-Object -First 20
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:12
++ cd python; rg -n "def build_decision_evidence_envelope" decision_evid ...
++            ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:79
++ ... ef build_decision_evidence_envelope" decision_evidence.py; rg -n "def ...
++                                                                ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+$ cd python; rg -n "OPENCODE_MUSE_REASONING_EFFORT|OPENCODE_MUSE_REASONING_TOKEN_RESERVE|def 
+_opencode_prefix_session_id|def _opencode_session_id|def _wire_responses_kwargs" ai_gate.py ai_provider.py | 
+Select-Object -First 30
+rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:12
++ cd python; rg -n "OPENCODE_MUSE_REASONING_EFFORT|OPENCODE_MUSE_REASON ...
++            ~~
+    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+✱ Grep "def build_decision_evidence_envelope|def _wire_responses_kwargs|def 
+build_provider_exchange_contract|def _opencode_prefix_session_id|def _opencode_session_id" in python · 6 
+matches
+✱ Grep "def _score_setup_impl|def score_setup|_score_setup_impl\(|def generate_structured" in python · 15 
+matches
+→ Read python/ai_gate.py [limit=80, offset=9080]
+→ Read python/ai_gate.py [limit=130, offset=9536]
+→ Read python/ai_provider.py [limit=80, offset=1446]
+✱ Grep "^def _provider\(|^def log\(|^_PROVIDER|def _bus_path|def _apply_prompt_cache_kwargs|def 
+_reasoning_config_for_model" in python · 14 matches
+→ Read python/ai_provider.py [limit=120, offset=3400]
+→ Read python/ai_gate.py [limit=60, offset=1396]
+→ Read python/ai_gate.py [limit=70, offset=1613]
+✱ Grep "provider_call_started|provider_call_completed" in python · 11 matches
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $d = Get-ChildItem 
+-LiteralPath "$bus\completed" -File -Filter "python_*.json" | Where-Object { $_.Name -notlike "*.meta.json" } ; 
+Write-Output ("completed payloads: " + $d.Count); $d | Group-Object { ($_.Name -split '_')[-1] } | Measure-Object | 
+Select-Object -ExpandProperty Count; $d | Select-Object -First 5 -ExpandProperty Name
+completed payloads: 154
+154
+python_10236_1789295269__591813800_1785715200_305658125_1785723306_USDCAD_20589.json
+python_10236_1789295269__591813800_1785715200_305658125_1785728114_BITCOIN_15507.json
+python_11104_1789082965__903871_1789093630_118426656_1789100962_GBPNZD_31161.json
+python_12980_1788971959__903871_1788983285_8075437_1788987005_EURUSD_24595.json
+python_12980_1788971959__903871_1788983285_8075437_1788994470_NAS100_7194.json
+
+This is a complex reconstruction. Let me run a feasibility spike in a temp directory before delegating.
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $rows = Get-Content 
+-LiteralPath "$bus\logs\openai_usage.ndjson"; Write-Output ("total usage rows: " + $rows.Count); $rows | 
+ForEach-Object { $o = $_ | ConvertFrom-Json; $o.model } | Group-Object | Sort-Object Count -Descending | Select-Object 
+Count,Name | Format-Table -AutoSize
+total usage rows: 15208
+
+Count Name                           
+----- ----                           
+ 4597 gpt-5.6-luna                   
+ 4134 gpt-5.4-mini                   
+ 2474 muse-spark-1.3-contributor     
+ 1970 gpt-5.4-nano                   
+  650 openai/gpt-5.6-luna            
+  650 chatgpt-browser-review         
+  281 gpt-5-nano-2025-08-07          
+  151 harness-deterministic-v1       
+  145 gpt-5.4-nano-2026-03-17        
+  104 deepseek/deepseek-v4-flash-0731
+   42 deepseek-v4.1-flash            
+   10 z-ai/glm-5.3-flash
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; Write-Output 
+("rejected: " + (Get-ChildItem -LiteralPath "$bus\rejected" -File -Filter "*.json" | Where-Object { $_.Name -notlike 
+"*.meta.json" }).Count); Write-Output ("requests dir: " + (Get-ChildItem -LiteralPath "$bus\requests" -File 
+-ErrorAction SilentlyContinue).Count); Write-Output ("responses dir: " + (Get-ChildItem -LiteralPath "$bus\responses" 
+-File -ErrorAction SilentlyContinue).Count); Write-Output ("archived: " + (Get-ChildItem -LiteralPath "$bus\archive" 
+-Recurse -File -ErrorAction SilentlyContinue).Count); Test-Path -LiteralPath 
+"C:\Users\amroe\AppData\Local\Temp\opencode"
+rejected: 16280
+requests dir: 11098
+responses dir: 349
+archived: 128
+True
+
+✗ Write C:/Users/amroe/AppData/Local/Temp/opencode/spike_capture.py failed
+Error: The user has specified a rule which prevents you from using this specific tool call. Here are some 
+of the relevant rules [{"permission":"*","action":"allow","pattern":"*"},{"permission":"edit","pattern":"*","action":"d
+eny"},{"permission":"edit","pattern":".mt5-orchestrator/runs/*","action":"allow"}]
+
+← Write .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_capture.py
+Wrote file successfully.
+
+I can only write within the run directory. Let me place the spike there.
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $f = Get-ChildItem 
+-LiteralPath "$bus\completed" -File -Filter "python_*.json" | Where-Object { $_.Name -notlike "*.meta.json" } | 
+Select-Object -First 1; & "python\.venv\Scripts\python.exe" 
+".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_capture.py" $f.FullName 2>&1
+python.exe : Traceback (most recent call last):
+At line:1 char:241
++ ... t -First 1; & "python\.venv\Scripts\python.exe" ".mt5-orchestrator\ru ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0
+\_spike_capture.py", line 93, in <module>
+    main()
+  File "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0
+\_spike_capture.py", line 45, in main
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python311\Lib\pathlib.py", line 1059, in read_text
+    return f.read()
+           ^^^^^^^^
+  File "<frozen codecs>", line 322, in decode
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_capture.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_capture.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_capture.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_capture.py
+@@ -41,9 +41,14 @@
+ 
+ 
+ def main():
+     payload_path = Path(sys.argv[1])
+-    payload = json.loads(payload_path.read_text(encoding="utf-8"))
++    raw = payload_path.read_bytes()
++    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
++        text = raw.decode("utf-16")
++    else:
++        text = raw.decode("utf-8-sig")
++    payload = json.loads(text)
+     print("payload id:", payload.get("id"), "workload_mode:", payload.get("workload_mode"),
+           "candidates:", len(payload.get("candidates") or []))
+ 
+     import ai_gate
+
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $f = Get-ChildItem 
+-LiteralPath "$bus\completed" -File -Filter "python_*.json" | Where-Object { $_.Name -notlike "*.meta.json" } | 
+Select-Object -First 1; & "python\.venv\Scripts\python.exe" 
+".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_capture.py" $f.FullName 2>&1
+payload id: 591813800_1785715200_305658125_1785723306_USDCAD_20589 workload_mode: TESTER_AI_RECORD_ONLY candidates: 8
+[hard_pre_gate] request_id=591813800_1785715200_305658125_1785723306_USDCAD_20589 candidate_index=0 enabled=true 
+passed=true provider_call_permitted=true
+[ai_provider_health] healthy=true provider_mode=OPENCODE_API provider_id=opencode_go_responses 
+endpoint_class=non_loopback model_id=muse-spark-1.3-contributor model_available=true structured_output_available=true 
+reason=none
+[ai_gate] ai_cache_miss request_id=591813800_1785715200_305658125_1785723306_USDCAD_20589 signature=367011ec2dd4
+[ai_gate] snapshot status for USDCAD: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_TRANSPORT_ERROR:remote_provider_models_failed:muse-spark-1.3-contributor:PROVIDER_TRANSPORT_ERROR:PRO
+VIDER_TRANSPORT_ERROR:captured failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=591813800_1785715200_305658125_1785723306_USDCAD_20589 request_identity_hash= 
+symbol=USDCAD provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_TRANSPORT_ERROR exception_type=ProviderCallError exception_message=PROVIDER_TRANSPORT_ERROR:rem
+ote_provider_models_failed:muse-spark-1.3-contributor:PROVIDER_TRANSPORT_ERROR:PROVIDER_TRANSPORT_ERROR:captured 
+provider_call_attempted=true http_request_sent=true http_status=0 repair_attempted=false repair_result=failed 
+final_quality_tier=DEGRADED_NON_TRADING
+decision: Decision provider_transport_error
+captured calls: 1
+keys: ['extra_headers', 'input', 'instructions', 'max_output_tokens', 'model', 'reasoning', 'store', 'text', 
+'truncation']
+instructions chars: 16880
+input type: list len: 293689
+schema name: ModelAIGateOutput
+reasoning: {'effort': 'high'}
+max_output_tokens: 38000
+truncation: disabled
+headers: {'X-PO3-Deadline-Epoch-Ms': '1789316412445', 'X-PO3-Request-Id': 
+'591813800_1785715200_305658125_1785723306_USDCAD_20589', 'X-PO3-Deadline-Contract': 
+'20260730_absolute_request_deadline_v1', 'x-opencode-session': 'po3-prefix-11d46b090306e45e53482211e321d605'}
+
+$ Write-Output "=== venv site-packages ==="; Get-ChildItem "python\.venv\Lib\site-packages" -Directory | 
+Select-Object -ExpandProperty Name | Sort-Object; Write-Output "=== tiktoken caches ==="; foreach ($p in 
+@("$env:LOCALAPPDATA\tiktoken","$env:USERPROFILE\.cache\tiktoken","$env:APPDATA\tiktoken","$env:TEMP\tiktoken")) { if 
+(Test-Path -LiteralPath $p) { Write-Output $p; Get-ChildItem -LiteralPath $p -Recurse -File | Select-Object -First 10 
+-ExpandProperty Name } }
+=== venv site-packages ===
+__pycache__
+_distutils_hack
+_pytest
+annotated_types
+annotated_types-0.7.0.dist-info
+anyio
+anyio-4.12.1.dist-info
+certifi
+certifi-2026.1.4.dist-info
+charset_normalizer
+charset_normalizer-3.4.6.dist-info
+colorama
+colorama-0.4.6.dist-info
+Crypto
+distro
+distro-1.9.0.dist-info
+h11
+h11-0.16.0.dist-info
+httpcore
+httpcore-1.0.9.dist-info
+httpx
+httpx-0.28.1.dist-info
+idna
+idna-3.11.dist-info
+iniconfig
+iniconfig-2.3.0.dist-info
+jiter
+jiter-0.12.0.dist-info
+openai
+openai-2.14.0.dist-info
+packaging
+packaging-26.2.dist-info
+PIL
+pillow-12.1.1.dist-info
+pip
+pip-22.3.dist-info
+pkg_resources
+pluggy
+pluggy-1.6.0.dist-info
+pybit
+pybit-5.14.0-py3.11.egg-info
+pycryptodome-3.23.0.dist-info
+pydantic
+pydantic_core
+pydantic_core-2.41.5.dist-info
+pydantic-2.12.5.dist-info
+pygments
+pygments-2.20.0.dist-info
+pytest
+pytest-9.1.1.dist-info
+requests
+requests-2.33.0.dist-info
+setuptools
+setuptools-65.5.0.dist-info
+sniffio
+sniffio-1.3.1.dist-info
+tqdm
+tqdm-4.67.1.dist-info
+typing_extensions-4.15.0.dist-info
+typing_inspection
+typing_inspection-0.4.2.dist-info
+urllib3
+urllib3-2.6.3.dist-info
+websocket
+websocket_client-1.9.0.dist-info
+=== tiktoken caches ===
+
+The recording-provider approach works. Now let me check whether any tokenizer is available offline.
+$ $py = Get-Command python -ErrorAction SilentlyContinue; Write-Output $py.Source; & python -c "import sys; 
+print(sys.version); import importlib.util as u; print([m for m in 
+['tiktoken','transformers','tokenizers','sentencepiece','numpy','regex'] if u.find_spec(m)])" 2>&1; Write-Output "=== 
+venv version ==="; & "python\.venv\Scripts\python.exe" -c "import sys; print(sys.version); import importlib.util as u; 
+print([m for m in ['tiktoken','transformers','tokenizers','sentencepiece','numpy','regex'] if u.find_spec(m)])" 2>&1
+c:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\autonomous_ai_browser_bridge\.venv\Scripts\python.exe
+3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]
+[]
+=== venv version ===
+3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
+[]
+
+← Write .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py
+Wrote file successfully.
+
+The provider path is drivable. Now let me calibrate a token proxy against provider-reported counts.
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_calibrate.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
+@@ -10,17 +10,17 @@
+ REPO = Path(r"C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5")
+ sys.path.insert(0, str(REPO / "python"))
+ BUS = Path(r"C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS")
+ 
+-PRETOKEN = re.compile(
+-    r"""'(?:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| 
+?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+""",
+-    re.UNICODE,
+-)
+ try:
+-    import regex  # noqa: F401
++    import regex as _re
+ 
++    PRETOKEN = _re.compile(
++        r"""'(?:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| 
+?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
++    )
+     HAVE_REGEX = True
+ except Exception:
++    PRETOKEN = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d|[A-Za-z]+|[0-9]+|[^\sA-Za-z0-9]+|\s+")
+     HAVE_REGEX = False
+ 
+ 
+ class _Stop(Exception):
+
+
+$ & "python\.venv\Scripts\python.exe" ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_calibrate.py" 
+analyst 6 2>&1
+role=analyst usage_rows=0 payloads=3460 common=0
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; $rows = Get-Content 
+-LiteralPath "$bus\logs\openai_usage.ndjson" | Where-Object { $_ -match '"model":"muse-spark-1.3-contributor"' }; 
+Write-Output ("muse rows: " + $rows.Count); $rows[0]; Write-Output "---extra roles---"; $rows | ForEach-Object { ($_ | 
+ConvertFrom-Json).extra.role } | Group-Object | Sort-Object Count -Descending | Select-Object Count,Name | 
+Format-Table -AutoSize
+muse rows: 2474
+{"ts_utc":"2026-09-09T16:50:38+00:00","source":"ai_gate","operation":"trade_gate.provider_neutral_analyst","status":"ok
+","request_id":"903871_1788983285_8075437_1788983347_AUDJPY_16869","response_id":"resp_6aa18e5d4fd7c16838d347fe","provi
+der_mode":"OPENCODE_API","provider_id":"opencode_go_responses","endpoint_class":"non_loopback","model_fingerprint":"","
+model":"muse-spark-1.3-contributor","reasoning_effort":"high","max_output_tokens":25000,"input_tokens":36979,"cached_in
+put_tokens":0,"output_tokens":11854,"reasoning_output_tokens":8641,"total_tokens":48833,"estimated_cost_usd":0.0,"servi
+ce_tier":"","price_multiplier":1.0,"routed_endpoint":"","pricing_status":"unpriced_model","tokens_per_second":null,"est
+imated_context_tokens":null,"error_type":"","error_message":"","raw_usage":{"input_tokens":36979,"input_tokens_details"
+:{"cached_tokens":0},"output_tokens":11854,"output_tokens_details":{"reasoning_tokens":8641},"total_tokens":48833},"ext
+ra":{"symbol":"AUDJPY","snapshot_count":0,"service_tier":"","flex_used":false}}
+---extra roles---
+
+Count Name       
+----- ----       
+ 1116 critic     
+  252 adjudicator
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; Get-ChildItem 
+-LiteralPath "$bus\rejected" -File | Group-Object { ($_.Name -split '_')[0] } | Sort-Object Count -Descending | 
+Select-Object -First 8 Count,Name | Format-Table -AutoSize; Write-Output "---completed name prefixes---"; 
+Get-ChildItem -LiteralPath "$bus\completed" -File | Group-Object { ($_.Name -split '_')[0] } | Sort-Object Count 
+-Descending | Select-Object -First 8 Count,Name | Format-Table -AutoSize
+Count Name    
+----- ----    
+12587 response
+ 7386 python  
+
+
+---completed name prefixes---
+
+Count Name    
+----- ----    
+  308 python  
+  209 response
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_calibrate.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
+@@ -60,10 +60,17 @@
+         if row.get("model") != "muse-spark-1.3-contributor":
+             continue
+         if row.get("provider_mode") != "OPENCODE_API":
+             continue
+-        if str((row.get("extra") or {}).get("role") or "") != role:
+-            continue
++        if role != "analyst":
++            if str((row.get("extra") or {}).get("role") or "") != role:
++                continue
++        else:
++            op = str(row.get("operation") or "")
++            if str((row.get("extra") or {}).get("role") or "") not in ("", "analyst"):
++                continue
++            if op and not op.endswith("analyst"):
++                continue
+         idx[str(row.get("request_id"))] = row
+ return idx
+ 
+ 
+
+
+$ & "python\.venv\Scripts\python.exe" ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_calibrate.py" 
+analyst 6 2>&1
+role=analyst usage_rows=1105 payloads=3460 common=1057
+[prior_startup_audit] 
+absolute_path=C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\python\data\live_bucket_priors.json 
+exists=true hash=e9f2e9b09b7067f4cfd7f7303cdf0855da7b8bb2b9c3f8a280fcd43945e9fd7d mtime=1786497910.627229 
+prior_version=20260717_hierarchical_prior_v1 data_window={"end":"1775803160","start":"1771206280"} bucket_count=32 
+rejected_count=0 status=ready mandatory=true
+[hard_pre_gate] request_id=903871_1788983285_8075437_1788983347_AUDJPY_16869 candidate_index=0 enabled=true 
+passed=true provider_call_permitted=true
+[ai_provider_health] healthy=true provider_mode=OPENCODE_API provider_id=opencode_go_responses 
+endpoint_class=non_loopback model_id=muse-spark-1.3-contributor model_available=true structured_output_available=true 
+reason=none
+[ai_gate] ai_cache_miss request_id=903871_1788983285_8075437_1788983347_AUDJPY_16869 signature=025f47599336
+[ai_gate] snapshot status for AUDJPY: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_DEADLINE_EXCEEDED:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341892594 
+failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=903871_1788983285_8075437_1788983347_AUDJPY_16869 request_identity_hash= 
+symbol=AUDJPY provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_DEADLINE_EXCEEDED exception_type=ProviderCallError exception_message=PROVIDER_DEADLINE_EXCEEDED
+:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341892594 provider_call_attempted=true 
+http_request_sent=true http_status=0 repair_attempted=false repair_result=not_attempted 
+final_quality_tier=DEGRADED_NON_TRADING
+903871_1788983285_8075437_1788983347_AUDJPY_16869 NO CAPTURE
+[hard_pre_gate] request_id=903871_1788983285_8075437_1788983347_JPN225_24127 candidate_index=5 enabled=true 
+passed=true provider_call_permitted=true
+[ai_gate] ai_cache_miss request_id=903871_1788983285_8075437_1788983347_JPN225_24127 signature=3da8ca2107ec
+[ai_gate] snapshot status for JPN225: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_DEADLINE_EXCEEDED:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341907735 
+failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=903871_1788983285_8075437_1788983347_JPN225_24127 request_identity_hash= 
+symbol=JPN225 provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_DEADLINE_EXCEEDED exception_type=ProviderCallError exception_message=PROVIDER_DEADLINE_EXCEEDED
+:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341907735 provider_call_attempted=true 
+http_request_sent=true http_status=0 repair_attempted=false repair_result=not_attempted 
+final_quality_tier=DEGRADED_NON_TRADING
+903871_1788983285_8075437_1788983347_JPN225_24127 NO CAPTURE
+[hard_pre_gate] request_id=903871_1788983285_8075437_1788983347_GBPUSD_1543 candidate_index=0 enabled=true passed=true 
+provider_call_permitted=true
+[ai_gate] ai_cache_miss request_id=903871_1788983285_8075437_1788983347_GBPUSD_1543 signature=c04436acbaa5
+[ai_gate] snapshot status for GBPUSD: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_DEADLINE_EXCEEDED:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341924843 
+failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=903871_1788983285_8075437_1788983347_GBPUSD_1543 request_identity_hash= 
+symbol=GBPUSD provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_DEADLINE_EXCEEDED exception_type=ProviderCallError exception_message=PROVIDER_DEADLINE_EXCEEDED
+:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341924843 provider_call_attempted=true 
+http_request_sent=true http_status=0 repair_attempted=false repair_result=not_attempted 
+final_quality_tier=DEGRADED_NON_TRADING
+903871_1788983285_8075437_1788983347_GBPUSD_1543 NO CAPTURE
+[hard_pre_gate] request_id=903871_1788983285_8075437_1788983347_NZDJPY_19727 candidate_index=0 enabled=true 
+passed=true provider_call_permitted=true
+[ai_gate] ai_cache_miss request_id=903871_1788983285_8075437_1788983347_NZDJPY_19727 signature=03bc1014c7b3
+[ai_gate] snapshot status for NZDJPY: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_DEADLINE_EXCEEDED:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341939984 
+failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=903871_1788983285_8075437_1788983347_NZDJPY_19727 request_identity_hash= 
+symbol=NZDJPY provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_DEADLINE_EXCEEDED exception_type=ProviderCallError exception_message=PROVIDER_DEADLINE_EXCEEDED
+:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341939984 provider_call_attempted=true 
+http_request_sent=true http_status=0 repair_attempted=false repair_result=not_attempted 
+final_quality_tier=DEGRADED_NON_TRADING
+903871_1788983285_8075437_1788983347_NZDJPY_19727 NO CAPTURE
+[hard_pre_gate] request_id=903871_1788983285_8075437_1788983347_NZDUSD_453 candidate_index=6 enabled=true passed=true 
+provider_call_permitted=true
+[ai_provider_health] healthy=true provider_mode=OPENCODE_API provider_id=opencode_go_responses 
+endpoint_class=non_loopback model_id=muse-spark-1.3-contributor model_available=true structured_output_available=true 
+reason=none
+[ai_gate] ai_cache_miss request_id=903871_1788983285_8075437_1788983347_NZDUSD_453 signature=a4848828fbbf
+[ai_gate] snapshot status for NZDUSD: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_DEADLINE_EXCEEDED:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341952516 
+failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=903871_1788983285_8075437_1788983347_NZDUSD_453 request_identity_hash= symbol=NZDUSD 
+provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_DEADLINE_EXCEEDED exception_type=ProviderCallError exception_message=PROVIDER_DEADLINE_EXCEEDED
+:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341952516 provider_call_attempted=true 
+http_request_sent=true http_status=0 repair_attempted=false repair_result=not_attempted 
+final_quality_tier=DEGRADED_NON_TRADING
+903871_1788983285_8075437_1788983347_NZDUSD_453 NO CAPTURE
+[hard_pre_gate] request_id=903871_1788983285_8075437_1788983348_AUDUSD_4802 candidate_index=0 enabled=true passed=true 
+provider_call_permitted=true
+[ai_gate] ai_cache_miss request_id=903871_1788983285_8075437_1788983348_AUDUSD_4802 signature=81954b5c244f
+[ai_gate] snapshot status for AUDUSD: snapshots=disabled
+[ai_gate] selected_provider_call_failed provider=opencode_go_responses model=muse-spark-1.3-contributor error=ProviderC
+allError:PROVIDER_DEADLINE_EXCEEDED:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341965235 
+failure_domain=provider cross_provider_fallback=false
+[provider_call_failed] request_id=903871_1788983285_8075437_1788983348_AUDUSD_4802 request_identity_hash= 
+symbol=AUDUSD provider=opencode_go_responses model=muse-spark-1.3-contributor stage=provider_call 
+error_category=PROVIDER_DEADLINE_EXCEEDED exception_type=ProviderCallError exception_message=PROVIDER_DEADLINE_EXCEEDED
+:insufficient_remaining_budget_for_provider_attempt:remaining_ms=-341965235 provider_call_attempted=true 
+http_request_sent=true http_status=0 repair_attempted=false repair_result=not_attempted 
+final_quality_tier=DEGRADED_NON_TRADING
+903871_1788983285_8075437_1788983348_AUDUSD_4802 NO CAPTURE
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_calibrate.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
+@@ -113,8 +113,11 @@
+ )
+ ai_gate.LOG_FILE = None
+ ai_gate._provider = lambda: leg
+ ai_gate._write_ai_cost_report = lambda *a, **k: None
++import time as _time
++
++ai_gate._request_deadline_for = lambda _p: _time.time() + 3600.0
+ try:
+     ai_gate._score_setup_impl(payload)
+ except Exception:
+     pass
+
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_capture.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_capture.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_capture.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_capture.py
+@@ -70,9 +70,12 @@
+ # Neutralize side effects.
+ ai_gate.LOG_FILE = None
+ ai_gate._provider = lambda: leg
+ ai_gate._write_ai_cost_report = lambda *a, **k: None
++import time as _time
+ 
++ai_gate._request_deadline_for = lambda _p: _time.time() + 3600.0
++
+ try:
+     decision = ai_gate._score_setup_impl(payload)
+     print("decision:", type(decision).__name__, getattr(decision, "decision_source", None))
+ except Exception as exc:  # noqa: BLE001
+
+
+$ & "python\.venv\Scripts\python.exe" ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_calibrate.py" 
+analyst 5 2>&1 | Select-String -Pattern "role=|provider input_tokens|chars:|chars/token|pretokens|NO CAPTURE|---"
+role=analyst usage_rows=1105 payloads=3460 common=1057
+903871_1788983285_8075437_1788983347_AUDJPY_16869 NO CAPTURE
+903871_1788983285_8075437_1788983347_JPN225_24127 NO CAPTURE
+903871_1788983285_8075437_1788983347_GBPUSD_1543 NO CAPTURE
+903871_1788983285_8075437_1788983347_NZDJPY_19727 NO CAPTURE
+903871_1788983285_8075437_1788983347_NZDUSD_453 NO CAPTURE
+
+✱ Grep "_request_deadline_for|insufficient_remaining_budget_for_provider_attempt|def 
+_provider_request_metadata" in python · 5 matches
+→ Read python/ai_gate.py [limit=80, offset=2534]
+→ Read python/ai_provider.py [limit=45, offset=1595]
+✱ Grep "def _start_request_deadline|def can_start_attempt|def remaining_ms|def provider_timeout_sec|class 
+RequestDeadline" in python · 11 matches
+
+$ Get-Content -LiteralPath "python\ai_gate.py" -TotalCount 4260 | Select-Object -Last 120 | ForEach-Object 
+-Begin { $i = 4141 } -Process { Write-Output ("$i`: " + $_); $i++ } | Select-String -Pattern "^4[12][0-9][0-9]: def 
+|^4[12][0-9][0-9]:.*def "
+(no output)
+
+✱ Grep "^def .*analyst|^def .*provider_neutral|^def _run_|^def _analyst" in python · 5 matches
+→ Read python/ai_gate.py [limit=55, offset=2499]
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern '^def ' | Where-Object { $_.LineNumber -gt 3620 -and 
+$_.LineNumber -lt 4300 } | ForEach-Object { "$($_.LineNumber): $($_.Line)" }
+3625: def _bind_python_owned_analyst_envelope(
+4067: def _score_setup_ai(
+
+→ Read python/ai_gate.py [limit=90, offset=4067]
+✱ Grep "_score_setup_ai\(|_request_deadline_for\(|deadline=" in python · 8 matches
+→ Read python/ai_gate.py [limit=60, offset=9250]
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern 'deadline' | Where-Object { $_.LineNumber -gt 5100 
+-and $_.LineNumber -lt 5260 } | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+5238: **_provider_request_metadata(payload, provider, deadline=request_deadline),
+
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py [offset=95, limit=45]
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_calibrate.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
+@@ -116,8 +116,10 @@
+ ai_gate._write_ai_cost_report = lambda *a, **k: None
+ import time as _time
+ 
+ ai_gate._request_deadline_for = lambda _p: _time.time() + 3600.0
++print("DBG patched:", type(ai_gate._request_deadline_for(payload)).__name__,
++      ai_gate._score_setup_ai.__globals__["_request_deadline_for"] is ai_gate._request_deadline_for)
+ try:
+     ai_gate._score_setup_impl(payload)
+ except Exception:
+     pass
+
+
+$ & "python\.venv\Scripts\python.exe" ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_calibrate.py" 
+analyst 1 2>&1 | Select-String -Pattern "DBG|NO CAPTURE|provider input_tokens|chars:|role="
+role=analyst usage_rows=1105 payloads=3460 common=1057
+DBG patched: float True
+903871_1788983285_8075437_1788983347_AUDJPY_16869 NO CAPTURE
+
+→ Read python/ai_provider.py [limit=45, offset=1559]
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern 
+'deadline|provider_call_failed|selected_provider_call_failed' | Where-Object { $_.LineNumber -ge 4249 -and 
+$_.LineNumber -le 4400 } | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+4249: request_deadline = _request_deadline_for(payload)
+4329: "deadline": request_deadline,
+4335: if request_deadline.expired():
+4336: # The result arrived after the Python response deadline.  It
+4339: "[provider_deadline_exceeded]"
+4342: f" elapsed_ms={request_deadline.elapsed_ms()}"
+4343: f" python_deadline_ms={request_deadline.policy.python_deadline_ms}"
+4349: "provider result arrived after the absolute request deadline",
+4350: invalid=["provider_deadline_exceeded"],
+4351: source="provider_deadline_exceeded",
+
+→ Read python/ai_gate.py [limit=30, offset=5230]
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern 'request_deadline\s*=|_request_deadline_for|def 
+_score_setup_ai|selected_provider_call_failed' | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+2534: def _request_deadline_for(payload: Dict[str, Any] | None) -> RequestDeadline:
+4067: def _score_setup_ai(
+4249: request_deadline = _request_deadline_for(payload)
+5475: f"[ai_gate] selected_provider_call_failed {msg}"
+10666: request_deadline = _start_request_deadline(payload)
+11283: request_deadline = REQUEST_TERMINAL_REGISTRY.deadline_for(str(req_id))
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/_spike_calibrate.py
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+_spike_calibrate.py
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_sp
+ike_calibrate.py
+@@ -113,13 +113,12 @@
+ )
+ ai_gate.LOG_FILE = None
+ ai_gate._provider = lambda: leg
+ ai_gate._write_ai_cost_report = lambda *a, **k: None
+-import time as _time
++from provider_deadline import RequestDeadline as _RD
+ 
+-ai_gate._request_deadline_for = lambda _p: _time.time() + 3600.0
+-print("DBG patched:", type(ai_gate._request_deadline_for(payload)).__name__,
+-      ai_gate._score_setup_ai.__globals__["_request_deadline_for"] is ai_gate._request_deadline_for)
++_RD.can_start_attempt = lambda self, now=None: True
++_RD.provider_timeout_sec = lambda self, configured, now=None: float(configured)
+ try:
+     ai_gate._score_setup_impl(payload)
+ except Exception:
+     pass
+
+
+$ & "python\.venv\Scripts\python.exe" ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\_spike_calibrate.py" 
+analyst 3 2>&1 | Select-String -Pattern "NO CAPTURE|provider input_tokens|chars:|chars/token|pretokens|---|role="
+role=analyst usage_rows=1105 payloads=3460 common=1057
+--- 903871_1788983285_8075437_1788983347_AUDJPY_16869 cand=5
+  provider input_tokens=36979 cached=0 output=11854 reason=8641
+  chars: instr=16880 schema=8852 input=194224 total=219956 static=25732
+  chars/token total=5.948 static/cached=0.000
+--- 903871_1788983285_8075437_1788983347_JPN225_24127 cand=8
+  provider input_tokens=37734 cached=0 output=11658 reason=8304
+  chars: instr=16880 schema=8852 input=308710 total=334442 static=25732
+  chars/token total=8.863 static/cached=0.000
+--- 903871_1788983285_8075437_1788983347_GBPUSD_1543 cand=6
+  provider input_tokens=37212 cached=0 output=17004 reason=14002
+  chars: instr=16880 schema=8852 input=231444 total=257176 static=25732
+  chars/token total=6.911 static/cached=0.000
+
+→ Read .opencode/agents/mt5-worker-strong.md
+→ Read .opencode/agents/mt5-explorer.md
+→ Read .opencode/agents/mt5-reviewer-logic.md
+Let me check the worker/reviewer agent configurations before delegating.
+
+# Todos
+[✓] Recon: validate offline capture recipe, data sources, tokenizer availability
+[•] WP1 (ACC-001): accounting reconciliation via explorer
+[•] WP2 (IN/DUP/PREC/OUT/WIRE measurements): token attribution tool + raw outputs
+[ ] WP3 (WIRE/SES/RSN/REP): design, docs fetch, benchmark manifest, report
+[ ] Independent logic review of report numbers vs raw outputs
+[ ] Final verification: full Python suite once, record counts
+[ ] Diff audit + SUPERVISOR_REPORT.json/md
+
+← Edit .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/PROGRESS.json
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\
+PROGRESS.json
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\PRO
+GRESS.json
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T155650Z-5fa598c0\PRO
+GRESS.json
+@@ -1,12 +1,10 @@
+ {
+     "run_id":  "20260913T155650Z-5fa598c0",
+     "active_role":  "supervisor",
+-    "active_model":  "",
+-    "updated_at_utc":  "2026-09-13T15:56:50.4124569Z",
+-    "completed_work_packages":  [
+-
+-                                ],
+-    "status":  "starting",
+-    "current_action":  "Starting delegated run",
+-    "current_work_package":  ""
++    "active_model":  "opencode-go/deepseek-v4.1-flash",
++    "updated_at_utc":  "2026-09-13T16:30:00Z",
++    "completed_work_packages":  [],
++    "status":  "recon_done_dispatching",
++    "current_action":  "Recon validated: offline capture of real provider wire kwargs works via monkeypatched 
+ai_gate._provider + recording client; tiktoken absent -> documented proxy required. Dispatching WP1 (explorer) and WP2 
+(strong worker).",
++    "current_work_package":  "WP1,WP2"
+ }
+
+
+I have validated the core reconstruction approach. Let me set up tracking and dispatch the work packages.
+→ Read python/decision_evidence.py [limit=70, offset=580]
+Let me confirm the evidence-envelope builder signature before writing the worker spec.
+
+$ Select-String -LiteralPath "python\decision_evidence.py" -Pattern 'class DecisionEvidenceResult|def 
+build_decision_evidence_envelope|envelope\b' | Select-Object -First 15 | ForEach-Object { "$($_.LineNumber): 
+$($_.Line.Trim())" }; Write-Output "---ai_gate import names---"; Select-String -LiteralPath "python\ai_gate.py" 
+-Pattern 'from decision_pipeline import|from decision_evidence 
+import|run_qualitative_consensus|build_decision_evidence_envelope' | Select-Object -First 15 | ForEach-Object { 
+"$($_.LineNumber): $($_.Line.Trim())" }
+1: """Canonical, provider-neutral evidence envelope for Version Z AI passes."""
+386: envelope: dict[str, Any]
+580: def build_decision_evidence_envelope(
+645: envelope: dict[str, Any] = {
+837: envelope["input_fingerprint"] = canonical_hash(envelope)
+840: envelope=envelope,
+---ai_gate import names---
+123: from decision_evidence import EVIDENCE_ENVELOPE_VERSION, build_decision_evidence_envelope
+139: from decision_pipeline import (
+143: run_qualitative_consensus,
+4226: evidence_result = build_decision_evidence_envelope(
+5232: consensus = run_qualitative_consensus(
+
+← Write .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/WP2_SPEC.md
+Wrote file successfully.
+
+Now I'll write the detailed WP2 spec for the worker.
+• WP1 accounting reconciliation Mt5-Explorer Agent
+• WP2 token attribution tool Mt5-Worker-Strong Agent
+Now dispatching WP1 (explorer) and WP2 (strong worker) in parallel.
+✓ WP1 accounting reconciliation Mt5-Explorer Agent
+✓ WP2 token attribution tool Mt5-Worker-Strong Agent
+Both work packages returned. Let me independently verify the artifacts and change scope.
+
+$ Write-Output "=== recent mtimes of sensitive product files ==="; foreach ($f in @("python\logs\ai_cost_report
+.jsonl","python\data\ai_trade_memory.sqlite3","python\ai_gate.py","python\ai_provider.py","python\decision_evidence.py"
+,"python\evidence_catalog.py","python\decision_pipeline.py","python\structured_models.py")) { if (Test-Path $f) { $i = 
+Get-Item $f; Write-Output ("{0}  {1}" -f $i.LastWriteTimeUtc.ToString('s'), $f) } }; Write-Output "=== run dirs 
+present ==="; Get-ChildItem ".mt5-orchestrator\runs" -Directory | Select-Object -ExpandProperty Name
+=== recent mtimes of sensitive product files ===
+2026-09-13T14:13:11  python\logs\ai_cost_report.jsonl
+2026-09-13T12:56:29  python\data\ai_trade_memory.sqlite3
+2026-09-13T13:46:21  python\ai_gate.py
+2026-09-13T14:08:18  python\ai_provider.py
+2026-09-09T20:39:10  python\decision_evidence.py
+2026-09-08T14:58:43  python\evidence_catalog.py
+2026-09-13T13:41:17  python\decision_pipeline.py
+2026-08-12T02:20:52  python\structured_models.py
+=== run dirs present ===
+20260912T214338Z-3f097327
+20260912T222538Z-239d484b
+20260913T104353Z-7f1fbcd6
+20260913T113107Z-6a42ed80
+20260913T132919Z-7706175f
+20260913T145826Z-99e5815c
+20260913T155650Z-5fa598c0
+20260913T180610Z-eee8a0a8
+
+$ Write-Output "=== git status (new files) ==="; git status --short | Select-String -Pattern 
+"opencode_token_attribution|wp2|WP1_ACC001|OPENCODE_GO_PHASE2|tool|spike|_spike"; Write-Output "=== tool exists ==="; 
+Test-Path "python\tools\opencode_token_attribution.py"; (Get-Item 
+"python\tools\opencode_token_attribution.py").Length; Write-Output "=== py_compile ==="; & 
+"python\.venv\Scripts\python.exe" -m py_compile "python\tools\opencode_token_attribution.py"; Write-Output "py_compile 
+exit: $LASTEXITCODE"; Write-Output "=== wp2 dir ==="; Get-ChildItem 
+".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\wp2" -File | Select-Object Name,Length | Format-Table -AutoSize; 
+Write-Output "=== WP1 doc ==="; Test-Path 
+".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\WP1_ACC001_RECONCILIATION.md"; (Get-Item 
+".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\WP1_ACC001_RECONCILIATION.md").Length
+=== git status (new files) ===
+
+?? python/tools/__pycache__/opencode_reasoning_benchmark.cpython-311.pyc
+?? python/tools/opencode_reasoning_benchmark.py
+?? python/tools/opencode_token_attribution.py
+=== tool exists ===
+True
+161132
+=== py_compile ===
+py_compile exit: 0
+=== wp2 dir ===
+
+
+
+Name                    Length
+----                    ------
+cache_layout.json        13477
+calibration.json        123247
+consumer_table.json     132118
+duplication.json         71030
+input_attribution.csv    32131
+input_attribution.json  115978
+output_attribution.csv   31904
+output_attribution.json 114078
+precision.json          342090
+sample_manifest.json     41615
+tool_stdout.txt          12331
+
+
+=== WP1 doc ===
+True
+12456
+
+There is a new `opencode_reasoning_benchmark.py` and another run dir. Let me investigate scope before proceeding.
+$ Write-Output "=== benchmark tool mtime ==="; Get-Item "python\tools\opencode_reasoning_benchmark.py" | 
+Select-Object LastWriteTimeUtc,Length; Write-Output "=== attribution tool mtime ==="; Get-Item 
+"python\tools\opencode_token_attribution.py" | Select-Object LastWriteTimeUtc,Length; Write-Output "=== other run dir 
+contents ==="; Get-ChildItem ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8" -ErrorAction SilentlyContinue | 
+Select-Object Name; Write-Output "=== other run MISSION head ==="; Get-Content 
+".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\MISSION.md" -TotalCount 20 -ErrorAction SilentlyContinue
+=== benchmark tool mtime ===
+
+LastWriteTimeUtc     Length
+----------------     ------
+9/13/2026 7:05:17 PM  84190
+=== attribution tool mtime ===
+9/13/2026 7:07:20 PM 161132
+=== other run dir contents ===
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+                           
+=== other run MISSION head ===
+# Mission
+
+Front-end: Claude
+Tier: Deep
+RuntimeMode: Offline
+
+## Outcome
+
+OpenCode Go cost work, **Phase 2, stage C1: live reasoning-effort non-inferiority benchmark for
+Muse** (`muse-spark-1.3-contributor`) on real archived requests, with GPT-5.6 Luna low/flex as a
+quality reference.
+
+The deliverable is **evidence**, not a configuration change. Production stays on
+`OPENCODE_MUSE_REASONING_EFFORT=high`. The front-end decides from this evidence.
+
+Paid provider authorization: YES. The user authorized paid provider calls without a spend cap on
+2026-09-13 (~21:05 local). Spend sensibly anyway, and report actual spend.
+
+Runs **in parallel** with stage A (run `20260913T155650Z-5fa598c0`, which is building
+`python/tools/opencode_token_attribution.py` and `OPENCODE_GO_PHASE2_TOKEN_EFFICIENCY.md`).
+
+$ Write-Output "=== benchmark tool head ==="; Get-Content "python\tools\opencode_reasoning_benchmark.py" 
+-TotalCount 30; Write-Output "=== RUN.json current ==="; Get-Content ".mt5-orchestrator\current\RUN.json" -ErrorAction 
+SilentlyContinue
+=== benchmark tool head ===
+#!/usr/bin/env python3
+"""Muse reasoning-effort non-inferiority benchmark driver (Phase 2, stage C1, WP1).
+
+Requirement IDs (benchmark_protocol.md): BEN-001 (frozen stratified request set),
+BEN-003 (effort verified on the wire from the attempt record), BEN-004 (per-request
+metrics: decision state, allow, veto, tokens/latency/cost per role), BEN-005
+(pre-registered non-inferiority rule incl. S1/S2/S3 safety counters and Wilson 95%
+intervals), BEN-006/BEN-007 (fresh subprocess per pair, isolated mutable state,
+bounded concurrency, resumability, clean stop on a Go usage-limit 429).
+
+SAFETY CONTRACT
+    * ``--mode dry`` (the default) NEVER builds a real API key and NEVER touches
+      the network: the leg is constructed with an injected fake client whose
+      ``responses.create`` records the wire kwargs and raises a sentinel that the
+      production transport classifies as one non-retryable transport failure.
+      Credentials are only ever obtained by the gate's own loader
+      (``po3_env.bootstrap_provider_env()`` in ``--mode live`` children) plus
+      ``os.environ`` at leg-build time; this module never opens ``python/.env``
+      and never prints a secret.
+    * ``--mode live`` children run the real provider leg; only the supervisor
+      runs paid calls.  ``manifest`` reads the live bus strictly READ-ONLY; no
+      command writes to the live bus, ``python/data/*``, ``python/logs/*`` or the
+      shadow ledger: every mutable path the driven pipeline can touch is
+      redirected to the per-pair scratch dir BEFORE ``ai_gate`` is imported, and
+      the parent snapshots (path, size, mtime) before/after and records whether
+      anything moved.
+    * One result JSON per (request, arm); completed ``status == "ok"`` pairs are
+      skipped on restart (BEN-007 resumability).
+
+WHAT THE DRY FAKE PROVES / DOES NOT PROVE (WP1_SPEC "Fake dry client")
+=== RUN.json current ===
+{
+    "front_end":  "Claude",
+    "started_utc":  "2026-09-13T18:06:10.9568604Z",
+    "mode":  "Offline",
+    "run_dir":  ".mt5-orchestrator/runs/20260913T180610Z-eee8a0a8",
+    "tier":  "Deep",
+    "run_id":  "20260913T180610Z-eee8a0a8"
+}
+
+A parallel stage-C run exists (out of my scope). Now let me fetch the SES-001 docs myself and spot-check WP2 raw outputs.
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/wp2/cache_layout.json
+% WebFetch https://opencode.ai/docs/go/
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/wp2/calibration.json [limit=90]
+Docs captured. Let me validate the WP2 raw outputs and confirm the live bus was not written.
+
+$ $bus = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"; Write-Output "=== bus 
+log mtimes (must predate 19:00Z if untouched) ==="; foreach ($f in 
+@("logs\openai_usage.ndjson","logs\ai_gate.log","logs\opencode_go_attempts.ndjson")) { $p = Join-Path $bus $f; if 
+(Test-Path $p) { $i = Get-Item $p; Write-Output ("{0}  {1}  {2}" -f $i.LastWriteTimeUtc.ToString('s'), $i.Length, $f) 
+} else { Write-Output ("MISSING  " + $f) } }; Write-Output "=== attribution tool: subcommands ==="; Select-String 
+-LiteralPath "python\tools\opencode_token_attribution.py" -Pattern "add_parser|add_argument\(" | Select-Object -First 
+30 | ForEach-Object { $_.Line.Trim() }
+=== bus log mtimes (must predate 19:00Z if untouched) ===
+2026-09-13T12:56:28  13927516  logs\openai_usage.ndjson
+2026-09-13T12:56:34  64006800  logs\ai_gate.log
+MISSING  logs\opencode_go_attempts.ndjson
+=== attribution tool: subcommands ===
+parser.add_argument("--wp-dir", default=".mt5-orchestrator/runs/20260913T155650Z-5fa598c0/wp2")
+parser.add_argument("--bus", default=os.environ.get("PO3_ATTRIBUTION_BUS", DEFAULT_BUS))
+parser.add_argument("--sample-size", type=int, default=36)
+parser.add_argument("--seed", type=int, default=20260913)
+parser.add_argument("--limit", type=int, default=0)
+parser.add_argument("--stage", choices=("select", "capture", "analyze", "all"), default="all")
+parser.add_argument("--force", action="store_true", help="recapture existing capture files")
+parser.add_argument("--review", action=argparse.BooleanOptionalAction, default=True, help="capture critic/adjudicator 
+wires")
+parser.add_argument("--no-shadow", action="store_true", help="omit shadow historical evidence from the rebuilt wire")
+parser.add_argument("--child-timeout", type=float, default=900.0)
+parser.add_argument("--child", action="store_true")
+parser.add_argument("--payload")
+parser.add_argument("--request-id")
+parser.add_argument("--out")
+
+← Write .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/WP3_SPEC.md
+Wrote file successfully.
+
+Now I'll write the WP3 spec with the SES-001 doc quotes, then dispatch the report worker.
+• WP3 design and report Mt5-Worker-Strong Agent

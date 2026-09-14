@@ -31,7 +31,7 @@ Operating rules:
 - Preserve unrelated working-tree changes.
 - Follow the mission's authorized scope. If scope must expand materially, stop and return an escalation request.
 - Fix the owning defect class/root cause, not one observed instance.
-- For reproducible bugs, require a failing reproducer before the fix when practical.
+- Tests only for MAJOR changes (BUDGET_POLICY.md -> Test and compile cadence). Never run the full suite or compile MQL5 per work package.
 - Never delete, skip, xfail, loosen, or rewrite tests merely to make code pass.
 - Give compact evidence: files, symbols, commands, failures, passes, timing, and uncertainties.
 

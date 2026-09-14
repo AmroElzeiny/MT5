@@ -1,6 +1,6 @@
 ﻿# Live OpenCode Go model snapshot
 
-Generated UTC: 2026-09-12T20:44:19.7120724Z
+Generated UTC: 2026-09-13T15:55:54.6572225Z
 
 The local OpenCode CLI is authority.
 

@@ -1,0 +1,1352 @@
+{
+  "generated_at_utc": "2026-09-13T19:16:55Z",
+  "bus": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS",
+  "sample_size": 36,
+  "meets_minimum_30": true,
+  "seed": 20260913,
+  "selection_rule": "round-robin over (candidate-count stratum x symbol class) cells built from request ids that have BOTH a successful Muse row in logs/openai_usage.ndjson AND an archived python_*.json payload; the two known approvals and every request carrying the exact 6,513 analyst static-prefix anchor are taken first",
+  "available_population": {
+    "cand_3plus/FX-major": 370,
+    "cand_2/index": 20,
+    "cand_3plus/crypto": 43,
+    "cand_2/FX-cross": 33,
+    "cand_3plus/metal": 65,
+    "cand_3plus/FX-cross": 291,
+    "cand_3plus/index": 199,
+    "cand_1/FX-major": 15,
+    "cand_1/index": 6,
+    "cand_1/FX-cross": 1,
+    "cand_2/FX-major": 9,
+    "cand_3plus/energy": 1,
+    "cand_2/metal": 4,
+    "cand_2/energy": 1
+  },
+  "selected_strata_summary": {
+    "cand_3plus/FX-cross": 5,
+    "cand_3plus/FX-major": 5,
+    "cand_3plus/index": 5,
+    "cand_3plus/crypto": 3,
+    "cand_1/FX-cross": 1,
+    "cand_3plus/metal": 3,
+    "cand_2/FX-cross": 3,
+    "cand_2/index": 2,
+    "cand_1/FX-major": 2,
+    "cand_1/index": 2,
+    "cand_2/FX-major": 2,
+    "cand_2/energy": 1,
+    "cand_2/metal": 1,
+    "cand_3plus/energy": 1
+  },
+  "anchor_requests_in_sample": 17,
+  "critic_anchor_requests_in_sample": 4,
+  "muse_ledger_ok_rows_by_role": {
+    "analyst": 1106,
+    "critic": 1116,
+    "adjudicator": 252
+  },
+  "rows": [
+    {
+      "request_id": "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788951947_AUDJPY_32618.json",
+      "symbol": "AUDJPY",
+      "symbol_class": "FX-cross",
+      "n_candidates": 5,
+      "stratum": "cand_3plus/FX-cross",
+      "ledger_roles_muse": [],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "note": "required-by-spec known id; no Muse row for this request id",
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 5,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        3
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1788925102_208218984_1788951325_USDCHF_19925",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788951325_USDCHF_19925.json",
+      "symbol": "USDCHF",
+      "symbol_class": "FX-major",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/FX-major",
+      "ledger_roles_muse": [],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "note": "required-by-spec known id; no Muse row for this request id",
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        3
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789151032_EURAUD_5869",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789151032_EURAUD_5869.json",
+      "symbol": "EURAUD",
+      "symbol_class": "FX-cross",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": true,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        1,
+        2,
+        7
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789004983_NAS100_9597",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_14752_1788992581__903871_1788999394_24185000_1789004983_NAS100_9597.json",
+      "symbol": "NAS100",
+      "symbol_class": "index",
+      "n_candidates": 6,
+      "stratum": "cand_3plus/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": true,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 6,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785759967_BITCOIN_9173",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785759967_BITCOIN_9173.json",
+      "symbol": "BITCOIN",
+      "symbol_class": "crypto",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/crypto",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 8,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785762972_AUDUSD_11360.json",
+      "symbol": "AUDUSD",
+      "symbol_class": "FX-major",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 8,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1788983285_8075437_1788995216_GBPCAD_29371",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12980_1788971959__903871_1788983285_8075437_1788995216_GBPCAD_29371.json",
+      "symbol": "GBPCAD",
+      "symbol_class": "FX-cross",
+      "n_candidates": 1,
+      "stratum": "cand_1/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 1,
+      "n_candidates_wire": 1,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_10236_1789295269__591813800_1785715200_305658125_1785725109_GOLD_25455.json",
+      "symbol": "GOLD",
+      "symbol_class": "metal",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/metal",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 8,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789096071_XAUUSD_13096",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789096071_XAUUSD_13096.json",
+      "symbol": "XAUUSD",
+      "symbol_class": "metal",
+      "n_candidates": 7,
+      "stratum": "cand_3plus/metal",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 7,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        2,
+        4
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1788983285_8075437_1788988231_NZDJPY_13045",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12980_1788971959__903871_1788983285_8075437_1788988231_NZDJPY_13045.json",
+      "symbol": "NZDJPY",
+      "symbol_class": "FX-cross",
+      "n_candidates": 2,
+      "stratum": "cand_2/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789155320_UK100_2328",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789155320_UK100_2328.json",
+      "symbol": "UK100",
+      "symbol_class": "index",
+      "n_candidates": 4,
+      "stratum": "cand_3plus/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 4,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785768982_USDCHF_2988",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785768982_USDCHF_2988.json",
+      "symbol": "USDCHF",
+      "symbol_class": "FX-major",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 8,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789068109_US30_16044",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789068109_US30_16044.json",
+      "symbol": "US30",
+      "symbol_class": "index",
+      "n_candidates": 2,
+      "stratum": "cand_2/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785740735_BITCOIN_469",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785740735_BITCOIN_469.json",
+      "symbol": "BITCOIN",
+      "symbol_class": "crypto",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/crypto",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 8,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789071381_USDCHF_5236",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789071381_USDCHF_5236.json",
+      "symbol": "USDCHF",
+      "symbol_class": "FX-major",
+      "n_candidates": 3,
+      "stratum": "cand_3plus/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 3,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1788983285_8075437_1788988231_EURAUD_21885",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12980_1788971959__903871_1788983285_8075437_1788988231_EURAUD_21885.json",
+      "symbol": "EURAUD",
+      "symbol_class": "FX-cross",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": true,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785744942_#Germany40_32424.json",
+      "symbol": "#Germany40",
+      "symbol_class": "index",
+      "n_candidates": 3,
+      "stratum": "cand_3plus/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 3,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789002917_NAS100_10901",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12296_1788989149__903871_1788999394_24185000_1789002917_NAS100_10901.json",
+      "symbol": "NAS100",
+      "symbol_class": "index",
+      "n_candidates": 6,
+      "stratum": "cand_3plus/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": true,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 6,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789033279_NZDJPY_20411",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1788999394_24185000_1789033279_NZDJPY_20411.json",
+      "symbol": "NZDJPY",
+      "symbol_class": "FX-cross",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": true,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        3,
+        5,
+        6
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785753356_GBPUSD_22093",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785753356_GBPUSD_22093.json",
+      "symbol": "GBPUSD",
+      "symbol_class": "FX-major",
+      "n_candidates": 1,
+      "stratum": "cand_1/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 1,
+      "n_candidates_wire": 1,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789094249_US30_14363",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789094249_US30_14363.json",
+      "symbol": "US30",
+      "symbol_class": "index",
+      "n_candidates": 1,
+      "stratum": "cand_1/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 1,
+      "n_candidates_wire": 1,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789098513_AUDJPY_32323",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789098513_AUDJPY_32323.json",
+      "symbol": "AUDJPY",
+      "symbol_class": "FX-cross",
+      "n_candidates": 2,
+      "stratum": "cand_2/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789154707_GBPUSD_19340",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789154707_GBPUSD_19340.json",
+      "symbol": "GBPUSD",
+      "symbol_class": "FX-major",
+      "n_candidates": 2,
+      "stratum": "cand_2/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789149197_WTI_22682",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789149197_WTI_22682.json",
+      "symbol": "WTI",
+      "symbol_class": "energy",
+      "n_candidates": 2,
+      "stratum": "cand_2/energy",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789066099_US30_18866",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789066099_US30_18866.json",
+      "symbol": "US30",
+      "symbol_class": "index",
+      "n_candidates": 2,
+      "stratum": "cand_2/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789102197_XAUUSD_1646",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789102197_XAUUSD_1646.json",
+      "symbol": "XAUUSD",
+      "symbol_class": "metal",
+      "n_candidates": 2,
+      "stratum": "cand_2/metal",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789102811_CHFJPY_32047",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789102811_CHFJPY_32047.json",
+      "symbol": "CHFJPY",
+      "symbol_class": "FX-cross",
+      "n_candidates": 7,
+      "stratum": "cand_3plus/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 7,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        1,
+        3,
+        5
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789097294_USDJPY_5699",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789097294_USDJPY_5699.json",
+      "symbol": "USDJPY",
+      "symbol_class": "FX-major",
+      "n_candidates": 3,
+      "stratum": "cand_3plus/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 3,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785740134_BITCOIN_1317.json",
+      "symbol": "BITCOIN",
+      "symbol_class": "crypto",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/crypto",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic",
+        "adjudicator"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 8,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789094249_WTI_24227",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789094249_WTI_24227.json",
+      "symbol": "WTI",
+      "symbol_class": "energy",
+      "n_candidates": 3,
+      "stratum": "cand_3plus/energy",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 3,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789028921_JPN225_10535",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1788999394_24185000_1789028921_JPN225_10535.json",
+      "symbol": "JPN225",
+      "symbol_class": "index",
+      "n_candidates": 6,
+      "stratum": "cand_3plus/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 6,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        1,
+        2
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789036511_XAUUSD_7721",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1788999394_24185000_1789036511_XAUUSD_7721.json",
+      "symbol": "XAUUSD",
+      "symbol_class": "metal",
+      "n_candidates": 8,
+      "stratum": "cand_3plus/metal",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 8,
+      "n_candidates_wire": 3,
+      "cohort_sealed_to_live_budget": true,
+      "wire_candidate_indexes": [
+        0,
+        2,
+        7
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785749750_AUDUSD_9445.json",
+      "symbol": "AUDUSD",
+      "symbol_class": "FX-major",
+      "n_candidates": 1,
+      "stratum": "cand_1/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 1,
+      "n_candidates_wire": 1,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0
+      ],
+      "workload_mode": "TESTER_AI_RECORD_ONLY"
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789067423_US30_19703",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789067423_US30_19703.json",
+      "symbol": "US30",
+      "symbol_class": "index",
+      "n_candidates": 1,
+      "stratum": "cand_1/index",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 1,
+      "n_candidates_wire": 1,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789152868_EURNZD_21011",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789152868_EURNZD_21011.json",
+      "symbol": "EURNZD",
+      "symbol_class": "FX-cross",
+      "n_candidates": 2,
+      "stratum": "cand_2/FX-cross",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789064597_USDCHF_11315",
+      "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789064597_USDCHF_11315.json",
+      "symbol": "USDCHF",
+      "symbol_class": "FX-major",
+      "n_candidates": 2,
+      "stratum": "cand_2/FX-major",
+      "ledger_roles_muse": [
+        "analyst",
+        "critic"
+      ],
+      "anchor_6513_analyst": false,
+      "anchor_1265_critic": false,
+      "roles_captured": [
+        "adjudicator",
+        "analyst",
+        "critic"
+      ],
+      "capture_status": "captured",
+      "capture_errors": [],
+      "review_status": "ok",
+      "review_roles_reached": [
+        "critic",
+        "adjudicator"
+      ],
+      "n_candidates_archive": 2,
+      "n_candidates_wire": 2,
+      "cohort_sealed_to_live_budget": false,
+      "wire_candidate_indexes": [
+        0,
+        1
+      ],
+      "workload_mode": "LIVE_FORWARD"
+    }
+  ],
+  "captured_requests": 36,
+  "measurement_version": "wp2.7",
+  "stale_captures_skipped": [],
+  "role_row_count": 108,
+  "role_row_summary": {
+    "analyst": 36,
+    "critic": 36,
+    "adjudicator": 36
+  },
+  "selected_strata_summary_by_wire_candidates": {
+    "cand_3plus/FX-cross": 5,
+    "cand_3plus/FX-major": 5,
+    "cand_3plus/index": 5,
+    "cand_3plus/crypto": 3,
+    "cand_1/FX-cross": 1,
+    "cand_3plus/metal": 3,
+    "cand_2/FX-cross": 3,
+    "cand_2/index": 2,
+    "cand_1/FX-major": 2,
+    "cand_1/index": 2,
+    "cand_2/FX-major": 2,
+    "cand_2/energy": 1,
+    "cand_2/metal": 1,
+    "cand_3plus/energy": 1
+  },
+  "cohort_sealed_requests": 12,
+  "analyst_wires": 36,
+  "critic_wires": 36,
+  "adjudicator_wires": 36
+}

@@ -1,0 +1,449 @@
+{
+ "arms": {
+  "luna_low_flex": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.0,
+   "token_weighted_cached_read_ratio": 0.0894,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 2931323.0,
+     "cached_read_tokens": 304939.0,
+     "output_tokens": 199601.0,
+     "reasoning_tokens": 9603.0,
+     "latency_sec": 2364.8,
+     "calls": 62.0
+    },
+    "critic": {
+     "input_tokens": 1076413.0,
+     "cached_read_tokens": 61183.0,
+     "output_tokens": 18966.0,
+     "reasoning_tokens": 12060.0,
+     "latency_sec": 349.1,
+     "calls": 63.0
+    },
+    "adjudicator": {
+     "input_tokens": 200160.0,
+     "cached_read_tokens": 10161.0,
+     "output_tokens": 4132.0,
+     "reasoning_tokens": 2610.0,
+     "latency_sec": 79.6,
+     "calls": 15.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:ok": 62,
+    "critic:ok": 63,
+    "adjudicator:ok": 15
+   }
+  },
+  "muse_high_a": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.1957,
+   "token_weighted_cached_read_ratio": 0.095,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 1033641.0,
+     "cached_read_tokens": 95120.0,
+     "output_tokens": 280987.0,
+     "reasoning_tokens": 192553.0,
+     "latency_sec": 6927.8,
+     "calls": 22.0
+    },
+    "critic": {
+     "input_tokens": 284763.0,
+     "cached_read_tokens": 32061.0,
+     "output_tokens": 53922.0,
+     "reasoning_tokens": 52280.0,
+     "latency_sec": 418.1,
+     "calls": 16.0
+    },
+    "adjudicator": {
+     "input_tokens": 68037.0,
+     "cached_read_tokens": 4533.0,
+     "output_tokens": 15090.0,
+     "reasoning_tokens": 14581.0,
+     "latency_sec": 408.2,
+     "calls": 5.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:transport_error": 40,
+    "analyst:ok": 22,
+    "critic:ok": 16,
+    "adjudicator:ok": 5,
+    "adjudicator:transport_error": 1,
+    "critic:transport_error": 6
+   }
+  },
+  "muse_high_b": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.2043,
+   "token_weighted_cached_read_ratio": 0.0668,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 1033693.0,
+     "cached_read_tokens": 60793.0,
+     "output_tokens": 296329.0,
+     "reasoning_tokens": 209829.0,
+     "latency_sec": 7042.0,
+     "calls": 22.0
+    },
+    "critic": {
+     "input_tokens": 283781.0,
+     "cached_read_tokens": 28349.0,
+     "output_tokens": 63509.0,
+     "reasoning_tokens": 61836.0,
+     "latency_sec": 484.2,
+     "calls": 16.0
+    },
+    "adjudicator": {
+     "input_tokens": 68266.0,
+     "cached_read_tokens": 3411.0,
+     "output_tokens": 14173.0,
+     "reasoning_tokens": 13667.0,
+     "latency_sec": 426.3,
+     "calls": 5.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:transport_error": 40,
+    "analyst:ok": 22,
+    "critic:ok": 16,
+    "adjudicator:ok": 5,
+    "critic:transport_error": 6
+   }
+  },
+  "muse_high_compact": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.1481,
+   "token_weighted_cached_read_ratio": 0.0904,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 734111.0,
+     "cached_read_tokens": 62043.0,
+     "output_tokens": 262531.0,
+     "reasoning_tokens": 182855.0,
+     "latency_sec": 6279.4,
+     "calls": 18.0
+    },
+    "critic": {
+     "input_tokens": 168855.0,
+     "cached_read_tokens": 19562.0,
+     "output_tokens": 41308.0,
+     "reasoning_tokens": 40165.0,
+     "latency_sec": 308.2,
+     "calls": 11.0
+    },
+    "adjudicator": {
+     "input_tokens": 33486.0,
+     "cached_read_tokens": 3027.0,
+     "output_tokens": 9755.0,
+     "reasoning_tokens": 9456.0,
+     "latency_sec": 289.0,
+     "calls": 3.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:transport_error": 42,
+    "analyst:ok": 18,
+    "critic:ok": 11,
+    "adjudicator:ok": 3,
+    "critic:transport_error": 7,
+    "adjudicator:transport_error": 1
+   }
+  },
+  "muse_low": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.1831,
+   "token_weighted_cached_read_ratio": 0.0479,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 1072091.0,
+     "cached_read_tokens": 39078.0,
+     "output_tokens": 122040.0,
+     "reasoning_tokens": 40356.0,
+     "latency_sec": 2833.1,
+     "calls": 23.0
+    },
+    "critic": {
+     "input_tokens": 410943.0,
+     "cached_read_tokens": 33025.0,
+     "output_tokens": 33604.0,
+     "reasoning_tokens": 31028.0,
+     "latency_sec": 311.0,
+     "calls": 24.0
+    },
+    "adjudicator": {
+     "input_tokens": 94191.0,
+     "cached_read_tokens": 3411.0,
+     "output_tokens": 8369.0,
+     "reasoning_tokens": 7695.0,
+     "latency_sec": 355.8,
+     "calls": 7.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:transport_error": 39,
+    "analyst:ok": 23,
+    "critic:ok": 24,
+    "adjudicator:ok": 7,
+    "critic:transport_error": 1
+   }
+  },
+  "muse_medium": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.1629,
+   "token_weighted_cached_read_ratio": 0.0348,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 890255.0,
+     "cached_read_tokens": 19539.0,
+     "output_tokens": 170226.0,
+     "reasoning_tokens": 98928.0,
+     "latency_sec": 4075.7,
+     "calls": 18.0
+    },
+    "critic": {
+     "input_tokens": 253297.0,
+     "cached_read_tokens": 18922.0,
+     "output_tokens": 38568.0,
+     "reasoning_tokens": 37126.0,
+     "latency_sec": 314.3,
+     "calls": 14.0
+    },
+    "adjudicator": {
+     "input_tokens": 81254.0,
+     "cached_read_tokens": 4164.0,
+     "output_tokens": 13995.0,
+     "reasoning_tokens": 13375.0,
+     "latency_sec": 522.6,
+     "calls": 6.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:transport_error": 42,
+    "analyst:ok": 18,
+    "critic:ok": 14,
+    "adjudicator:ok": 6,
+    "critic:transport_error": 4
+   }
+  },
+  "muse_minimal": {
+   "pairs": 60,
+   "expected_go_usd_standard": 0.1731,
+   "token_weighted_cached_read_ratio": 0.0461,
+   "per_role_totals": {
+    "analyst": {
+     "input_tokens": 1072027.0,
+     "cached_read_tokens": 28725.0,
+     "output_tokens": 94359.0,
+     "reasoning_tokens": 14100.0,
+     "latency_sec": 2034.6,
+     "calls": 23.0
+    },
+    "critic": {
+     "input_tokens": 409455.0,
+     "cached_read_tokens": 39794.0,
+     "output_tokens": 15365.0,
+     "reasoning_tokens": 12856.0,
+     "latency_sec": 192.6,
+     "calls": 24.0
+    },
+    "adjudicator": {
+     "input_tokens": 94097.0,
+     "cached_read_tokens": 4164.0,
+     "output_tokens": 3523.0,
+     "reasoning_tokens": 2870.0,
+     "latency_sec": 287.4,
+     "calls": 7.0
+    }
+   },
+   "attempt_outcomes": {
+    "analyst:transport_error": 39,
+    "analyst:ok": 23,
+    "critic:ok": 24,
+    "adjudicator:ok": 7,
+    "critic:transport_error": 1
+   }
+  }
+ },
+ "paired_vs_compact": {
+  "muse_high_a": {
+   "common_requests": 60,
+   "roles": {
+    "adjudicator": {
+     "paired_n": 3,
+     "input_base_mean": 13919.7,
+     "input_compact_mean": 11162,
+     "delta_mean": -2757.7,
+     "delta_median": -2723,
+     "delta_pct_of_mean": -19.81,
+     "calls_base": 5,
+     "calls_compact": 3
+    },
+    "critic": {
+     "paired_n": 10,
+     "input_base_mean": 18376.4,
+     "input_compact_mean": 15654.7,
+     "delta_mean": -2721.7,
+     "delta_median": -2723.5,
+     "delta_pct_of_mean": -14.81,
+     "calls_base": 16,
+     "calls_compact": 11
+    },
+    "analyst": {
+     "paired_n": 17,
+     "input_base_mean": 52375,
+     "input_compact_mean": 41794.4,
+     "delta_mean": -10580.6,
+     "delta_median": -7485,
+     "delta_pct_of_mean": -20.2,
+     "calls_base": 22,
+     "calls_compact": 18
+    }
+   }
+  },
+  "muse_high_b": {
+   "common_requests": 60,
+   "roles": {
+    "adjudicator": {
+     "paired_n": 3,
+     "input_base_mean": 13962.3,
+     "input_compact_mean": 11162,
+     "delta_mean": -2800.3,
+     "delta_median": -2790,
+     "delta_pct_of_mean": -20.06,
+     "calls_base": 5,
+     "calls_compact": 3
+    },
+    "critic": {
+     "paired_n": 11,
+     "input_base_mean": 18098.2,
+     "input_compact_mean": 15350.5,
+     "delta_mean": -2747.7,
+     "delta_median": -2729,
+     "delta_pct_of_mean": -15.18,
+     "calls_base": 16,
+     "calls_compact": 11
+    },
+    "analyst": {
+     "paired_n": 18,
+     "input_base_mean": 51066.2,
+     "input_compact_mean": 40783.9,
+     "delta_mean": -10282.2,
+     "delta_median": -7488.5,
+     "delta_pct_of_mean": -20.14,
+     "calls_base": 22,
+     "calls_compact": 18
+    }
+   }
+  }
+ },
+ "contamination": {
+  "luna_low_flex": {
+   "analyst": [
+    "c1fc5f807c4e"
+   ]
+  },
+  "muse_high_a": {
+   "analyst": [
+    "c1fc5f807c4e"
+   ]
+  },
+  "muse_high_b": {
+   "analyst": [
+    "c1fc5f807c4e"
+   ]
+  },
+  "muse_high_compact": {
+   "analyst": [
+    "896047ecda87"
+   ]
+  },
+  "muse_low": {
+   "analyst": [
+    "c1fc5f807c4e"
+   ]
+  },
+  "muse_medium": {
+   "analyst": [
+    "c1fc5f807c4e"
+   ]
+  },
+  "muse_minimal": {
+   "analyst": [
+    "c1fc5f807c4e"
+   ]
+  }
+ },
+ "sensitivity": {
+  "per_arm": {
+   "luna_low_flex": {
+    "clean_pairs_vs_high_a": 15,
+    "state_agreement_clean": 0.6,
+    "infra_outcomes": 0,
+    "infra_causes": {}
+   },
+   "muse_high_a": {
+    "clean_pairs_vs_high_a": null,
+    "state_agreement_clean": null,
+    "infra_outcomes": 45,
+    "infra_causes": {
+     "analyst:429:RateLimitError": 38,
+     "adjudicator:429:RateLimitError": 1,
+     "critic:429:RateLimitError": 5,
+     "analyst::APIConnectionError": 1
+    }
+   },
+   "muse_high_b": {
+    "clean_pairs_vs_high_a": 15,
+    "state_agreement_clean": 1.0,
+    "infra_outcomes": 44,
+    "infra_causes": {
+     "analyst:429:RateLimitError": 39,
+     "critic:429:RateLimitError": 5
+    }
+   },
+   "muse_high_compact": {
+    "clean_pairs_vs_high_a": 9,
+    "state_agreement_clean": 0.8889,
+    "infra_outcomes": 50,
+    "infra_causes": {
+     "analyst:429:RateLimitError": 41,
+     "critic:429:RateLimitError": 7,
+     "adjudicator:429:RateLimitError": 1,
+     "analyst:500:InternalServerError": 1
+    }
+   },
+   "muse_low": {
+    "clean_pairs_vs_high_a": 15,
+    "state_agreement_clean": 0.9333,
+    "infra_outcomes": 40,
+    "infra_causes": {
+     "analyst:429:RateLimitError": 39,
+     "critic:429:RateLimitError": 1
+    }
+   },
+   "muse_medium": {
+    "clean_pairs_vs_high_a": 12,
+    "state_agreement_clean": 1.0,
+    "infra_outcomes": 46,
+    "infra_causes": {
+     "analyst:429:RateLimitError": 39,
+     "critic:429:RateLimitError": 4,
+     "analyst:500:InternalServerError": 3
+    }
+   },
+   "muse_minimal": {
+    "clean_pairs_vs_high_a": 15,
+    "state_agreement_clean": 0.7333,
+    "infra_outcomes": 40,
+    "infra_causes": {
+     "analyst:429:RateLimitError": 39,
+     "critic:429:RateLimitError": 1
+    }
+   }
+  },
+  "pooled_high_infra_rate": 0.7417
+ }
+}

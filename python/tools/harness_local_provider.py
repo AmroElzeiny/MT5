@@ -213,6 +213,18 @@ class HarnessState:
 # --------------------------------------------------------------------------
 
 
+def _decoded_wire(evidence: Any) -> Any:
+    """Canonical rows from either provider-wire encoding.
+
+    The payload a provider receives may carry ``evidence_catalog.items`` as
+    canonical rows or as ``compact_v1`` groups (provider_wire_projection.py);
+    a compliant model reads whichever encoding it was sent.
+    """
+    from provider_wire_projection import expand_evidence_from_wire
+
+    return expand_evidence_from_wire(evidence) if isinstance(evidence, dict) else evidence
+
+
 def extract_catalog(evidence: Any) -> tuple[dict[int, list[int]], list[int], str]:
     """Return (ids_by_candidate, all_ids, catalog_hash) from a model payload.
 
@@ -228,7 +240,7 @@ def extract_catalog(evidence: Any) -> tuple[dict[int, list[int]], list[int], str
     if not isinstance(evidence, dict):
         return ids_by_candidate, all_ids, catalog_hash
 
-    catalog = evidence.get("evidence_catalog")
+    catalog = _decoded_wire(evidence).get("evidence_catalog")
     if not isinstance(catalog, dict):
         return ids_by_candidate, all_ids, catalog_hash
     catalog_hash = str(catalog.get("catalog_hash") or "")
@@ -265,7 +277,7 @@ def candidate_values(evidence: Any) -> dict[int, dict[str, Any]]:
     values: dict[int, dict[str, Any]] = {}
     if not isinstance(evidence, dict):
         return values
-    catalog = evidence.get("evidence_catalog")
+    catalog = _decoded_wire(evidence).get("evidence_catalog")
     if not isinstance(catalog, dict):
         return values
 

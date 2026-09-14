@@ -1,0 +1,1452 @@
+{
+ "luna_low_flex": {
+  "effort_requested": "low",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "APPROVE": 30,
+   "ABSTAIN": 22,
+   "REJECT": 8
+  },
+  "final_allow_rate": {
+   "numerator": 30,
+   "denominator": 60,
+   "rate": 0.5,
+   "wilson_95_ci": [
+    0.37735,
+    0.62265
+   ]
+  },
+  "approve_rate": {
+   "numerator": 30,
+   "denominator": 60,
+   "rate": 0.5,
+   "wilson_95_ci": [
+    0.37735,
+    0.62265
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 60,
+   "denominator": 60,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.939828,
+    1.0
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 60,
+   "denominator": 60,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.939828,
+    1.0
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 39.412517,
+    "latency_sec_p50": 35.222,
+    "input_tokens_avg": 48855.383333,
+    "cached_read_tokens_avg": 5082.316667,
+    "reasoning_tokens_avg": 160.05,
+    "output_tokens_avg": 3326.683333,
+    "cost_usd_avg": 0.0,
+    "cost_usd_total": 0.0,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 5.818917,
+    "latency_sec_p50": 5.147,
+    "input_tokens_avg": 17940.216667,
+    "cached_read_tokens_avg": 1019.716667,
+    "reasoning_tokens_avg": 201.0,
+    "output_tokens_avg": 316.1,
+    "cost_usd_avg": 0.0,
+    "cost_usd_total": 0.0,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 1.326467,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 3336.0,
+    "cached_read_tokens_avg": 169.35,
+    "reasoning_tokens_avg": 43.5,
+    "output_tokens_avg": 68.866667,
+    "cost_usd_avg": 0.0,
+    "cost_usd_total": 0.0,
+    "cost_unpriced_any": true
+   }
+  },
+  "agreement_vs_high_a": {
+   "n": 60,
+   "decision_state_agreement": {
+    "numerator": 17,
+    "denominator": 60,
+    "rate": 0.283333,
+    "wilson_95_ci": [
+     0.185068,
+     0.407673
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 30,
+    "denominator": 60,
+    "rate": 0.5,
+    "wilson_95_ci": [
+     0.37735,
+     0.62265
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 39,
+    "denominator": 60,
+    "rate": 0.65,
+    "wilson_95_ci": [
+     0.523626,
+     0.758322
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 52,
+    "denominator": 60,
+    "rate": 0.866667,
+    "wilson_95_ci": [
+     0.758348,
+     0.930859
+    ]
+   },
+   "quality_score_mad": 4.851667
+  },
+  "agreement_vs_high_a_clean": {
+   "n": 15,
+   "decision_state_agreement": {
+    "numerator": 9,
+    "denominator": 15,
+    "rate": 0.6,
+    "wilson_95_ci": [
+     0.357468,
+     0.801755
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 9,
+    "denominator": 15,
+    "rate": 0.6,
+    "wilson_95_ci": [
+     0.357468,
+     0.801755
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 10,
+    "denominator": 15,
+    "rate": 0.666667,
+    "wilson_95_ci": [
+     0.417135,
+     0.848237
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 15,
+    "denominator": 15,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.796117,
+     1.0
+    ]
+   },
+   "quality_score_mad": 0.88
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 30,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {
+    "a_S1_zero": true,
+    "b_S2_within_high_vs_high_noise": false,
+    "c_schema_valid_ge_high_minus_2pp": true,
+    "c_semantic_valid_ge_high_minus_2pp": true,
+    "d_state_agreement_ge_noise_minus_5pp": false,
+    "e_infra_failure_le_high": true,
+    "non_inferior": false,
+    "addendum_a3": {
+     "d_clean_state_agreement_ge_clean_noise_minus_5pp": false,
+     "n_clean_pairs_ge_min": false,
+     "no_usage_limit_refusals_left": false,
+     "non_inferior_a3": false
+    }
+   },
+   "non_inferior": false,
+   "non_inferior_a3": false
+  },
+  "savings_vs_high": {
+   "tokens_per_request_avg": {
+    "arm": 73843.2,
+    "high": 29134.925,
+    "delta_pct": 153.5
+   },
+   "cost_usd_per_request_avg": {
+    "arm": 0.0,
+    "high": 0.003333,
+    "delta_pct": -100.0
+   },
+   "latency_sec_per_request_avg": {
+    "arm": 46.558,
+    "high": 135.179608,
+    "delta_pct": -65.6
+   }
+  }
+ },
+ "muse_high_a": {
+  "effort_requested": "high",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "ABSTAIN": 15,
+   "REJECT": 45
+  },
+  "final_allow_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "approve_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 15,
+   "denominator": 60,
+   "rate": 0.25,
+   "wilson_95_ci": [
+    0.157765,
+    0.372321
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 15,
+   "denominator": 60,
+   "rate": 0.25,
+   "wilson_95_ci": [
+    0.157765,
+    0.372321
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 45,
+   "denominator": 60,
+   "rate": 0.75,
+   "wilson_95_ci": [
+    0.627679,
+    0.842235
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 119.854767,
+    "latency_sec_p50": 8.178,
+    "input_tokens_avg": 17227.35,
+    "cached_read_tokens_avg": 1585.333333,
+    "reasoning_tokens_avg": 3209.216667,
+    "output_tokens_avg": 4683.116667,
+    "cost_usd_avg": 0.002504,
+    "cost_usd_total": 0.15023978,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 7.015283,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 4746.05,
+    "cached_read_tokens_avg": 534.35,
+    "reasoning_tokens_avg": 871.333333,
+    "output_tokens_avg": 898.7,
+    "cost_usd_avg": 0.000602,
+    "cost_usd_total": 0.03611873,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 6.80845,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 1133.95,
+    "cached_read_tokens_avg": 75.55,
+    "reasoning_tokens_avg": 243.016667,
+    "output_tokens_avg": 251.5,
+    "cost_usd_avg": 0.000156,
+    "cost_usd_total": 0.00937747,
+    "cost_unpriced_any": true
+   }
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 0,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {},
+   "non_inferior": null,
+   "non_inferior_a3": null
+  }
+ },
+ "muse_high_b": {
+  "effort_requested": "high",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "ABSTAIN": 15,
+   "REJECT": 45
+  },
+  "final_allow_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "approve_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 16,
+   "denominator": 60,
+   "rate": 0.266667,
+   "wilson_95_ci": [
+    0.171326,
+    0.390087
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 16,
+   "denominator": 60,
+   "rate": 0.266667,
+   "wilson_95_ci": [
+    0.171326,
+    0.390087
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 44,
+   "denominator": 60,
+   "rate": 0.733333,
+   "wilson_95_ci": [
+    0.609913,
+    0.828674
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 121.471083,
+    "latency_sec_p50": 7.648,
+    "input_tokens_avg": 17228.216667,
+    "cached_read_tokens_avg": 1013.216667,
+    "reasoning_tokens_avg": 3497.15,
+    "output_tokens_avg": 4938.816667,
+    "cost_usd_avg": 0.002611,
+    "cost_usd_total": 0.1566774,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 8.105433,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 4729.683333,
+    "cached_read_tokens_avg": 472.483333,
+    "reasoning_tokens_avg": 1030.6,
+    "output_tokens_avg": 1058.483333,
+    "cost_usd_avg": 0.000638,
+    "cost_usd_total": 0.03830172,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 7.1042,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 1137.766667,
+    "cached_read_tokens_avg": 56.85,
+    "reasoning_tokens_avg": 227.783333,
+    "output_tokens_avg": 236.216667,
+    "cost_usd_avg": 0.000155,
+    "cost_usd_total": 0.00932691,
+    "cost_unpriced_any": false
+   }
+  },
+  "agreement_vs_high_a": {
+   "n": 60,
+   "decision_state_agreement": {
+    "numerator": 60,
+    "denominator": 60,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.939828,
+     1.0
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 60,
+    "denominator": 60,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.939828,
+     1.0
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 58,
+    "denominator": 60,
+    "rate": 0.966667,
+    "wilson_95_ci": [
+     0.886362,
+     0.990811
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 59,
+    "denominator": 60,
+    "rate": 0.983333,
+    "wilson_95_ci": [
+     0.911449,
+     0.997052
+    ]
+   },
+   "quality_score_mad": 0.173333
+  },
+  "agreement_vs_high_a_clean": {
+   "n": 15,
+   "decision_state_agreement": {
+    "numerator": 15,
+    "denominator": 15,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.796117,
+     1.0
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 15,
+    "denominator": 15,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.796117,
+     1.0
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 13,
+    "denominator": 15,
+    "rate": 0.866667,
+    "wilson_95_ci": [
+     0.62118,
+     0.962639
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 15,
+    "denominator": 15,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.796117,
+     1.0
+    ]
+   },
+   "quality_score_mad": 0.44
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 0,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {},
+   "non_inferior": null,
+   "non_inferior_a3": null
+  }
+ },
+ "muse_high_compact": {
+  "effort_requested": "high",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "APPROVE": 1,
+   "REJECT": 51,
+   "ABSTAIN": 8
+  },
+  "final_allow_rate": {
+   "numerator": 1,
+   "denominator": 60,
+   "rate": 0.016667,
+   "wilson_95_ci": [
+    0.002948,
+    0.088551
+   ]
+  },
+  "approve_rate": {
+   "numerator": 1,
+   "denominator": 60,
+   "rate": 0.016667,
+   "wilson_95_ci": [
+    0.002948,
+    0.088551
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 10,
+   "denominator": 60,
+   "rate": 0.166667,
+   "wilson_95_ci": [
+    0.093132,
+    0.280316
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 10,
+   "denominator": 60,
+   "rate": 0.166667,
+   "wilson_95_ci": [
+    0.093132,
+    0.280316
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 50,
+   "denominator": 60,
+   "rate": 0.833333,
+   "wilson_95_ci": [
+    0.719684,
+    0.906868
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 116.144283,
+    "latency_sec_p50": 9.998,
+    "input_tokens_avg": 12235.183333,
+    "cached_read_tokens_avg": 1034.05,
+    "reasoning_tokens_avg": 3047.583333,
+    "output_tokens_avg": 4375.516667,
+    "cost_usd_avg": 0.001997,
+    "cost_usd_total": 0.11983713,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 5.182067,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 2814.25,
+    "cached_read_tokens_avg": 326.033333,
+    "reasoning_tokens_avg": 669.416667,
+    "output_tokens_avg": 688.466667,
+    "cost_usd_avg": 0.000387,
+    "cost_usd_total": 0.02323004,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 4.821033,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 558.1,
+    "cached_read_tokens_avg": 50.45,
+    "reasoning_tokens_avg": 157.6,
+    "output_tokens_avg": 162.583333,
+    "cost_usd_avg": 8.3e-05,
+    "cost_usd_total": 0.00500295,
+    "cost_unpriced_any": true
+   }
+  },
+  "agreement_vs_high_a": {
+   "n": 60,
+   "decision_state_agreement": {
+    "numerator": 53,
+    "denominator": 60,
+    "rate": 0.883333,
+    "wilson_95_ci": [
+     0.778212,
+     0.942323
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 59,
+    "denominator": 60,
+    "rate": 0.983333,
+    "wilson_95_ci": [
+     0.911449,
+     0.997052
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 56,
+    "denominator": 60,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.840746,
+     0.973771
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 59,
+    "denominator": 60,
+    "rate": 0.983333,
+    "wilson_95_ci": [
+     0.911449,
+     0.997052
+    ]
+   },
+   "quality_score_mad": 0.726667
+  },
+  "agreement_vs_high_a_clean": {
+   "n": 9,
+   "decision_state_agreement": {
+    "numerator": 8,
+    "denominator": 9,
+    "rate": 0.888889,
+    "wilson_95_ci": [
+     0.565,
+     0.980109
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 8,
+    "denominator": 9,
+    "rate": 0.888889,
+    "wilson_95_ci": [
+     0.565,
+     0.980109
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 8,
+    "denominator": 9,
+    "rate": 0.888889,
+    "wilson_95_ci": [
+     0.565,
+     0.980109
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 9,
+    "denominator": 9,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.700855,
+     1.0
+    ]
+   },
+   "quality_score_mad": 0.566667
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 1,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {
+    "a_S1_zero": true,
+    "b_S2_within_high_vs_high_noise": false,
+    "c_schema_valid_ge_high_minus_2pp": false,
+    "c_semantic_valid_ge_high_minus_2pp": false,
+    "d_state_agreement_ge_noise_minus_5pp": false,
+    "e_infra_failure_le_high": false,
+    "non_inferior": false,
+    "addendum_a3": {
+     "d_clean_state_agreement_ge_clean_noise_minus_5pp": false,
+     "n_clean_pairs_ge_min": false,
+     "no_usage_limit_refusals_left": false,
+     "non_inferior_a3": false
+    }
+   },
+   "non_inferior": false,
+   "non_inferior_a3": false
+  },
+  "savings_vs_high": {
+   "tokens_per_request_avg": {
+    "arm": 20834.1,
+    "high": 29134.925,
+    "delta_pct": -28.5
+   },
+   "cost_usd_per_request_avg": {
+    "arm": 0.002467,
+    "high": 0.003333,
+    "delta_pct": -26.0
+   },
+   "latency_sec_per_request_avg": {
+    "arm": 126.147,
+    "high": 135.179608,
+    "delta_pct": -6.7
+   }
+  }
+ },
+ "muse_low": {
+  "effort_requested": "low",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "ABSTAIN": 16,
+   "REJECT": 44
+  },
+  "final_allow_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "approve_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 20,
+   "denominator": 60,
+   "rate": 0.333333,
+   "wilson_95_ci": [
+    0.227293,
+    0.459431
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 20,
+   "denominator": 60,
+   "rate": 0.333333,
+   "wilson_95_ci": [
+    0.227293,
+    0.459431
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 40,
+   "denominator": 60,
+   "rate": 0.666667,
+   "wilson_95_ci": [
+    0.540569,
+    0.772707
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 51.578217,
+    "latency_sec_p50": 8.79,
+    "input_tokens_avg": 17868.183333,
+    "cached_read_tokens_avg": 651.3,
+    "reasoning_tokens_avg": 672.6,
+    "output_tokens_avg": 2034.0,
+    "cost_usd_avg": 0.00213,
+    "cost_usd_total": 0.12778748,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 5.18995,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 6849.05,
+    "cached_read_tokens_avg": 550.416667,
+    "reasoning_tokens_avg": 517.133333,
+    "output_tokens_avg": 560.066667,
+    "cost_usd_avg": 0.000743,
+    "cost_usd_total": 0.04457867,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 5.92995,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 1569.85,
+    "cached_read_tokens_avg": 56.85,
+    "reasoning_tokens_avg": 128.25,
+    "output_tokens_avg": 139.483333,
+    "cost_usd_avg": 0.000179,
+    "cost_usd_total": 0.01075861,
+    "cost_unpriced_any": false
+   }
+  },
+  "agreement_vs_high_a": {
+   "n": 60,
+   "decision_state_agreement": {
+    "numerator": 57,
+    "denominator": 60,
+    "rate": 0.95,
+    "wilson_95_ci": [
+     0.862995,
+     0.98285
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 60,
+    "denominator": 60,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.939828,
+     1.0
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 56,
+    "denominator": 60,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.840746,
+     0.973771
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 56,
+    "denominator": 60,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.840746,
+     0.973771
+    ]
+   },
+   "quality_score_mad": 0.51
+  },
+  "agreement_vs_high_a_clean": {
+   "n": 15,
+   "decision_state_agreement": {
+    "numerator": 14,
+    "denominator": 15,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.701835,
+     0.988133
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 15,
+    "denominator": 15,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.796117,
+     1.0
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 11,
+    "denominator": 15,
+    "rate": 0.733333,
+    "wilson_95_ci": [
+     0.480496,
+     0.891025
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 14,
+    "denominator": 15,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.701835,
+     0.988133
+    ]
+   },
+   "quality_score_mad": 0.473333
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 0,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {
+    "a_S1_zero": true,
+    "b_S2_within_high_vs_high_noise": true,
+    "c_schema_valid_ge_high_minus_2pp": true,
+    "c_semantic_valid_ge_high_minus_2pp": true,
+    "d_state_agreement_ge_noise_minus_5pp": true,
+    "e_infra_failure_le_high": true,
+    "non_inferior": true,
+    "addendum_a3": {
+     "d_clean_state_agreement_ge_clean_noise_minus_5pp": false,
+     "n_clean_pairs_ge_min": false,
+     "no_usage_limit_refusals_left": false,
+     "non_inferior_a3": false
+    }
+   },
+   "non_inferior": true,
+   "non_inferior_a3": false
+  },
+  "savings_vs_high": {
+   "tokens_per_request_avg": {
+    "arm": 29020.6,
+    "high": 29134.925,
+    "delta_pct": -0.4
+   },
+   "cost_usd_per_request_avg": {
+    "arm": 0.003052,
+    "high": 0.003333,
+    "delta_pct": -8.4
+   },
+   "latency_sec_per_request_avg": {
+    "arm": 62.698,
+    "high": 135.179608,
+    "delta_pct": -53.6
+   }
+  }
+ },
+ "muse_medium": {
+  "effort_requested": "medium",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "REJECT": 47,
+   "ABSTAIN": 13
+  },
+  "final_allow_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "approve_rate": {
+   "numerator": 0,
+   "denominator": 60,
+   "rate": 0.0,
+   "wilson_95_ci": [
+    0.0,
+    0.060172
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 14,
+   "denominator": 60,
+   "rate": 0.233333,
+   "wilson_95_ci": [
+    0.144396,
+    0.354363
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 14,
+   "denominator": 60,
+   "rate": 0.233333,
+   "wilson_95_ci": [
+    0.144396,
+    0.354363
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 46,
+   "denominator": 60,
+   "rate": 0.766667,
+   "wilson_95_ci": [
+    0.645637,
+    0.855604
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 79.074783,
+    "latency_sec_p50": 8.433,
+    "input_tokens_avg": 14837.583333,
+    "cached_read_tokens_avg": 325.65,
+    "reasoning_tokens_avg": 1648.8,
+    "output_tokens_avg": 2837.1,
+    "cost_usd_avg": 0.002019,
+    "cost_usd_total": 0.12115589,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 5.260817,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 4221.616667,
+    "cached_read_tokens_avg": 315.366667,
+    "reasoning_tokens_avg": 618.766667,
+    "output_tokens_avg": 642.8,
+    "cost_usd_avg": 0.00052,
+    "cost_usd_total": 0.03118896,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 8.709717,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 1354.233333,
+    "cached_read_tokens_avg": 69.4,
+    "reasoning_tokens_avg": 222.916667,
+    "output_tokens_avg": 233.25,
+    "cost_usd_avg": 0.000175,
+    "cost_usd_total": 0.01051632,
+    "cost_unpriced_any": false
+   }
+  },
+  "agreement_vs_high_a": {
+   "n": 60,
+   "decision_state_agreement": {
+    "numerator": 56,
+    "denominator": 60,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.840746,
+     0.973771
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 60,
+    "denominator": 60,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.939828,
+     1.0
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 57,
+    "denominator": 60,
+    "rate": 0.95,
+    "wilson_95_ci": [
+     0.862995,
+     0.98285
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 59,
+    "denominator": 60,
+    "rate": 0.983333,
+    "wilson_95_ci": [
+     0.911449,
+     0.997052
+    ]
+   },
+   "quality_score_mad": 0.518333
+  },
+  "agreement_vs_high_a_clean": {
+   "n": 12,
+   "decision_state_agreement": {
+    "numerator": 12,
+    "denominator": 12,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.757506,
+     1.0
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 12,
+    "denominator": 12,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.757506,
+     1.0
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 10,
+    "denominator": 12,
+    "rate": 0.833333,
+    "wilson_95_ci": [
+     0.551969,
+     0.953035
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 12,
+    "denominator": 12,
+    "rate": 1.0,
+    "wilson_95_ci": [
+     0.757506,
+     1.0
+    ]
+   },
+   "quality_score_mad": 0.341667
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 0,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {
+    "a_S1_zero": true,
+    "b_S2_within_high_vs_high_noise": true,
+    "c_schema_valid_ge_high_minus_2pp": true,
+    "c_semantic_valid_ge_high_minus_2pp": true,
+    "d_state_agreement_ge_noise_minus_5pp": false,
+    "e_infra_failure_le_high": false,
+    "non_inferior": false,
+    "addendum_a3": {
+     "d_clean_state_agreement_ge_clean_noise_minus_5pp": true,
+     "n_clean_pairs_ge_min": false,
+     "no_usage_limit_refusals_left": false,
+     "non_inferior_a3": false
+    }
+   },
+   "non_inferior": false,
+   "non_inferior_a3": false
+  },
+  "savings_vs_high": {
+   "tokens_per_request_avg": {
+    "arm": 24126.6,
+    "high": 29134.925,
+    "delta_pct": -17.2
+   },
+   "cost_usd_per_request_avg": {
+    "arm": 0.002714,
+    "high": 0.003333,
+    "delta_pct": -18.6
+   },
+   "latency_sec_per_request_avg": {
+    "arm": 93.045,
+    "high": 135.179608,
+    "delta_pct": -31.2
+   }
+  }
+ },
+ "muse_minimal": {
+  "effort_requested": "minimal",
+  "n_planned": 60,
+  "n_completed_ok": 60,
+  "n_error": 0,
+  "decision_state_distribution": {
+   "APPROVE": 1,
+   "ABSTAIN": 13,
+   "REJECT": 46
+  },
+  "final_allow_rate": {
+   "numerator": 1,
+   "denominator": 60,
+   "rate": 0.016667,
+   "wilson_95_ci": [
+    0.002948,
+    0.088551
+   ]
+  },
+  "approve_rate": {
+   "numerator": 1,
+   "denominator": 60,
+   "rate": 0.016667,
+   "wilson_95_ci": [
+    0.002948,
+    0.088551
+   ]
+  },
+  "schema_valid_rate": {
+   "numerator": 20,
+   "denominator": 60,
+   "rate": 0.333333,
+   "wilson_95_ci": [
+    0.227293,
+    0.459431
+   ]
+  },
+  "semantic_valid_rate": {
+   "numerator": 20,
+   "denominator": 60,
+   "rate": 0.333333,
+   "wilson_95_ci": [
+    0.227293,
+    0.459431
+   ]
+  },
+  "infra_failure_rate": {
+   "numerator": 40,
+   "denominator": 60,
+   "rate": 0.666667,
+   "wilson_95_ci": [
+    0.540569,
+    0.772707
+   ]
+  },
+  "roles": {
+   "analyst": {
+    "latency_sec_avg": 37.9159,
+    "latency_sec_p50": 7.558,
+    "input_tokens_avg": 17867.116667,
+    "cached_read_tokens_avg": 478.75,
+    "reasoning_tokens_avg": 235.0,
+    "output_tokens_avg": 1572.65,
+    "cost_usd_avg": 0.002054,
+    "cost_usd_total": 0.12325946,
+    "cost_unpriced_any": true
+   },
+   "critic": {
+    "latency_sec_avg": 3.219567,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 6824.25,
+    "cached_read_tokens_avg": 663.233333,
+    "reasoning_tokens_avg": 214.266667,
+    "output_tokens_avg": 256.083333,
+    "cost_usd_avg": 0.000669,
+    "cost_usd_total": 0.0401187,
+    "cost_unpriced_any": true
+   },
+   "adjudicator": {
+    "latency_sec_avg": 4.789217,
+    "latency_sec_p50": 0.0,
+    "input_tokens_avg": 1568.283333,
+    "cached_read_tokens_avg": 69.4,
+    "reasoning_tokens_avg": 47.833333,
+    "output_tokens_avg": 58.716667,
+    "cost_usd_avg": 0.000162,
+    "cost_usd_total": 0.00970622,
+    "cost_unpriced_any": false
+   }
+  },
+  "agreement_vs_high_a": {
+   "n": 60,
+   "decision_state_agreement": {
+    "numerator": 54,
+    "denominator": 60,
+    "rate": 0.9,
+    "wilson_95_ci": [
+     0.798505,
+     0.953357
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 59,
+    "denominator": 60,
+    "rate": 0.983333,
+    "wilson_95_ci": [
+     0.911449,
+     0.997052
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 54,
+    "denominator": 60,
+    "rate": 0.9,
+    "wilson_95_ci": [
+     0.798505,
+     0.953357
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 54,
+    "denominator": 60,
+    "rate": 0.9,
+    "wilson_95_ci": [
+     0.798505,
+     0.953357
+    ]
+   },
+   "quality_score_mad": 0.533333
+  },
+  "agreement_vs_high_a_clean": {
+   "n": 15,
+   "decision_state_agreement": {
+    "numerator": 11,
+    "denominator": 15,
+    "rate": 0.733333,
+    "wilson_95_ci": [
+     0.480496,
+     0.891025
+    ]
+   },
+   "final_allow_agreement": {
+    "numerator": 14,
+    "denominator": 15,
+    "rate": 0.933333,
+    "wilson_95_ci": [
+     0.701835,
+     0.988133
+    ]
+   },
+   "selected_candidate_agreement": {
+    "numerator": 10,
+    "denominator": 15,
+    "rate": 0.666667,
+    "wilson_95_ci": [
+     0.417135,
+     0.848237
+    ]
+   },
+   "veto_code_agreement": {
+    "numerator": 12,
+    "denominator": 15,
+    "rate": 0.8,
+    "wilson_95_ci": [
+     0.548146,
+     0.929525
+    ]
+   },
+   "quality_score_mad": 0.74
+  },
+  "safety": {
+   "S1": 0,
+   "S2": 1,
+   "S3": 0,
+   "S1_detail": [],
+   "n_requests_with_both_high_completed": 60,
+   "S2_high_vs_high_noise_count": 0
+  },
+  "ben005": {
+   "conditions": {
+    "a_S1_zero": true,
+    "b_S2_within_high_vs_high_noise": false,
+    "c_schema_valid_ge_high_minus_2pp": true,
+    "c_semantic_valid_ge_high_minus_2pp": true,
+    "d_state_agreement_ge_noise_minus_5pp": false,
+    "e_infra_failure_le_high": true,
+    "non_inferior": false,
+    "addendum_a3": {
+     "d_clean_state_agreement_ge_clean_noise_minus_5pp": false,
+     "n_clean_pairs_ge_min": false,
+     "no_usage_limit_refusals_left": false,
+     "non_inferior_a3": false
+    }
+   },
+   "non_inferior": false,
+   "non_inferior_a3": false
+  },
+  "savings_vs_high": {
+   "tokens_per_request_avg": {
+    "arm": 28147.1,
+    "high": 29134.925,
+    "delta_pct": -3.4
+   },
+   "cost_usd_per_request_avg": {
+    "arm": 0.002885,
+    "high": 0.003333,
+    "delta_pct": -13.4
+   },
+   "latency_sec_per_request_avg": {
+    "arm": 45.925,
+    "high": 135.179608,
+    "delta_pct": -66.0
+   }
+  }
+ },
+ "_noise_high_a_vs_high_b": {
+  "n": 60,
+  "decision_state_agreement": {
+   "numerator": 60,
+   "denominator": 60,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.939828,
+    1.0
+   ]
+  },
+  "final_allow_agreement": {
+   "numerator": 60,
+   "denominator": 60,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.939828,
+    1.0
+   ]
+  },
+  "selected_candidate_agreement": {
+   "numerator": 58,
+   "denominator": 60,
+   "rate": 0.966667,
+   "wilson_95_ci": [
+    0.886362,
+    0.990811
+   ]
+  },
+  "veto_code_agreement": {
+   "numerator": 59,
+   "denominator": 60,
+   "rate": 0.983333,
+   "wilson_95_ci": [
+    0.911449,
+    0.997052
+   ]
+  },
+  "quality_score_mad": 0.173333
+ },
+ "_noise_high_a_vs_high_b_clean": {
+  "n": 15,
+  "decision_state_agreement": {
+   "numerator": 15,
+   "denominator": 15,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.796117,
+    1.0
+   ]
+  },
+  "final_allow_agreement": {
+   "numerator": 15,
+   "denominator": 15,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.796117,
+    1.0
+   ]
+  },
+  "selected_candidate_agreement": {
+   "numerator": 13,
+   "denominator": 15,
+   "rate": 0.866667,
+   "wilson_95_ci": [
+    0.62118,
+    0.962639
+   ]
+  },
+  "veto_code_agreement": {
+   "numerator": 15,
+   "denominator": 15,
+   "rate": 1.0,
+   "wilson_95_ci": [
+    0.796117,
+    1.0
+   ]
+  },
+  "quality_score_mad": 0.44
+ },
+ "_meta": {
+  "generated_utc": "2026-09-13T20:21:28Z",
+  "manifest_request_count": 187,
+  "high_arms": [
+   "muse_high_a",
+   "muse_high_b"
+  ],
+  "n_requests_with_both_high_completed": 60,
+  "s2_high_vs_high_noise_count": 0,
+  "definitions_note": "S1: arm APPROVE or python_final_allow=true on a candidate BOTH HIGH runs REJECTed with an evidence-backed per-candidate veto. S2: arm python_final_allow=true where BOTH HIGH runs' python_final_allow is false; the BEN-005(b) noise count is the number of requests where the two HIGH runs themselves disagree on python_final_allow. S3: arm REJECT/ABSTAIN where both HIGH runs had python_final_allow=true. selected-candidate agreement compares selected_candidate_id (empty==empty counts as agreement). schema_valid = tier FULL_STRUCTURED and mandatory_fields_complete; semantic_valid adds empty missing/invalid mandatory field lists and a decision_source that is not an infrastructure outcome; infra_failed = status error or tier != FULL_STRUCTURED or an infrastructure decision_source."
+ }
+}

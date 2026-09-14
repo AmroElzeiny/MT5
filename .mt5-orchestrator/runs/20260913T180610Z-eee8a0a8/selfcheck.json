@@ -1,0 +1,358 @@
+{
+ "generated_utc": "2026-09-13T20:10:37Z",
+ "mode": "live",
+ "harness_controls": {
+  "AI_REQUIRE_REPEATABILITY_LIVE": null,
+  "AI_SHADOW_REPEAT_ENABLE": null
+ },
+ "requests": [
+  "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+  "591813800_1788925102_208218984_1788951325_USDCHF_19925",
+  "903871_1789148402_173202328_1789151032_EURAUD_5869",
+  "903871_1788999394_24185000_1789004983_NAS100_9597",
+  "591813800_1785715200_305658125_1785759967_BITCOIN_9173",
+  "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+  "903871_1788983285_8075437_1788995216_GBPCAD_29371",
+  "591813800_1785715200_305658125_1785725109_GOLD_25455",
+  "903871_1789093630_118426656_1789096071_XAUUSD_13096",
+  "903871_1788983285_8075437_1788988231_NZDJPY_13045",
+  "903871_1789148402_173202328_1789155320_UK100_2328",
+  "591813800_1785715200_305658125_1785768982_USDCHF_2988",
+  "903871_1789062748_87542921_1789068109_US30_16044",
+  "591813800_1785715200_305658125_1785740735_BITCOIN_469",
+  "903871_1789062748_87542921_1789071381_USDCHF_5236",
+  "903871_1788983285_8075437_1788988231_EURAUD_21885",
+  "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+  "903871_1788999394_24185000_1789002917_NAS100_10901",
+  "903871_1788999394_24185000_1789033279_NZDJPY_20411",
+  "591813800_1785715200_305658125_1785753356_GBPUSD_22093",
+  "903871_1789093630_118426656_1789094249_US30_14363",
+  "903871_1789093630_118426656_1789098513_AUDJPY_32323",
+  "903871_1789148402_173202328_1789154707_GBPUSD_19340",
+  "903871_1789148402_173202328_1789149197_WTI_22682",
+  "903871_1789062748_87542921_1789066099_US30_18866",
+  "903871_1789093630_118426656_1789102197_XAUUSD_1646",
+  "903871_1789093630_118426656_1789102811_CHFJPY_32047",
+  "903871_1789093630_118426656_1789097294_USDJPY_5699",
+  "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+  "903871_1789093630_118426656_1789094249_WTI_24227",
+  "903871_1788999394_24185000_1789028921_JPN225_10535",
+  "903871_1788999394_24185000_1789036511_XAUUSD_7721",
+  "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+  "903871_1789062748_87542921_1789067423_US30_19703",
+  "903871_1789148402_173202328_1789152868_EURNZD_21011",
+  "903871_1789062748_87542921_1789064597_USDCHF_11315",
+  "591813800_1788837043_120154281_1788844299_#Germany40_9560",
+  "903871_1788999394_24185000_1789006198_GBPUSD_2800",
+  "903871_1789148402_173202328_1789162120_XAUUSD_19843",
+  "903871_1789148402_173202328_1789159027_XAUUSD_32549",
+  "903871_1788999394_24185000_1789005590_EURUSD_31539",
+  "591813800_1785715200_13176437_1785963899_#Germany40_14504",
+  "903871_1788983285_8075437_1788994470_NAS100_7194",
+  "591813800_1785715200_305658125_1785722705_GBPUSD_1359",
+  "591813800_1788925102_208218984_1788942756_AUDJPY_13213",
+  "591813800_1785715200_305658125_1785795426_GBPUSD_24102",
+  "591813800_1788048000_295326640_1788086757_BITCOIN_15339",
+  "903871_1789148402_173202328_1789156550_GER40_13532",
+  "591813800_1788925102_208218984_1788933039_GBPCAD_25813",
+  "591813800_1785715200_305658125_1785723306_#USNDAQ100_23435",
+  "591813800_1785715200_305658125_1785737129_BITCOIN_25456",
+  "591813800_1785715200_305658125_1785799633_GOLD_2121",
+  "591813800_1788925102_208218984_1788943973_GBPCAD_15336",
+  "591813800_1788048000_295326640_1788118610_BITCOIN_32222",
+  "903871_1789148402_173202328_1789159645_XAUUSD_14022",
+  "591813800_1788048000_295326640_1788124019_BITCOIN_4564",
+  "591813800_1788925102_208218984_1788949481_AUDJPY_26449",
+  "903871_1788999394_24185000_1789007417_EURUSD_31666",
+  "591813800_1785715200_305658125_1785778598_GBPCAD_4044",
+  "591813800_1788048000_295326640_1788111999_BITCOIN_30760"
+ ],
+ "arms": [
+  "muse_high_a",
+  "muse_high_b",
+  "muse_medium",
+  "muse_low",
+  "muse_minimal",
+  "luna_low_flex"
+ ],
+ "seed": 20260913,
+ "pairs_planned": 360,
+ "pairs_skipped_ok": [],
+ "stopped_after_go_limit": false,
+ "go_usage_limit_events": [],
+ "arm_wire_selfcheck": {
+  "muse_high_a": {
+   "effort_requested": "high",
+   "effort_observed_on_wire": [
+    "high"
+   ],
+   "wire_matches_requested": true,
+   "provider_ids": [
+    "opencode_go_responses"
+   ],
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "fallback_rows": 0,
+   "no_fallback": true,
+   "pairs_with_results": 60
+  },
+  "muse_high_b": {
+   "effort_requested": "high",
+   "effort_observed_on_wire": [
+    "high"
+   ],
+   "wire_matches_requested": true,
+   "provider_ids": [
+    "opencode_go_responses"
+   ],
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "fallback_rows": 0,
+   "no_fallback": true,
+   "pairs_with_results": 60
+  },
+  "muse_medium": {
+   "effort_requested": "medium",
+   "effort_observed_on_wire": [
+    "medium"
+   ],
+   "wire_matches_requested": true,
+   "provider_ids": [
+    "opencode_go_responses"
+   ],
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "fallback_rows": 0,
+   "no_fallback": true,
+   "pairs_with_results": 60
+  },
+  "muse_low": {
+   "effort_requested": "low",
+   "effort_observed_on_wire": [
+    "low"
+   ],
+   "wire_matches_requested": true,
+   "provider_ids": [
+    "opencode_go_responses"
+   ],
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "fallback_rows": 0,
+   "no_fallback": true,
+   "pairs_with_results": 60
+  },
+  "muse_minimal": {
+   "effort_requested": "minimal",
+   "effort_observed_on_wire": [
+    "minimal"
+   ],
+   "wire_matches_requested": true,
+   "provider_ids": [
+    "opencode_go_responses"
+   ],
+   "models": [
+    "muse-spark-1.3-contributor"
+   ],
+   "fallback_rows": 0,
+   "no_fallback": true,
+   "pairs_with_results": 60
+  },
+  "luna_low_flex": {
+   "effort_requested": "low",
+   "effort_observed_on_wire": [
+    "low"
+   ],
+   "wire_matches_requested": true,
+   "provider_ids": [
+    "openai_remote_api"
+   ],
+   "models": [
+    "gpt-5.6-luna"
+   ],
+   "fallback_rows": 0,
+   "no_fallback": true,
+   "pairs_with_results": 60
+  }
+ },
+ "isolation": {
+  "before": {
+   "captured_utc": "2026-09-13T19:37:04Z",
+   "files": {
+    "bus/logs/openai_usage.ndjson": {
+     "exists": true,
+     "size": 13927516,
+     "mtime_ns": 1789304188107876500
+    },
+    "bus/logs/opencode_go_attempts.ndjson": {
+     "exists": false,
+     "size": null,
+     "mtime_ns": null
+    },
+    "bus/logs/shadow_candidates.jsonl": {
+     "exists": true,
+     "size": 220219784,
+     "mtime_ns": 1789266758060960700
+    },
+    "python/data/ai_trade_memory.sqlite3": {
+     "exists": true,
+     "size": 39186432,
+     "mtime_ns": 1789304189360322500
+    },
+    "python/data/ai_decision_cache.jsonl": {
+     "exists": true,
+     "size": 153982064,
+     "mtime_ns": 1789304169509765700
+    },
+    "python/data/ai_repeatability_artifact.json": {
+     "exists": true,
+     "size": 114975,
+     "mtime_ns": 1789302815353325100
+    },
+    "python/logs/ai_cost_report.jsonl": {
+     "exists": true,
+     "size": 34301879,
+     "mtime_ns": 1789308791083642800
+    },
+    "python/logs/ai_request_response_fingerprints.jsonl": {
+     "exists": true,
+     "size": 103250472,
+     "mtime_ns": 1789304169665867300
+    }
+   },
+   "trees": {
+    "bus/completed": {
+     "exists": true,
+     "entries": 517,
+     "digest": "26462db3ab3355d81ecdd0819ca71317fe52efc2a6f94adfa1cf085479b98eb7"
+    },
+    "bus/rejected": {
+     "exists": true,
+     "entries": 19973,
+     "digest": "0f99c88fa418ac24696434f5b47f872f4754474d8787a9e8172cec78ce9695a2"
+    },
+    "bus/response_debug": {
+     "exists": true,
+     "entries": 3458,
+     "digest": "e1b446071e004a2ca8be2b96295c35d85cdf0c5606e20b89844b7d7c242e0211"
+    },
+    "bus/requests": {
+     "exists": true,
+     "entries": 11098,
+     "digest": "9b93cf23bcfdece1bf0a951f9883132281aa38a964311b05b6a784047ea8be8b"
+    },
+    "bus/responses": {
+     "exists": true,
+     "entries": 349,
+     "digest": "a3b0c46c471c3120a2dd4af878f0b5c6dcc64714bcf07a87c6d964ed589f2ec7"
+    },
+    "bus/processing": {
+     "exists": true,
+     "entries": 85,
+     "digest": "4bdd0ac7b6c58e4d96911c221fb0b47e3f5af0b892a565b889a02a3283d2c633"
+    },
+    "python/logs": {
+     "exists": true,
+     "entries": 2,
+     "digest": "f6eaf023b18fdf7cbee1cca8809557b5e41c935908e8e2662258fff74329fdb2"
+    }
+   },
+   "digest": "af17e2bdda233b9d7fd3f7bbb2b14681c57f5bf34e027d960b0286fdad3257ca"
+  },
+  "after": {
+   "captured_utc": "2026-09-13T20:10:27Z",
+   "files": {
+    "bus/logs/openai_usage.ndjson": {
+     "exists": true,
+     "size": 13927516,
+     "mtime_ns": 1789304188107876500
+    },
+    "bus/logs/opencode_go_attempts.ndjson": {
+     "exists": false,
+     "size": null,
+     "mtime_ns": null
+    },
+    "bus/logs/shadow_candidates.jsonl": {
+     "exists": true,
+     "size": 220219784,
+     "mtime_ns": 1789266758060960700
+    },
+    "python/data/ai_trade_memory.sqlite3": {
+     "exists": true,
+     "size": 39387136,
+     "mtime_ns": 1789330107387280500
+    },
+    "python/data/ai_decision_cache.jsonl": {
+     "exists": true,
+     "size": 159767970,
+     "mtime_ns": 1789330226917192100
+    },
+    "python/data/ai_repeatability_artifact.json": {
+     "exists": true,
+     "size": 121748,
+     "mtime_ns": 1789329467533149200
+    },
+    "python/logs/ai_cost_report.jsonl": {
+     "exists": true,
+     "size": 34304967,
+     "mtime_ns": 1789329912080796700
+    },
+    "python/logs/ai_request_response_fingerprints.jsonl": {
+     "exists": true,
+     "size": 103250472,
+     "mtime_ns": 1789304169665867300
+    }
+   },
+   "trees": {
+    "bus/completed": {
+     "exists": true,
+     "entries": 517,
+     "digest": "26462db3ab3355d81ecdd0819ca71317fe52efc2a6f94adfa1cf085479b98eb7"
+    },
+    "bus/rejected": {
+     "exists": true,
+     "entries": 19973,
+     "digest": "0f99c88fa418ac24696434f5b47f872f4754474d8787a9e8172cec78ce9695a2"
+    },
+    "bus/response_debug": {
+     "exists": true,
+     "entries": 3458,
+     "digest": "e1b446071e004a2ca8be2b96295c35d85cdf0c5606e20b89844b7d7c242e0211"
+    },
+    "bus/requests": {
+     "exists": true,
+     "entries": 11098,
+     "digest": "9b93cf23bcfdece1bf0a951f9883132281aa38a964311b05b6a784047ea8be8b"
+    },
+    "bus/responses": {
+     "exists": true,
+     "entries": 349,
+     "digest": "a3b0c46c471c3120a2dd4af878f0b5c6dcc64714bcf07a87c6d964ed589f2ec7"
+    },
+    "bus/processing": {
+     "exists": true,
+     "entries": 85,
+     "digest": "4bdd0ac7b6c58e4d96911c221fb0b47e3f5af0b892a565b889a02a3283d2c633"
+    },
+    "python/logs": {
+     "exists": true,
+     "entries": 2,
+     "digest": "9bd193e289cedb742c814ded89b3912a36c72741daa09954710b2bea58cbed8d"
+    }
+   },
+   "digest": "2e837ea561812654c08637a73d70a13f697cafa8bab4c19b1d66be152ced9237"
+  },
+  "unchanged": false,
+  "changed_paths": [
+   "python/data/ai_trade_memory.sqlite3",
+   "python/data/ai_decision_cache.jsonl",
+   "python/data/ai_repeatability_artifact.json",
+   "python/logs/ai_cost_report.jsonl",
+   "python/logs"
+  ],
+  "note": "A changed path while the production ai_gate/MT5 runtime is live is NOT proof the benchmark wrote it; the child-side redirections and in-process writer neutralization are the guarantee, this snapshot is the observation. Re-run with the gate stopped for a clean before/after."
+ }
+}

@@ -101,11 +101,11 @@ For every failure:
 1. Find the first incorrect state.
 2. Find every place that reads or reconstructs that state.
 3. Find every alternate path, cache path, retry path, error path, replay path, and restart path.
-4. Add tests that fail before the fix.
+4. For MAJOR changes only, add a focused test (see `.mt5-orchestrator/policy/BUDGET_POLICY.md` -> Test and compile cadence).
 5. Implement the root fix.
-6. Run focused tests.
-7. Run the full relevant suite.
-8. Compile affected MQL5/MQH code.
+6. Move on to the next change without running the suite or compiling.
+7. When ALL changes are finished: run the full Python suite once.
+8. When ALL changes are finished: compile affected MQL5/MQH code once.
 9. Re-run representative end-to-end fixtures.
 10. Review logs for the next blocker.
 11. Continue until the intended workflow is healthy.
@@ -138,14 +138,15 @@ Use the repository’s existing test files as the primary verification surface.
 
 ### Before editing
 
-- Locate all relevant tests.
-- Run them and record the baseline.
-- Identify missing coverage.
-- Add a regression test that reproduces every confirmed defect.
+- Locate the tests that own the changed module (do not run them yet).
 - Do not modify tests merely to accept broken behavior.
 
 ### During implementation
 
+- SMALL changes: no new tests, no test runs, no compile. `python -m py_compile` on changed files only.
+- MAJOR changes: one focused test file covering the main success path and the main fail-closed path; run only that file.
+
+For MAJOR changes, pick the relevant layers from this list (a menu, not a checklist):
 Use focused tests for each layer:
 
 - pure unit tests;
@@ -163,17 +164,14 @@ Use focused tests for each layer:
 
 ### After implementation
 
-Run:
+Once, after ALL work is finished (never per change or per work package), run:
 
-1. New regression tests.
-2. All tests touching changed modules.
-3. The complete Python test suite.
-4. Static checks and type checks available in the repository.
-5. MQL5 compilation for every affected EA/include.
-6. End-to-end fixtures using realistic request files.
-7. Record-only to cache-only replay tests.
-8. Representative failure-path tests.
-9. Log validation against explicit acceptance criteria.
+1. The complete Python test suite.
+2. MQL5 compilation for every affected EA/include (0 errors, 0 warnings, `.ex5` newer than every `.mqh`, repo == deployed).
+3. Static and type checks available in the repository.
+4. MAJOR changes only: end-to-end fixtures with realistic request files, record-only -> cache-only replay, representative failure paths, log validation.
+
+If anything fails: fix it, re-run only the failing tests, then run the full suite and compile once more.
 
 A green unit test is insufficient if the end-to-end workflow still degrades, times out, mismatches, or cannot trade when genuinely approved.
 
@@ -550,9 +548,9 @@ Every implementation response must include:
 
 1. Confirmed root causes.
 2. Why the visible symptom occurred.
-3. Why the root cause was deeper than the symptom.
-4. Files changed.
-5. Functions changed.
+3. MAJOR changes have focused tests; SMALL changes need none.
+4. The full test suite passes in the single final run.
+5. Affected MQL5 code compiles in the single final compile.
 6. Schema or contract changes.
 7. Tests added.
 8. Commands run.

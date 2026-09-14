@@ -7,6 +7,7 @@ from typing import Any, Callable, Mapping
 
 from ai_provider import AIProvider, ProviderResult
 from evidence_catalog import EvidenceCatalog, resolve_legacy_references
+from provider_wire_projection import WIRE_PROJECTION_METADATA_KEY, project_evidence_for_wire
 from decision_integrity import (
     AI_ROLE_CONTRACT_VERSION,
     DECISION_ABSTAIN,
@@ -68,6 +69,30 @@ def _adjudication_is_pointless(request_metadata: Mapping[str, Any]) -> bool:
     if floor is None or expectancy is None:
         return False
     return float(expectancy) <= float(floor)
+
+
+def _analyst_reject_makes_adjudication_pointless(
+    analyst_state: str,
+    request_metadata: Mapping[str, Any],
+) -> bool:
+    """True when the analyst's REJECT already fixes the consensus outcome.
+
+    ``run_qualitative_consensus`` resolves an analyst REJECT to
+    ``(REJECT, python_allow=False)`` on every path: without adjudication
+    (``analyst_reject``) and after it, whatever the verdict
+    (``analyst_state == REJECT or verdict == UPHOLD_BLOCK`` -> REJECT).  So an
+    adjudicator call can change neither the decision state nor the final allow
+    -- only cost, latency and one more way for the response to fail.
+
+    The same live-only and enable switches as the expectancy-floor rule apply,
+    so record-only and replay workloads keep a complete panel.
+    """
+
+    if not bool(request_metadata.get("adjudication_skip_enable")):
+        return False
+    if not bool(request_metadata.get("live_workload")):
+        return False
+    return str(analyst_state or "").upper() == DECISION_REJECT
 
 
 def _dump(value: Any) -> dict[str, Any]:
@@ -284,13 +309,18 @@ def run_qualitative_consensus(
         "The top-level evidence_ref_ids list is mandatory, and every objection needs evidence_ref_ids. "
         "Every such list must contain distinct integers copied only from allowed_evidence_ref_ids; "
         "never return a path string, duplicate an id, or invent an id. "
-        f"For this candidate the complete allowed id set is: {critic_allowed_ids}. "
         "Use ABSTAIN for uncertainty or insufficient evidence. Return strict JSON only and do not expose hidden reasoning. "
         "Reference only the supplied candidate_index; Python owns all request, "
         "candidate, provider, model, and schema identity."
         " Internal candidate IDs, hashes, fingerprints, and any embedded lineage prices are intentionally absent; "
         "they are not evidence and must never be reconstructed or compared with the executable entry. "
         "Treat target_semantics and family_event_evidence as the authoritative interpretation contracts."
+        # The one per-request sentence is LAST.  Everything above is identical
+        # for every critic call, so it forms a provider-cacheable prefix; when
+        # this id list sat in the middle, the rest of the instructions (and a
+        # schema placed after them) could never be reused across requests.
+        # Same words, same ids -- only the position moved.
+        f" For this candidate the complete allowed id set is: {critic_allowed_ids}."
     )
     critic_metadata = dict(request_metadata)
     if request_metadata.get("critic_timeout_sec") is not None:
@@ -298,7 +328,7 @@ def run_qualitative_consensus(
     critic_result = provider.generate_structured(
         role="critic",
         system_prompt=critic_prompt,
-        evidence=critic_evidence,
+        evidence=project_evidence_for_wire(critic_evidence, request_metadata.get(WIRE_PROJECTION_METADATA_KEY)),
         response_schema=ModelCriticDecision,
         request_metadata=critic_metadata,
     )
@@ -342,7 +372,7 @@ def run_qualitative_consensus(
         repaired_critic_result = provider.generate_structured(
             role="critic",
             system_prompt=repair_prompt,
-            evidence=critic_evidence,
+            evidence=project_evidence_for_wire(critic_evidence, request_metadata.get(WIRE_PROJECTION_METADATA_KEY)),
             response_schema=ModelCriticDecision,
             request_metadata=critic_metadata,
         )
@@ -414,7 +444,12 @@ def run_qualitative_consensus(
         or analyst_missing
         or near_deterministic_boundary
     )
-    skip_adjudication = requires_adjudication and _adjudication_is_pointless(request_metadata)
+    reject_invariant = requires_adjudication and _analyst_reject_makes_adjudication_pointless(
+        analyst_state, request_metadata
+    )
+    skip_adjudication = requires_adjudication and (
+        reject_invariant or _adjudication_is_pointless(request_metadata)
+    )
     if skip_adjudication and event_logger is not None:
         event_logger(
             "[adjudication_skipped]"
@@ -424,6 +459,7 @@ def run_qualitative_consensus(
             f" critic_verdict={critic_verdict}"
             f" expectancy={float(request_metadata.get('analyst_expectancy_score') or 0.0):.4f}"
             f" floor={float(request_metadata.get('adjudication_skip_floor') or 0.0):.4f}"
+            f" rule={'analyst_reject_outcome_invariant' if reject_invariant else 'hopeless_abstain_below_floor'}"
             " role_skipped=adjudicator critic_ran=true outcome_changed=false"
         )
 
@@ -431,7 +467,16 @@ def run_qualitative_consensus(
         if analyst_state == DECISION_APPROVE and critic_verdict == "PASS":
             return ConsensusResult(DECISION_APPROVE, True, "analyst_approve_critic_pass", critic, {}, critic_result, None)
         if analyst_state == DECISION_REJECT:
-            return ConsensusResult(DECISION_REJECT, False, "analyst_reject", critic, {}, critic_result, None)
+            return ConsensusResult(
+                DECISION_REJECT,
+                False,
+                "analyst_reject",
+                critic,
+                {},
+                critic_result,
+                None,
+                adjudication_skipped=skip_adjudication,
+            )
         if skip_adjudication:
             # Named for what actually happened, so a skipped adjudication is
             # never read back as an unresolved one.
@@ -478,12 +523,14 @@ def run_qualitative_consensus(
         "evidence_ref_ids is mandatory and must contain between 1 and 16 distinct integers. "
         "Use only ids visibly supplied in evidence_catalog.items, never duplicate an id, never invent an id, "
         "and never cite evidence belonging to another candidate. "
-        f"For this candidate the complete allowed id set is: {adjudicator_allowed_ids}. "
         "Reference only the supplied candidate_index; Python owns all request, "
         "candidate, provider, model, and schema identity."
         " Internal candidate IDs, hashes, fingerprints, and any embedded lineage prices are intentionally absent; "
         "they are not evidence and must never be reconstructed or compared with the executable entry. "
         "Treat target_semantics and family_event_evidence as the authoritative interpretation contracts."
+        # Per-request id list last, for the same prefix-cache reason as the
+        # critic prompt above.  Same words and ids; only the position moved.
+        f" For this candidate the complete allowed id set is: {adjudicator_allowed_ids}."
     )
     adjudicator_metadata = dict(request_metadata)
     if request_metadata.get("adjudicator_timeout_sec") is not None:
@@ -493,7 +540,7 @@ def run_qualitative_consensus(
     adjudicator_result = provider.generate_structured(
         role="adjudicator",
         system_prompt=adjudicator_prompt,
-        evidence=adjudicator_evidence,
+        evidence=project_evidence_for_wire(adjudicator_evidence, request_metadata.get(WIRE_PROJECTION_METADATA_KEY)),
         response_schema=ModelAdjudicatorDecision,
         request_metadata=adjudicator_metadata,
     )

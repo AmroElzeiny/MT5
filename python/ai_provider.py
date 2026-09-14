@@ -11,11 +11,14 @@ import inspect
 import ipaddress
 import json
 import math
+import re
 import copy
+import functools
 import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -48,6 +51,15 @@ PROVIDER_MODE_REMOTE = "REMOTE_API"
 PROVIDER_MODE_LOCAL = "LOCAL_OPENAI_COMPATIBLE"
 PROVIDER_MODE_OPENROUTER = "OPENROUTER_API"
 PROVIDER_MODE_OPENCODE = "OPENCODE_API"
+
+# The one system-wide concurrency ceiling (raised from 8/16 to 25 on
+# 2026-09-13).  It bounds the gate's request pool, every per-transport
+# parallelism setting that has no stricter structural limit, and the in-process
+# call semaphore of the Responses transport -- which Muse, the secondary
+# OpenCode leg and the Luna fallback all run on -- so no layer silently caps
+# concurrency below what the request pool was configured for.  The local
+# browser-bridge path keeps its own structural limit of 3 isolated lanes.
+MAX_PROVIDER_PARALLELISM = 25
 PROVIDER_MODE_UNAVAILABLE = "UNAVAILABLE"
 
 # Every mode MQL is willing to bind a decision to.  ``AIGateBridge.mqh`` and
@@ -509,6 +521,51 @@ class UnavailableProvider:
         raise RuntimeError(self.reason)
 
 
+# How long a RECOVERABLE configuration circuit refuses calls before one probe
+# may test whether the refusal still holds.  Chosen, not measured: the one
+# observed transient 403 (Muse, 2026-09-13 15:38) had cleared within ~25 min,
+# and a probe that meets the refusal again costs one failed call per cooldown.
+CONFIGURATION_RECOVERY_COOLDOWN_SEC = 300.0
+
+
+@dataclass
+class _ConfigurationCircuit:
+    """One open configuration circuit, keyed by provider/model/schema identity.
+
+    ``recoverable`` is decided once, from the classified failure that opened
+    the circuit -- never by parsing ``reason``, which for provider failures is
+    only the category string.  A non-recoverable circuit (bad key, invalid
+    schema, unknown model, unroutable request) stays open for the life of the
+    process exactly as before: waiting cannot fix our own configuration.
+    """
+
+    reason: str
+    recoverable: bool
+    opened_at: float
+    probe_token: object | None = None
+
+
+def _releases_configuration_probes(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Hand back any recovery probe this call claimed, on every exit path.
+
+    A claimed probe is resolved inside the call when the outcome is decisive
+    (success clears the circuit, a repeat refusal re-opens it).  Every other
+    exit -- a transport error, invalid JSON, a deadline stop, an exception
+    raised before the request was even sent -- must still free the probe, or
+    the circuit would be latched shut again by the very mechanism meant to
+    open it.  A ``finally`` at the one entry point covers all of them.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._release_configuration_probes()
+
+    return wrapper
+
+
 class _OpenAICompatibleProviderBase:
     # Cooldown waits are sliced so a worker notices another worker's recovery
     # (which zeroes ``_circuit_open_until``) instead of sleeping through it.
@@ -544,6 +601,7 @@ class _OpenAICompatibleProviderBase:
         client_factory: Callable[..., Any] | None = None,
         circuit_failure_threshold: int = 3,
         circuit_cooldown_sec: float = 60.0,
+        configuration_recovery_cooldown_sec: float = CONFIGURATION_RECOVERY_COOLDOWN_SEC,
     ) -> None:
         self.provider_mode = provider_mode
         self.provider_id = provider_id
@@ -571,7 +629,14 @@ class _OpenAICompatibleProviderBase:
         self._last_health: ProviderHealth | None = None
         self._known_model_fingerprint = ""
         self._unsupported_logged: set[str] = set()
-        self._configuration_circuits: dict[str, str] = {}
+        self._configuration_circuits: dict[str, _ConfigurationCircuit] = {}
+        self._configuration_recovery_cooldown_sec = max(
+            1.0, float(configuration_recovery_cooldown_sec)
+        )
+        # Recovery probes claimed by the calling thread, as (key, token) pairs.
+        # ``_releases_configuration_probes`` hands them back when
+        # generate_structured exits by any path, so a probe can never leak.
+        self._configuration_probe_claims = threading.local()
         # Admission-retry defaults.  Every transport carries the attributes so
         # the shared retry helpers below are usable from any subclass; a
         # subclass that has its own configuration overwrites them after
@@ -863,29 +928,116 @@ class _OpenAICompatibleProviderBase:
             }
         )
 
-    def _configuration_circuit_check(self, key: str) -> None:
-        with self._state_lock:
-            reason = self._configuration_circuits.get(key, "")
-        if reason:
-            raise ProviderCallError(
-                "PROVIDER_CONFIGURATION_ERROR",
-                "provider_configuration_block:" + reason,
-                configuration_block=True,
-                provider_call_attempted=False,
-                http_request_sent=False,
-            )
+    @staticmethod
+    def _configuration_block_recoverable(failure: ProviderCallError) -> bool:
+        """Whether waiting can plausibly clear this configuration refusal.
 
-    def _open_configuration_circuit(self, key: str, reason: str) -> None:
+        Only HTTP 403 ``permission_denied``.  It is the provider's verdict on
+        the account at that moment (plan, quota, model access), and it has been
+        observed to clear by itself: on 2026-09-13 Muse answered 403 at 15:38
+        and HTTP 200 on the same key, model and requests at ~16:05, yet the
+        permanent latch kept it unreachable for the whole gate session.  A 401,
+        an invalid schema, an unknown model or an unroutable request describe
+        OUR configuration, which no amount of waiting changes.
+        """
+
+        return failure.status_code == 403
+
+    def _configuration_circuit_check(self, key: str) -> None:
+        probe_token: object | None = None
         with self._state_lock:
-            self._configuration_circuits[key] = str(reason)
+            circuit = self._configuration_circuits.get(key)
+            if circuit is None:
+                return
+            if (
+                circuit.recoverable
+                and circuit.probe_token is None
+                and time.monotonic() - circuit.opened_at
+                >= self._configuration_recovery_cooldown_sec
+            ):
+                # Exactly one caller per key becomes the probe; everyone else
+                # keeps the immediate refusal below while it is in flight.
+                probe_token = object()
+                circuit.probe_token = probe_token
+            reason = circuit.reason
+        if probe_token is not None:
+            claims = getattr(self._configuration_probe_claims, "items", None)
+            if claims is None:
+                claims = []
+                self._configuration_probe_claims.items = claims
+            claims.append((key, probe_token))
+            self._log(
+                "[provider_configuration_probe]"
+                f" provider_id={self.provider_id} key={key[:16]}"
+                " action=probe_started"
+            )
+            return
+        raise ProviderCallError(
+            "PROVIDER_CONFIGURATION_ERROR",
+            "provider_configuration_block:" + reason,
+            configuration_block=True,
+            provider_call_attempted=False,
+            http_request_sent=False,
+        )
+
+    def _open_configuration_circuit(
+        self, key: str, reason: str, *, recoverable: bool = False
+    ) -> None:
+        with self._state_lock:
+            previous = self._configuration_circuits.get(key)
+            was_probing = previous is not None and previous.probe_token is not None
+            self._configuration_circuits[key] = _ConfigurationCircuit(
+                reason=str(reason),
+                recoverable=bool(recoverable),
+                opened_at=time.monotonic(),
+            )
+        cooldown = (
+            f" cooldown_sec={self._configuration_recovery_cooldown_sec:g}"
+            if recoverable
+            else ""
+        )
         self._log(
             "[provider_configuration_block]"
             f" provider_id={self.provider_id} key={key[:16]} reason={reason}"
+            f" recoverable={str(bool(recoverable)).lower()}{cooldown}"
         )
+        if was_probing:
+            self._log(
+                "[provider_configuration_probe]"
+                f" provider_id={self.provider_id} key={key[:16]}"
+                f" action=reopened recoverable={str(bool(recoverable)).lower()}"
+            )
 
     def clear_configuration_circuit(self, key: str) -> None:
         with self._state_lock:
-            self._configuration_circuits.pop(key, None)
+            circuit = self._configuration_circuits.pop(key, None)
+        if circuit is not None and circuit.probe_token is not None:
+            self._log(
+                "[provider_configuration_probe]"
+                f" provider_id={self.provider_id} key={key[:16]}"
+                " action=cleared"
+            )
+
+    def _release_configuration_probes(self) -> None:
+        claims = getattr(self._configuration_probe_claims, "items", None)
+        if not claims:
+            return
+        self._configuration_probe_claims.items = []
+        released: list[str] = []
+        with self._state_lock:
+            for key, token in claims:
+                circuit = self._configuration_circuits.get(key)
+                # Identity check: a circuit cleared or re-opened by this call
+                # is no longer this probe's to release.
+                if circuit is not None and circuit.probe_token is token:
+                    circuit.probe_token = None
+                    released.append(key)
+        for key in released:
+            self._log(
+                "[provider_configuration_probe]"
+                f" provider_id={self.provider_id} key={key[:16]}"
+                " action=released_without_verdict"
+            )
 
     def configuration_circuit_count(self) -> int:
         with self._state_lock:
@@ -1202,7 +1354,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             temperature=None,
             top_p=None,
             seed=None,
-            parallelism=16,
+            parallelism=MAX_PROVIDER_PARALLELISM,
             require_json_schema=True,
             log=log,
             client_factory=client_factory,
@@ -1244,6 +1396,52 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
     # which fall back to Luna instead -- sets this to 0 so a malformed response
     # is not paid for twice.
     schema_repair_attempts = 1
+
+    # Per-HTTP-attempt accounting sink (``opencode_go_accounting``).  ``None`` on
+    # every transport the gate does not explicitly instrument, so the official
+    # OpenAI selection is untouched.  Observability only: the observer's result
+    # is never read and its failures are swallowed.
+    attempt_observer: Callable[[Mapping[str, Any]], None] | None = None
+
+    def _observe_attempt(
+        self,
+        *,
+        outcome: str,
+        role: str,
+        model: str,
+        request_metadata: Mapping[str, Any],
+        kwargs: Mapping[str, Any] | None,
+        response: Any,
+        error: BaseException | None,
+        started: float,
+        attempt: int,
+        retry_counts: Mapping[str, int],
+    ) -> None:
+        observer = self.attempt_observer
+        if observer is None:
+            return
+        try:
+            from opencode_go_accounting import build_attempt_record
+
+            observer(
+                build_attempt_record(
+                    outcome=outcome,
+                    provider_mode=self.provider_mode,
+                    provider_id=self.provider_id,
+                    endpoint=(self.base_url or "https://api.openai.com/v1") + "/responses",
+                    model=model,
+                    role=role,
+                    request_metadata=request_metadata,
+                    kwargs=kwargs,
+                    response=response,
+                    error=error,
+                    latency_sec=max(0.0, time.perf_counter() - started) if started else 0.0,
+                    attempt_index=attempt,
+                    retry_counts=retry_counts,
+                )
+            )
+        except Exception:
+            return
 
     def _wire_responses_kwargs(
         self,
@@ -1357,6 +1555,7 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
     # this one and OpenRouter -- shares one definition of "was never admitted".
     # They were duplicated here while OpenRouter had none at all.
 
+    @_releases_configuration_probes
     def generate_structured(
         self,
         *,
@@ -1397,6 +1596,12 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
             flex_retries = 0
             admission_retries = 0
             while True:
+                # Reset per attempt: the accounting observer must describe the
+                # attempt that just ran, never a previous iteration's response.
+                attempt_sent = False
+                attempt_response: Any = None
+                attempt_kwargs: dict[str, Any] | None = None
+                attempt_started = 0.0
                 if deadline is not None and not deadline.can_start_attempt():
                     # Never begin an attempt that cannot finish inside the
                     # absolute budget; the caller still needs time to validate
@@ -1537,7 +1742,11 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         f" transport_retry={transport_retries}"
                         f" schema_repair={schema_retries}"
                     )
+                    attempt_kwargs = kwargs
+                    attempt_started = time.perf_counter()
+                    attempt_sent = True
                     response = call_client.responses.create(**kwargs)
+                    attempt_response = response
                     value = _extract_responses_value(response)
                     parsed = _schema_validate(response_schema, value)
                     elapsed = time.perf_counter() - started
@@ -1554,6 +1763,23 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         f" quality_tier=FULL_STRUCTURED latency_sec={elapsed:.3f}"
                         f" transport_retries={transport_retries + flex_retries}"
                         f" schema_repairs={schema_retries}"
+                    )
+                    self._observe_attempt(
+                        outcome="ok",
+                        role=role,
+                        model=model,
+                        request_metadata=request_metadata,
+                        kwargs=attempt_kwargs,
+                        response=attempt_response,
+                        error=None,
+                        started=attempt_started,
+                        attempt=attempt,
+                        retry_counts={
+                            "transport_retries": transport_retries,
+                            "schema_retries": schema_retries,
+                            "flex_retries": flex_retries,
+                            "admission_retries": admission_retries,
+                        },
                     )
                     return ProviderResult(
                         parsed,
@@ -1583,6 +1809,24 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                         exchange.contract_hash,
                     )
                 except (ValueError, TypeError) as exc:
+                    if attempt_sent:
+                        self._observe_attempt(
+                            outcome="schema_invalid",
+                            role=role,
+                            model=model,
+                            request_metadata=request_metadata,
+                            kwargs=attempt_kwargs,
+                            response=attempt_response,
+                            error=exc,
+                            started=attempt_started,
+                            attempt=attempt,
+                            retry_counts={
+                                "transport_retries": transport_retries,
+                                "schema_retries": schema_retries,
+                                "flex_retries": flex_retries,
+                                "admission_retries": admission_retries,
+                            },
+                        )
                     errors.append(f"{model}:schema:{type(exc).__name__}:{exc}")
                     if schema_retries < self.schema_repair_attempts and (
                         deadline is None or deadline.can_start_attempt()
@@ -1599,8 +1843,30 @@ class RemoteAPIProvider(_OpenAICompatibleProviderBase):
                     break
                 except Exception as exc:
                     failure = self._classify_transport_exception(exc)
+                    if attempt_sent:
+                        self._observe_attempt(
+                            outcome="transport_error",
+                            role=role,
+                            model=model,
+                            request_metadata=request_metadata,
+                            kwargs=attempt_kwargs,
+                            response=attempt_response,
+                            error=exc,
+                            started=attempt_started,
+                            attempt=attempt,
+                            retry_counts={
+                                "transport_retries": transport_retries,
+                                "schema_retries": schema_retries,
+                                "flex_retries": flex_retries,
+                                "admission_retries": admission_retries,
+                            },
+                        )
                     if failure.configuration_block:
-                        self._open_configuration_circuit(circuit_key, failure.category)
+                        self._open_configuration_circuit(
+                            circuit_key,
+                            failure.category,
+                            recoverable=self._configuration_block_recoverable(failure),
+                        )
                         self._log(
                             "[provider_call_failed]"
                             f" provider={self.provider_id} model={model}"
@@ -1990,6 +2256,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
         self._last_health = health
         return health
 
+    @_releases_configuration_probes
     def generate_structured(
         self,
         *,
@@ -2293,7 +2560,11 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             continue
                         failure = self._classify_transport_exception(exc)
                         if failure.configuration_block:
-                            self._open_configuration_circuit(circuit_key, failure.category)
+                            self._open_configuration_circuit(
+                                circuit_key,
+                                failure.category,
+                                recoverable=self._configuration_block_recoverable(failure),
+                            )
                             self._log(
                                 "[provider_call_failed]"
                                 f" provider={self.provider_id} model={model}"
@@ -2609,16 +2880,27 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
 # One selection, three legs, and exactly one strict validation contract shared
 # with every other transport in this file:
 #
-#   ``OpenCodeResponsesProvider``  Muse Spark 1.3 Contributor, /zen/go/v1/responses
-#   ``OpenCodeMessagesProvider``   qwen3.8-flash, /zen/go/v1/messages (Anthropic dialect)
+#   ``OpenCodeResponsesProvider``  Muse Spark 1.3 Contributor (primary) and
+#                                  deepseek-v4.1-flash at effort=high (secondary),
+#                                  both on /zen/go/v1/responses
 #   ``OpenCodeRoutedProvider``     deterministic routing + one Luna fallback
+#   ``OpenCodeMessagesProvider``   /zen/go/v1/messages (Anthropic dialect) --
+#                                  a tested transport, NOT wired into the router
 #
-# Neither OpenCode leg re-implements the request loop, the deadline contract,
-# the admission-retry rules, the circuit breaker, or the structured validation.
-# The Responses leg subclasses the official transport and shapes two keys; the
-# Messages leg reuses the chat-completions loop verbatim behind a client adapter
-# that speaks the Anthropic-compatible wire dialect.  That adapter is the only
-# place in the codebase that knows ``responses`` and ``messages`` differ.
+# Neither OpenCode transport re-implements the request loop, the deadline
+# contract, the admission-retry rules, the circuit breaker, or the structured
+# validation.  The Responses transport subclasses the official one and shapes a
+# few keys; the Messages transport reuses the chat-completions loop verbatim
+# behind a client adapter that speaks the Anthropic-compatible wire dialect.
+#
+# Why both routed OpenCode legs speak ``/responses`` (measured 2026-09-13 with a
+# live probe of deepseek-v4.1-flash): ``/responses`` accepted
+# ``reasoning.effort=high`` -- echoed back, reasoning tokens reported -- together
+# with a strict ``text.format`` json_schema, ``truncation=disabled`` and the
+# session header; ``/chat/completions`` refused the json_schema response_format
+# with HTTP 400; ``/messages`` answered but offers neither a strict schema nor an
+# effort control.  qwen3.8-flash, the leg this replaced, is refused outright on
+# ``/responses`` ("not supported for format openai").
 # ---------------------------------------------------------------------------
 
 
@@ -2667,6 +2949,41 @@ class OpenCodeTransportError(RuntimeError):
 #     same session, and two concurrent workers never share one.
 OPENCODE_SESSION_HEADER = "x-opencode-session"
 OPENCODE_DEFAULT_USER_AGENT = "opencode/1.0.0"
+# What one ``x-opencode-session`` value names on the /responses legs.
+#
+# OpenCode's own guidance (https://opencode.ai/docs/go/, page updated
+# 2026-09-11, retrieved 2026-09-13): "Send a stable session ID in
+# ``x-opencode-session`` for each conversation so we can optimize routing and
+# prompt caching."  The header used to be derived from the request id, so every
+# MT5 request opened a brand-new session.  Measured on the live usage ledger for
+# 2026-09-09..13 (2,474 Muse calls): the token-weighted cache-read ratio was
+# 0.1-1.1%, and the rare hits were EXACTLY the static prefix -- 6,513 tokens on
+# the analyst (instructions + schema) and 1,265 on the critic -- i.e. the cache
+# existed and was reachable, but a fresh session per request almost never routed
+# back to the backend that held it.
+#
+# ``prompt_prefix`` (the default) keys the session on the parts of a request
+# that are byte-identical across calls of the same kind: the model and the
+# strict response schema.  Every analyst call (and its correction passes) shares
+# one session, every critic call another, so the provider can route them to the
+# backend whose prefix cache is warm.  It carries no request id, no timestamp and
+# no market data.  The requests stay stateless: ``store=False`` and no
+# ``previous_response_id``, so a shared session shares routing, never context.
+# ``request`` restores the previous per-request derivation as an operator
+# rollback that needs no code change.
+OPENCODE_SESSION_SCOPE_PROMPT_PREFIX = "prompt_prefix"
+OPENCODE_SESSION_SCOPE_REQUEST = "request"
+OPENCODE_SESSION_SCOPES = (
+    OPENCODE_SESSION_SCOPE_PROMPT_PREFIX,
+    OPENCODE_SESSION_SCOPE_REQUEST,
+)
+# The two routed OpenCode legs share one transport class, so they are told apart
+# by provider id.  The primary keeps the id it has always had: it is what the
+# routed provider's identity reports, so decision-cache rows written by Muse stay
+# valid.  The secondary gets its own id so fallback telemetry, the usage ledger
+# and every ``ProviderResult`` name the leg that actually answered.
+OPENCODE_PRIMARY_PROVIDER_ID = "opencode_go_responses"
+OPENCODE_SECONDARY_PROVIDER_ID = "opencode_go_responses_secondary"
 _OPENCODE_SESSION_FALLBACK = "po3-aigate"
 
 
@@ -2679,6 +2996,25 @@ def _opencode_session_id(request_id: str) -> str:
     if not token:
         return _OPENCODE_SESSION_FALLBACK
     return ("po3-" + token)[:120]
+
+
+def _opencode_prefix_session_id(kwargs: Mapping[str, Any]) -> str:
+    """Header-safe session id naming the static prefix of a Responses request.
+
+    A pure function of the model and the strict ``text.format`` schema -- the
+    parts that are identical for every call of one kind -- so it never changes
+    with the request id, the deadline, the evidence or the market state.
+    """
+
+    text = kwargs.get("text")
+    fmt = text.get("format") if isinstance(text, Mapping) else None
+    fmt = fmt if isinstance(fmt, Mapping) else {}
+    material = {
+        "model": str(kwargs.get("model") or ""),
+        "schema_name": str(fmt.get("name") or ""),
+        "schema": fmt.get("schema"),
+    }
+    return "po3-prefix-" + _canonical_hash(material)[:32]
 
 
 class _OpenCodeMessagesClient:
@@ -2991,7 +3327,12 @@ class _OpenCodeMessagesClient:
 
 
 class OpenCodeResponsesProvider(RemoteAPIProvider):
-    """Muse Spark 1.3 Contributor over the OpenCode Go ``/responses`` endpoint.
+    """One OpenCode Go model over the ``/responses`` endpoint.
+
+    Serves both routed OpenCode legs: Muse Spark 1.3 Contributor (the primary,
+    ``provider_id=opencode_go_responses``) and deepseek-v4.1-flash at
+    ``reasoning.effort=high`` (the secondary,
+    ``provider_id=opencode_go_responses_secondary``).
 
     Subclasses the official Responses transport rather than copying it, so the
     deadline contract, admission-retry budget, circuit breaker, strict schema
@@ -3030,6 +3371,8 @@ class OpenCodeResponsesProvider(RemoteAPIProvider):
         admission_backoff_initial_sec: float = 2.0,
         admission_backoff_max_sec: float = 30.0,
         client_factory: Callable[..., Any] | None = None,
+        provider_id: str = OPENCODE_PRIMARY_PROVIDER_ID,
+        session_scope: str = OPENCODE_SESSION_SCOPE_PROMPT_PREFIX,
     ) -> None:
         super().__init__(
             api_key=api_key,
@@ -3060,8 +3403,12 @@ class OpenCodeResponsesProvider(RemoteAPIProvider):
             client_factory=client_factory,
         )
         self.provider_mode = PROVIDER_MODE_OPENCODE
-        self.provider_id = "opencode_go_responses"
+        self.provider_id = str(provider_id or OPENCODE_PRIMARY_PROVIDER_ID)
         self.reasoning_token_reserve = max(0, int(reasoning_token_reserve))
+        scope = str(session_scope or "").strip().lower()
+        self.session_scope = (
+            scope if scope in OPENCODE_SESSION_SCOPES else OPENCODE_SESSION_SCOPE_PROMPT_PREFIX
+        )
 
     def _wire_responses_kwargs(
         self,
@@ -3122,15 +3469,23 @@ class OpenCodeResponsesProvider(RemoteAPIProvider):
         # header just as much.
         headers = dict(shaped.get("extra_headers") or {})
         if not headers.get(OPENCODE_SESSION_HEADER):
-            headers[OPENCODE_SESSION_HEADER] = _opencode_session_id(
-                str(request_metadata.get("request_id") or "")
-            )
+            if self.session_scope == OPENCODE_SESSION_SCOPE_REQUEST:
+                headers[OPENCODE_SESSION_HEADER] = _opencode_session_id(
+                    str(request_metadata.get("request_id") or "")
+                )
+            else:
+                headers[OPENCODE_SESSION_HEADER] = _opencode_prefix_session_id(shaped)
         shaped["extra_headers"] = headers
         return shaped
 
 
 class OpenCodeMessagesProvider(LocalOpenAICompatibleProvider):
-    """qwen3.8-flash over the OpenCode Go Anthropic-compatible ``/messages``.
+    """A model over the OpenCode Go Anthropic-compatible ``/messages``.
+
+    Not wired into ``OpenCodeRoutedProvider``: since 2026-09-13 the secondary
+    OpenCode leg is deepseek-v4.1-flash on ``/responses`` (see the note above
+    ``OpenCodeTransportError``), because this dialect offers neither a strict
+    schema nor a reasoning-effort control.  Kept as a tested transport.
 
     Reuses the chat-completions request loop unchanged; the dialect difference
     lives entirely in ``_OpenCodeMessagesClient``.  Sampling parameters default
@@ -3267,19 +3622,24 @@ class OpenCodeMessagesProvider(LocalOpenAICompatibleProvider):
 
 
 class OpenCodeRoutedProvider:
-    """OpenCode Go with deterministic routing and a single OpenAI Luna fallback.
+    """OpenCode Go with deterministic routing and an ordered fallback chain.
 
     Owns *routing only*.  Every leg it dispatches to is a fully independent
     provider that performs its own strict schema validation, so this class can
     never forward an unvalidated answer: it either returns a ``ProviderResult``
     that a leg already validated, or it raises.
 
-    Routing (``OPENCODE_CALL_DIRECTING`` off is the default):
+    Routing (``OPENCODE_CALL_DIRECTING`` off is the default), where "secondary"
+    is deepseek-v4.1-flash at reasoning effort high:
 
-        directing off              -> Muse, fallback Luna
-        directing on, normal       -> Muse, fallback Luna
-        directing on, important    -> Qwen, fallback Luna
+        directing off              -> Muse, then secondary, then Luna
+        directing on, normal       -> Muse, then secondary, then Luna
+        directing on, important    -> secondary, then Luna (never Muse)
         directing on, critical     -> Luna directly
+
+    Each leg is asked at most once per call, and every hop must fit inside the
+    same absolute deadline.  ``OPENCODE_SECONDARY_FALLBACK_ENABLE=false`` removes
+    the secondary stage from the normal route, restoring Muse -> Luna.
 
     Importance is classified by ``opencode_routing.classify_importance``: a pure
     function of signals the request already carries.  No extra model call is
@@ -3297,18 +3657,24 @@ class OpenCodeRoutedProvider:
         self,
         *,
         muse: Any,
-        qwen: Any,
+        secondary: Any,
         fallback: Any,
         policy: Any,
         log: Callable[[str], None],
         fallback_service_tier: str = "flex",
+        secondary_fallback_enable: bool = True,
     ) -> None:
         self._muse = muse
-        self._qwen = qwen
+        self._secondary = secondary
         self._fallback = fallback
         self._policy = policy
         self._log = log
         self._fallback_service_tier = str(fallback_service_tier or "").strip().lower()
+        self._secondary_fallback_enabled = bool(secondary_fallback_enable)
+        # Accounting sink for one record per logical call (see
+        # ``opencode_go_accounting``).  ``None`` leaves routing byte-identical:
+        # no metadata is added and nothing is recorded.
+        self.call_observer: Callable[[Mapping[str, Any]], None] | None = None
         default_leg = self._default_leg()
         self.provider_mode = default_leg.provider_mode
         self.provider_id = default_leg.provider_id
@@ -3344,7 +3710,7 @@ class OpenCodeRoutedProvider:
         if importance == IMPORTANCE_CRITICAL:
             return self._fallback, False
         if importance == IMPORTANCE_IMPORTANT:
-            return self._qwen, True
+            return self._secondary, True
         if importance != IMPORTANCE_NORMAL:
             # Unreachable while the classifier can only return the three known
             # levels, and written this way so it stays unreachable: if a fourth
@@ -3396,7 +3762,7 @@ class OpenCodeRoutedProvider:
         identity["opencode_routing"] = self._policy.fingerprint()
         identity["opencode_legs"] = {
             "normal": self._muse.model_for_role(role),
-            "important": self._qwen.model_for_role(role),
+            "important": self._secondary.model_for_role(role),
             "critical": self._fallback.model_for_role(role),
         }
         return identity
@@ -3409,7 +3775,7 @@ class OpenCodeRoutedProvider:
         return self._default_leg().generation_identity(role, request_metadata)
 
     def clear_configuration_circuit(self, key: str) -> None:
-        for leg in (self._muse, self._qwen, self._fallback):
+        for leg in (self._muse, self._secondary, self._fallback):
             clear = getattr(leg, "clear_configuration_circuit", None)
             if callable(clear):
                 clear(key)
@@ -3417,16 +3783,168 @@ class OpenCodeRoutedProvider:
     def configuration_circuit_count(self) -> int:
         return sum(
             int(getattr(leg, "configuration_circuit_count", lambda: 0)())
-            for leg in (self._muse, self._qwen, self._fallback)
+            for leg in (self._muse, self._secondary, self._fallback)
         )
 
-    @staticmethod
-    def _failure_fields(exc: Exception) -> tuple[str, str]:
-        """``(category, detail)`` for telemetry, precise where it is knowable."""
+    # Bound on the fallback detail.  The previous 200-character cut ended every
+    # live Muse HTTP 500 line mid-body ("{'type': 'error', 'error': {'type':
+    # 'error', 'mess"), and failed calls never reach the usage ledger, so the
+    # upstream's own explanation was recorded nowhere.
+    _FAILURE_DETAIL_MAX_CHARS = 2000
+    # Defence in depth only: no transport puts a credential into an exception,
+    # but an upstream body that echoed one must still never reach a log line.
+    _CREDENTIAL_RE = re.compile(r"(?i)\b(?:sk|oc)-[A-Za-z0-9_\-]{6,}|\bbearer\s+\S+")
+    _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+    _HTTP_STATUS_IN_TEXT_RE = re.compile(r"(?:Error code:|http_)\s*(\d{3})\b")
 
-        if isinstance(exc, ProviderCallError):
-            return exc.category, str(exc)[:200]
-        return type(exc).__name__, str(exc)[:200]
+    @classmethod
+    def _failure_fields(cls, exc: Exception) -> tuple[str, str, int | None]:
+        """``(category, detail, http_status)`` for telemetry.
+
+        ``detail`` is one line, credential-scrubbed and bounded at
+        ``_FAILURE_DETAIL_MAX_CHARS``.  ``http_status`` comes from the exception
+        when it carries one; a leg that wraps its transport failure into a
+        ``ProviderCallError`` keeps the status only in the text (``Error code:
+        500``), so the text is the second source.  ``None`` when unknowable.
+        """
+
+        category = exc.category if isinstance(exc, ProviderCallError) else type(exc).__name__
+        detail = " ".join(cls._CONTROL_CHARS_RE.sub(" ", str(exc)).split())
+        detail = cls._CREDENTIAL_RE.sub("[redacted]", detail)
+        if len(detail) > cls._FAILURE_DETAIL_MAX_CHARS:
+            detail = detail[: cls._FAILURE_DETAIL_MAX_CHARS] + "...[truncated]"
+        status: int | None = None
+        for name in ("status_code", "status", "http_status"):
+            value = getattr(exc, name, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                status = value
+                break
+        if status is None:
+            match = cls._HTTP_STATUS_IN_TEXT_RE.search(detail)
+            if match:
+                status = int(match.group(1))
+        return category, detail, status
+
+    @staticmethod
+    def _http_status_field(status: int | None) -> str:
+        return f" http_status={status}" if status else ""
+
+    def _fallback_legs_after(self, failed_leg: Any) -> tuple[Any, ...]:
+        """Legs still to try, in order, after the routed leg ``failed_leg`` failed.
+
+        Only the Muse primary gets the secondary stage.  A failing secondary
+        primary (the important route) goes straight to Luna and never back to
+        Muse, and Luna is always the last leg.
+        """
+
+        if failed_leg is self._muse and self._secondary_fallback_enabled:
+            return (self._secondary, self._fallback)
+        return (self._fallback,)
+
+    def _fall_back(
+        self,
+        *,
+        failed_leg: Any,
+        failure: Exception,
+        role: str,
+        system_prompt: str,
+        evidence: Mapping[str, Any],
+        response_schema: type,
+        request_metadata: Mapping[str, Any],
+        importance: str,
+        request_id: str,
+        started: float,
+    ) -> ProviderResult:
+        """Walk the fallback chain after an OpenCode leg failed.
+
+        Every leg is asked at most once.  Before each hop the absolute deadline
+        must still be able to cover a new attempt; it is never extended, so a hop
+        it cannot cover ends the chain with the last real failure.  A leg that
+        raises hands its failure to the next hop; the last leg's failure
+        propagates unchanged.
+        """
+
+        hops = self._fallback_legs_after(failed_leg)
+        chain = ">".join(leg.model_for_role(role) for leg in (failed_leg, *hops))
+        deadline = request_metadata.get("deadline")
+        for stage, next_leg in enumerate(hops, start=1):
+            category, detail, status = self._failure_fields(failure)
+            hop_fields = (
+                f" request_id={request_id}"
+                f" importance={importance}"
+                f" stage={stage}"
+                f" from={failed_leg.provider_id}"
+                f" from_model={failed_leg.model_for_role(role)}"
+                f" to={next_leg.provider_id}"
+                f" to_model={next_leg.model_for_role(role)}"
+            )
+            if deadline is not None and not deadline.can_start_attempt():
+                # Falling back would begin an attempt the absolute deadline
+                # cannot cover, so the last failure is the terminal answer.
+                self._log(
+                    "[opencode_fallback]"
+                    + hop_fields
+                    + " action=skipped reason=insufficient_remaining_budget"
+                    f" error_category={category}"
+                    + self._http_status_field(status)
+                    + f" remaining_ms={deadline.remaining_ms()}"
+                    f" fallback_chain={chain}"
+                    f" latency_sec={time.perf_counter() - started:.3f}"
+                    f" fallback_reason={detail}"
+                )
+                raise failure
+            self._log(
+                "[opencode_fallback]"
+                + hop_fields
+                + " action=fallback_once"
+                f" error_category={category}"
+                + self._http_status_field(status)
+                + f" fallback_chain={chain}"
+                f" opencode_latency_sec={time.perf_counter() - started:.3f}"
+                # Last on the line: it is free text and may contain spaces.
+                f" fallback_reason={detail}"
+            )
+            hop_started = time.perf_counter()
+            hop_metadata = (
+                self._fallback_metadata(request_metadata)
+                if next_leg is self._fallback
+                else request_metadata
+            )
+            if self.call_observer is not None:
+                hop_metadata = dict(hop_metadata)
+                hop_metadata["opencode_route_stage"] = stage
+                hop_metadata["opencode_fallback_reason"] = (
+                    f"{category}:{status}" if status else category
+                )
+                legs = request_metadata.get("_opencode_legs_invoked")
+                if isinstance(legs, list):
+                    legs.append(next_leg.provider_id)
+            try:
+                result = next_leg.generate_structured(
+                    role=role,
+                    system_prompt=system_prompt,
+                    evidence=evidence,
+                    response_schema=response_schema,
+                    request_metadata=hop_metadata,
+                )
+            except Exception as hop_failure:
+                if stage == len(hops):
+                    raise
+                failed_leg, failure = next_leg, hop_failure
+                continue
+            self._log(
+                "[opencode_fallback_completed]"
+                f" request_id={request_id}"
+                f" stage={stage}"
+                f" provider={result.provider_id}"
+                f" provider_mode={result.provider_mode}"
+                f" model={result.actual_model}"
+                " validation=passed"
+                f" fallback_chain={chain}"
+                f" latency_sec={time.perf_counter() - hop_started:.3f}"
+            )
+            return result
+        raise failure  # unreachable: the last hop either returns or raises
 
     def generate_structured(
         self,
@@ -3441,6 +3959,73 @@ class OpenCodeRoutedProvider:
         leg, is_opencode = self._leg_for(decision.importance)
         request_id = str(request_metadata.get("request_id") or "")
         started = time.perf_counter()
+        if self.call_observer is None:
+            return self._route(
+                decision=decision,
+                leg=leg,
+                is_opencode=is_opencode,
+                request_id=request_id,
+                started=started,
+                role=role,
+                system_prompt=system_prompt,
+                evidence=evidence,
+                response_schema=response_schema,
+                request_metadata=request_metadata,
+            )
+        legs_invoked: list[str] = [leg.provider_id]
+        observed_metadata = dict(request_metadata)
+        observed_metadata["opencode_logical_call_id"] = uuid.uuid4().hex
+        observed_metadata["opencode_route_importance"] = decision.importance
+        observed_metadata["opencode_route_stage"] = 0
+        observed_metadata["_opencode_legs_invoked"] = legs_invoked
+        outcome, final_provider = "failed", ""
+        try:
+            result = self._route(
+                decision=decision,
+                leg=leg,
+                is_opencode=is_opencode,
+                request_id=request_id,
+                started=started,
+                role=role,
+                system_prompt=system_prompt,
+                evidence=evidence,
+                response_schema=response_schema,
+                request_metadata=observed_metadata,
+            )
+            outcome, final_provider = "ok", result.provider_id
+            return result
+        finally:
+            try:
+                from opencode_go_accounting import build_logical_call_record
+
+                self.call_observer(
+                    build_logical_call_record(
+                        request_metadata=observed_metadata,
+                        role=role,
+                        importance=decision.importance,
+                        legs=legs_invoked,
+                        outcome=outcome,
+                        final_provider_id=final_provider,
+                        latency_sec=time.perf_counter() - started,
+                    )
+                )
+            except Exception:
+                pass
+
+    def _route(
+        self,
+        *,
+        decision: Any,
+        leg: Any,
+        is_opencode: bool,
+        request_id: str,
+        started: float,
+        role: str,
+        system_prompt: str,
+        evidence: Mapping[str, Any],
+        response_schema: type,
+        request_metadata: Mapping[str, Any],
+    ) -> ProviderResult:
         self._log(
             "[opencode_routing]"
             f" request_id={request_id}"
@@ -3449,6 +4034,7 @@ class OpenCodeRoutedProvider:
             + f" routed_provider={leg.provider_id}"
             f" routed_model={leg.model_for_role(role)}"
             f" fallback_available={str(is_opencode).lower()}"
+            f" secondary_fallback={str(self._secondary_fallback_enabled).lower()}"
             f" routing_policy_version={ROUTING_POLICY_VERSION}"
         )
         leg_metadata = (
@@ -3463,11 +4049,11 @@ class OpenCodeRoutedProvider:
                 request_metadata=leg_metadata,
             )
         except Exception as exc:
-            category, detail = self._failure_fields(exc)
             if not is_opencode:
                 # The critical route is already Luna.  There is no second
                 # fallback: a failure here is the transport's real answer and is
                 # raised unchanged rather than retried against itself.
+                category, _detail, status = self._failure_fields(exc)
                 self._log(
                     "[opencode_fallback]"
                     f" request_id={request_id}"
@@ -3475,56 +4061,22 @@ class OpenCodeRoutedProvider:
                     f" from={leg.provider_id} action=none"
                     f" reason=no_fallback_configured_for_direct_openai_route"
                     f" error_category={category}"
-                    f" latency_sec={time.perf_counter() - started:.3f}"
+                    + self._http_status_field(status)
+                    + f" latency_sec={time.perf_counter() - started:.3f}"
                 )
                 raise
-            deadline = request_metadata.get("deadline")
-            if deadline is not None and not deadline.can_start_attempt():
-                # Falling back would begin an attempt the absolute deadline
-                # cannot cover.  The deadline is never extended to make room for
-                # a fallback, so the OpenCode failure is the terminal answer.
-                self._log(
-                    "[opencode_fallback]"
-                    f" request_id={request_id}"
-                    f" importance={decision.importance}"
-                    f" from={leg.provider_id} action=skipped"
-                    " reason=insufficient_remaining_budget"
-                    f" error_category={category}"
-                    f" remaining_ms={deadline.remaining_ms()}"
-                    f" latency_sec={time.perf_counter() - started:.3f}"
-                )
-                raise
-            self._log(
-                "[opencode_fallback]"
-                f" request_id={request_id}"
-                f" importance={decision.importance}"
-                f" from={leg.provider_id}"
-                f" from_model={leg.model_for_role(role)}"
-                f" to={self._fallback.provider_id}"
-                f" to_model={self._fallback.model_for_role(role)}"
-                " action=fallback_once"
-                f" error_category={category}"
-                f" fallback_reason={detail}"
-                f" opencode_latency_sec={time.perf_counter() - started:.3f}"
-            )
-            fallback_started = time.perf_counter()
-            fallback_result = self._fallback.generate_structured(
+            return self._fall_back(
+                failed_leg=leg,
+                failure=exc,
                 role=role,
                 system_prompt=system_prompt,
                 evidence=evidence,
                 response_schema=response_schema,
-                request_metadata=self._fallback_metadata(request_metadata),
+                request_metadata=request_metadata,
+                importance=decision.importance,
+                request_id=request_id,
+                started=started,
             )
-            self._log(
-                "[opencode_fallback_completed]"
-                f" request_id={request_id}"
-                f" provider={fallback_result.provider_id}"
-                f" provider_mode={fallback_result.provider_mode}"
-                f" model={fallback_result.actual_model}"
-                " validation=passed"
-                f" latency_sec={time.perf_counter() - fallback_started:.3f}"
-            )
-            return fallback_result
         self._log(
             "[opencode_call_completed]"
             f" request_id={request_id}"

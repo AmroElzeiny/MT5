@@ -1339,6 +1339,44 @@ class ShadowPendingReconciliationTests(unittest.TestCase):
             self.assertEqual(report["totals"].get("quarantined_written", 0), 0)
             self.assertFalse((scope / ledger.QUARANTINE_FILENAME).exists())
 
+    def test_a_tracker_resolved_since_the_last_queue_save_is_not_reported_overdue(self) -> None:
+        """Station-driven tracking writes the terminal-once index at the station
+        and the queue only at scan end, so a resolved tracker can still be in the
+        queue.  The EA drops it on restore; reconcile must agree, not call it
+        overdue.  An EXPIRED resolved entry proves nothing and is ignored."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            now = BASE_TS + 200_000
+            scope = self._scope(
+                root,
+                "live_account_1_magic_5303191",
+                [
+                    self._v4_plan(shadow_candidate_variant_id="V-DONE", shadow_horizon_at=BASE_TS + 10),
+                    self._v4_plan(shadow_candidate_variant_id="V-OLD", shadow_horizon_at=BASE_TS + 10),
+                    self._v4_plan(shadow_candidate_variant_id="V-OPEN", shadow_horizon_at=now + 900),
+                ],
+            )
+            (scope / ledger.INDEX_FILENAME).write_text(
+                f"resolved|V-DONE|{now + 3_600}\n"
+                f"resolved|V-OLD|{now - 1}\n"
+                f"progress|V-OPEN#tp1|{now + 3_600}\n"
+                f"variant|V-OPEN|{now + 3_600}\n",
+                encoding="utf-8",
+            )
+            report = ledger.reconcile_pending_trackers(runtime_state_root=root, now=now)
+            self.assertEqual(report["totals"]["ALREADY_RESOLVED"], 1)
+            self.assertEqual(report["totals"]["ADDRESSABLE_OVERDUE"], 1)
+            self.assertEqual(report["totals"]["ADDRESSABLE_PENDING"], 1)
+            states = {
+                sample["candidate_variant_id"]: sample["state"] for sample in report["scopes"][0]["samples"]
+            }
+            self.assertEqual(states["V-DONE"], "ALREADY_RESOLVED")
+            self.assertEqual(states["V-OLD"], "ADDRESSABLE_OVERDUE")
+            self.assertEqual(states["V-OPEN"], "ADDRESSABLE_PENDING")
+            # Never quarantined, never deleted: it is simply not open any more.
+            self.assertFalse((scope / ledger.QUARANTINE_FILENAME).exists())
+
     def test_an_unusable_price_contract_is_reported_as_untrackable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1359,6 +1397,143 @@ class ShadowPendingReconciliationTests(unittest.TestCase):
             )
             self.assertEqual(report["state"], "RUNTIME_STATE_ROOT_MISSING")
             self.assertEqual(report["scopes"], [])
+
+
+# --------------------------------------------------------------------------
+# Station-driven tracking: the ledger side
+# --------------------------------------------------------------------------
+
+
+def _station_lifecycle(variant: str, terminal: str, **terminal_overrides) -> list[dict]:
+    """A lifecycle written the station-driven way.
+
+    The EA now writes activation and the +0.25R/+0.50R milestones only at the
+    next station, so in the file they sit AFTER rows that happened later -- the
+    event_at is what orders them, never the line number.
+    """
+
+    observed = BASE_TS
+    rows = abstain_lifecycle(variant, "OPP-" + variant, observed_at=observed, terminal=terminal)
+    entry = [row for row in rows if row["event_type"] == EVENT_ENTRY_ACTIVATED]
+    rows = [row for row in rows if row["event_type"] != EVENT_ENTRY_ACTIVATED]
+    terminal_row = rows.pop()
+    terminal_row.update(terminal_overrides)
+    tp1_at = observed + 1_500
+    if terminal_row.get("tp1_hit"):
+        rows.append(
+            _envelope(
+                EVENT_TP1_REACHED,
+                variant=variant,
+                opportunity="OPP-" + variant,
+                at=tp1_at,
+                tp1_hit=True,
+                tp1_hit_at=tp1_at,
+                time_to_tp1_sec=tp1_at - (observed + 300),
+                station="TP1",
+                time_from_entry_to_station_sec=tp1_at - (observed + 300),
+                next_station="TP2_OR_SL",
+            )
+        )
+    # Written late: the activation row lands after the TP1 row in the file.
+    rows.extend(entry)
+    rows.append(terminal_row)
+    return rows
+
+
+class StationDrivenLedgerTests(unittest.TestCase):
+    """What the station-driven EA writes is consolidated without loss."""
+
+    def test_the_tp1_to_tp2_leg_is_carried_with_its_own_duration(self) -> None:
+        rows = _station_lifecycle(
+            "V-ST-T2",
+            "TP1_THEN_TP2",
+            terminal_station="TP2",
+            time_from_entry_to_station_sec=6_900,
+            station_after_tp1="TP2",
+            time_from_tp1_to_station_sec=5_700,
+        )
+        record = by_id(consolidate(rows))["V-ST-T2"]
+        self.assertEqual(record.terminal_station, "TP2")
+        self.assertEqual(record.time_from_entry_to_station_sec, 6_900)
+        self.assertEqual(record.station_after_tp1, "TP2")
+        self.assertEqual(record.time_from_tp1_to_station_sec, 5_700)
+        self.assertEqual(record.time_to_tp1_sec, 1_200)
+        # The activation row was written after the TP1 row and is still applied.
+        self.assertTrue(record.entry_activated)
+        self.assertEqual(record.time_to_entry_sec, 300)
+        self.assertEqual(record.sample_class, "CLEAN")
+
+    def test_the_tp1_to_sl_leg_is_attributed_to_the_stop(self) -> None:
+        rows = _station_lifecycle(
+            "V-ST-SL",
+            "TP1_THEN_SL",
+            terminal_station="SL",
+            time_from_entry_to_station_sec=4_000,
+            station_after_tp1="SL",
+            time_from_tp1_to_station_sec=2_800,
+        )
+        record = by_id(consolidate(rows))["V-ST-SL"]
+        self.assertEqual(record.station_after_tp1, "SL")
+        self.assertEqual(record.time_from_tp1_to_station_sec, 2_800)
+        self.assertEqual(record.terminal_station, "SL")
+
+    def test_a_ledger_written_before_station_tracking_reports_none_not_zero(self) -> None:
+        """A missing duration is 'not measured'; a zero would read as instant."""
+
+        rows = abstain_lifecycle("V-OLD", "OPP-OLD", observed_at=BASE_TS, terminal="TP1_THEN_TP2")
+        record = by_id(consolidate(rows))["V-OLD"]
+        self.assertIsNone(record.time_from_tp1_to_station_sec)
+        self.assertIsNone(record.time_from_entry_to_station_sec)
+        self.assertEqual(record.station_after_tp1, "")
+
+    def test_station_duration_medians_are_split_by_the_station_that_ended_the_leg(self) -> None:
+        rows: list[dict] = []
+        for index, leg in enumerate((600, 1_800, 3_000)):
+            rows += _station_lifecycle(
+                f"V-MT2-{index}",
+                "TP1_THEN_TP2",
+                terminal_station="TP2",
+                time_from_entry_to_station_sec=leg + 1_200,
+                station_after_tp1="TP2",
+                time_from_tp1_to_station_sec=leg,
+            )
+        rows += _station_lifecycle(
+            "V-MSL-0",
+            "TP1_THEN_SL",
+            terminal_station="SL",
+            time_from_entry_to_station_sec=9_000,
+            station_after_tp1="SL",
+            time_from_tp1_to_station_sec=7_800,
+        )
+        rows += _station_lifecycle(
+            "V-MSL-1",
+            "SL_BEFORE_TP1",
+            terminal_station="SL",
+            time_from_entry_to_station_sec=900,
+        )
+        # A post-TP1 horizon: no station, so no leg duration may enter a median.
+        rows += _station_lifecycle(
+            "V-CENS",
+            "HORIZON_CENSORED",
+            tp1_hit=True,
+            station_after_tp1="NONE_HORIZON_CENSORED",
+            time_from_tp1_to_station_sec=None,
+        )
+        records = consolidate(rows).variants
+        stats = summarize_group("ALL", records, weight_by_sweep=False)
+        self.assertEqual(stats.median_tp1_to_tp2_sec, 1_800)
+        self.assertEqual(stats.median_tp1_to_sl_sec, 7_800)
+        self.assertEqual(stats.median_entry_to_sl_sec, 900)
+        self.assertEqual(stats.median_entry_to_tp1_sec, 1_200)
+        payload = stats.as_dict()
+        for key in (
+            "median_entry_to_tp1_sec",
+            "median_entry_to_tp2_sec",
+            "median_entry_to_sl_sec",
+            "median_tp1_to_tp2_sec",
+            "median_tp1_to_sl_sec",
+        ):
+            self.assertIn(key, payload)
 
 
 # --------------------------------------------------------------------------
@@ -1399,8 +1574,8 @@ def assert_shadow_tracker_source(
         "_ShadowStepPrice must gate on entry activation before anything else",
     )
     case.assertIn("if(!entry_touch) return false;", step)
-    case.assertIn("_AppendShadowEntryActivated", step)
-    activation_end = step.index("_AppendShadowEntryActivated")
+    case.assertIn("p.shadow_entry_activated_at = at;", step)
+    activation_end = step.index("p.shadow_entry_activated_at = at;")
     for measurement in ("shadow_mfe_r", "shadow_mae_r", "sl_hit", "tp2_hit"):
         first = step.find(measurement)
         case.assertGreater(
@@ -1408,6 +1583,39 @@ def assert_shadow_tracker_source(
             activation_end,
             f"{measurement} is measured before entry activation is established",
         )
+
+    # Station-driven writing.  Activation and the +0.25R/+0.50R milestones are
+    # state, not results: the price step must never WRITE them.  They are
+    # flushed, with their own timestamps, at the next station -- TP1 or the
+    # terminal -- so the ledger and the durable state behind it change only
+    # when the hypothetical trade actually produced a result.
+    for writer in ("_AppendShadowEntryActivated", "_AppendShadowPathProgress"):
+        case.assertNotIn(writer, step, f"{writer} must not be written between stations")
+    case.assertIn("_AppendShadowTp1Reached(p);", step, "TP1 is a station and is written")
+    for milestone in ("p.shadow_mfe_r_at_025r = p.shadow_mfe_r;", "p.shadow_mae_r_at_050r = p.shadow_mae_r;"):
+        case.assertIn(milestone, step, "a deferred milestone must keep the values it had when reached")
+    flush = _function_body(trade_engine, "_FlushShadowPathEvents")
+    case.assertIn("_AppendShadowEntryActivated(p);", flush)
+    case.assertIn('_AppendShadowPathProgress(p, "r025"', flush)
+    case.assertIn('_AppendShadowPathProgress(p, "r050"', flush)
+    case.assertIn("p.shadow_entry_activated_at + p.shadow_time_to_025r_sec", flush)
+    tp1_row = _function_body(trade_engine, "_AppendShadowTp1Reached")
+    case.assertLess(
+        tp1_row.index("_FlushShadowPathEvents(p);"),
+        tp1_row.index('_MarkShadowProgressEmitted(p, "tp1");'),
+        "the milestones before TP1 must be written before the TP1 station itself",
+    )
+    case.assertIn('JsonKVStr("next_station", "TP2_OR_SL")', tp1_row)
+
+    # After TP1 the tracker follows the next station, and the leg is timed from
+    # the TP1 touch -- for TP2 and for SL alike.
+    for station in ('p.shadow_station_after_tp1 = "TP2";', 'p.shadow_station_after_tp1 = "SL";'):
+        case.assertIn(station, step)
+    case.assertGreaterEqual(
+        step.count("p.shadow_time_tp1_to_station_sec = (int)MathMax(0, (long)(at - p.shadow_tp1_hit_at));"),
+        2,
+        "the TP1 -> TP2 and TP1 -> SL legs must both be timed from the TP1 touch",
+    )
 
     # Properties 3-5: the ordered TP1/TP2/SL lifecycle exists as distinct
     # terminal events, and TP2 implies TP1 rather than losing the first leg.
@@ -1508,6 +1716,12 @@ def assert_shadow_tracker_source(
     case.assertLess(guard, append, "the resolved-variant guard must precede the append")
     case.assertIn("m_shadow_terminal_duplicate_suppressed_total++", commit)
     case.assertIn("_ShadowIndexAdd(m_shadow_resolved_variants", commit)
+    # Milestones reached since the last station are flushed at the terminal --
+    # after the terminal-once guard, so a suppressed duplicate emits nothing.
+    case.assertIn("_FlushShadowPathEvents(p);", commit)
+    flush_at = commit.index("_FlushShadowPathEvents(p);")
+    case.assertLess(guard, flush_at, "path events must be flushed only after the terminal-once guard")
+    case.assertLess(flush_at, append, "path events must precede the terminal row they lead up to")
 
     # Properties 13/14: identity is derived from the sweep and the exact plan,
     # never from the observation time -- an observed_at ingredient is what made
@@ -1587,6 +1801,83 @@ def assert_shadow_tracker_source(
         r"if\(ArraySize\(m_shadow_pending\) <= 0\)\s*\{[^}]*_PersistShadowTrackerIndex\(\);[^}]*return;",
         "the identity index must be persisted on the empty-queue path, before it returns",
     )
+
+    # Station-driven maintenance.  The pre-change loop re-read every tracker's
+    # M1 path once a minute and rewrote the whole pending queue after EVERY
+    # evaluation; with thousands of trackers and a budget of 25 per call that was
+    # nearly every call.  Measured in the 2026-09-13 03:35 tester run: 6460 of
+    # 6460 maintenance seconds, 27 simulated hours in two wall hours.
+    case.assertNotIn(
+        "m_state.SavePlans(", maintain, "the maintenance loop must never rewrite the pending queue"
+    )
+    case.assertIn("_ShadowLastClosedM1Bar(now)", maintain)
+    case.assertIn("if(!new_bar && !m_shadow_station_backlog){", maintain)
+    case.assertIn("_ShadowScreenForStations(last_closed);", maintain)
+    case.assertIn("_EvaluateShadowCandidate(p, reason, through)", maintain)
+    due = _function_body(trade_engine, "_ShadowTrackerDue")
+    case.assertIn("if(p.shadow_station_due) return true;", due)
+    case.assertIn(
+        "if(p.shadow_horizon_at <= 0 || now < p.shadow_horizon_at) return false;",
+        due,
+        "before its horizon a tracker is evaluated only when a station was touched",
+    )
+    touches = _function_body(trade_engine, "_ShadowBarTouchesStation")
+    case.assertRegex(
+        touches,
+        r"if\(!p\.shadow_entry_activated\)\s*return \(p\.is_buy \? \(low <= p\.entry_est\) : \(high >= p\.entry_est\)\);",
+        "before activation the entry is the only station",
+    )
+    for level in ("low <= p.sl", "high >= p.tp2", "high >= p.tp1", "!p.shadow_tp1_hit && tp1_valid"):
+        case.assertIn(level, touches)
+    screen = _function_body(trade_engine, "_ShadowScreenForStations")
+    case.assertIn("CopyRates(m_shadow_screen_symbols[s], PERIOD_M1, slot_from[s], last_closed, rates)", screen)
+    case.assertIn("_ShadowEnsureM1History(m_shadow_screen_symbols[s]);", screen)
+    screen_one = _function_body(trade_engine, "_ShadowScreenTracker")
+    case.assertIn("p.shadow_station_bar = t;", screen_one)
+    case.assertIn("p.shadow_watch_bar = t;", screen_one)
+    # Only closed bars are consumed, and a station replay stops at its station.
+    case.assertIn("datetime evaluation_end = last_closed;", evaluate)
+    case.assertNotIn("datetime evaluation_end = now;", evaluate)
+    case.assertIn("evaluation_end = through_bar;", evaluate)
+    case.assertIn("if(evaluation_end < cursor){", evaluate)
+    last_closed = _function_body(trade_engine, "_ShadowLastClosedM1Bar")
+    case.assertIn("- 60", last_closed)
+
+    # Durability at stations without rewriting the queue: the progress index
+    # remembers what was written, is consulted before writing, and is persisted
+    # with the rest of the identity index.
+    emitted = _function_body(trade_engine, "_ShadowProgressEmitted")
+    case.assertIn("_ShadowIndexContains(m_shadow_emitted_progress", emitted)
+    mark = _function_body(trade_engine, "_MarkShadowProgressEmitted")
+    case.assertIn("_ShadowIndexAdd(m_shadow_emitted_progress", mark)
+    load_index = _function_body(trade_engine, "_LoadShadowTrackerIndex")
+    case.assertIn('kind == "progress"', load_index)
+    persist_index = _function_body(trade_engine, "_PersistShadowTrackerIndex")
+    case.assertIn('_ShadowIndexAppendLines(lines, m_shadow_emitted_progress, "progress")', persist_index)
+    research = _function_body(trade_engine, "_PersistResearchQueues")
+    case.assertIn("if(m_shadow_pending_dirty &&", research)
+
+    # The station durations reach the ledger.
+    for field in (
+        '"terminal_station"',
+        '"time_from_entry_to_station_sec"',
+        '"station_after_tp1"',
+        '"time_from_tp1_to_station_sec"',
+    ):
+        case.assertIn(field, resolution, f"terminal resolution must carry {field}")
+    for field in (
+        "shadow_time_tp1_to_station_sec",
+        "shadow_station_after_tp1",
+        "shadow_mfe_r_at_025r",
+        "shadow_mae_r_at_050r",
+    ):
+        case.assertIn(field, types)
+        case.assertGreaterEqual(state_store.count(field), 2, f"{field} must be both serialized and parsed")
+    # Screening state is rebuilt from the cursor after a restart; serializing it
+    # would restore a watermark past bars the restored cursor never replayed.
+    for transient in ("shadow_watch_bar", "shadow_station_due", "shadow_station_bar", "shadow_screen_slot"):
+        case.assertIn(transient, types)
+        case.assertNotIn(f'"{transient}"', state_store, f"{transient} must not be serialized")
 
     # Requirement 1: the rejected-candidate writer receives the BUILT plan.  The
     # pre-v4 call sites passed the untouched ``base``, which is why 714 of 787
@@ -1728,6 +2019,10 @@ class ShadowTrackerMqlSourceTests(unittest.TestCase):
         self.assertIn("_CommitShadowTerminalResolution(", body)
         self.assertRegex(body, r"for\(int i=ArraySize\(m_shadow_pending\)-1; i>=0; i--\)")
         self.assertIn("ArrayResize(m_shadow_pending, last);", body)
+        # A due tracker beyond the budget is not dropped until the next bar: the
+        # backlog flag makes the very next call continue with it.
+        self.assertIn("m_shadow_station_backlog = true;", body)
+        self.assertNotIn("m_state.SavePlans(", body)
 
     def test_the_runtime_counters_required_for_diagnosis_all_exist(self) -> None:
         for counter in (
@@ -1859,6 +2154,52 @@ MQL_MUTATIONS: tuple[tuple[str, str, str], ...] = (
         "identity_index_not_persisted_on_the_empty_queue_path",
         "if(ArraySize(m_shadow_pending) <= 0){",
         "if(ArraySize(m_shadow_pending) <= 0){ return; }\n      if(false){",
+    ),
+    # --- Station-driven tracking (2026-09-13) ------------------------------
+    (
+        "maintenance_rewrites_the_queue_after_every_evaluation_again",
+        "            m_shadow_pending_dirty = true;\n            continue;",
+        "            m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);\n            continue;",
+    ),
+    (
+        "closed_bar_gate_removed",
+        "if(!new_bar && !m_shadow_station_backlog){",
+        "if(false){",
+    ),
+    (
+        "tracker_due_on_a_timer_again",
+        "if(p.shadow_horizon_at <= 0 || now < p.shadow_horizon_at) return false;",
+        "if(false) return false;",
+    ),
+    (
+        "forming_bar_consumed_again",
+        "datetime evaluation_end = last_closed;",
+        "datetime evaluation_end = now;",
+    ),
+    (
+        "entry_activation_written_between_stations_again",
+        "         // Activation is state, not a result: it is written by",
+        "         _AppendShadowEntryActivated(p);\n         // Activation is state, not a result: it is written by",
+    ),
+    (
+        "tp1_to_tp2_leg_not_attributed",
+        'p.shadow_station_after_tp1 = "TP2";',
+        'p.shadow_station_after_tp1 = "";',
+    ),
+    (
+        "progress_index_not_consulted_after_restart",
+        "return _ShadowIndexContains(m_shadow_emitted_progress, _ShadowProgressIndexId(p, kind));",
+        "return false;",
+    ),
+    (
+        "milestones_not_flushed_at_the_terminal",
+        "      _FlushShadowPathEvents(p);\n      _AppendShadowOutcomeResolution(p);",
+        "      _AppendShadowOutcomeResolution(p);",
+    ),
+    (
+        "shadow_queue_rewritten_at_every_scan_again",
+        "if(m_shadow_pending_dirty &&",
+        "if(true &&",
     ),
 )
 

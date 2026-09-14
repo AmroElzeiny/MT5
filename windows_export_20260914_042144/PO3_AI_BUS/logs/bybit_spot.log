@@ -1,0 +1,692 @@
+2026-09-13 00:00:20,784 INFO bybit_environment_resolved environment=demo rest_url=https://api-demo.bybit.com public_ws_url=wss://stream.bybit.com/v5/public/spot private_ws_url=wss://stream-demo.bybit.com/v5/private
+2026-09-13 00:00:20,784 INFO bybit_demo_public_stream_split note=public_data_uses_mainnet_host private_session_uses_demo_host
+2026-09-13 00:00:20,784 INFO bybit_marketable_limit_attached_mode_active environment=demo market_entries=ioc_limit_at_max_entry_price protection=native_attached_tp_and_sl take_profit=native_attached unprotected_window=none evidence=wp2_limit_demo_20260912_l1x_l2x
+2026-09-13 00:00:20,785 INFO bybit_unprotected_dwell_flatten_armed unprotected_max_sec=300 action=market_sell_strategy_inventory_after_dwell
+2026-09-13 00:00:20,785 INFO bybit_weak_trade_management_armed policy=mt5_penalty_watcher_port actions=partial_cut,full_close closed_trade_records=trade_outcomes
+2026-09-13 00:00:20,785 INFO bybit_correlation_filter_armed tf=60 lookback_bars=168 threshold=0.85 min_samples=30 basis=log_returns action=block_duplicated_same_direction_spot_exposure
+2026-09-13 00:00:20,785 INFO bybit_trade_cost_model fee_rate_source=v5_account_fee_rate fee_rate_refresh_sec=900 max_total_cost_r=0.24 exit_slippage_multiplier=1.5 fallback_taker_fee_rate=0.001 fallback_slippage_rate=0.001
+2026-09-13 00:00:20,786 INFO bybit_sizing_balance_fallback_armed max_balance_fallback_pct=0.99 rule=size_to_pct_of_free_quote_when_risk_sized_order_exceeds_it consequence=actual_risk_below_requested_never_above
+2026-09-13 00:00:20,786 INFO bybit_universe_turnover_filter_armed min_turnover_24h=1000000 basis=turnover24h_quote applied=before_gainer_loser_turnover_rankings managed_symbols=exempt
+2026-09-13 00:00:20,786 INFO bybit_order_split_armed max_child_orders=5 max_child_order_notional=0 rule=quantity_above_the_per_order_cap_is_placed_as_children_summing_to_it consequence=approved_risk_is_placed_in_full_instead_of_capped
+2026-09-13 00:00:20,786 INFO bybit_kline_bootstrap concurrency=4 rate_limit_per_sec=20 per_call_timeout_sec=8 cache=validated_history_csv_with_delta_fetch
+2026-09-13 00:00:20,787 INFO bybit_universe_schedule interval_sec=900 lead_sec=300 alignment=utc_wall_clock refresh_at=interval_boundary_minus_lead
+2026-09-13 00:00:23,031 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 00:00:23,031 INFO kline_cache_absent symbol=AAVEUSDT action=full_fetch
+2026-09-13 00:00:23,031 INFO kline_cache_absent symbol=AEROUSDT action=full_fetch
+2026-09-13 00:00:23,031 INFO kline_cache_absent symbol=ASTERUSDT action=full_fetch
+2026-09-13 00:00:23,031 INFO kline_cache_absent symbol=BSBUSDT action=full_fetch
+2026-09-13 00:00:23,690 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789246823687 source=v5_account_fee_rate
+2026-09-13 00:00:23,707 INFO universe_refresh_scheduled next_utc=2026-09-12T21:10:00Z in_sec=576.3 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 00:00:28,026 INFO [trade_cost_realized] schema=20260912_bybit_spot_total_trade_cost_v1 execution_id=87afbea3568839102f9a0cf1305cbd99a9dcabbef10f9021c4133802b1a4e6d9 symbol=BTCUSDT exit_role=exit entry_fills=1 exit_fills=1 realized_total_quote=0.02482471 realized_bps=19.93787535 realized_r=0.09968371 expected_bps=- expected_r=- cost_error_quote=- cost_error_bps=- cost_error_r=- complete=false reason=expected_cost_missing:expected_total_cost_quote,expected_total_cost_bps,expected_total_cost_r,quantity fee_currencies=BTC,USDT entry_reference=plan_entry_price_legacy_row exit_reference=unmeasured_strategy_exit_decision_price_not_persisted residue_qty=8.39E-7 status=EXIT_PARTIAL authority=research_only
+2026-09-13 00:00:28,036 WARNING [trade_outcome_recorded] schema=bybit_spot_trade_outcome_v1 execution_id=87afbea3568839102f9a0cf1305cbd99a9dcabbef10f9021c4133802b1a4e6d9 request_id=wp7-20260911T-direct-part1-1789160487 trade_key=- symbol=BTCUSDT net_pnl_quote=-0.02484080 realized_r=-0.099748 pnl_complete=true reason=- exit_roles=exit strategy_exit_kinds=- penalty_strikes=0 pending_action_superseded=false
+2026-09-13 00:00:29,278 WARNING bybit_acknowledged_orphans_skipped count=5 identities=execution:1788855852510017127,execution:1788855852510017128,p3probeAbfad981e75,p3probeCbfad981e75,p3probeSbfad981e75 note=operator_disowned_these_identities_they_no_longer_block
+2026-09-13 00:00:29,278 INFO bybit_foreign_activity_observed orders=26 executions=16 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 00:00:29,292 WARNING [trade_outcome_recorded] schema=bybit_spot_trade_outcome_v1 execution_id=e0f25240f06266a7f1c96e39e02c5d3a6d4e881c1059047df76ba811df20765c request_id=wp7-20260911T-direct-part1-1789159607 trade_key=- symbol=BTCUSDT net_pnl_quote=-0.05123719 realized_r=-0.205650 pnl_complete=true reason=- exit_roles=exit strategy_exit_kinds=- penalty_strikes=0 pending_action_superseded=false
+2026-09-13 00:01:07,263 WARNING bybit_websocket_error type=PermissionError
+2026-09-13 00:01:14,107 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:01:14,192 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:01:14,193 WARNING [kline_page_retry] symbol=AEROUSDT end_ms=1786246859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:01:17,659 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:01:17,675 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:01:17,675 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1785826859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:01:34,073 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:01:34,151 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:01:34,229 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1785406859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:01:46,331 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:01:46,332 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:01:46,332 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1785226859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:02:52,114 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:02:52,243 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:02:52,535 WARNING [kline_page_retry] symbol=BSBUSDT end_ms=1781866859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:03:02,825 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:03:02,826 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:03:02,826 WARNING [kline_page_retry] symbol=BSBUSDT end_ms=1781806859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:03:10,205 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:03:10,206 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:03:10,206 WARNING [kline_page_retry] symbol=ASTERUSDT end_ms=1780846859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:03:10,226 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:03:10,227 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:03:10,227 WARNING [kline_page_retry] symbol=AEROUSDT end_ms=1781506859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:04:25,414 INFO history_bootstrap_complete symbol=ASTERUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=242390
+2026-09-13 00:04:25,466 INFO kline_cache_absent symbol=BTCUSDT action=full_fetch
+2026-09-13 00:04:42,649 INFO history_bootstrap_complete symbol=BSBUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=259625
+2026-09-13 00:04:43,758 INFO history_bootstrap_complete symbol=AEROUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=260733
+2026-09-13 00:04:43,758 INFO kline_cache_absent symbol=CHIPUSDT action=full_fetch
+2026-09-13 00:04:44,548 INFO history_bootstrap_complete symbol=AAVEUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=261531
+2026-09-13 00:04:44,549 INFO kline_cache_absent symbol=DOTUSDT action=full_fetch
+2026-09-13 00:04:44,563 INFO kline_cache_absent symbol=ENAUSDT action=full_fetch
+2026-09-13 00:05:20,156 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:05:20,157 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:05:20,157 WARNING [kline_page_retry] symbol=ENAUSDT end_ms=1787327099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:05:57,411 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:05:57,412 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:05:57,412 WARNING [kline_page_retry] symbol=DOTUSDT end_ms=1785107099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:05:57,426 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:05:57,426 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:05:57,427 WARNING [kline_page_retry] symbol=BTCUSDT end_ms=1784147099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:05:59,644 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:05:59,645 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:05:59,645 WARNING [kline_page_retry] symbol=ENAUSDT end_ms=1785407099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:06:44,225 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:06:44,226 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:06:44,227 WARNING [kline_page_retry] symbol=CHIPUSDT end_ms=1783067099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:07:35,556 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:08:25,501 INFO history_bootstrap_complete symbol=BTCUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=240047
+2026-09-13 00:08:25,970 INFO kline_cache_absent symbol=ETHUSDT action=full_fetch
+2026-09-13 00:08:29,509 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:08:38,235 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:08:38,532 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:08:38,595 WARNING [kline_page_retry] symbol=CHIPUSDT end_ms=1779587099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:08:55,012 INFO history_bootstrap_complete symbol=DOTUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=251266
+2026-09-13 00:08:55,017 INFO kline_cache_absent symbol=FFUSDT action=full_fetch
+2026-09-13 00:08:57,708 INFO history_bootstrap_complete symbol=ENAUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=253171
+2026-09-13 00:08:57,717 INFO kline_cache_absent symbol=FLOCKUSDT action=full_fetch
+2026-09-13 00:09:07,299 INFO history_bootstrap_complete symbol=CHIPUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=264656
+2026-09-13 00:09:07,305 INFO kline_cache_absent symbol=HYPEUSDT action=full_fetch
+2026-09-13 00:09:25,024 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:09:25,025 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:09:25,025 WARNING [kline_page_retry] symbol=FFUSDT end_ms=1787687339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:09:26,922 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:09:26,923 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:09:26,923 WARNING [kline_page_retry] symbol=ETHUSDT end_ms=1786067339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:10:01,873 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 00:10:04,355 INFO correlation_matrix_built symbols=7 measurable_pairs=21 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 00:10:04,523 INFO universe_refresh_scheduled next_utc=2026-09-12T21:25:00Z in_sec=895.5 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 00:10:23,068 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:10:23,069 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:10:23,070 WARNING [kline_page_retry] symbol=FLOCKUSDT end_ms=1784327339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:10:23,138 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:10:23,138 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:10:23,139 WARNING [kline_page_retry] symbol=ETHUSDT end_ms=1783607339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:10:31,111 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:10:31,111 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:10:31,112 WARNING [kline_page_retry] symbol=FLOCKUSDT end_ms=1784327339999 attempt=2/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:11:29,438 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:11:29,548 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:11:29,580 WARNING [kline_page_retry] symbol=ETHUSDT end_ms=1781327339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:11:42,826 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:12:01,486 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:12:01,724 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:12:01,879 WARNING [kline_page_retry] symbol=ETHUSDT end_ms=1780487339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:12:05,055 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 00:12:15,877 WARNING bybit_acknowledged_orphans_skipped count=16 identities=execution:1788855852510017127,execution:1788855852510017128,execution:1788855852510017330,execution:1788855852510017331,execution:1788855852510017332,execution:1788855852510017333,execution:1788855852510017334,p3e37132afdb33b7fcabee2fd29081bec,p3eaf94c903e72576e00a8bcb6614ad87,p3probeAbfad981e75,p3probeCbfad981e75,p3probeSbfad981e75,p3sd3b5e9cc3b44c1d2b4c5f2498d5e12,p3x02e0dd948cb6dd85fe6a613260c3ab,p3x7535ca44492e5defed24b0872d727f,p3xb6dc89f38c6b716b8771311fab5823 note=operator_disowned_these_identities_they_no_longer_block
+2026-09-13 00:12:15,878 INFO bybit_foreign_activity_observed orders=32 executions=21 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 00:12:36,538 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:12:36,612 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:12:36,763 WARNING [kline_page_retry] symbol=FFUSDT end_ms=1779947339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:12:37,873 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:12:53,338 INFO history_bootstrap_complete symbol=HYPEUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=226046
+2026-09-13 00:12:53,352 INFO kline_cache_absent symbol=JTOUSDT action=full_fetch
+2026-09-13 00:12:56,032 INFO history_bootstrap_complete symbol=ETHUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=270422
+2026-09-13 00:12:56,036 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 00:12:56,179 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:12:56,180 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:12:56,180 WARNING [kline_page_retry] symbol=FLOCKUSDT end_ms=1778867339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:12:56,311 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:12:56,312 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:12:56,312 WARNING [kline_page_retry] symbol=FFUSDT end_ms=1779527339999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:13:07,502 INFO history_bootstrap_complete symbol=FLOCKUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=249797
+2026-09-13 00:13:07,510 INFO kline_cache_absent symbol=LITUSDT action=full_fetch
+2026-09-13 00:13:19,994 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:13:20,027 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:13:20,181 WARNING [kline_page_retry] symbol=JTOUSDT end_ms=1788047579999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:13:20,671 INFO history_bootstrap_complete symbol=FFUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=265670
+2026-09-13 00:13:20,675 INFO kline_cache_absent symbol=METUSDT action=full_fetch
+2026-09-13 00:13:37,562 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:13:37,565 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:13:37,565 WARNING [kline_page_retry] symbol=LITUSDT end_ms=1787627639999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:13:43,032 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 00:13:43,049 INFO kline_cache_absent symbol=MNTUSDT action=full_fetch
+2026-09-13 00:16:29,808 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:16:29,809 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:16:29,810 WARNING [kline_page_retry] symbol=JTOUSDT end_ms=1779947579999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:16:33,522 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:16:58,852 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:16:58,946 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:16:59,040 WARNING [kline_page_retry] symbol=LITUSDT end_ms=1779887639999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:17:03,397 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:17:03,508 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:17:03,607 WARNING [kline_page_retry] symbol=MNTUSDT end_ms=1780727639999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:17:25,446 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:17:25,447 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:17:25,447 WARNING [kline_page_retry] symbol=JTOUSDT end_ms=1778627579999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:17:31,049 INFO history_bootstrap_complete symbol=JTOUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=277718
+2026-09-13 00:17:31,363 INFO kline_cache_absent symbol=NEARUSDT action=full_fetch
+2026-09-13 00:17:34,871 INFO history_bootstrap_complete symbol=METUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=254204
+2026-09-13 00:17:34,877 INFO kline_cache_absent symbol=ONDOUSDT action=full_fetch
+2026-09-13 00:17:44,729 INFO history_bootstrap_complete symbol=LITUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=277233
+2026-09-13 00:17:44,733 INFO kline_cache_absent symbol=PEPEUSDT action=full_fetch
+2026-09-13 00:17:54,911 INFO history_bootstrap_complete symbol=MNTUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=251875
+2026-09-13 00:17:54,917 INFO kline_cache_absent symbol=PUMPUSDT action=full_fetch
+2026-09-13 00:18:27,736 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:18:27,737 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:18:27,737 WARNING [kline_page_retry] symbol=NEARUSDT end_ms=1786007879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:18:35,641 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:18:35,642 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:18:35,642 WARNING [kline_page_retry] symbol=ONDOUSDT end_ms=1785707879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:18:47,908 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:18:47,908 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:18:47,909 WARNING [kline_page_retry] symbol=NEARUSDT end_ms=1785287879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:18:56,970 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:18:56,971 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:18:56,971 WARNING [kline_page_retry] symbol=NEARUSDT end_ms=1785227879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:19:11,473 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:19:11,473 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:19:11,474 WARNING [kline_page_retry] symbol=PUMPUSDT end_ms=1784747879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:19:19,523 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:19:19,524 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:19:19,525 WARNING [kline_page_retry] symbol=PUMPUSDT end_ms=1784747879999 attempt=2/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:19:26,062 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:19:26,063 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:19:26,063 WARNING [kline_page_retry] symbol=NEARUSDT end_ms=1783967879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:19:34,144 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:19:34,270 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:19:34,379 WARNING [kline_page_retry] symbol=NEARUSDT end_ms=1783967879999 attempt=2/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:19:45,676 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:19:45,690 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:19:45,690 WARNING [kline_page_retry] symbol=NEARUSDT end_ms=1783787879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:20:56,335 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:20:56,377 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:20:56,377 WARNING [kline_page_retry] symbol=PEPEUSDT end_ms=1780907879999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:21:56,774 INFO history_bootstrap_complete symbol=ONDOUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=261920
+2026-09-13 00:21:56,778 INFO kline_cache_absent symbol=SKYUSDT action=full_fetch
+2026-09-13 00:22:01,629 INFO history_bootstrap_complete symbol=PUMPUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=246719
+2026-09-13 00:22:02,690 INFO history_bootstrap_complete symbol=PEPEUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=257968
+2026-09-13 00:22:02,691 INFO kline_cache_absent symbol=SOLUSDT action=full_fetch
+2026-09-13 00:22:02,708 INFO kline_cache_absent symbol=UNIUSDT action=full_fetch
+2026-09-13 00:22:05,858 INFO history_bootstrap_complete symbol=NEARUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=274688
+2026-09-13 00:22:05,861 INFO kline_cache_absent symbol=USDCUSDT action=full_fetch
+2026-09-13 00:23:24,462 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 00:23:32,221 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 00:25:03,146 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 00:25:04,249 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789248304249 source=v5_account_fee_rate
+2026-09-13 00:25:08,172 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:25:16,312 INFO correlation_matrix_built symbols=20 measurable_pairs=190 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 00:25:17,203 INFO universe_refresh_scheduled next_utc=2026-09-12T21:40:00Z in_sec=882.8 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 00:25:25,030 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:25:25,125 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:25:25,252 WARNING [kline_page_retry] symbol=SOLUSDT end_ms=1780308179999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:25:45,396 INFO history_bootstrap_complete symbol=SKYUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=228625
+2026-09-13 00:25:45,673 INFO kline_cache_absent symbol=VTHOUSDT action=full_fetch
+2026-09-13 00:25:58,691 INFO history_bootstrap_complete symbol=UNIUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=236015
+2026-09-13 00:25:58,692 INFO kline_cache_absent symbol=WLFIUSDT action=full_fetch
+2026-09-13 00:26:01,860 INFO history_bootstrap_complete symbol=USDCUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=236015
+2026-09-13 00:26:01,866 INFO kline_cache_absent symbol=XPLUSDT action=full_fetch
+2026-09-13 00:26:10,187 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:26:17,723 INFO history_bootstrap_complete symbol=SOLUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=256109
+2026-09-13 00:26:17,728 INFO kline_cache_absent symbol=XRPUSDT action=full_fetch
+2026-09-13 00:27:43,980 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:27:44,023 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:27:44,024 WARNING [kline_page_retry] symbol=XRPUSDT end_ms=1786428419999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:28:12,638 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:28:12,639 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:28:12,639 WARNING [kline_page_retry] symbol=VTHOUSDT end_ms=1782648359999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:30:01,234 INFO history_bootstrap_complete symbol=VTHOUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=255733
+2026-09-13 00:30:01,241 INFO kline_cache_absent symbol=CHZUSDT action=full_fetch
+2026-09-13 00:30:04,918 INFO history_bootstrap_complete symbol=WLFIUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=246234
+2026-09-13 00:30:04,924 INFO kline_cache_absent symbol=SKRUSDT action=full_fetch
+2026-09-13 00:30:13,640 INFO history_bootstrap_complete symbol=XPLUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=251780
+2026-09-13 00:30:13,644 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 00:30:38,956 INFO history_bootstrap_complete symbol=XRPUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=261233
+2026-09-13 00:30:50,054 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:30:50,055 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:30:50,055 WARNING [kline_page_retry] symbol=KIIUSDT end_ms=1787268659999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:30:59,308 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 00:31:52,708 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:31:52,709 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:31:52,709 WARNING [kline_page_retry] symbol=SKRUSDT end_ms=1783188659999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:38:40,498 INFO bybit_environment_resolved environment=demo rest_url=https://api-demo.bybit.com public_ws_url=wss://stream.bybit.com/v5/public/spot private_ws_url=wss://stream-demo.bybit.com/v5/private
+2026-09-13 00:38:40,498 INFO bybit_demo_public_stream_split note=public_data_uses_mainnet_host private_session_uses_demo_host
+2026-09-13 00:38:40,499 INFO bybit_marketable_limit_attached_mode_active environment=demo market_entries=ioc_limit_at_max_entry_price protection=native_attached_tp_and_sl take_profit=native_attached unprotected_window=none evidence=wp2_limit_demo_20260912_l1x_l2x
+2026-09-13 00:38:40,499 INFO bybit_unprotected_dwell_flatten_armed unprotected_max_sec=300 action=market_sell_strategy_inventory_after_dwell
+2026-09-13 00:38:40,500 INFO bybit_weak_trade_management_armed policy=mt5_penalty_watcher_port actions=partial_cut,full_close closed_trade_records=trade_outcomes
+2026-09-13 00:38:40,500 INFO bybit_correlation_filter_armed tf=60 lookback_bars=168 threshold=0.85 min_samples=30 basis=log_returns action=block_duplicated_same_direction_spot_exposure
+2026-09-13 00:38:40,500 INFO bybit_trade_cost_model fee_rate_source=v5_account_fee_rate fee_rate_refresh_sec=900 max_total_cost_r=0.24 exit_slippage_multiplier=1.5 fallback_taker_fee_rate=0.001 fallback_slippage_rate=0.001
+2026-09-13 00:38:40,500 INFO bybit_sizing_balance_fallback_armed max_balance_fallback_pct=0.99 rule=size_to_pct_of_free_quote_when_risk_sized_order_exceeds_it consequence=actual_risk_below_requested_never_above
+2026-09-13 00:38:40,501 INFO bybit_universe_turnover_filter_armed min_turnover_24h=1000000 basis=turnover24h_quote applied=before_gainer_loser_turnover_rankings managed_symbols=exempt
+2026-09-13 00:38:40,501 INFO bybit_order_split_armed max_child_orders=5 max_child_order_notional=0 rule=quantity_above_the_per_order_cap_is_placed_as_children_summing_to_it consequence=approved_risk_is_placed_in_full_instead_of_capped
+2026-09-13 00:38:40,501 INFO bybit_kline_bootstrap concurrency=4 rate_limit_per_sec=20 per_call_timeout_sec=8 cache=validated_history_csv_with_delta_fetch
+2026-09-13 00:38:40,501 INFO bybit_universe_schedule interval_sec=900 lead_sec=300 alignment=utc_wall_clock refresh_at=interval_boundary_minus_lead
+2026-09-13 00:38:42,508 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 00:38:43,977 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789249123973 source=v5_account_fee_rate
+2026-09-13 00:38:46,991 INFO universe_refresh_scheduled next_utc=2026-09-12T21:40:00Z in_sec=73.0 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 00:38:53,107 WARNING kline_cache_invalid symbol=AEROUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 00:38:53,307 WARNING kline_cache_invalid symbol=BSBUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 00:38:53,379 WARNING kline_cache_invalid symbol=AAVEUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 00:38:53,404 WARNING kline_cache_invalid symbol=ASTERUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 00:38:56,469 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 00:39:39,117 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 00:39:39,118 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 00:39:39,119 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1787209139999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 00:39:42,691 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:40:04,435 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 00:40:07,743 INFO universe_refresh_scheduled next_utc=2026-09-12T21:55:00Z in_sec=892.3 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 00:40:46,792 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 00:59:52,555 INFO bybit_environment_resolved environment=demo rest_url=https://api-demo.bybit.com public_ws_url=wss://stream.bybit.com/v5/public/spot private_ws_url=wss://stream-demo.bybit.com/v5/private
+2026-09-13 00:59:52,556 INFO bybit_demo_public_stream_split note=public_data_uses_mainnet_host private_session_uses_demo_host
+2026-09-13 00:59:52,556 INFO bybit_marketable_limit_attached_mode_active environment=demo market_entries=ioc_limit_at_max_entry_price protection=native_attached_tp_and_sl take_profit=native_attached unprotected_window=none evidence=wp2_limit_demo_20260912_l1x_l2x
+2026-09-13 00:59:52,557 INFO bybit_unprotected_dwell_flatten_armed unprotected_max_sec=300 action=market_sell_strategy_inventory_after_dwell
+2026-09-13 00:59:52,557 INFO bybit_weak_trade_management_armed policy=mt5_penalty_watcher_port actions=partial_cut,full_close closed_trade_records=trade_outcomes
+2026-09-13 00:59:52,558 INFO bybit_correlation_filter_armed tf=60 lookback_bars=168 threshold=0.85 min_samples=30 basis=log_returns action=block_duplicated_same_direction_spot_exposure
+2026-09-13 00:59:52,558 INFO bybit_trade_cost_model fee_rate_source=v5_account_fee_rate fee_rate_refresh_sec=900 max_total_cost_r=0.24 exit_slippage_multiplier=1.5 fallback_taker_fee_rate=0.001 fallback_slippage_rate=0.001
+2026-09-13 00:59:52,558 INFO bybit_sizing_balance_fallback_armed max_balance_fallback_pct=0.99 rule=size_to_pct_of_free_quote_when_risk_sized_order_exceeds_it consequence=actual_risk_below_requested_never_above
+2026-09-13 00:59:52,559 INFO bybit_universe_turnover_filter_armed min_turnover_24h=1000000 basis=turnover24h_quote applied=before_gainer_loser_turnover_rankings managed_symbols=exempt
+2026-09-13 00:59:52,559 INFO bybit_order_split_armed max_child_orders=5 max_child_order_notional=0 rule=quantity_above_the_per_order_cap_is_placed_as_children_summing_to_it consequence=approved_risk_is_placed_in_full_instead_of_capped
+2026-09-13 00:59:52,559 INFO bybit_kline_bootstrap concurrency=4 rate_limit_per_sec=20 per_call_timeout_sec=8 cache=validated_history_csv_with_delta_fetch
+2026-09-13 00:59:52,559 INFO bybit_universe_schedule interval_sec=900 lead_sec=300 alignment=utc_wall_clock refresh_at=interval_boundary_minus_lead
+2026-09-13 00:59:54,468 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 00:59:56,185 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789250396183 source=v5_account_fee_rate
+2026-09-13 00:59:59,364 INFO universe_refresh_scheduled next_utc=2026-09-12T22:10:00Z in_sec=600.6 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 01:00:02,615 WARNING kline_cache_invalid symbol=AEROUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:00:02,670 WARNING kline_cache_invalid symbol=AAVEUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:00:02,733 WARNING kline_cache_invalid symbol=BSBUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:00:02,867 WARNING kline_cache_invalid symbol=ASTERUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:00:06,075 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 01:00:41,050 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:00:41,055 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:00:41,055 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1787090459999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:02:44,362 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:02:44,363 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:02:44,363 WARNING [kline_page_retry] symbol=AEROUSDT end_ms=1781750459999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:02:52,254 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:03:48,362 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:03:48,363 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:03:48,363 WARNING [kline_page_retry] symbol=AEROUSDT end_ms=1780010459999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:04:03,756 INFO history_bootstrap_complete symbol=BSBUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=249297
+2026-09-13 01:04:05,893 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:04:05,958 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:04:06,010 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1778690459999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:04:08,646 WARNING kline_cache_invalid symbol=BTCUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:04:14,777 INFO history_bootstrap_complete symbol=AAVEUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=260313
+2026-09-13 01:04:15,980 INFO history_bootstrap_complete symbol=ASTERUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=261516
+2026-09-13 01:04:15,987 INFO kline_cache_absent symbol=CHZUSDT action=full_fetch
+2026-09-13 01:04:21,385 INFO history_bootstrap_complete symbol=DOTUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=5406
+2026-09-13 01:04:24,922 WARNING kline_cache_invalid symbol=ENAUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:04:25,922 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:04:27,509 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:04:27,510 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:04:27,510 WARNING [kline_page_retry] symbol=CHZUSDT end_ms=1789070699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:04:34,867 INFO history_bootstrap_complete symbol=AEROUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=280406
+2026-09-13 01:04:34,884 INFO kline_cache_absent symbol=ETHFIUSDT action=full_fetch
+2026-09-13 01:04:44,701 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:04:44,702 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:04:44,702 WARNING [kline_page_retry] symbol=BTCUSDT end_ms=1787690699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:05:26,439 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:05:26,440 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:05:26,440 WARNING [kline_page_retry] symbol=CHZUSDT end_ms=1786310699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:05:32,157 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:05:32,291 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:05:32,405 WARNING [kline_page_retry] symbol=ETHFIUSDT end_ms=1786550699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:06:22,733 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:06:22,748 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:06:22,749 WARNING [kline_page_retry] symbol=ETHFIUSDT end_ms=1784750699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:06:49,891 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:06:49,966 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:06:49,966 WARNING [kline_page_retry] symbol=CHZUSDT end_ms=1782830699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:07:05,530 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:07:05,589 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:07:05,645 WARNING [kline_page_retry] symbol=BTCUSDT end_ms=1781090699999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:07:58,390 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:08:16,817 INFO history_bootstrap_complete symbol=BTCUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=253061
+2026-09-13 01:08:18,278 INFO history_bootstrap_complete symbol=ENAUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=236891
+2026-09-13 01:08:25,572 WARNING kline_cache_invalid symbol=ETHUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:08:28,693 INFO history_bootstrap_complete symbol=FFUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=10405
+2026-09-13 01:08:32,374 WARNING kline_cache_invalid symbol=FLOCKUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:08:53,287 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:08:55,868 INFO history_bootstrap_complete symbol=CHZUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=280983
+2026-09-13 01:08:59,207 WARNING kline_cache_invalid symbol=HYPEUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:09:18,140 INFO history_bootstrap_complete symbol=ETHFIUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=283266
+2026-09-13 01:09:18,145 INFO kline_cache_absent symbol=INJUSDT action=full_fetch
+2026-09-13 01:10:02,145 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 01:10:04,862 INFO correlation_matrix_built symbols=10 measurable_pairs=45 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 01:10:05,349 INFO universe_refresh_scheduled next_utc=2026-09-12T22:25:00Z in_sec=894.7 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 01:10:52,175 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:10:52,176 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:10:52,176 WARNING [kline_page_retry] symbol=INJUSDT end_ms=1784210999999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:11:20,787 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:11:20,838 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:11:20,921 WARNING [kline_page_retry] symbol=ETHUSDT end_ms=1780370939999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:12:05,282 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 01:12:14,338 INFO history_bootstrap_complete symbol=ETHUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=237547
+2026-09-13 01:12:14,431 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 01:12:16,259 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 01:12:29,745 INFO history_bootstrap_complete symbol=FLOCKUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=241079
+2026-09-13 01:12:29,750 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:12:34,800 WARNING kline_cache_invalid symbol=LITUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:13:06,714 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 01:13:13,545 WARNING kline_cache_invalid symbol=METUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:13:19,721 INFO history_bootstrap_complete symbol=HYPEUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=263891
+2026-09-13 01:13:23,083 WARNING kline_cache_invalid symbol=MNTUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:13:26,163 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:13:32,623 INFO history_bootstrap_complete symbol=INJUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=254515
+2026-09-13 01:13:36,762 WARNING kline_cache_invalid symbol=NEARUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:15:20,366 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:16:14,259 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:17:09,287 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:17:30,005 INFO history_bootstrap_complete symbol=LITUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=300295
+2026-09-13 01:17:39,227 INFO history_bootstrap_complete symbol=METUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=272500
+2026-09-13 01:17:40,863 INFO history_bootstrap_complete symbol=PEPEUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=10844
+2026-09-13 01:17:47,694 WARNING kline_cache_invalid symbol=PUMPUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:17:49,763 INFO history_bootstrap_complete symbol=SOLUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=8889
+2026-09-13 01:17:54,233 WARNING kline_cache_invalid symbol=UNIUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:17:58,365 INFO history_bootstrap_complete symbol=MNTUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=278672
+2026-09-13 01:18:04,325 WARNING kline_cache_invalid symbol=USDCUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 01:18:07,398 INFO history_bootstrap_complete symbol=NEARUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=274796
+2026-09-13 01:18:11,038 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:18:13,330 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:18:13,429 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:18:13,499 WARNING [kline_page_retry] symbol=UNIUSDT end_ms=1788771479999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:18:13,731 INFO history_bootstrap_complete symbol=VTHOUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=6313
+2026-09-13 01:18:18,456 INFO history_bootstrap_complete symbol=WLFIUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=4718
+2026-09-13 01:18:25,271 INFO history_bootstrap_complete symbol=XPLUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=6811
+2026-09-13 01:18:31,734 INFO history_bootstrap_complete symbol=XRPUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=6469
+2026-09-13 01:18:31,738 INFO kline_cache_absent symbol=AVAXUSDT action=full_fetch
+2026-09-13 01:19:11,827 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:19:14,362 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:19:14,439 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:19:14,496 WARNING [kline_page_retry] symbol=UNIUSDT end_ms=1785951479999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:19:21,821 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:19:21,888 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:19:22,005 WARNING [kline_page_retry] symbol=AVAXUSDT end_ms=1786731539999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:19:34,572 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:19:34,572 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:19:34,573 WARNING [kline_page_retry] symbol=UNIUSDT end_ms=1785351479999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:20:08,299 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:20:08,384 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:20:08,399 WARNING [kline_page_retry] symbol=PUMPUSDT end_ms=1782831479999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:22:03,052 INFO history_bootstrap_complete symbol=PUMPUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=263797
+2026-09-13 01:22:10,713 INFO history_bootstrap_complete symbol=USDCUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=252344
+2026-09-13 01:22:17,386 INFO history_bootstrap_complete symbol=UNIUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=267657
+2026-09-13 01:22:34,282 INFO history_bootstrap_complete symbol=AVAXUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=242577
+2026-09-13 01:23:24,506 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 01:23:30,536 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 01:25:01,839 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 01:25:01,858 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 01:25:01,861 INFO kline_cache_absent symbol=SKRUSDT action=full_fetch
+2026-09-13 01:25:02,500 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789251902499 source=v5_account_fee_rate
+2026-09-13 01:25:08,762 INFO correlation_matrix_built symbols=27 measurable_pairs=351 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 01:25:08,786 INFO universe_refresh_scheduled next_utc=2026-09-12T22:40:00Z in_sec=891.2 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 01:25:32,501 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:25:32,501 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:25:32,502 WARNING [kline_page_retry] symbol=KIIUSDT end_ms=1787571959999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:25:45,365 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 01:28:15,685 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:28:15,686 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:28:15,686 WARNING [kline_page_retry] symbol=SKRUSDT end_ms=1778991959999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:28:27,690 INFO history_bootstrap_complete symbol=SKRUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=205842
+2026-09-13 01:33:57,431 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 01:34:04,064 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 01:40:02,020 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 01:40:02,061 INFO kline_cache_absent symbol=CYBERUSDT action=full_fetch
+2026-09-13 01:40:02,063 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 01:40:02,095 INFO kline_cache_absent symbol=SHIBUSDT action=full_fetch
+2026-09-13 01:40:23,205 INFO correlation_matrix_built symbols=26 measurable_pairs=325 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 01:40:23,314 INFO universe_refresh_scheduled next_utc=2026-09-12T22:55:00Z in_sec=876.7 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 01:40:31,216 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:40:49,243 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:40:49,243 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:40:49,244 WARNING [kline_page_retry] symbol=BTCUSDT end_ms=None attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:40:55,762 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 01:41:17,734 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:41:17,735 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:41:17,736 WARNING [kline_page_retry] symbol=CYBERUSDT end_ms=1785832859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:41:28,117 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:41:28,118 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:41:28,119 WARNING [kline_page_retry] symbol=CYBERUSDT end_ms=1785712859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:41:37,335 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:41:37,336 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:41:37,336 WARNING [kline_page_retry] symbol=CYBERUSDT end_ms=1785652859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:41:51,821 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:41:51,822 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:41:51,823 WARNING [kline_page_retry] symbol=CYBERUSDT end_ms=1785232859999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:43:42,268 INFO history_bootstrap_complete symbol=SHIBUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=220233
+2026-09-13 01:44:16,074 INFO history_bootstrap_complete symbol=CYBERUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=254061
+2026-09-13 01:46:37,259 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 01:46:43,249 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 01:55:02,206 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 01:55:02,223 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 01:55:02,226 INFO kline_cache_absent symbol=SPCXXUSDT action=full_fetch
+2026-09-13 01:55:02,226 INFO kline_cache_absent symbol=VVVUSDT action=full_fetch
+2026-09-13 01:55:02,819 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789253702804 source=v5_account_fee_rate
+2026-09-13 01:55:24,235 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 01:55:32,838 INFO correlation_matrix_built symbols=26 measurable_pairs=325 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 01:55:32,962 INFO universe_refresh_scheduled next_utc=2026-09-12T23:10:00Z in_sec=867.0 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 01:55:48,200 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 01:57:25,571 ERROR history_bootstrap_failed symbol=SPCXXUSDT error=ValueError
+2026-09-13 01:57:57,403 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 01:57:57,405 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 01:57:57,406 WARNING [kline_page_retry] symbol=VVVUSDT end_ms=1779533759999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 01:58:17,308 INFO history_bootstrap_complete symbol=VVVUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=195109
+2026-09-13 01:59:24,399 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 01:59:30,520 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 02:10:02,096 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 02:10:02,149 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 02:10:10,529 INFO history_bootstrap_complete symbol=SKYUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=8391
+2026-09-13 02:10:25,263 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 02:10:36,567 INFO correlation_matrix_built symbols=28 measurable_pairs=378 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 02:10:36,719 INFO universe_refresh_scheduled next_utc=2026-09-12T23:25:00Z in_sec=863.3 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 02:10:37,192 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 02:10:39,570 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 02:10:39,630 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 02:10:39,679 WARNING [kline_page_retry] symbol=KIIUSDT end_ms=1787694659999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 02:10:57,827 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 02:11:19,666 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 02:23:24,421 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 02:23:30,740 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 02:25:02,302 INFO [universe_turnover_filter] min=1000000 excluded=338 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 02:25:02,329 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 02:25:02,331 INFO kline_cache_absent symbol=MONUSDT action=full_fetch
+2026-09-13 02:25:02,944 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789255502934 source=v5_account_fee_rate
+2026-09-13 02:25:46,360 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=TimeoutError
+2026-09-13 02:25:46,471 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 02:25:46,521 WARNING [kline_page_retry] symbol=KIIUSDT end_ms=1787875559999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 02:25:49,557 INFO correlation_matrix_built symbols=27 measurable_pairs=351 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 02:25:49,656 INFO universe_refresh_scheduled next_utc=2026-09-12T23:40:00Z in_sec=850.3 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 02:25:56,283 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 02:26:06,425 ERROR history_bootstrap_failed symbol=KIIUSDT error=ValueError
+2026-09-13 02:28:35,492 INFO history_bootstrap_complete symbol=MONUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=213186
+2026-09-13 04:42:31,364 INFO bybit_environment_resolved environment=demo rest_url=https://api-demo.bybit.com public_ws_url=wss://stream.bybit.com/v5/public/spot private_ws_url=wss://stream-demo.bybit.com/v5/private
+2026-09-13 04:42:31,364 INFO bybit_demo_public_stream_split note=public_data_uses_mainnet_host private_session_uses_demo_host
+2026-09-13 04:42:31,364 INFO bybit_marketable_limit_attached_mode_active environment=demo market_entries=ioc_limit_at_max_entry_price protection=native_attached_tp_and_sl take_profit=native_attached unprotected_window=none evidence=wp2_limit_demo_20260912_l1x_l2x
+2026-09-13 04:42:31,364 INFO bybit_unprotected_dwell_flatten_armed unprotected_max_sec=300 action=market_sell_strategy_inventory_after_dwell
+2026-09-13 04:42:31,364 INFO bybit_weak_trade_management_armed policy=mt5_penalty_watcher_port actions=partial_cut,full_close closed_trade_records=trade_outcomes
+2026-09-13 04:42:31,366 INFO bybit_correlation_filter_armed tf=60 lookback_bars=168 threshold=0.85 min_samples=30 basis=log_returns action=block_duplicated_same_direction_spot_exposure
+2026-09-13 04:42:31,366 INFO bybit_trade_cost_model fee_rate_source=v5_account_fee_rate fee_rate_refresh_sec=900 max_total_cost_r=0.24 exit_slippage_multiplier=1.5 fallback_taker_fee_rate=0.001 fallback_slippage_rate=0.001
+2026-09-13 04:42:31,366 INFO bybit_sizing_balance_fallback_armed max_balance_fallback_pct=0.99 rule=size_to_pct_of_free_quote_when_risk_sized_order_exceeds_it consequence=actual_risk_below_requested_never_above
+2026-09-13 04:42:31,366 INFO bybit_universe_turnover_filter_armed min_turnover_24h=1000000 basis=turnover24h_quote applied=before_gainer_loser_turnover_rankings managed_symbols=exempt
+2026-09-13 04:42:31,366 INFO bybit_order_split_armed max_child_orders=5 max_child_order_notional=0 rule=quantity_above_the_per_order_cap_is_placed_as_children_summing_to_it consequence=approved_risk_is_placed_in_full_instead_of_capped
+2026-09-13 04:42:31,368 INFO bybit_kline_bootstrap concurrency=4 rate_limit_per_sec=20 per_call_timeout_sec=8 cache=validated_history_csv_with_delta_fetch
+2026-09-13 04:42:31,368 INFO bybit_market_clock_bounds ticker_quote_stale_after_sec=15 kline_stale_after_sec=75 basis=bybit_kline_push_cadence_1_60s
+2026-09-13 04:42:31,368 INFO bybit_universe_schedule interval_sec=900 lead_sec=300 alignment=utc_wall_clock refresh_at=interval_boundary_minus_lead
+2026-09-13 04:42:33,553 INFO [universe_turnover_filter] min=1000000 excluded=339 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 04:42:33,567 INFO kline_cache_absent symbol=APTUSDT action=full_fetch
+2026-09-13 04:42:34,541 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789263754539 source=v5_account_fee_rate
+2026-09-13 04:42:36,525 INFO universe_refresh_scheduled next_utc=2026-09-13T01:55:00Z in_sec=743.5 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 04:42:40,189 WARNING kline_cache_invalid symbol=AAVEUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:42:40,274 WARNING kline_cache_invalid symbol=ASTERUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:42:40,358 WARNING kline_cache_invalid symbol=BTCUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:42:43,478 INFO bybit_foreign_activity_observed orders=23 executions=14 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 04:42:59,025 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:42:59,025 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:42:59,025 WARNING [kline_page_retry] symbol=APTUSDT end_ms=1788063779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:43:01,224 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:43:01,226 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:43:01,226 WARNING [kline_page_retry] symbol=ASTERUSDT end_ms=1788183779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:43:58,526 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:43:58,527 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:43:58,527 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1784943779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:43:59,095 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:43:59,096 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:43:59,096 WARNING [kline_page_retry] symbol=APTUSDT end_ms=1784823779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:44:14,580 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:44:14,625 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:44:14,626 WARNING [kline_page_retry] symbol=APTUSDT end_ms=1784463779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:44:15,878 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:44:15,879 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:44:15,879 WARNING [kline_page_retry] symbol=ASTERUSDT end_ms=1784163779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:44:20,661 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:44:20,731 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:44:20,743 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1784103779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:45:00,317 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:45:00,402 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:45:00,580 WARNING [kline_page_retry] symbol=AAVEUSDT end_ms=1782663779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:45:51,804 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:45:51,816 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:45:51,816 WARNING [kline_page_retry] symbol=ASTERUSDT end_ms=1780503779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:46:10,083 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:46:15,591 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:46:15,670 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:46:15,749 WARNING [kline_page_retry] symbol=BTCUSDT end_ms=1778583779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:46:20,429 INFO history_bootstrap_complete symbol=BTCUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=226889
+2026-09-13 04:46:25,931 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:46:26,075 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:46:26,180 WARNING [kline_page_retry] symbol=ASTERUSDT end_ms=1779663779999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:46:26,839 INFO history_bootstrap_complete symbol=CHZUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=6375
+2026-09-13 04:46:31,559 WARNING kline_cache_invalid symbol=DOTUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:46:58,543 INFO history_bootstrap_complete symbol=APTUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=265000
+2026-09-13 04:47:02,511 INFO history_bootstrap_complete symbol=AAVEUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=268968
+2026-09-13 04:47:03,277 WARNING kline_cache_invalid symbol=ENAUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:47:03,578 INFO history_bootstrap_complete symbol=ASTERUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=270030
+2026-09-13 04:47:03,584 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:47:08,630 WARNING kline_cache_invalid symbol=ETHUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:47:08,690 WARNING kline_cache_invalid symbol=FFUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:47:15,900 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:47:15,931 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:47:15,994 WARNING [kline_page_retry] symbol=ENAUSDT end_ms=1789084079999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:47:17,011 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:47:17,012 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:47:17,013 WARNING [kline_page_retry] symbol=DOTUSDT end_ms=1787404019999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:48:37,324 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:48:37,325 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:48:37,325 WARNING [kline_page_retry] symbol=ENAUSDT end_ms=1784524079999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:49:00,590 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:49:55,179 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:50:27,583 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:50:27,668 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:50:27,825 WARNING [kline_page_retry] symbol=ENAUSDT end_ms=1780684079999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:50:48,706 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:51:03,115 INFO history_bootstrap_complete symbol=DOTUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=276281
+2026-09-13 04:51:10,496 WARNING kline_cache_invalid symbol=FLOCKUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:51:29,345 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:51:29,347 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:51:29,347 WARNING [kline_page_retry] symbol=ENAUSDT end_ms=1779184079999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:51:31,957 INFO history_bootstrap_complete symbol=ETHUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=269452
+2026-09-13 04:51:36,456 WARNING kline_cache_invalid symbol=HYPEUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:51:45,246 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:51:51,425 INFO history_bootstrap_complete symbol=ENAUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=292889
+2026-09-13 04:51:54,599 INFO history_bootstrap_complete symbol=FFUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=291031
+2026-09-13 04:51:54,599 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 04:52:01,234 WARNING kline_cache_invalid symbol=LITUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:52:38,486 WARNING history_bootstrap_excluded symbol=KIIUSDT reason=insufficient_history:42532<180000
+2026-09-13 04:52:38,969 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:52:43,912 WARNING kline_cache_invalid symbol=METUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:53:02,762 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:53:02,763 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:53:02,763 WARNING [kline_page_retry] symbol=HYPEUSDT end_ms=1785004319999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:53:24,549 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 04:53:32,515 INFO bybit_foreign_activity_observed orders=2 executions=0 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 04:53:35,514 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:53:58,102 WARNING bybit_websocket_error type=TimeoutError
+2026-09-13 04:55:10,797 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:55:10,798 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:55:10,798 WARNING [kline_page_retry] symbol=METUSDT end_ms=1785244379999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:55:26,163 INFO [universe_turnover_filter] min=1000000 excluded=339 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 04:55:27,831 INFO correlation_matrix_built symbols=9 measurable_pairs=36 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 04:55:27,855 INFO universe_refresh_scheduled next_utc=2026-09-13T02:10:00Z in_sec=872.1 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 04:55:36,524 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:55:36,611 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:55:36,794 WARNING [kline_page_retry] symbol=METUSDT end_ms=1785184379999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:56:30,873 INFO history_bootstrap_complete symbol=FLOCKUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=327750
+2026-09-13 04:56:34,726 WARNING kline_cache_invalid symbol=MNTUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:56:56,149 INFO history_bootstrap_complete symbol=HYPEUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=324141
+2026-09-13 04:57:03,667 INFO history_bootstrap_complete symbol=MONUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=7514
+2026-09-13 04:57:08,228 WARNING kline_cache_invalid symbol=PEPEUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:57:10,895 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:57:50,967 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:57:51,080 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:57:51,191 WARNING [kline_page_retry] symbol=MNTUSDT end_ms=1785724619999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:57:56,951 INFO history_bootstrap_complete symbol=LITUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=362358
+2026-09-13 04:58:00,262 WARNING kline_cache_invalid symbol=PUMPUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:58:04,509 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 04:58:32,396 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:58:32,467 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:58:32,558 WARNING [kline_page_retry] symbol=PEPEUSDT end_ms=1785904679999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:58:34,715 INFO history_bootstrap_complete symbol=METUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=356233
+2026-09-13 04:58:34,772 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 04:58:34,773 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 04:58:34,773 WARNING [kline_page_retry] symbol=PUMPUSDT end_ms=1787944679999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 04:58:39,537 WARNING kline_cache_invalid symbol=SKRUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 04:58:59,346 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:01:00,364 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:01:00,512 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:01:00,607 WARNING [kline_page_retry] symbol=PEPEUSDT end_ms=1783024679999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:01:32,309 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:01:57,270 INFO history_bootstrap_complete symbol=MNTUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=326405
+2026-09-13 05:02:12,677 INFO history_bootstrap_complete symbol=SKYUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=15250
+2026-09-13 05:02:19,653 WARNING kline_cache_invalid symbol=SOLUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 05:02:27,432 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:03:24,496 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:03:54,600 INFO history_bootstrap_complete symbol=PEPEUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=410938
+2026-09-13 05:04:12,909 INFO history_bootstrap_complete symbol=UNIUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=18233
+2026-09-13 05:04:14,964 INFO history_bootstrap_complete symbol=PUMPUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=378016
+2026-09-13 05:04:29,010 INFO history_bootstrap_complete symbol=USDCUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=16094
+2026-09-13 05:04:30,208 INFO history_bootstrap_complete symbol=VTHOUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=15218
+2026-09-13 05:04:31,730 INFO history_bootstrap_complete symbol=SKRUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=357016
+2026-09-13 05:04:31,740 INFO kline_cache_absent symbol=WLDUSDT action=full_fetch
+2026-09-13 05:04:31,747 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:04:39,212 WARNING kline_cache_invalid symbol=WLFIUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 05:04:44,395 INFO history_bootstrap_complete symbol=VVVUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=15327
+2026-09-13 05:04:57,925 INFO history_bootstrap_complete symbol=XPLUSDT origin=cache_delta bars=180000 rest_pages=1 elapsed_ms=13500
+2026-09-13 05:05:03,555 WARNING kline_cache_invalid symbol=XRPUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 05:05:20,312 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:05:20,314 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:05:20,314 WARNING [kline_page_retry] symbol=WLFIUSDT end_ms=1787825099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:05:32,305 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:06:05,337 WARNING bybit_websocket_error type=WebSocketConnectionClosedException
+2026-09-13 05:06:27,961 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:06:57,555 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:06:57,690 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:06:57,770 WARNING [kline_page_retry] symbol=WLFIUSDT end_ms=1784825099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:07:32,897 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:07:49,629 INFO bybit_foreign_activity_observed orders=2 executions=0 active_foreign_sells=0 encroached_bases=none blocking=false
+2026-09-13 05:07:53,259 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:07:53,463 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:07:54,041 WARNING [kline_page_retry] symbol=WLFIUSDT end_ms=1783325099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:08:07,913 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:08:07,974 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:08:08,088 WARNING [kline_page_retry] symbol=WLFIUSDT end_ms=1783205099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:08:11,603 INFO history_bootstrap_complete symbol=SOLUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=358937
+2026-09-13 05:08:11,742 INFO kline_cache_absent symbol=ARBUSDT action=full_fetch
+2026-09-13 05:08:38,826 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:08:53,570 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:08:53,707 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:08:53,786 WARNING [kline_page_retry] symbol=WLFIUSDT end_ms=1782125099999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:09:41,288 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:10:39,186 INFO history_bootstrap_complete symbol=WLDUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=368922
+2026-09-13 05:10:39,198 INFO kline_cache_absent symbol=CCUSDT action=full_fetch
+2026-09-13 05:10:39,532 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:10:55,092 INFO history_bootstrap_complete symbol=XRPUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=357172
+2026-09-13 05:10:55,114 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 05:11:20,259 INFO history_bootstrap_complete symbol=WLFIUSDT origin=rest_full bars=180000 rest_pages=181 elapsed_ms=408516
+2026-09-13 05:11:28,654 WARNING kline_cache_invalid symbol=SHIBUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 05:11:30,791 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:11:30,894 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:11:30,955 WARNING [kline_page_retry] symbol=KIIUSDT end_ms=1788005459999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:11:41,874 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:12:00,997 WARNING history_bootstrap_excluded symbol=KIIUSDT reason=insufficient_history:42551<180000
+2026-09-13 05:12:12,440 INFO [universe_turnover_filter] min=1000000 excluded=340 sample=0GUSDT,1INCHUSDT,2ZUSDT,A8USDT,AAPLXUSDT,ACHUSDT,ACSUSDT,AEDZUSDT,AEVOUSDT,AGIUSDT
+2026-09-13 05:12:13,601 INFO bybit_fee_rates_refreshed symbols=553 fetched_at_ms=1789265533596 source=v5_account_fee_rate
+2026-09-13 05:12:19,562 WARNING kline_cache_invalid symbol=AEROUSDT reason=cache_overlap_mismatch cached_bars=180000 action=full_fetch
+2026-09-13 05:12:26,415 INFO correlation_matrix_built symbols=25 measurable_pairs=300 unavailable_symbols=0 tf=60 lookback=168 min_samples=30 threshold=0.85
+2026-09-13 05:12:26,643 INFO universe_refresh_scheduled next_utc=2026-09-13T02:25:00Z in_sec=753.4 interval_sec=900 lead_sec=300 stale_grace_sec=120
+2026-09-13 05:12:40,820 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:13:44,148 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:14:09,176 INFO history_bootstrap_complete symbol=ARBUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=357547
+2026-09-13 05:14:09,186 INFO kline_cache_absent symbol=KIIUSDT action=full_fetch
+2026-09-13 05:15:23,498 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:15:48,990 WARNING history_bootstrap_excluded symbol=KIIUSDT reason=insufficient_history:42555<180000
+2026-09-13 05:16:16,278 WARNING bybit_websocket_error type=WebSocketTimeoutException
+2026-09-13 05:16:43,526 WARNING [execution_failure] schema=20260912_bybit_spot_failure_taxonomy_v1 method=GET path=/v5/market/kline category=TRANSPORT_TIMEOUT domain=transport retryable=true mapped=true ret_code=- http_status=- error_kind=timeout action=raise detail=URLError
+2026-09-13 05:16:43,727 WARNING [bybit_retry] schema=20260912_bybit_spot_retry_policy_v1 method=GET path=/v5/market/kline attempt=0/4 category=TRANSPORT_TIMEOUT domain=transport idempotent=true retry=false wait_sec=0.000 wait_source= reason=deadline_leaves_no_room_for_another_attempt
+2026-09-13 05:16:43,823 WARNING [kline_page_retry] symbol=AEROUSDT end_ms=1781825579999 attempt=1/3 error=BybitDeadlineExceeded action=refetch_page
+2026-09-13 05:16:50,114 INFO history_bootstrap_complete symbol=CCUSDT origin=rest_full bars=180000 rest_pages=180 elapsed_ms=370936

@@ -13,6 +13,9 @@
 /python/.codex_validation/approval_execution_20260907/terminal/MetaEditor64.exe
 /python/data/ai_decision_cache.jsonl
 
+# Orchestrator takeover isolation backups duplicate python/data (152 MB cache copy).
+/.mt5-orchestrator/runs/*/takeover/isolation_backup/
+
 # Authentication/account stores are not safe to publish in this public repo.
 /python/.codex_validation/approval_execution_20260907/terminal/config/
 /python/.codex_validation/approval_execution_20260907/terminal/temp/EBWebView/

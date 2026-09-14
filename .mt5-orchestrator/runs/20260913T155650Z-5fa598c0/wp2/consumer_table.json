@@ -1,0 +1,4738 @@
+{
+  "method": "AST scan of every read site (attribute, string subscript, .get/.pop/getattr literal) of each provider-schema field across python/*.py, excluding structured_models.py and decision_integrity.py which only define the schemas; constructor keyword arguments are recorded as injection sites (persistence), not consumption. A read is content-gating when it sits in an actual test position (if/while test, comparison, boolean or conditional expression) inside a decision-authority module that is not itself a validation/binding helper. MQL5 (.mqh includes and Experts/*.mq5 EAs) is matched by word boundary and split into schema/parse calls (_SchemaRequire*, JsonGet*, _AppendSchemaField, JsonKV*) versus value tests (if(/&&/|| lines that are not parse calls); only a value test gates.",
+  "categories": {
+    "decision_value": "the value's CONTENT steers a trading/risk outcome (an outcome-changing test in a decision module, or an MQL value test)",
+    "diagnostic_logged_only": "declared diagnostic by the role prompt and only ever compared to build the threshold-crossing log line",
+    "validated_or_bound": "read only by validation/binding helpers: presence, range or identity is enforced fail-closed, the content does not steer",
+    "persisted": "read or injected outside any guard: carried into the authoritative response or a log line",
+    "telemetry_only": "only referenced from logging/reporting/analytics modules",
+    "never_read": "no read or injection site anywhere in Python or MQL"
+  },
+  "declared_diagnostic_fields": [
+    "chop_risk",
+    "cost_risk",
+    "final_trade_expectancy_score",
+    "follow_through_probability",
+    "invalidation_risk",
+    "post_entry_failure_risk",
+    "session_bucket_risk",
+    "symbol_bucket_risk"
+  ],
+  "caveat": "Heuristic, not proof. A value can still be decision-altering through a flow this scan does not model (copied into a struct, then tested under another name), and an MQL 'value test' is a line-level approximation. Every row carries its concrete file:function evidence so the classification can be spot-checked; the token numbers are the measurement, the category is an interpretation of them.",
+  "declared_diagnostic_source": "parsed from the captured analyst instructions: \"... are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority\"",
+  "decision_authority_modules": [
+    "ai_gate.py",
+    "decision_pipeline.py",
+    "execution_adjustment_contract.py",
+    "repeatability_state.py"
+  ],
+  "telemetry_modules": [
+    "audit_scalp_20260908.py",
+    "calibration_pipeline.py",
+    "expectancy_report.py",
+    "experiment_registry.py",
+    "openai_usage_logger.py",
+    "opencode_go_accounting.py",
+    "shadow_outcome_ledger.py",
+    "snapshot_diagnostics.py"
+  ],
+  "python_files_scanned": [
+    "ai_gate.py",
+    "ai_provider.py",
+    "architecture_contracts.py",
+    "bus_cohort_migration.py",
+    "calibration_pipeline.py",
+    "compatibility_manifest.py",
+    "decision_evidence.py",
+    "decision_pipeline.py",
+    "evidence_catalog.py",
+    "execution_adjustment_contract.py",
+    "expectancy_report.py",
+    "experiment_registry.py",
+    "family_context.py",
+    "governance_contracts.py",
+    "openai_usage_logger.py",
+    "opencode_go_accounting.py",
+    "opencode_routing.py",
+    "pipeline_integrity.py",
+    "po3_env.py",
+    "po3_fvg_replay_validator.py",
+    "provider_deadline.py",
+    "repeatability_state.py",
+    "request_lifecycle.py",
+    "request_terminal_state.py",
+    "run_manifest.py",
+    "runtime_governance.py",
+    "shadow_outcome_ledger.py",
+    "snapshot_diagnostics.py",
+    "tester_cache_rekey.py",
+    "tester_replay_provenance.py",
+    "tester_wait_contract.py",
+    "trade_memory.py",
+    "transport_failure_requeue.py"
+  ],
+  "python_files_failed": {},
+  "mql_files_scanned": [
+    "AIGateBridge.mqh",
+    "Config.mqh",
+    "ExecutionAdjustmentContract.mqh",
+    "FileBus.mqh",
+    "FVG.mqh",
+    "Indicators.mqh",
+    "JsonLite.mqh",
+    "MarketWatchScanner.mqh",
+    "PenaltyWatcher.mqh",
+    "PO3.mqh",
+    "Risk.mqh",
+    "StateStore.mqh",
+    "TestOrderAdapter.mqh",
+    "TradeEngine.mqh",
+    "Types.mqh",
+    "PO3_AIGate_PositivePath_Harness.mq5",
+    "PO3_AIGate_ScannerEA.mq5",
+    "PO3_ContentHashSelfTest.mq5",
+    "PO3_JsonIndexSelfTest.mq5"
+  ],
+  "schemas": {
+    "ModelTargetArbitrationDecision": [
+      "arbitration_required",
+      "chosen_target_model",
+      "chosen_tp1",
+      "chosen_tp2",
+      "chosen_rr1",
+      "chosen_rr2",
+      "rejected_target_models",
+      "blocker_kind",
+      "blocker_severity",
+      "blocker_class",
+      "blocker_is_trade_killer",
+      "why_not_liquidity_target",
+      "why_not_partial_before_obstacle",
+      "why_not_capped_before_obstacle",
+      "why_not_synthetic_fallback",
+      "target_decision_reason",
+      "target_comparison"
+    ],
+    "ModelVetoDecision": [
+      "enabled",
+      "code",
+      "evidence_ref_ids",
+      "reason"
+    ],
+    "ModelCandidateAssessment": [
+      "candidate_index",
+      "llm_quality_score",
+      "llm_self_reported_confidence",
+      "verdict",
+      "thesis_supported",
+      "material_contradictions",
+      "missing_required_evidence",
+      "historical_evidence_state",
+      "major_risks",
+      "evidence_ref_ids",
+      "confidence_band",
+      "summary",
+      "raw_allow",
+      "decision_state",
+      "structure_quality_score",
+      "entry_timing_score",
+      "follow_through_probability",
+      "invalidation_risk",
+      "chop_risk",
+      "cost_risk",
+      "symbol_bucket_risk",
+      "session_bucket_risk",
+      "post_entry_failure_risk",
+      "final_trade_expectancy_score",
+      "veto",
+      "bucket_prior_override_justification",
+      "reasons",
+      "rejection_codes",
+      "narrative_state",
+      "invalidation_risks",
+      "missing_confirmations",
+      "suggested_risk_multiplier",
+      "target_arbitration"
+    ],
+    "ModelAIGateOutput": [
+      "decision_quality_tier",
+      "response_quality",
+      "selected_candidate_index",
+      "candidate_assessments",
+      "reasons"
+    ],
+    "ModelCriticObjection": [
+      "code",
+      "evidence_ref_ids",
+      "reason"
+    ],
+    "ModelCriticDecision": [
+      "candidate_index",
+      "verdict",
+      "blocking_objections",
+      "non_blocking_objections",
+      "missing_required_evidence",
+      "evidence_ref_ids",
+      "confidence_band",
+      "summary"
+    ],
+    "ModelAdjudicatorDecision": [
+      "candidate_index",
+      "verdict",
+      "resolved_objection_codes",
+      "unresolved_objection_codes",
+      "evidence_ref_ids",
+      "resolution_reason"
+    ]
+  },
+  "authoritative_fields": [
+    "assessed_execution_fingerprint",
+    "blended_legacy_score",
+    "blocking_objections",
+    "bucket_prior_override_justification",
+    "calibrated_win_probability",
+    "calibration_available",
+    "calibration_bucket",
+    "calibration_data_window_end",
+    "calibration_data_window_start",
+    "calibration_lower_bound",
+    "calibration_model_version",
+    "calibration_sample_size",
+    "calibration_upper_bound",
+    "candidate_assessments",
+    "candidate_count",
+    "candidate_hash",
+    "candidate_id",
+    "candidate_index",
+    "chop_risk",
+    "code",
+    "confidence_band",
+    "cost_risk",
+    "decision_quality_tier",
+    "decision_schema_version",
+    "decision_state",
+    "enabled",
+    "entry",
+    "entry_timing_score",
+    "evidence_fields",
+    "evidence_refs",
+    "expected_net_r",
+    "final_trade_expectancy_score",
+    "follow_through_probability",
+    "historical_evidence_state",
+    "invalidation_risk",
+    "invalidation_risks",
+    "legacy_agreement_confidence",
+    "llm_quality_score",
+    "llm_self_reported_confidence",
+    "major_risks",
+    "material_contradictions",
+    "missing_confirmations",
+    "missing_required_evidence",
+    "model_id",
+    "model_version",
+    "narrative_state",
+    "non_blocking_objections",
+    "oos_predicted_probability",
+    "ordered_candidate_identities",
+    "post_entry_failure_risk",
+    "prompt_contract_version",
+    "provider_id",
+    "raw_allow",
+    "reason",
+    "reasons",
+    "rejection_codes",
+    "request_execution_fingerprint",
+    "request_id",
+    "request_identity_hash",
+    "resolution_reason",
+    "resolved_objection_codes",
+    "response_quality",
+    "role",
+    "role_contract_version",
+    "role_schema_version",
+    "rule_score",
+    "selected_candidate_hash",
+    "selected_candidate_id",
+    "selected_target_identity",
+    "selected_target_price",
+    "session_bucket_risk",
+    "setup_taxonomy_enum",
+    "setup_taxonomy_version",
+    "sl",
+    "structure_quality_score",
+    "suggested_risk_multiplier",
+    "summary",
+    "symbol_bucket_risk",
+    "target_arbitration",
+    "target_arbitration_schema_version",
+    "taxonomy_mapping_source",
+    "thesis_supported",
+    "tp1",
+    "tp2",
+    "unresolved_objection_codes",
+    "verdict",
+    "veto"
+  ],
+  "fields": [
+    {
+      "schema": [
+        "ModelAIGateOutput"
+      ],
+      "field": "candidate_assessments",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_cached_decision_to_current_request",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_candidate_authority_fields",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 13,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_cached_decision_to_current_request"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_candidate_authority_fields"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_cached_decision_to_current_request"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAdjudicatorDecision",
+        "ModelCandidateAssessment",
+        "ModelCriticDecision"
+      ],
+      "field": "candidate_index",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_candidate_with_index",
+          "side": "python"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_compact_model_payload",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "select_live_candidate_cohort",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_live_candidate_budget",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_compact_model_evidence_payload",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_cached_decision_to_current_request",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_cache_signature",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_resolve_evidence_reference_ids"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_resolve_critic_evidence"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "resolve"
+        },
+        {
+          "file": "evidence_catalog.py",
+          "function": "_append"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 22,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "select_live_candidate_cohort"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_live_candidate_budget"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_cached_decision_to_current_request"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_cache_signature"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_cached_decision_to_current_request"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "chosen_rr1",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 8,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "chosen_rr2",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 7,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "chosen_target_model",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_validate_ai_target_choice_against_feasibility",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_cache_signature",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 14,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_validate_ai_target_choice_against_feasibility"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_validate_ai_target_choice_against_feasibility"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "chosen_tp1",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 9,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "chosen_tp2",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 8,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAIGateOutput"
+      ],
+      "field": "decision_quality_tier",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "process_one",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_run_provider_shadow_comparison",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_contract_current",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_update_repeatability_artifact"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "process_one"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 22,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "decision_state",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_run_provider_shadow_comparison",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_evidence_for_candidate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 33,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAdjudicatorDecision",
+        "ModelCandidateAssessment",
+        "ModelCriticDecision",
+        "ModelCriticObjection",
+        "ModelVetoDecision"
+      ],
+      "field": "evidence_ref_ids",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_resolve_critic_evidence",
+          "side": "python"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus",
+          "side": "python"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "resolve",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_resolve_critic_evidence",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_resolve_critic_evidence",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "resolve",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "resolve",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_resolve_critic_evidence"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_resolve_critic_evidence"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "resolve"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "resolve"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "narrative_state",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_compact_model_payload",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "shadow_outcome_ledger.py",
+          "function": "consolidate_shadow_lifecycle",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "hard_pre_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 7,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "raw_allow",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_decision_authority_fields",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_candidate_authority_fields",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 11,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_decision_authority_fields"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_candidate_authority_fields"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAIGateOutput",
+        "ModelCandidateAssessment"
+      ],
+      "field": "reasons",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "hard_pre_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 13,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "rejected_target_models",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "rejection_codes",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "hard_pre_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 21,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_reason_text"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_reject_no_feasible_target"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_fail_closed_invalid_final_response"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAIGateOutput"
+      ],
+      "field": "response_quality",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "suggested_risk_multiplier",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "architecture_contracts.py",
+          "function": "response_binding_material",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "hard_pre_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 12,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "target_arbitration",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_mql_tester_cache_skip_reason",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 20,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "target_comparison",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 5,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "target_decision_reason",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 8,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_target_choice_to_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "veto",
+      "category": "decision_value",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": true,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "side": "python"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "side": "python"
+        }
+      ],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "chop_risk",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "cost_risk",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 5,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "final_trade_expectancy_score",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 7,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "follow_through_probability",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "invalidation_risk",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "post_entry_failure_risk",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_ai_veto_gate"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "session_bucket_risk",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "symbol_bucket_risk",
+      "category": "diagnostic_logged_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "blocker_is_trade_killer",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "blocker_kind",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "blocker_severity",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "bucket_prior_override_justification",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "entry_timing_score",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "historical_evidence_state",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "invalidation_risks",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_mandatory_live_prior_rejection"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "hard_pre_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "major_risks",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 0,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "material_contradictions",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 0,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "missing_confirmations",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "hard_pre_gate"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment",
+        "ModelCriticDecision"
+      ],
+      "field": "missing_required_evidence",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCriticObjection",
+        "ModelVetoDecision"
+      ],
+      "field": "reason",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_compact_target_candidates",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_impl",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "process_one",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_runtime_repeatability_block_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_provider.py",
+          "function": "_health_failure_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_provider.py",
+          "function": "_extract_responses_value",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_archive_request_terminal"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "process_one"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_process_claimed_request"
+        },
+        {
+          "file": "ai_provider.py",
+          "function": "_open_configuration_circuit"
+        },
+        {
+          "file": "architecture_contracts.py",
+          "function": "recover_processing"
+        },
+        {
+          "file": "bus_cohort_migration.py",
+          "function": "classify_bus_file"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 15,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_repeatability_authority"
+        }
+      ],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelAdjudicatorDecision"
+      ],
+      "field": "resolution_reason",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 0,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "structure_quality_score",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "why_not_synthetic_fallback",
+      "category": "persisted",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment",
+        "ModelCriticDecision"
+      ],
+      "field": "summary",
+      "category": "telemetry_only",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "expectancy_report.py",
+          "function": "_ai_decision_pack",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_apply_ai_audit_to_suite",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_render_dashboard_html",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_render_markdown",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_render_markdown",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 5,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [],
+      "validation_scope_reads": []
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "arbitration_required",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_arbitration_required",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_compact_target_candidates",
+          "kind": "read"
+        },
+        {
+          "file": "decision_evidence.py",
+          "function": "_target_review_projection",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_arbitration_required"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_arbitration_required"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "blocker_class",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 2,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCriticDecision"
+      ],
+      "field": "blocking_objections",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 3,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCriticObjection",
+        "ModelVetoDecision"
+      ],
+      "field": "code",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_provider.py",
+          "function": "_health_failure_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_provider.py",
+          "function": "_post",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment",
+        "ModelCriticDecision"
+      ],
+      "field": "confidence_band",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 2,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelVetoDecision"
+      ],
+      "field": "enabled",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_ai_quality_kwargs_from_model",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_write_startup_policy_manifest",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_write_artifact_compatibility_report",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_expectancy_ai_skip_audit",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_expectancy_ai_audit",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_expectancy_ai_audit",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_apply_ai_audit_to_suite",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "shadow_outcome_ledger.py",
+          "function": "from_env"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 10,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "llm_quality_score",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "process_one",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "architecture_contracts.py",
+          "function": "response_binding_material",
+          "kind": "read"
+        },
+        {
+          "file": "expectancy_report.py",
+          "function": "_llm_quality_score_bucket",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 12,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_decision_repeatability_view"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_apply_family_ai_threshold_gate"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "llm_self_reported_confidence",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai",
+          "kind": "read_attribute"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "process_one",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "_degraded_non_trading_decision"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_score_setup_ai"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCriticDecision"
+      ],
+      "field": "non_blocking_objections",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAdjudicatorDecision"
+      ],
+      "field": "resolved_objection_codes",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAIGateOutput"
+      ],
+      "field": "selected_candidate_index",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": false,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelCandidateAssessment"
+      ],
+      "field": "thesis_supported",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAdjudicatorDecision"
+      ],
+      "field": "unresolved_objection_codes",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 1,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelAdjudicatorDecision",
+        "ModelCandidateAssessment",
+        "ModelCriticDecision"
+      ],
+      "field": "verdict",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication",
+          "kind": "read"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus",
+          "kind": "read"
+        }
+      ],
+      "python_inject_sites": [],
+      "mql_reference_sites": [],
+      "read_site_count": 6,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_synchronize_selected_assessment_contract"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_shadow_decision_summary"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "run_qualitative_consensus"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_bind_python_owned_analyst_envelope"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_objections"
+        },
+        {
+          "file": "decision_pipeline.py",
+          "function": "_validate_adjudication"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "why_not_capped_before_obstacle",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "why_not_liquidity_target",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    },
+    {
+      "schema": [
+        "ModelTargetArbitrationDecision"
+      ],
+      "field": "why_not_partial_before_obstacle",
+      "category": "validated_or_bound",
+      "alters_trading_or_risk_decision": false,
+      "gates_in_python": false,
+      "gates_in_mql": false,
+      "mql_referenced": false,
+      "persisted_in_authoritative_envelope": true,
+      "decision_guard_sites": [],
+      "python_read_consumers": [
+        {
+          "file": "ai_gate.py",
+          "function": "_target_kwargs_from_dict",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "lookup",
+          "kind": "read"
+        },
+        {
+          "file": "ai_gate.py",
+          "function": "store",
+          "kind": "read_attribute"
+        }
+      ],
+      "python_inject_sites": [
+        {
+          "file": "ai_gate.py",
+          "function": "lookup"
+        }
+      ],
+      "mql_reference_sites": [],
+      "read_site_count": 4,
+      "mql_reference_count": 0,
+      "decision_named_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ],
+      "validation_scope_reads": [
+        {
+          "file": "ai_gate.py",
+          "function": "_cached_decision_schema_miss_reason"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "decision_value": 21,
+    "diagnostic_logged_only": 8,
+    "validated_or_bound": 17,
+    "persisted": 15,
+    "telemetry_only": 1,
+    "never_read": 0
+  }
+}

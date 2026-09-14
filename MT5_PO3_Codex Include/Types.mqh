@@ -1088,6 +1088,23 @@ struct TradePlan {
    double shadow_assessed_tp2;
    string shadow_decision_state;
    string shadow_decision_source;
+   //--- Station-driven tracking.  A tracker is written only at a station (TP1,
+   //--- then TP2 or SL), so the leg after TP1 is timed explicitly and the path
+   //--- milestones keep the MFE/MAE they had when they were reached, not the
+   //--- values at the later station where they are finally written.
+   int    shadow_time_tp1_to_station_sec;
+   string shadow_station_after_tp1;
+   double shadow_mfe_r_at_025r;
+   double shadow_mae_r_at_025r;
+   double shadow_mfe_r_at_050r;
+   double shadow_mae_r_at_050r;
+   //--- Screening state.  Deliberately NOT serialized: after a restart a tracker
+   //--- is re-screened from its persisted scan cursor, which reproduces the same
+   //--- state exactly because closed M1 bars are immutable history.
+   int      shadow_screen_slot;
+   datetime shadow_watch_bar;
+   bool     shadow_station_due;
+   datetime shadow_station_bar;
    double mfe_price;
    double mae_price;
    double mfe_r;

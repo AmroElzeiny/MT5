@@ -1,0 +1,2161 @@
+{
+  "classes": {
+    "a_same_fact_serialized_twice": "catalog row p resolves to an identical value inside the non-catalog envelope (path identity)",
+    "b_distinct_equal_value": "different canonical paths whose serialized value happens to be equal",
+    "c_alias": "the row points at a value the compaction pass already renamed (per_candidate_reference / candidate_targets_reference / *.value)",
+    "d_catalog_material": "the catalog is the only carrier of that fact on the wire",
+    "e_contract_required": "overlap flag: the path name is named by the role prompt and must survive any compaction"
+  },
+  "per_request": [
+    {
+      "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+      "rows": 1163,
+      "counts": {
+        "a_same_fact_serialized_twice": 1008,
+        "b_distinct_equal_value_nontrivial": 11,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 136,
+        "d_catalog_material": 8,
+        "e_contract_required": 261
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 54128,
+        "b_distinct_equal_value_nontrivial": 650,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 7749,
+        "d_catalog_material": 588,
+        "e_contract_required": 16300
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 5802,
+        "b_distinct_equal_value_nontrivial": 136,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 452,
+        "d_catalog_material": 152,
+        "e_contract_required": 2452
+      },
+      "truncated_string_matches": 16,
+      "value_groups_duplicated": 122,
+      "duplicate_extra_rows": 985,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 560
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+      "rows": 1163,
+      "counts": {
+        "a_same_fact_serialized_twice": 1008,
+        "b_distinct_equal_value_nontrivial": 11,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 136,
+        "d_catalog_material": 8,
+        "e_contract_required": 261
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 54098,
+        "b_distinct_equal_value_nontrivial": 646,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 7744,
+        "d_catalog_material": 594,
+        "e_contract_required": 16281
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 5770,
+        "b_distinct_equal_value_nontrivial": 136,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 447,
+        "d_catalog_material": 154,
+        "e_contract_required": 2433
+      },
+      "truncated_string_matches": 16,
+      "value_groups_duplicated": 123,
+      "duplicate_extra_rows": 995,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 613
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785740735_BITCOIN_469",
+      "rows": 1162,
+      "counts": {
+        "a_same_fact_serialized_twice": 1007,
+        "b_distinct_equal_value_nontrivial": 7,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 136,
+        "d_catalog_material": 12,
+        "e_contract_required": 260
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 54021,
+        "b_distinct_equal_value_nontrivial": 356,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 7746,
+        "d_catalog_material": 880,
+        "e_contract_required": 16211
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 5757,
+        "b_distinct_equal_value_nontrivial": 62,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 449,
+        "d_catalog_material": 224,
+        "e_contract_required": 2427
+      },
+      "truncated_string_matches": 16,
+      "value_groups_duplicated": 110,
+      "duplicate_extra_rows": 977,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 611
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 9,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 0,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21335,
+        "b_distinct_equal_value_nontrivial": 521,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2892,
+        "d_catalog_material": 0,
+        "e_contract_required": 6164
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2296,
+        "b_distinct_equal_value_nontrivial": 120,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 162,
+        "d_catalog_material": 0,
+        "e_contract_required": 951
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 76,
+      "duplicate_extra_rows": 365,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 258
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+      "rows": 204,
+      "counts": {
+        "a_same_fact_serialized_twice": 182,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 17,
+        "d_catalog_material": 2,
+        "e_contract_required": 37
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 8414,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 965,
+        "d_catalog_material": 146,
+        "e_contract_required": 2209
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 929,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 55,
+        "d_catalog_material": 37,
+        "e_contract_required": 333
+      },
+      "truncated_string_matches": 2,
+      "value_groups_duplicated": 30,
+      "duplicate_extra_rows": 97,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 102
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785753356_GBPUSD_22093",
+      "rows": 204,
+      "counts": {
+        "a_same_fact_serialized_twice": 182,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 17,
+        "d_catalog_material": 2,
+        "e_contract_required": 37
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 8425,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 967,
+        "d_catalog_material": 146,
+        "e_contract_required": 2205
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 939,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 57,
+        "d_catalog_material": 37,
+        "e_contract_required": 329
+      },
+      "truncated_string_matches": 2,
+      "value_groups_duplicated": 32,
+      "duplicate_extra_rows": 99,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 102
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785759967_BITCOIN_9173",
+      "rows": 1162,
+      "counts": {
+        "a_same_fact_serialized_twice": 1007,
+        "b_distinct_equal_value_nontrivial": 7,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 136,
+        "d_catalog_material": 12,
+        "e_contract_required": 260
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 54007,
+        "b_distinct_equal_value_nontrivial": 356,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 7749,
+        "d_catalog_material": 880,
+        "e_contract_required": 16197
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 5743,
+        "b_distinct_equal_value_nontrivial": 62,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 452,
+        "d_catalog_material": 224,
+        "e_contract_required": 2413
+      },
+      "truncated_string_matches": 16,
+      "value_groups_duplicated": 111,
+      "duplicate_extra_rows": 977,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 611
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+      "rows": 1163,
+      "counts": {
+        "a_same_fact_serialized_twice": 1008,
+        "b_distinct_equal_value_nontrivial": 15,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 136,
+        "d_catalog_material": 4,
+        "e_contract_required": 261
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 54203,
+        "b_distinct_equal_value_nontrivial": 966,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 7756,
+        "d_catalog_material": 290,
+        "e_contract_required": 16366
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 5892,
+        "b_distinct_equal_value_nontrivial": 234,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 459,
+        "d_catalog_material": 72,
+        "e_contract_required": 2535
+      },
+      "truncated_string_matches": 16,
+      "value_groups_duplicated": 115,
+      "duplicate_extra_rows": 1003,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 621
+    },
+    {
+      "request_id": "591813800_1785715200_305658125_1785768982_USDCHF_2988",
+      "rows": 1164,
+      "counts": {
+        "a_same_fact_serialized_twice": 1009,
+        "b_distinct_equal_value_nontrivial": 15,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 136,
+        "d_catalog_material": 4,
+        "e_contract_required": 262
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 54172,
+        "b_distinct_equal_value_nontrivial": 966,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 7755,
+        "d_catalog_material": 294,
+        "e_contract_required": 16344
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 5794,
+        "b_distinct_equal_value_nontrivial": 234,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 458,
+        "d_catalog_material": 76,
+        "e_contract_required": 2446
+      },
+      "truncated_string_matches": 16,
+      "value_groups_duplicated": 91,
+      "duplicate_extra_rows": 987,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 620
+    },
+    {
+      "request_id": "591813800_1788925102_208218984_1788951325_USDCHF_19925",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21347,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2900,
+        "d_catalog_material": 433,
+        "e_contract_required": 6143
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2302,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 170,
+        "d_catalog_material": 106,
+        "e_contract_required": 923
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 86,
+      "duplicate_extra_rows": 346,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 247
+    },
+    {
+      "request_id": "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21339,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2888,
+        "d_catalog_material": 425,
+        "e_contract_required": 6132
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2296,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 158,
+        "d_catalog_material": 98,
+        "e_contract_required": 912
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 89,
+      "duplicate_extra_rows": 346,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 246
+    },
+    {
+      "request_id": "903871_1788983285_8075437_1788988231_EURAUD_21885",
+      "rows": 476,
+      "counts": {
+        "a_same_fact_serialized_twice": 416,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 99
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21313,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2898,
+        "d_catalog_material": 423,
+        "e_contract_required": 6090
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2332,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 168,
+        "d_catalog_material": 96,
+        "e_contract_required": 933
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 86,
+      "duplicate_extra_rows": 346,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 246
+    },
+    {
+      "request_id": "903871_1788983285_8075437_1788988231_NZDJPY_13045",
+      "rows": 342,
+      "counts": {
+        "a_same_fact_serialized_twice": 301,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 70
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 14972,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1922,
+        "d_catalog_material": 294,
+        "e_contract_required": 4267
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1615,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 102,
+        "d_catalog_material": 76,
+        "e_contract_required": 625
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 81,
+      "duplicate_extra_rows": 229,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 175
+    },
+    {
+      "request_id": "903871_1788983285_8075437_1788995216_GBPCAD_29371",
+      "rows": 203,
+      "counts": {
+        "a_same_fact_serialized_twice": 181,
+        "b_distinct_equal_value_nontrivial": 4,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 17,
+        "d_catalog_material": 1,
+        "e_contract_required": 36
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 8400,
+        "b_distinct_equal_value_nontrivial": 138,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 968,
+        "d_catalog_material": 75,
+        "e_contract_required": 2143
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 978,
+        "b_distinct_equal_value_nontrivial": 8,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 58,
+        "d_catalog_material": 21,
+        "e_contract_required": 329
+      },
+      "truncated_string_matches": 2,
+      "value_groups_duplicated": 27,
+      "duplicate_extra_rows": 110,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 99
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789002917_NAS100_10901",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21424,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2900,
+        "d_catalog_material": 425,
+        "e_contract_required": 6139
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2382,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 170,
+        "d_catalog_material": 98,
+        "e_contract_required": 919
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 89,
+      "duplicate_extra_rows": 331,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 254
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789004983_NAS100_9597",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21424,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2900,
+        "d_catalog_material": 425,
+        "e_contract_required": 6139
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2382,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 170,
+        "d_catalog_material": 98,
+        "e_contract_required": 919
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 89,
+      "duplicate_extra_rows": 331,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 254
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789028921_JPN225_10535",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21418,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2895,
+        "d_catalog_material": 427,
+        "e_contract_required": 6154
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2379,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 165,
+        "d_catalog_material": 100,
+        "e_contract_required": 934
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 83,
+      "duplicate_extra_rows": 327,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 251
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789033279_NZDJPY_20411",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21437,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2890,
+        "d_catalog_material": 435,
+        "e_contract_required": 6152
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2393,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 160,
+        "d_catalog_material": 108,
+        "e_contract_required": 929
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 85,
+      "duplicate_extra_rows": 305,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 245
+    },
+    {
+      "request_id": "903871_1788999394_24185000_1789036511_XAUUSD_7721",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 4,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 5,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21470,
+        "b_distinct_equal_value_nontrivial": 138,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2901,
+        "d_catalog_material": 360,
+        "e_contract_required": 6143
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2425,
+        "b_distinct_equal_value_nontrivial": 8,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 171,
+        "d_catalog_material": 88,
+        "e_contract_required": 919
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 89,
+      "duplicate_extra_rows": 317,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 229
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789064597_USDCHF_11315",
+      "rows": 340,
+      "counts": {
+        "a_same_fact_serialized_twice": 299,
+        "b_distinct_equal_value_nontrivial": 7,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 0,
+        "e_contract_required": 68
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 14971,
+        "b_distinct_equal_value_nontrivial": 346,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1930,
+        "d_catalog_material": 0,
+        "e_contract_required": 4144
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1744,
+        "b_distinct_equal_value_nontrivial": 52,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 110,
+        "d_catalog_material": 0,
+        "e_contract_required": 629
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 82,
+      "duplicate_extra_rows": 234,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 169
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789066099_US30_18866",
+      "rows": 340,
+      "counts": {
+        "a_same_fact_serialized_twice": 299,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 68
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 14899,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1931,
+        "d_catalog_material": 298,
+        "e_contract_required": 4164
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1671,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 111,
+        "d_catalog_material": 80,
+        "e_contract_required": 651
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 76,
+      "duplicate_extra_rows": 205,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 179
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789067423_US30_19703",
+      "rows": 203,
+      "counts": {
+        "a_same_fact_serialized_twice": 181,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 17,
+        "d_catalog_material": 2,
+        "e_contract_required": 36
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 8346,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 966,
+        "d_catalog_material": 148,
+        "e_contract_required": 2150
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 926,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 56,
+        "d_catalog_material": 39,
+        "e_contract_required": 337
+      },
+      "truncated_string_matches": 2,
+      "value_groups_duplicated": 30,
+      "duplicate_extra_rows": 95,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 106
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789068109_US30_16044",
+      "rows": 340,
+      "counts": {
+        "a_same_fact_serialized_twice": 299,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 68
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 14902,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1931,
+        "d_catalog_material": 298,
+        "e_contract_required": 4166
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1674,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 111,
+        "d_catalog_material": 80,
+        "e_contract_required": 653
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 76,
+      "duplicate_extra_rows": 203,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 181
+    },
+    {
+      "request_id": "903871_1789062748_87542921_1789071381_USDCHF_5236",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 9,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 0,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21495,
+        "b_distinct_equal_value_nontrivial": 521,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2898,
+        "d_catalog_material": 0,
+        "e_contract_required": 6160
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2456,
+        "b_distinct_equal_value_nontrivial": 120,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 168,
+        "d_catalog_material": 0,
+        "e_contract_required": 947
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 90,
+      "duplicate_extra_rows": 355,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 251
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789094249_US30_14363",
+      "rows": 203,
+      "counts": {
+        "a_same_fact_serialized_twice": 181,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 17,
+        "d_catalog_material": 2,
+        "e_contract_required": 36
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 8399,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 965,
+        "d_catalog_material": 150,
+        "e_contract_required": 2159
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 979,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 55,
+        "d_catalog_material": 41,
+        "e_contract_required": 346
+      },
+      "truncated_string_matches": 2,
+      "value_groups_duplicated": 32,
+      "duplicate_extra_rows": 85,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 105
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789094249_WTI_24227",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 9,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 0,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21469,
+        "b_distinct_equal_value_nontrivial": 521,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2890,
+        "d_catalog_material": 0,
+        "e_contract_required": 6157
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2430,
+        "b_distinct_equal_value_nontrivial": 120,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 160,
+        "d_catalog_material": 0,
+        "e_contract_required": 944
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 90,
+      "duplicate_extra_rows": 350,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 255
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789096071_XAUUSD_13096",
+      "rows": 478,
+      "counts": {
+        "a_same_fact_serialized_twice": 418,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 101
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21552,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2900,
+        "d_catalog_material": 439,
+        "e_contract_required": 6235
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2449,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 170,
+        "d_catalog_material": 112,
+        "e_contract_required": 956
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 86,
+      "duplicate_extra_rows": 316,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 237
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789097294_USDJPY_5699",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21429,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2886,
+        "d_catalog_material": 431,
+        "e_contract_required": 6162
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2387,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 156,
+        "d_catalog_material": 104,
+        "e_contract_required": 942
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 85,
+      "duplicate_extra_rows": 341,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 251
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789098513_AUDJPY_32323",
+      "rows": 342,
+      "counts": {
+        "a_same_fact_serialized_twice": 301,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 70
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 14998,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1924,
+        "d_catalog_material": 294,
+        "e_contract_required": 4271
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1640,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 104,
+        "d_catalog_material": 76,
+        "e_contract_required": 629
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 78,
+      "duplicate_extra_rows": 223,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 175
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789102197_XAUUSD_1646",
+      "rows": 342,
+      "counts": {
+        "a_same_fact_serialized_twice": 301,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 70
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 15002,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1936,
+        "d_catalog_material": 294,
+        "e_contract_required": 4282
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1644,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 116,
+        "d_catalog_material": 76,
+        "e_contract_required": 640
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 81,
+      "duplicate_extra_rows": 219,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 168
+    },
+    {
+      "request_id": "903871_1789093630_118426656_1789102811_CHFJPY_32047",
+      "rows": 478,
+      "counts": {
+        "a_same_fact_serialized_twice": 418,
+        "b_distinct_equal_value_nontrivial": 7,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 2,
+        "e_contract_required": 101
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21574,
+        "b_distinct_equal_value_nontrivial": 374,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2890,
+        "d_catalog_material": 148,
+        "e_contract_required": 6207
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2471,
+        "b_distinct_equal_value_nontrivial": 82,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 160,
+        "d_catalog_material": 39,
+        "e_contract_required": 928
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 91,
+      "duplicate_extra_rows": 328,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 251
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789149197_WTI_22682",
+      "rows": 340,
+      "counts": {
+        "a_same_fact_serialized_twice": 299,
+        "b_distinct_equal_value_nontrivial": 7,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 0,
+        "e_contract_required": 68
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 14993,
+        "b_distinct_equal_value_nontrivial": 346,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1928,
+        "d_catalog_material": 0,
+        "e_contract_required": 4145
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1766,
+        "b_distinct_equal_value_nontrivial": 52,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 108,
+        "d_catalog_material": 0,
+        "e_contract_required": 630
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 85,
+      "duplicate_extra_rows": 231,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 174
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789151032_EURAUD_5869",
+      "rows": 478,
+      "counts": {
+        "a_same_fact_serialized_twice": 418,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 101
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21559,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2902,
+        "d_catalog_material": 439,
+        "e_contract_required": 6218
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2455,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 172,
+        "d_catalog_material": 112,
+        "e_contract_required": 939
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 88,
+      "duplicate_extra_rows": 308,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 250
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789152868_EURNZD_21011",
+      "rows": 342,
+      "counts": {
+        "a_same_fact_serialized_twice": 301,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 70
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 15039,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1934,
+        "d_catalog_material": 294,
+        "e_contract_required": 4271
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1679,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 114,
+        "d_catalog_material": 76,
+        "e_contract_required": 629
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 73,
+      "duplicate_extra_rows": 213,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 177
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789154707_GBPUSD_19340",
+      "rows": 342,
+      "counts": {
+        "a_same_fact_serialized_twice": 301,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 34,
+        "d_catalog_material": 4,
+        "e_contract_required": 70
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 15038,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 1934,
+        "d_catalog_material": 294,
+        "e_contract_required": 4285
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 1679,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 114,
+        "d_catalog_material": 76,
+        "e_contract_required": 643
+      },
+      "truncated_string_matches": 4,
+      "value_groups_duplicated": 81,
+      "duplicate_extra_rows": 222,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 177
+    },
+    {
+      "request_id": "903871_1789148402_173202328_1789155320_UK100_2328",
+      "rows": 477,
+      "counts": {
+        "a_same_fact_serialized_twice": 417,
+        "b_distinct_equal_value_nontrivial": 3,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 51,
+        "d_catalog_material": 6,
+        "e_contract_required": 100
+      },
+      "proxy_units": {
+        "a_same_fact_serialized_twice": 21465,
+        "b_distinct_equal_value_nontrivial": 80,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 2900,
+        "d_catalog_material": 433,
+        "e_contract_required": 6168
+      },
+      "proxy_value_units": {
+        "a_same_fact_serialized_twice": 2423,
+        "b_distinct_equal_value_nontrivial": 6,
+        "b2_distinct_equal_value_trivial_scalar": 0,
+        "c_alias": 170,
+        "d_catalog_material": 106,
+        "e_contract_required": 948
+      },
+      "truncated_string_matches": 6,
+      "value_groups_duplicated": 88,
+      "duplicate_extra_rows": 321,
+      "contract_required_terms_in_prompt": 20,
+      "contract_required_terms": [
+        "allowed_evidence_ref_ids",
+        "arbitration_required",
+        "asset_class",
+        "bucket_prior",
+        "candidate_index",
+        "cross_asset_fallback_blocked",
+        "decision_state",
+        "evidence_catalog",
+        "family_event_evidence",
+        "family_profile",
+        "family_requirement_contract",
+        "historical_evidence_state",
+        "missing_required_evidence",
+        "opposing_clearance_score",
+        "prior_applicability",
+        "require_snapshots",
+        "rule_score",
+        "target_choice_menu",
+        "target_comparison",
+        "target_semantics"
+      ],
+      "contract_required_envelope_units": 257
+    }
+  ],
+  "totals_row_counts": {
+    "a_same_fact_serialized_twice": 16329,
+    "b_distinct_equal_value_nontrivial": 188,
+    "b2_distinct_equal_value_trivial_scalar": 0,
+    "c_alias": 2023,
+    "d_catalog_material": 158,
+    "e_contract_required": 3971
+  },
+  "total_proxy_units": {
+    "a_same_fact_serialized_twice": 844477,
+    "b_distinct_equal_value_nontrivial": 8605,
+    "b2_distinct_equal_value_trivial_scalar": 0,
+    "c_alias": 115030,
+    "d_catalog_material": 11500,
+    "e_contract_required": 245123
+  },
+  "total_calibrated_tokens": {
+    "a_same_fact_serialized_twice": 472817.8,
+    "b_distinct_equal_value_nontrivial": 4817.9,
+    "b2_distinct_equal_value_trivial_scalar": 0.0,
+    "c_alias": 64404.6,
+    "d_catalog_material": 6438.8,
+    "e_contract_required": 137243.0
+  },
+  "total_value_only_proxy_units": {
+    "a_same_fact_serialized_twice": 92879,
+    "b_distinct_equal_value_nontrivial": 1558,
+    "b2_distinct_equal_value_trivial_scalar": 0,
+    "c_alias": 6638,
+    "d_catalog_material": 2882,
+    "e_contract_required": 37052
+  },
+  "total_value_only_calibrated_tokens": {
+    "a_same_fact_serialized_twice": 52002.4,
+    "b_distinct_equal_value_nontrivial": 872.3,
+    "b2_distinct_equal_value_trivial_scalar": 0.0,
+    "c_alias": 3716.6,
+    "d_catalog_material": 1613.6,
+    "e_contract_required": 20745.2
+  },
+  "interpretation": "total_calibrated_tokens is the whole catalog row (id+p+v+c+punctuation) per class; total_value_only_calibrated_tokens is the ``v`` payload only, i.e. what a pointer/dereference rewrite can remove while keeping every citable id and path",
+  "median_analyst_global_factor": 0.55989,
+  "repeated_key_names": {
+    "catalog_key_names_units": {
+      "n": 36,
+      "avg": 8046.222,
+      "p50": 7368.0,
+      "p95": 18344.0,
+      "min": 2984,
+      "max": 18360
+    },
+    "all_input_key_names_units": {
+      "n": 36,
+      "avg": 20315.667,
+      "p50": 18190.0,
+      "p95": 46281.0,
+      "min": 6349,
+      "max": 54351
+    },
+    "candidate_array_key_names_units": {
+      "n": 36,
+      "avg": 2227.944,
+      "p50": 2022.0,
+      "p95": 5392.0,
+      "min": 674,
+      "max": 5392
+    },
+    "top_repeated_keys": [
+      {
+        "key": "id",
+        "units": 56094
+      },
+      {
+        "key": "p",
+        "units": 56094
+      },
+      {
+        "key": "v",
+        "units": 56094
+      },
+      {
+        "key": "c",
+        "units": 48966
+      },
+      {
+        "key": "available",
+        "units": 10115
+      },
+      {
+        "key": "setup_taxonomy_enum",
+        "units": 8658
+      },
+      {
+        "key": "asset_class",
+        "units": 7889
+      },
+      {
+        "key": "feasible_for_tp1_only",
+        "units": 7854
+      },
+      {
+        "key": "feasible_for_tp2",
+        "units": 7497
+      },
+      {
+        "key": "unavailable_reason",
+        "units": 7416
+      },
+      {
+        "key": "exceeds_max_target_distance",
+        "units": 7140
+      },
+      {
+        "key": "infeasible_reason",
+        "units": 6664
+      },
+      {
+        "key": "data_quality_status",
+        "units": 6174
+      },
+      {
+        "key": "for_candidate_hash",
+        "units": 6174
+      },
+      {
+        "key": "target_before_stop",
+        "units": 6174
+      },
+      {
+        "key": "reward_distance_price",
+        "units": 5700
+      },
+      {
+        "key": "entry_branch",
+        "units": 5523
+      },
+      {
+        "key": "setup_family",
+        "units": 5523
+      },
+      {
+        "key": "candidate_hash",
+        "units": 5523
+      },
+      {
+        "key": "historical_outcome",
+        "units": 5488
+      },
+      {
+        "key": "net_realized_r",
+        "units": 5488
+      },
+      {
+        "key": "similarity_score",
+        "units": 5488
+      },
+      {
+        "key": "max_allowed_distance",
+        "units": 5130
+      },
+      {
+        "key": "exit_reason",
+        "units": 3906
+      },
+      {
+        "key": "memory_id",
+        "units": 3906
+      }
+    ]
+  }
+}

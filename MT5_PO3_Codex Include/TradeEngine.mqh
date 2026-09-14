@@ -68,8 +68,18 @@ private:
    string m_shadow_seen_opportunities[];
    string m_shadow_seen_variants[];
    string m_shadow_resolved_variants[];
+   //--- "<variant_id>#<kind>" for every path event already written.  Stations
+   //--- are made durable through this small index instead of rewriting the whole
+   //--- pending queue, so a restart can never write a TP1 a second time.
+   string m_shadow_emitted_progress[];
    bool   m_shadow_index_loaded;
    bool   m_shadow_index_dirty;
+   //--- Station-driven screening.  One pass per closed M1 bar reads each tracked
+   //--- symbol once and touches a tracker only when a station level was reached.
+   string   m_shadow_screen_symbols[];
+   datetime m_shadow_screened_through;
+   bool     m_shadow_station_backlog;
+   bool     m_shadow_pending_dirty;
    //--- Runtime counters, reported by [shadow_tracker] and [final_summary].
    long   m_shadow_opportunities_total;
    long   m_shadow_observed_total;
@@ -97,6 +107,10 @@ private:
    long   m_shadow_tick_ordered_total;
    long   m_shadow_progress_events_total;
    long   m_shadow_event_sequence;
+   long   m_shadow_screen_passes_total;
+   long   m_shadow_screen_bars_total;
+   long   m_shadow_station_evaluations_total;
+   long   m_shadow_stations_total;
    string m_ai_cooldown_symbols[];
    string m_ai_cooldown_signatures[];
    datetime m_ai_cooldown_until[];
@@ -164,6 +178,8 @@ private:
    int m_funnel_watchlist_precheck_rejects;
    int m_funnel_watchlist_instant_invalidations_bars0;
    int m_total_ai_requests_queued;
+   int m_total_ai_review_gate_reuse;
+   int m_total_ai_predetermined_skips;
    int m_total_tester_ai_wait_started;
    int m_total_tester_ai_wait_completed;
    int m_total_tester_ai_wait_timeout;
@@ -356,7 +372,12 @@ private:
 
    void _PersistResearchQueues() {
       m_state.SavePlans(m_state.CounterfactualPendingPath(), m_counterfactual_pending);
-      m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+      // The shadow queue can hold thousands of full plans (26-68 MB measured).
+      // It is rewritten only when a tracker was added, removed or reached a
+      // station since the last save -- never merely because a scan ended.
+      if(m_shadow_pending_dirty &&
+         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending))
+         m_shadow_pending_dirty = false;
       // The identity index is persisted with the queue it protects.  Saving the
       // pending records without it would let a restart re-observe a variant that
       // is already being tracked, or re-resolve one already terminal.
@@ -1283,6 +1304,15 @@ private:
       ArrayResize(m_shadow_seen_opportunities, 0);
       ArrayResize(m_shadow_seen_variants, 0);
       ArrayResize(m_shadow_resolved_variants, 0);
+      ArrayResize(m_shadow_emitted_progress, 0);
+      ArrayResize(m_shadow_screen_symbols, 0);
+      m_shadow_screened_through = 0;
+      m_shadow_station_backlog = false;
+      m_shadow_pending_dirty = false;
+      m_shadow_screen_passes_total = 0;
+      m_shadow_screen_bars_total = 0;
+      m_shadow_station_evaluations_total = 0;
+      m_shadow_stations_total = 0;
       m_shadow_index_loaded = false;
       m_shadow_index_dirty = false;
       m_shadow_opportunities_total = 0;
@@ -1491,6 +1521,7 @@ private:
          if(kind == "opportunity") _ShadowIndexAdd(m_shadow_seen_opportunities, id, expires);
          else if(kind == "variant") _ShadowIndexAdd(m_shadow_seen_variants, id, expires);
          else if(kind == "resolved") _ShadowIndexAdd(m_shadow_resolved_variants, id, expires);
+         else if(kind == "progress") _ShadowIndexAdd(m_shadow_emitted_progress, id, expires);
          else { corrupt++; continue; }
          restored++;
       }
@@ -1511,11 +1542,13 @@ private:
       _ShadowIndexPrune(m_shadow_seen_opportunities, now);
       _ShadowIndexPrune(m_shadow_seen_variants, now);
       _ShadowIndexPrune(m_shadow_resolved_variants, now);
+      _ShadowIndexPrune(m_shadow_emitted_progress, now);
       string lines[];
       ArrayResize(lines, 0);
       _ShadowIndexAppendLines(lines, m_shadow_seen_opportunities, "opportunity");
       _ShadowIndexAppendLines(lines, m_shadow_seen_variants, "variant");
       _ShadowIndexAppendLines(lines, m_shadow_resolved_variants, "resolved");
+      _ShadowIndexAppendLines(lines, m_shadow_emitted_progress, "progress");
       if(m_state.SaveTextLines(m_state.ShadowTrackerIndexPath(), lines))
          m_shadow_index_dirty = false;
    }
@@ -1627,14 +1660,41 @@ private:
       return 0;
    }
 
+   string _ShadowProgressIndexId(const TradePlan &p, const string kind) const {
+      return p.shadow_candidate_variant_id + "#" + kind;
+   }
+
    bool _ShadowProgressEmitted(const TradePlan &p, const string kind) const {
       int bit = _ShadowProgressBit(kind);
-      return (bit != 0 && (p.shadow_progress_mask & bit) != 0);
+      if(bit == 0) return false;
+      if((p.shadow_progress_mask & bit) != 0) return true;
+      // The pending queue is no longer rewritten at every station, so a restart
+      // can restore a tracker whose mask predates an event already written.  The
+      // progress index is persisted at the station itself and remembers it.
+      return _ShadowIndexContains(m_shadow_emitted_progress, _ShadowProgressIndexId(p, kind));
    }
 
    void _MarkShadowProgressEmitted(TradePlan &p, const string kind) {
       int bit = _ShadowProgressBit(kind);
-      if(bit != 0) p.shadow_progress_mask |= bit;
+      if(bit == 0) return;
+      p.shadow_progress_mask |= bit;
+      _ShadowIndexAdd(m_shadow_emitted_progress, _ShadowProgressIndexId(p, kind),
+                      _ShadowIdentityExpiry(p.shadow_observed_at));
+   }
+
+   // A resolved variant is protected by the terminal-once index, so its path
+   // entries are no longer needed; dropping them keeps the progress set bounded
+   // by the trackers that are still open.
+   void _ShadowForgetEmittedProgress(const string variant_id) {
+      if(StringLen(variant_id) == 0) return;
+      string prefix = variant_id + "#";
+      for(int i=ArraySize(m_shadow_emitted_progress)-1; i>=0; i--){
+         if(StringFind(m_shadow_emitted_progress[i], prefix) != 0) continue;
+         int last = ArraySize(m_shadow_emitted_progress) - 1;
+         if(i != last) m_shadow_emitted_progress[i] = m_shadow_emitted_progress[last];
+         ArrayResize(m_shadow_emitted_progress, last);
+         m_shadow_index_dirty = true;
+      }
    }
 
    void _AppendShadowEntryActivated(TradePlan &p) {
@@ -1654,7 +1714,15 @@ private:
       _AppendShadowEvent(row);
    }
 
-   void _AppendShadowPathProgress(TradePlan &p, const string kind, const datetime at, const double r_level) {
+   // mfe_r/mae_r are the values at the moment the milestone was reached.  The
+   // event is written later, at the next station, so the live running values
+   // would describe the station instead of the milestone.
+   void _AppendShadowPathProgress(TradePlan &p,
+                                  const string kind,
+                                  const datetime at,
+                                  const double r_level,
+                                  const double mfe_at_level,
+                                  const double mae_at_level) {
       if(_ShadowProgressEmitted(p, kind)) return;
       _MarkShadowProgressEmitted(p, kind);
       m_shadow_progress_events_total++;
@@ -1664,22 +1732,51 @@ private:
       row += JsonKVNum("progress_r", r_level, 4) + ",";
       row += JsonKVInt("time_from_entry_sec",
                        (int)MathMax(0, (long)(at - p.shadow_entry_activated_at))) + ",";
-      row += JsonKVNum("mfe_r", p.shadow_mfe_r, 6) + ",";
-      row += JsonKVNum("mae_r", p.shadow_mae_r, 6) + ",";
+      row += JsonKVNum("mfe_r", mfe_at_level, 6) + ",";
+      row += JsonKVNum("mae_r", mae_at_level, 6) + ",";
       row += JsonKVStr("ordering_source", p.shadow_ordering_source);
       row += "}";
       _AppendShadowEvent(row);
    }
 
+   // Station-driven writing.  The replay measures entry activation and the
+   // +0.25R/+0.50R milestones the moment it finds them, but the tracker is only
+   // WRITTEN at a station: TP1, or the terminal (TP2, SL, censoring, ...).  Each
+   // event keeps its own event_at, so the ledger's order is unchanged; what
+   // changes is that nothing -- neither the stream nor the durable state behind
+   // it -- is touched between two results.
+   void _FlushShadowPathEvents(TradePlan &p) {
+      if(!p.shadow_entry_activated) return;
+      string status = p.shadow_outcome_status;
+      p.shadow_outcome_status = "ACTIVE";
+      _AppendShadowEntryActivated(p);
+      if(p.shadow_reached_025r && p.shadow_time_to_025r_sec >= 0)
+         _AppendShadowPathProgress(p, "r025",
+                                   (datetime)((long)p.shadow_entry_activated_at + p.shadow_time_to_025r_sec),
+                                   0.25, p.shadow_mfe_r_at_025r, p.shadow_mae_r_at_025r);
+      if(p.shadow_reached_050r && p.shadow_time_to_050r_sec >= 0)
+         _AppendShadowPathProgress(p, "r050",
+                                   (datetime)((long)p.shadow_entry_activated_at + p.shadow_time_to_050r_sec),
+                                   0.50, p.shadow_mfe_r_at_050r, p.shadow_mae_r_at_050r);
+      p.shadow_outcome_status = status;
+   }
+
+   // TP1 is the one intermediate station.  From here the tracker follows the
+   // next station -- TP2 or SL -- and times that leg from the TP1 touch.
    void _AppendShadowTp1Reached(TradePlan &p) {
       if(_ShadowProgressEmitted(p, "tp1")) return;
+      _FlushShadowPathEvents(p);
       _MarkShadowProgressEmitted(p, "tp1");
       m_shadow_progress_events_total++;
+      m_shadow_stations_total++;
       string row = "{";
       row += _ShadowEventEnvelope(p, "shadow_tp1_reached", p.shadow_tp1_hit_at);
       row += JsonKVBool("tp1_hit", true) + ",";
       row += JsonKVInt("tp1_hit_at", (int)p.shadow_tp1_hit_at) + ",";
       row += JsonKVInt("time_to_tp1_sec", p.shadow_time_to_tp1_sec) + ",";
+      row += JsonKVStr("station", "TP1") + ",";
+      row += JsonKVInt("time_from_entry_to_station_sec", p.shadow_time_to_tp1_sec) + ",";
+      row += JsonKVStr("next_station", "TP2_OR_SL") + ",";
       row += JsonKVNum("tp1", p.tp1, 8) + ",";
       row += JsonKVNum("tp1_partial_fraction", MathMax(0.0, MathMin(1.0, InpTP1PartialPct)), 6) + ",";
       row += JsonKVBool("tp1_before_sl", p.shadow_tp1_before_sl) + ",";
@@ -1696,6 +1793,7 @@ private:
       for(int i=0; i<ArraySize(m_shadow_pending); i++){
          if(m_shadow_pending[i].shadow_candidate_variant_id != variant_id) continue;
          m_shadow_pending[i].shadow_observation_count++;
+         m_shadow_pending_dirty = true;
          // The stage is allowed to advance (a candidate first seen pre-AI can
          // later be rejected by MQL) but the assessed prices are not touched:
          // that is what preserves the plan the AI actually judged.
@@ -1820,6 +1918,16 @@ private:
       p.shadow_time_to_stop_sec = -1;
       p.shadow_time_to_target_sec = -1;
       p.shadow_time_to_adverse_threshold_sec = -1;
+      p.shadow_time_tp1_to_station_sec = -1;
+      p.shadow_station_after_tp1 = "";
+      p.shadow_mfe_r_at_025r = 0.0;
+      p.shadow_mae_r_at_025r = 0.0;
+      p.shadow_mfe_r_at_050r = 0.0;
+      p.shadow_mae_r_at_050r = 0.0;
+      p.shadow_screen_slot = 0;
+      p.shadow_watch_bar = 0;
+      p.shadow_station_due = false;
+      p.shadow_station_bar = 0;
       p.shadow_reached_025r = false;
       p.shadow_reached_050r = false;
       p.shadow_reached_025r_before_adverse = false;
@@ -1992,6 +2100,7 @@ private:
       int n = ArraySize(m_shadow_pending);
       ArrayResize(m_shadow_pending, n + 1);
       m_shadow_pending[n] = p;
+      m_shadow_pending_dirty = true;
    }
 
    //--- Decision attribution -----------------------------------------
@@ -2243,7 +2352,8 @@ private:
                _ShadowAddAmbiguity(p, "entry_and_opposing_levels_same_m1_bar");
             }
          }
-         _AppendShadowEntryActivated(p);
+         // Activation is state, not a result: it is written by
+         // _FlushShadowPathEvents at the next station, with its own event_at.
       }
 
       double favorable = (p.is_buy ? (high - p.entry_est) : (p.entry_est - low)) / risk;
@@ -2267,9 +2377,10 @@ private:
          }
          p.shadow_reached_025r = true;
          p.shadow_time_to_025r_sec = from_entry;
+         p.shadow_mfe_r_at_025r = p.shadow_mfe_r;
+         p.shadow_mae_r_at_025r = p.shadow_mae_r;
          p.shadow_reached_025r_before_adverse = (!p.shadow_025_order_ambiguous &&
                                                  p.shadow_time_to_adverse_threshold_sec < 0);
-         _AppendShadowPathProgress(p, "r025", at, 0.25);
       }
       if(!p.shadow_reached_050r && favorable >= 0.50){
          if(new_adverse && !intrabar_ordered){
@@ -2278,9 +2389,10 @@ private:
          }
          p.shadow_reached_050r = true;
          p.shadow_time_to_050r_sec = from_entry;
+         p.shadow_mfe_r_at_050r = p.shadow_mfe_r;
+         p.shadow_mae_r_at_050r = p.shadow_mae_r;
          p.shadow_reached_050r_before_adverse = (!p.shadow_050_order_ambiguous &&
                                                  p.shadow_time_to_adverse_threshold_sec < 0);
-         _AppendShadowPathProgress(p, "r050", at, 0.50);
       }
       if(p.shadow_time_to_adverse_threshold_sec < 0 && adverse_threshold_hit)
          p.shadow_time_to_adverse_threshold_sec = from_entry;
@@ -2315,6 +2427,12 @@ private:
       if(sl_hit && tp2_hit && !intrabar_ordered){
          p.shadow_outcome_ambiguous = true;
          _ShadowAddAmbiguity(p, "tp2_and_sl_same_m1_bar_without_tick_sequence");
+         if(p.shadow_tp1_hit){
+            // Both next stations fell in one bar: the leg's duration is known,
+            // which of the two stations ended it is not.
+            p.shadow_station_after_tp1 = "AMBIGUOUS_TP2_OR_SL";
+            p.shadow_time_tp1_to_station_sec = (int)MathMax(0, (long)(at - p.shadow_tp1_hit_at));
+         }
          _ShadowFinalize(p, "AMBIGUOUS_TP2_AND_SL_SAME_BAR", at, "EXCLUDED_AMBIGUOUS",
                          "EXCLUDED_AMBIGUOUS_INTRABAR_ORDER", close, risk, tp1_valid);
          return true;
@@ -2328,6 +2446,10 @@ private:
          p.shadow_target_before_stop = true;
          p.shadow_time_to_target_sec = from_entry;
          p.shadow_tp1_then_tp2 = p.shadow_tp1_hit;
+         if(p.shadow_tp1_hit){
+            p.shadow_station_after_tp1 = "TP2";
+            p.shadow_time_tp1_to_station_sec = (int)MathMax(0, (long)(at - p.shadow_tp1_hit_at));
+         }
          _ShadowFinalize(p, (p.shadow_tp1_hit ? "TP1_THEN_TP2" : "TP2_BEFORE_SL"), at,
                          "UNCENSORED_TERMINAL", "RESOLVED_CLEAN_PRICE_PATH", close, risk, tp1_valid);
          return true;
@@ -2339,6 +2461,8 @@ private:
          p.shadow_tp2_before_sl = false;
          if(p.shadow_tp1_hit){
             p.shadow_tp1_then_sl = true;
+            p.shadow_station_after_tp1 = "SL";
+            p.shadow_time_tp1_to_station_sec = (int)MathMax(0, (long)(at - p.shadow_tp1_hit_at));
             _ShadowFinalize(p, "TP1_THEN_SL", at, "UNCENSORED_TERMINAL",
                             "RESOLVED_CLEAN_PRICE_PATH", close, risk, tp1_valid);
          } else {
@@ -2419,6 +2543,14 @@ private:
                                     : (at >= p.shadow_observed_at ? (int)(at - p.shadow_observed_at) : -1));
       p.shadow_neither_target_nor_stop = (p.shadow_entry_activated && !p.shadow_tp2_hit &&
                                           !p.shadow_sl_before_tp1 && !p.shadow_tp1_then_sl);
+      // After TP1 the tracker follows the next station.  A post-TP1 terminal that
+      // is neither TP2 nor SL (horizon, session close, data loss) says so by
+      // name and carries no leg duration, rather than a duration that was
+      // never measured.
+      if(p.shadow_tp1_hit && StringLen(p.shadow_station_after_tp1) == 0){
+         p.shadow_station_after_tp1 = "NONE_" + terminal_event;
+         p.shadow_time_tp1_to_station_sec = -1;
+      }
 
       double cost = MathMax(0.0, p.execution_cost_r);
       double frac = MathMax(0.0, MathMin(1.0, InpTP1PartialPct));
@@ -2505,10 +2637,174 @@ private:
       return _ShadowM1SeriesAvailable(symbol);
    }
 
-   // Incremental path evaluation.  The cursor advances with the bars already
-   // consumed, so a tracker is never re-scanned from its observation on every
-   // tick and its accumulated state survives a restart.
-   bool _EvaluateShadowCandidate(TradePlan &p, string &reason) {
+   //--- Station-driven screening -----------------------------------------
+   //
+   // The tracker used to re-read every pending candidate's M1 path once a
+   // minute and then rewrite the whole pending queue (26-68 MB measured) after
+   // EVERY evaluation -- i.e. on nearly every call, because a budget of 25 per
+   // call over thousands of trackers always left something due.  In the
+   // 2026-09-13 03:35 Strategy Tester run that was 6460 of 6460 seconds of
+   // maintenance time: the backtest advanced 27 simulated hours in two wall
+   // hours.  Nothing about a hypothetical position can change except at a
+   // station, so the screen below reads each tracked symbol ONCE per closed M1
+   // bar and wakes a tracker only when one of its stations was touched.
+
+   datetime _ShadowM1BarOpen(const datetime t) const {
+      return (datetime)(((long)t / 60) * 60);
+   }
+
+   // Newest M1 bar that is complete at server time `now`.  Only closed bars are
+   // consumed: reading the still-forming bar advanced the cursor past it, so the
+   // rest of that minute's range was never examined by any later evaluation.
+   datetime _ShadowLastClosedM1Bar(const datetime now) const {
+      return (datetime)((long)_ShadowM1BarOpen(now) - 60);
+   }
+
+   int _ShadowScreenSlot(const string symbol) {
+      for(int i=0; i<ArraySize(m_shadow_screen_symbols); i++){
+         if(m_shadow_screen_symbols[i] == symbol) return i + 1;
+      }
+      int n = ArraySize(m_shadow_screen_symbols);
+      ArrayResize(m_shadow_screen_symbols, n + 1);
+      m_shadow_screen_symbols[n] = symbol;
+      return n + 1;
+   }
+
+   // First bar this tracker still has to be screened from: after the last bar
+   // either replayed (scan cursor) or screened without a station (watch bar).
+   datetime _ShadowScreenFrom(const TradePlan &p) const {
+      datetime consumed = (p.shadow_watch_bar > p.shadow_scan_cursor ? p.shadow_watch_bar : p.shadow_scan_cursor);
+      if(consumed > 0) return (datetime)((long)consumed + 60);
+      return p.shadow_observed_at;
+   }
+
+   datetime _ShadowScreenUntil(const TradePlan &p, const datetime last_closed) const {
+      if(p.shadow_horizon_at > 0 && last_closed > p.shadow_horizon_at) return p.shadow_horizon_at;
+      return last_closed;
+   }
+
+   // Does this bar reach the tracker's next station?  Before activation the
+   // only thing that can change the hypothesis is the entry itself (the stop
+   // lies beyond the entry, so touching the stop touches the entry first).
+   // After activation the stations are SL and TP2, plus TP1 until it is hit.
+   // +0.25R/+0.50R are milestones, not stations: the replay that a station
+   // triggers measures them exactly, with their own timestamps.
+   bool _ShadowBarTouchesStation(const TradePlan &p,
+                                 const bool tp1_valid,
+                                 const double high,
+                                 const double low) const {
+      if(!p.shadow_entry_activated)
+         return (p.is_buy ? (low <= p.entry_est) : (high >= p.entry_est));
+      bool sl_touch = (p.is_buy ? (low <= p.sl) : (high >= p.sl));
+      bool tp2_touch = (p.is_buy ? (high >= p.tp2) : (low <= p.tp2));
+      if(sl_touch || tp2_touch) return true;
+      if(!p.shadow_tp1_hit && tp1_valid)
+         return (p.is_buy ? (high >= p.tp1) : (low <= p.tp1));
+      return false;
+   }
+
+   void _ShadowScreenTracker(TradePlan &p,
+                             const datetime &bar_time[],
+                             const double &bar_high[],
+                             const double &bar_low[],
+                             const int first,
+                             const int count,
+                             const datetime last_closed) {
+      if(p.shadow_station_due || count <= 0) return;
+      datetime from = _ShadowScreenFrom(p);
+      datetime until = _ShadowScreenUntil(p, last_closed);
+      if(from > until) return;
+      bool tp1_valid = _ShadowTp1Valid(p);
+      for(int k=first; k<first+count; k++){
+         datetime t = bar_time[k];
+         if(t < from) continue;
+         if(t > until) break;
+         m_shadow_screen_bars_total++;
+         if(_ShadowBarTouchesStation(p, tp1_valid, bar_high[k], bar_low[k])){
+            // The replay stops at this bar, so nothing after it can be written
+            // before the screen has actually reached it.
+            p.shadow_station_due = true;
+            p.shadow_station_bar = t;
+            return;
+         }
+         p.shadow_watch_bar = t;
+      }
+   }
+
+   // One pass per closed M1 bar.  Each tracked symbol is read ONCE, from the
+   // earliest bar any of its trackers still needs, into flat arrays; every
+   // tracker then compares only arithmetic against its own station levels.  A
+   // restored tracker (watch bar zero) is re-screened from its scan cursor, so a
+   // restart catches up exactly instead of skipping the downtime.
+   void _ShadowScreenForStations(const datetime last_closed) {
+      int total = ArraySize(m_shadow_pending);
+      if(total <= 0) return;
+      for(int i=0; i<total; i++){
+         int slot = m_shadow_pending[i].shadow_screen_slot;
+         if(slot <= 0 || slot > ArraySize(m_shadow_screen_symbols) ||
+            m_shadow_screen_symbols[slot - 1] != m_shadow_pending[i].symbol)
+            m_shadow_pending[i].shadow_screen_slot = _ShadowScreenSlot(m_shadow_pending[i].symbol);
+      }
+      int slots = ArraySize(m_shadow_screen_symbols);
+      datetime slot_from[];
+      ArrayResize(slot_from, slots);
+      for(int s=0; s<slots; s++) slot_from[s] = 0;
+      for(int i=0; i<total; i++){
+         if(m_shadow_pending[i].shadow_station_due) continue;
+         datetime from = _ShadowScreenFrom(m_shadow_pending[i]);
+         if(from > _ShadowScreenUntil(m_shadow_pending[i], last_closed)) continue;
+         int s = m_shadow_pending[i].shadow_screen_slot - 1;
+         if(slot_from[s] == 0 || from < slot_from[s]) slot_from[s] = from;
+      }
+      datetime bar_time[];
+      double bar_high[];
+      double bar_low[];
+      int slot_first[];
+      int slot_count[];
+      ArrayResize(bar_time, 0);
+      ArrayResize(bar_high, 0);
+      ArrayResize(bar_low, 0);
+      ArrayResize(slot_first, slots);
+      ArrayResize(slot_count, slots);
+      for(int s=0; s<slots; s++){
+         slot_first[s] = ArraySize(bar_time);
+         slot_count[s] = 0;
+         if(slot_from[s] <= 0) continue;
+         MqlRates rates[];
+         ArraySetAsSeries(rates, false);
+         int got = CopyRates(m_shadow_screen_symbols[s], PERIOD_M1, slot_from[s], last_closed, rates);
+         if(got <= 0){
+            // Market closed across the range, or the series is not built yet.
+            // Requesting the series is the only action: every tracker keeps its
+            // watermark and is screened from it on the next closed bar.
+            _ShadowEnsureM1History(m_shadow_screen_symbols[s]);
+            continue;
+         }
+         int base = ArraySize(bar_time);
+         ArrayResize(bar_time, base + got, 4096);
+         ArrayResize(bar_high, base + got, 4096);
+         ArrayResize(bar_low, base + got, 4096);
+         for(int k=0; k<got; k++){
+            bar_time[base + k] = rates[k].time;
+            bar_high[base + k] = rates[k].high;
+            bar_low[base + k] = rates[k].low;
+         }
+         slot_count[s] = got;
+      }
+      for(int i=0; i<total; i++){
+         int s = m_shadow_pending[i].shadow_screen_slot - 1;
+         if(slot_count[s] <= 0) continue;
+         _ShadowScreenTracker(m_shadow_pending[i], bar_time, bar_high, bar_low,
+                              slot_first[s], slot_count[s], last_closed);
+      }
+      m_shadow_screen_passes_total++;
+   }
+
+   // Path replay from the persisted cursor.  Called only when the screen found
+   // a station (through_bar = that bar) or when the horizon has passed
+   // (through_bar = 0).  The cursor advances with the bars consumed, so a replay
+   // never re-reads a bar and its accumulated state survives a restart.
+   bool _EvaluateShadowCandidate(TradePlan &p, string &reason, const datetime through_bar = 0) {
       reason = "";
       double risk = MathAbs(p.entry_est - p.sl);
       if(!_ShadowPlanTrackable(p)){
@@ -2521,14 +2817,25 @@ private:
       }
       bool tp1_valid = _ShadowTp1Valid(p);
       datetime now = _NowServerOrLocal();
-      datetime evaluation_end = now;
+      datetime last_closed = _ShadowLastClosedM1Bar(now);
+      // The horizon counts as passed once every bar up to it is CLOSED, so a
+      // censored result is never computed from a half-formed final minute.
+      bool horizon_passed = (p.shadow_horizon_at > 0 && now >= p.shadow_horizon_at &&
+                             last_closed >= _ShadowM1BarOpen(p.shadow_horizon_at));
+      datetime evaluation_end = last_closed;
+      // A station replay stops at the bar that touched the station.  At the
+      // horizon every remaining bar is read regardless, or the censored result
+      // would ignore the path between the station bar and the horizon.
+      if(through_bar > 0 && !horizon_passed && through_bar < evaluation_end)
+         evaluation_end = through_bar;
       if(p.shadow_horizon_at > 0 && evaluation_end > p.shadow_horizon_at)
          evaluation_end = p.shadow_horizon_at;
       datetime cursor = (p.shadow_scan_cursor > 0 ? (datetime)((long)p.shadow_scan_cursor + 60)
                                                   : p.shadow_observed_at);
-      bool horizon_passed = (p.shadow_horizon_at > 0 && now >= p.shadow_horizon_at);
 
-      if(evaluation_end <= cursor){
+      // evaluation_end is a bar OPEN time and that bar is included, so the
+      // range is empty only when it lies strictly before the cursor.
+      if(evaluation_end < cursor){
          if(!horizon_passed){
             reason = "awaiting_next_closed_m1_bar";
             return false;
@@ -2758,6 +3065,33 @@ private:
       } else {
          row += "\"tp2_hit_at\":null,\"time_to_tp2_sec\":null,";
       }
+      // Station durations.  The first station is timed from the entry; the leg
+      // after TP1 is timed from the TP1 touch, which is what separates a TP1
+      // that ran on to TP2 in minutes from one that drifted back to the stop
+      // days later.  A clean station only: an ambiguous or censored terminal
+      // did not reach a station whose timing can be stated.
+      string terminal_station = "";
+      if(!p.shadow_outcome_ambiguous &&
+         (p.shadow_terminal_event == "TP2_BEFORE_SL" || p.shadow_terminal_event == "TP1_THEN_TP2"))
+         terminal_station = "TP2";
+      else if(!p.shadow_outcome_ambiguous &&
+              (p.shadow_terminal_event == "SL_BEFORE_TP1" || p.shadow_terminal_event == "TP1_THEN_SL"))
+         terminal_station = "SL";
+      if(StringLen(terminal_station) > 0 && p.shadow_time_to_event_sec >= 0){
+         row += JsonKVStr("terminal_station", terminal_station) + ",";
+         row += JsonKVInt("time_from_entry_to_station_sec", p.shadow_time_to_event_sec) + ",";
+      } else {
+         row += "\"terminal_station\":null,\"time_from_entry_to_station_sec\":null,";
+      }
+      if(p.shadow_tp1_hit && StringLen(p.shadow_station_after_tp1) > 0)
+         row += JsonKVStr("station_after_tp1", p.shadow_station_after_tp1) + ",";
+      else
+         row += "\"station_after_tp1\":null,";
+      if(p.shadow_tp1_hit && p.shadow_time_tp1_to_station_sec >= 0 &&
+         (p.shadow_station_after_tp1 == "TP2" || p.shadow_station_after_tp1 == "SL"))
+         row += JsonKVInt("time_from_tp1_to_station_sec", p.shadow_time_tp1_to_station_sec) + ",";
+      else
+         row += "\"time_from_tp1_to_station_sec\":null,";
       // Ordered path booleans are only meaningful on an uncensored, unambiguous,
       // activated path.  Everywhere else they are null, so an aggregate cannot
       // silently read "not observed" as "did not happen".
@@ -2850,7 +3184,14 @@ private:
          return false;
       }
       _ShadowIndexAdd(m_shadow_resolved_variants, variant_id, _ShadowIdentityExpiry(_NowServerOrLocal()));
+      // Milestones reached since the last station are written now, in order and
+      // with their own timestamps, strictly after the terminal-once guard so a
+      // suppressed duplicate can never emit them either.
+      _FlushShadowPathEvents(p);
       _AppendShadowOutcomeResolution(p);
+      _ShadowForgetEmittedProgress(variant_id);
+      m_shadow_stations_total++;
+      m_shadow_pending_dirty = true;
       m_shadow_resolved_total++;
       if(p.shadow_outcome_ambiguous) m_shadow_ambiguous_total++;
       if(StringFind(p.shadow_censoring_status, "CENSORED") == 0 ||
@@ -2859,7 +3200,14 @@ private:
       return true;
    }
 
+   // A tracker is evaluated only when the screen found one of its stations, or
+   // once its horizon has passed (censoring, entry-never-reached, and the
+   // bounded history retries, spaced by InpShadowEvaluationIntervalSeconds).
+   // There is no periodic re-evaluation: between two stations nothing about a
+   // hypothetical position can change.
    bool _ShadowTrackerDue(const TradePlan &p, const datetime now) const {
+      if(p.shadow_station_due) return true;
+      if(p.shadow_horizon_at <= 0 || now < p.shadow_horizon_at) return false;
       if(p.shadow_last_evaluated_at <= 0) return true;
       long interval = (long)MathMax(1, InpShadowEvaluationIntervalSeconds);
       return ((long)(now - p.shadow_last_evaluated_at) >= interval);
@@ -2877,36 +3225,60 @@ private:
       }
       _LoadShadowTrackerIndex();
       datetime now = _NowServerOrLocal();
+      datetime last_closed = _ShadowLastClosedM1Bar(now);
+      bool new_bar = (last_closed > m_shadow_screened_through);
+      // Called on every tick and every timer beat.  Between two closed M1 bars
+      // no station can have been reached, so the call costs one comparison
+      // unless a previous pass left due trackers beyond its budget.
+      if(!new_bar && !m_shadow_station_backlog){
+         _PersistShadowTrackerIndex();
+         return;
+      }
+      if(new_bar){
+         _ShadowScreenForStations(last_closed);
+         m_shadow_screened_through = last_closed;
+      }
       int budget = MathMax(1, InpShadowMaxEvaluationsPerTick);
       int evaluated = 0;
-      bool changed = false;
+      m_shadow_station_backlog = false;
       // Descending walk with swap-removal: the swapped-in element is always one
-      // already visited, so no tracker is skipped.  The due gate plus the budget
-      // is what keeps an M1-resolution study from costing one CopyRates per
-      // pending tracker per second for information that changes once a minute --
-      // and because an evaluated tracker stops being due, the next call advances
-      // to the ones this call could not afford rather than starving them.
+      // already visited, so no tracker is skipped.  Only due trackers -- a
+      // station touched, or the horizon passed -- are replayed, and at most
+      // `budget` of them per call; the rest stay due and set the backlog flag so
+      // the very next call continues with them instead of waiting for a bar.
       for(int i=ArraySize(m_shadow_pending)-1; i>=0; i--){
-         if(evaluated >= budget) break;
          if(!_ShadowTrackerDue(m_shadow_pending[i], now)) continue;
+         if(evaluated >= budget){
+            m_shadow_station_backlog = true;
+            break;
+         }
          evaluated++;
+         m_shadow_station_evaluations_total++;
          TradePlan p = m_shadow_pending[i];
+         datetime through = (p.shadow_station_due ? p.shadow_station_bar : 0);
+         p.shadow_station_due = false;
+         p.shadow_station_bar = 0;
          string reason = "";
-         if(!_EvaluateShadowCandidate(p, reason)){
+         if(!_EvaluateShadowCandidate(p, reason, through)){
+            // Still open.  The in-memory state advanced; the durable write
+            // already happened inside the replay if it produced a station (TP1).
             m_shadow_pending[i] = p;
-            changed = true;
+            m_shadow_pending_dirty = true;
             continue;
          }
          _CommitShadowTerminalResolution(p);
          int last = ArraySize(m_shadow_pending) - 1;
          if(i != last) m_shadow_pending[i] = m_shadow_pending[last];
          ArrayResize(m_shadow_pending, last);
-         changed = true;
       }
-      if(changed){
-         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
-         _PersistShadowTrackerIndex();
-      }
+      // Durable state at stations only.  A station (TP1 or a terminal) marks the
+      // small identity index dirty -- the progress and resolved sets are exactly
+      // what stops a restart from writing it twice -- and only that index is
+      // written here.  The pending queue itself is saved by
+      // _PersistResearchQueues at scan end / shutdown when it actually changed;
+      // a restored tracker is re-screened from its cursor, which reproduces the
+      // same state from immutable history.
+      _PersistShadowTrackerIndex();
    }
 
    //--- Restart recovery ----------------------------------------------
@@ -3116,6 +3488,12 @@ private:
                + " capacity_rejected_total=" + IntegerToString((int)m_shadow_capacity_rejected_total)
                + " tick_ordered_bars_total=" + IntegerToString((int)m_shadow_tick_ordered_total)
                + " progress_events_total=" + IntegerToString((int)m_shadow_progress_events_total)
+               + " tracking_mode=station_driven"
+               + " screen_passes_total=" + IntegerToString((int)m_shadow_screen_passes_total)
+               + " screen_bars_total=" + IntegerToString((int)m_shadow_screen_bars_total)
+               + " station_evaluations_total=" + IntegerToString((int)m_shadow_station_evaluations_total)
+               + " stations_total=" + IntegerToString((int)m_shadow_stations_total)
+               + " emitted_progress_index=" + IntegerToString(ArraySize(m_shadow_emitted_progress))
                + " expired_pending=" + IntegerToString(expired_pending)
                + " trading_authority=false");
       if(expired_pending > 0)
@@ -3813,6 +4191,8 @@ private:
 
    void _ResetFinalCounters() {
       m_total_ai_requests_queued = 0;
+      m_total_ai_review_gate_reuse = 0;
+      m_total_ai_predetermined_skips = 0;
       m_total_tester_ai_wait_started = 0;
       m_total_tester_ai_wait_completed = 0;
       m_total_tester_ai_wait_timeout = 0;
@@ -3918,6 +4298,8 @@ private:
                + " cache_cohort=" + _TesterCacheCohortSummaryCached()
                + " cache_cohort_match=" + (_TesterCacheCohortMatchesCached() ? "true" : "false"));
       _Journal("[final_summary] ai_requests_queued_total=" + IntegerToString(m_total_ai_requests_queued)
+               + " ai_review_gate_reuse_total=" + IntegerToString(m_total_ai_review_gate_reuse)
+               + " ai_predetermined_outcome_skips_total=" + IntegerToString(m_total_ai_predetermined_skips)
                + " tester_ai_wait_started_total=" + IntegerToString(m_total_tester_ai_wait_started)
                + " tester_ai_wait_completed_total=" + IntegerToString(m_total_tester_ai_wait_completed)
                + " tester_ai_wait_timeout_total=" + IntegerToString(m_total_tester_ai_wait_timeout)
@@ -5195,6 +5577,24 @@ private:
    string _KillzoneCodeForEntryTime(const datetime entry_time) const {
       datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
       return m_po3.KillzoneCodeAt(t);
+   }
+
+   // Session context for the Python AI review gate.  server_time is the same
+   // instant BuildRequestJson publishes as request_created_sim_time, and the
+   // session/killzone codes come from the one repository authority (PO3.mqh).
+   string _AiReviewContextJson(const datetime request_time) const {
+      datetime t = (request_time > 0 ? request_time : _NowServerOrLocal());
+      datetime server_now = TimeTradeServer();
+      datetime gmt_now = TimeGMT();
+      long utc_offset = (server_now > 0 && gmt_now > 0 ? (long)(server_now - gmt_now) : 0);
+      return "{\"context_version\":\"" + AI_REVIEW_CONTEXT_VERSION + "\""
+             + ",\"server_time\":" + IntegerToString((long)t)
+             + ",\"utc_offset_sec\":" + IntegerToString(utc_offset)
+             + ",\"session_name\":\"" + m_po3.SessionNameAt(t) + "\""
+             + ",\"session_code\":\"" + m_po3.SessionCodeAt(t) + "\""
+             + ",\"killzone_code\":\"" + m_po3.KillzoneCodeAt(t) + "\""
+             + ",\"scan_interval_min\":" + IntegerToString(InpScanIntervalMinutes)
+             + "}";
    }
 
    string _ShortPlanId(const TradePlan &p) const {
@@ -13346,6 +13746,36 @@ private:
       }
       if(_TesterBootstrapMode())
          return _QueueTesterBootstrapCandidate(cands);
+      // PREDETERMINED-OUTCOME GATE.  With InpMaxTradesPerSweep == 1 a sweep that
+      // already produced a filled trade in this process is permanently consumed
+      // (m_consumed_sweep_keys is never pruned), and _AddToWatchlist rejects any
+      // approval for it via _SweepTradeCapReached.  When EVERY candidate of the
+      // group belongs to such a sweep, APPROVE, REJECT and ABSTAIN all end in the
+      // same place -- no watchlist entry, no order -- so the provider call cannot
+      // change the executable outcome.  Measured on the 2026-09-07..11 journals:
+      // 47 of 1,822 queued requests, and 10 approvals later dropped with
+      // "sweep already consumed by a filled trade".  A group with even one
+      // candidate outside a consumed sweep is sent unchanged.
+      if(InpUseAI && InpMaxTradesPerSweep == 1 && count > 0){
+         bool all_consumed = true;
+         for(int i=0; i<count; i++){
+            if(!_SweepAlreadyConsumed(cands[i])){
+               all_consumed = false;
+               break;
+            }
+         }
+         if(all_consumed){
+            m_total_ai_predetermined_skips++;
+            _LogSetupReject(cands[0].symbol, "ai_invocation_gate", "predetermined_sweep_already_consumed",
+                            "candidate_count=" + IntegerToString(count)
+                            + " sweep=" + TimeToString(cands[0].po3.t_sweep, TIME_DATE|TIME_MINUTES));
+            _Journal("[ai_invocation_gate] symbol=" + cands[0].symbol
+                     + " action=skip_provider_request reason=predetermined_sweep_already_consumed"
+                     + " candidate_count=" + IntegerToString(count)
+                     + " max_trades_per_sweep=1 outcome_equivalence=approve_reject_abstain_all_non_executable");
+            return false;
+         }
+      }
       string group_signature = _GroupSignature(cands);
       string tester_cache_signature = _TesterAiCacheSignature(cands);
       AiDecision cached_decision;
@@ -13413,7 +13843,7 @@ private:
                         + " tester_cache_signature=" + tester_cache_signature);
                return false;
             }
-            if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key)){
+            if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key, _AiReviewContextJson(cands[0].ai_request_time))){
                _RememberTesterRecordSignature(tester_cache_signature);
                m_funnel_ai_requests++;
                m_total_ai_requests_queued++;
@@ -13438,7 +13868,7 @@ private:
                      + " warning=tester_live_ai_wait_not_backtest_safe"
                      + " allow_trading=" + (InpTesterAllowLiveWaitDebugTrading ? "true" : "false")
                      + " default_action=" + (InpTesterAllowLiveWaitDebugTrading ? "trade_only_if_sim_age_safe" : "record_response_do_not_trade"));
-         if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key)){
+         if(m_ai.SendRequestCandidates(cands, req_id, tester_cache_signature, tester_cache_key, _AiReviewContextJson(cands[0].ai_request_time))){
             m_funnel_ai_requests++;
             m_total_ai_requests_queued++;
             _Journal(cands[0].symbol + " AI request queued candidates=" + IntegerToString(count)
@@ -18513,6 +18943,12 @@ public:
          string assessment_integrity_reason = "";
          bool assessment_group_ok = _DecisionAssessmentsMatchGroup(dec, decision_group, assessment_integrity_reason);
          bool strict_response_quality = (dec.decision_quality_tier == "FULL_STRUCTURED" || dec.decision_quality_tier == "CACHE_OF_FULL_STRUCTURED");
+         // A Python AI review gate reuse is a deliberate, identity-bound
+         // non-trading answer (no provider call was needed), not a degraded one.
+         // It keeps every non-trading consequence below and only gets its own
+         // label, so the reject table never counts it as an integrity failure.
+         bool review_gate_reuse = (!strict_response_quality && dec.decision_source == AI_REVIEW_GATE_REUSE_SOURCE);
+         if(review_gate_reuse) m_total_ai_review_gate_reuse++;
          bool strict_schema_ok = (dec.mandatory_fields_complete &&
                                   dec.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
                                   dec.hierarchical_prior_schema_version == HIERARCHICAL_PRIOR_SCHEMA_VERSION &&
@@ -18591,7 +19027,9 @@ public:
          bool risk_multiplier_ok = (dec.suggested_risk_multiplier > 0.0 && dec.suggested_risk_multiplier <= 1.0);
          string reject_reason = "ok";
          if(!strict_schema_ok)
-            reject_reason = (strict_response_quality ? "ai_quality_schema_incomplete" : "degraded_ai_response_non_trading");
+            reject_reason = (strict_response_quality ? "ai_quality_schema_incomplete"
+                             : (review_gate_reuse ? "ai_review_reused_prior_non_approval"
+                                                  : "degraded_ai_response_non_trading"));
          else if(!have_selected) reject_reason = "candidate_hash_mismatch";
          else if(dec.repeatability_required_live &&
                  (dec.repeatability_status != "REPEATABLE" || !dec.repeatability_trading_eligible))
@@ -18834,9 +19272,10 @@ public:
             _RemovePendingGroup(req_ids[r]);
          } else {
             _RememberAiCooldown(group_symbol, group_signature, reject_reason);
-            string reject_stage = ((reject_reason == "candidate_hash_mismatch" ||
-                                    reject_reason == "ai_quality_schema_incomplete" ||
-                                    reject_reason == "degraded_ai_response_non_trading") ? "decision_integrity" : "ai");
+            string reject_stage = (review_gate_reuse ? "ai_review_gate"
+                                   : ((reject_reason == "candidate_hash_mismatch" ||
+                                       reject_reason == "ai_quality_schema_incomplete" ||
+                                       reject_reason == "degraded_ai_response_non_trading") ? "decision_integrity" : "ai"));
             _LogSetupReject(group_symbol, reject_stage, reject_reason,
                             "llm_quality_score=" + DoubleToString(dec.llm_quality_score, 2)
                             + " required_llm_quality_score=" + DoubleToString(required_llm_quality_score, 2)

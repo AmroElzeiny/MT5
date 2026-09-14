@@ -1135,7 +1135,8 @@ public:
 
    string BuildRequestJson(const TradePlan &plans[],
                            const string tester_cache_signature="",
-                           const string tester_cache_key="") {
+                           const string tester_cache_key="",
+                           const string review_context_json="") {
        int count = ArraySize(plans);
        if(count <= 0) return "{}";
 
@@ -1178,6 +1179,10 @@ public:
        j += JsonKVStr("runtime_input_hash", runtime_input_hash) + ",";
        j += JsonKVStr("decision_input_hash", DecisionInputHash()) + ",";
        j += JsonKVStr("decision_schema_version", AI_DECISION_SCHEMA_VERSION) + ",";
+       // Operational session context for the Python AI review gate.  Never part
+       // of the model evidence envelope (a whitelist) or of any cache signature.
+       if(StringLen(review_context_json) > 0)
+          j += "\"ai_review_context\":" + review_context_json + ",";
        if(StringLen(tester_cache_signature) > 0)
           j += JsonKVStr("tester_cache_signature", tester_cache_signature) + ",";
        if(StringLen(tester_cache_key) > 0)
@@ -1816,7 +1821,8 @@ public:
 
    bool SendRequestCandidates(TradePlan &plans[], string &out_req_id,
                               const string tester_cache_signature="",
-                              const string tester_cache_key="") {
+                              const string tester_cache_key="",
+                              const string review_context_json="") {
       if(!InpUseAI) return false;
       if(!CanSendNow()) return false;
       if(ArraySize(plans) <= 0) return false;
@@ -1825,7 +1831,7 @@ public:
       if(StringLen(out_req_id) == 0) out_req_id = _NowId(plans[0].symbol);
       for(int i=0; i<ArraySize(plans); i++) plans[i].req_id = out_req_id;
       string path = m_bus.ReqDir() + "\\" + out_req_id + ".json";
-      string payload = BuildRequestJson(plans, tester_cache_signature, tester_cache_key);
+      string payload = BuildRequestJson(plans, tester_cache_signature, tester_cache_key, review_context_json);
       return m_bus.WriteText(path, payload);
    }
 

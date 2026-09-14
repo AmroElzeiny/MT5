@@ -709,6 +709,15 @@ private:
       j += JsonKVNum("shadow_assessed_tp2", p.shadow_assessed_tp2, 8) + ",";
       j += JsonKVStr("shadow_decision_state", p.shadow_decision_state) + ",";
       j += JsonKVStr("shadow_decision_source", p.shadow_decision_source) + ",";
+      // Station-driven tracking.  The screening fields (slot, watch bar, station
+      // due/bar) are deliberately not serialized: a restored tracker is
+      // re-screened from shadow_scan_cursor, which is exact on immutable bars.
+      j += JsonKVInt("shadow_time_tp1_to_station_sec", p.shadow_time_tp1_to_station_sec) + ",";
+      j += JsonKVStr("shadow_station_after_tp1", p.shadow_station_after_tp1) + ",";
+      j += JsonKVNum("shadow_mfe_r_at_025r", p.shadow_mfe_r_at_025r, 6) + ",";
+      j += JsonKVNum("shadow_mae_r_at_025r", p.shadow_mae_r_at_025r, 6) + ",";
+      j += JsonKVNum("shadow_mfe_r_at_050r", p.shadow_mfe_r_at_050r, 6) + ",";
+      j += JsonKVNum("shadow_mae_r_at_050r", p.shadow_mae_r_at_050r, 6) + ",";
       j += JsonKVNum("mfe_price", p.mfe_price, 8) + ",";
       j += JsonKVNum("mae_price", p.mae_price, 8) + ",";
       j += JsonKVNum("mfe_r", p.mfe_r, 6) + ",";
@@ -1704,6 +1713,18 @@ private:
       p.shadow_assessed_tp2 = JsonGetNumber(json, "shadow_assessed_tp2", 0);
       p.shadow_decision_state = JsonGetString(json, "shadow_decision_state", "");
       p.shadow_decision_source = JsonGetString(json, "shadow_decision_source", "");
+      // A tracker persisted before station-driven tracking has no TP1 leg timing;
+      // -1 is "not measured", never a zero-second leg.
+      p.shadow_time_tp1_to_station_sec = (int)JsonGetNumber(json, "shadow_time_tp1_to_station_sec", -1);
+      p.shadow_station_after_tp1 = JsonGetString(json, "shadow_station_after_tp1", "");
+      p.shadow_mfe_r_at_025r = JsonGetNumber(json, "shadow_mfe_r_at_025r", 0);
+      p.shadow_mae_r_at_025r = JsonGetNumber(json, "shadow_mae_r_at_025r", 0);
+      p.shadow_mfe_r_at_050r = JsonGetNumber(json, "shadow_mfe_r_at_050r", 0);
+      p.shadow_mae_r_at_050r = JsonGetNumber(json, "shadow_mae_r_at_050r", 0);
+      p.shadow_screen_slot = 0;
+      p.shadow_watch_bar = 0;
+      p.shadow_station_due = false;
+      p.shadow_station_bar = 0;
       p.mfe_price = JsonGetNumber(json, "mfe_price", 0);
       p.mae_price = JsonGetNumber(json, "mae_price", 0);
       p.mfe_r = JsonGetNumber(json, "mfe_r", 0);

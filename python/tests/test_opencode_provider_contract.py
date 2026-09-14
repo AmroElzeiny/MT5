@@ -25,10 +25,12 @@ Every test here fails against the pre-change tree.  The ones that matter most:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -45,6 +47,8 @@ from ai_gate import (  # noqa: E402
 )
 from ai_provider import (  # noqa: E402
     LocalOpenAICompatibleProvider,
+    OPENCODE_PRIMARY_PROVIDER_ID,
+    OPENCODE_SECONDARY_PROVIDER_ID,
     OpenCodeMessagesProvider,
     OpenCodeResponsesProvider,
     OpenCodeRoutedProvider,
@@ -72,6 +76,10 @@ from opencode_routing import (  # noqa: E402
 from structured_models import StrictStructuredModel  # noqa: E402
 
 MUSE = "muse-spark-1.3-contributor"
+# The secondary routed OpenCode leg since 2026-09-13 (replaced qwen3.8-flash).
+DEEPSEEK = "deepseek-v4.1-flash"
+# Only the Anthropic-dialect transport tests still use this model name; that
+# transport is no longer wired into the router.
 QWEN = "qwen3.8-flash"
 LUNA = "gpt-5.6-luna"
 BASE_URL = "https://opencode.ai/zen/go/v1"
@@ -113,7 +121,7 @@ def _config(**overrides: str) -> AIGateRuntimeConfig:
 
 
 class _ResponsesDouble:
-    """OpenAI Responses transport double for the Muse and Luna legs."""
+    """OpenAI Responses transport double for the Muse, secondary and Luna legs."""
 
     def __init__(self, answer: str | Exception) -> None:
         self.answer = answer
@@ -144,7 +152,7 @@ class _ResponsesDouble:
 
 
 class _MessagesDouble:
-    """OpenCode Anthropic-dialect HTTP double for the Qwen leg.
+    """OpenCode Anthropic-dialect HTTP double for the (unwired) messages transport.
 
     Substituted at the *HTTP* seam, not above the adapter, so every translation
     the adapter performs is exercised on the way in and on the way out.
@@ -198,7 +206,30 @@ def _muse(answer, log=None) -> OpenCodeResponsesProvider:
     return provider
 
 
-def _qwen(answer, log=None, *, as_text: bool = False) -> OpenCodeMessagesProvider:
+def _secondary(answer, log=None) -> OpenCodeResponsesProvider:
+    """The secondary leg exactly as the gate builds it: /responses, effort high."""
+
+    double = _ResponsesDouble(answer)
+    provider = OpenCodeResponsesProvider(
+        base_url=BASE_URL,
+        api_key="oc-test-key",
+        model=DEEPSEEK,
+        reasoning_effort="high",
+        timeout_sec=60.0,
+        max_output_tokens=2048,
+        circuit_failure_threshold=3,
+        circuit_cooldown_sec=1.0,
+        log=log or (lambda _m: None),
+        client_factory=lambda **_k: double.as_client(),
+        provider_id=OPENCODE_SECONDARY_PROVIDER_ID,
+    )
+    provider.transport_double = double
+    return provider
+
+
+def _messages_leg(answer, log=None, *, as_text: bool = False) -> OpenCodeMessagesProvider:
+    """The Anthropic-dialect transport, tested on its own; the router no longer builds it."""
+
     double = _MessagesDouble(answer, as_text=as_text)
     provider = OpenCodeMessagesProvider(
         base_url=BASE_URL,
@@ -251,21 +282,22 @@ def _luna(answer, log=None, *, service_tier: str = "flex") -> RemoteAPIProvider:
 def _routed(
     *,
     muse_answer=VALID_ANSWER,
-    qwen_answer=VALID_ANSWER,
+    secondary_answer=VALID_ANSWER,
     luna_answer=VALID_ANSWER,
     policy: OpenCodeRoutingPolicy | None = None,
     log=None,
-    qwen_as_text: bool = False,
+    secondary_fallback_enable: bool = True,
 ) -> OpenCodeRoutedProvider:
     lines: list[str] = []
     sink = log if log is not None else lines.append
     routed = OpenCodeRoutedProvider(
         muse=_muse(muse_answer, sink),
-        qwen=_qwen(qwen_answer, sink, as_text=qwen_as_text),
+        secondary=_secondary(secondary_answer, sink),
         fallback=_luna(luna_answer, sink),
         policy=policy or OpenCodeRoutingPolicy(),
         log=sink,
         fallback_service_tier="flex",
+        secondary_fallback_enable=secondary_fallback_enable,
     )
     routed.log_lines = lines
     return routed
@@ -308,7 +340,8 @@ class ProviderSelectionTests(unittest.TestCase):
     def test_defaults_pin_the_documented_models_and_endpoint(self) -> None:
         cfg = _config()
         self.assertEqual(cfg.opencode_muse_model, MUSE)
-        self.assertEqual(cfg.opencode_qwen_model, QWEN)
+        self.assertEqual(cfg.opencode_secondary_model, DEEPSEEK)
+        self.assertEqual(cfg.opencode_secondary_reasoning_effort, "high")
         self.assertEqual(cfg.opencode_base_url, BASE_URL)
         self.assertEqual(cfg.model, MUSE)
         self.assertFalse(cfg.opencode_call_directing)
@@ -512,7 +545,7 @@ class RoutedDispatchTests(unittest.TestCase):
         self.assertEqual(result.actual_model, MUSE)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
         self.assertEqual(result.provider_id, "opencode_go_responses")
-        self.assertEqual(len(routed._qwen.transport_double.requests), 0)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
     def test_directing_on_normal_routes_to_muse(self) -> None:
@@ -522,19 +555,23 @@ class RoutedDispatchTests(unittest.TestCase):
         )
         result = _call(routed, workload_mode="backtest")
         self.assertEqual(result.actual_model, MUSE)
-        self.assertEqual(len(routed._qwen.transport_double.requests), 0)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
-    def test_important_routes_to_qwen_through_the_messages_dialect(self) -> None:
+    def test_important_routes_to_deepseek_over_responses_at_high_effort(self) -> None:
+        """Intent changed 2026-09-13: the important route is deepseek-v4.1-flash on
+        ``/responses`` at effort=high (it was qwen3.8-flash on ``/messages``)."""
+
         routed = _routed(policy=OpenCodeRoutingPolicy(call_directing=True))
         result = _call(routed)  # live, rule_score 5.0 -> important
-        self.assertEqual(result.actual_model, QWEN)
+        self.assertEqual(result.actual_model, DEEPSEEK)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
-        self.assertEqual(result.provider_id, "opencode_go_messages")
+        self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
         self.assertEqual(len(routed._muse.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
-        sent = routed._qwen.transport_double.requests[0]
-        self.assertTrue(sent["url"].endswith("/messages"))
+        sent = routed._secondary.transport_double.calls[0]
+        self.assertEqual(sent["model"], DEEPSEEK)
+        self.assertEqual(sent["reasoning"], {"effort": "high"})
 
     def test_critical_route_never_touches_opencode(self) -> None:
         routed = _routed(policy=OpenCodeRoutingPolicy(call_directing=True))
@@ -548,7 +585,7 @@ class RoutedDispatchTests(unittest.TestCase):
         self.assertEqual(result.actual_model, LUNA)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_REMOTE)
         self.assertEqual(len(routed._muse.transport_double.calls), 0)
-        self.assertEqual(len(routed._qwen.transport_double.requests), 0)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
 
     def test_the_luna_leg_is_asked_at_the_configured_service_tier(self) -> None:
         """The gate supplies ``service_tier="auto"`` for every non-OpenAI mode.
@@ -577,7 +614,7 @@ class RoutedDispatchTests(unittest.TestCase):
         self.assertEqual(identity["provider_mode"], PROVIDER_MODE_OPENCODE)
         self.assertEqual(identity["provider_id"], "opencode_go_responses")
         self.assertEqual(identity["configured_model_ids"], [MUSE])
-        self.assertEqual(identity["opencode_legs"]["important"], QWEN)
+        self.assertEqual(identity["opencode_legs"]["important"], DEEPSEEK)
         self.assertEqual(identity["opencode_legs"]["critical"], LUNA)
         self.assertTrue(identity["opencode_routing"]["routing_policy_version"])
         result = _call(routed)
@@ -588,19 +625,28 @@ class RoutedDispatchTests(unittest.TestCase):
 
 
 class FallbackContractTests(unittest.TestCase):
-    """Requirements 6-8: every OpenCode failure class ends at a validated Luna."""
+    """Requirements 6-8: every OpenCode failure class ends at a validated answer.
 
-    def test_malformed_muse_json_falls_back_to_luna(self) -> None:
+    The normal route is Muse -> secondary -> Luna (each leg at most once); the
+    important route is secondary -> Luna; the critical route is Luna only.  The
+    secondary leg is deepseek-v4.1-flash on ``/responses`` since 2026-09-13
+    (qwen3.8-flash on ``/messages`` before that).
+    """
+
+    def test_malformed_muse_json_falls_back_to_the_secondary_first(self) -> None:
+        """A Muse failure is offered to the secondary leg before Luna."""
+
         routed = _routed(muse_answer=MALFORMED_ANSWER)
         result = _call(routed)
-        self.assertEqual(result.actual_model, LUNA)
-        self.assertEqual(result.provider_mode, PROVIDER_MODE_REMOTE)
+        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
+        self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
         self.assertEqual(result.parsed.decision_state, "ABSTAIN")
+        self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
-    def test_malformed_qwen_json_falls_back_to_luna(self) -> None:
+    def test_malformed_secondary_json_falls_back_to_luna(self) -> None:
         routed = _routed(
-            qwen_answer=MALFORMED_ANSWER,
-            qwen_as_text=True,
+            secondary_answer=MALFORMED_ANSWER,
             policy=OpenCodeRoutingPolicy(call_directing=True),
         )
         result = _call(routed)
@@ -608,68 +654,91 @@ class FallbackContractTests(unittest.TestCase):
         self.assertEqual(result.provider_mode, PROVIDER_MODE_REMOTE)
 
     def test_schema_invalid_opencode_answer_falls_back_to_luna(self) -> None:
-        """Valid JSON, invalid decision: it must not reach a consumer."""
+        """Valid JSON, invalid decision: it must not reach a consumer.
 
-        routed = _routed(muse_answer=SCHEMA_INVALID_ANSWER)
+        Both OpenCode legs answer schema-invalid (a Muse failure is first offered
+        to the secondary leg), so this still proves that neither invalid
+        answer is forwarded and that the chain ends on a validated Luna answer.
+        """
+
+        routed = _routed(muse_answer=SCHEMA_INVALID_ANSWER, secondary_answer=SCHEMA_INVALID_ANSWER)
         result = _call(routed)
         self.assertEqual(result.actual_model, LUNA)
         # And the fallback answer is itself validated, not merely returned.
         self.assertIsInstance(result.parsed, _DecisionProbe)
         self.assertEqual(result.parsed.llm_quality_score, 6.5)
 
-    def test_schema_invalid_qwen_answer_falls_back_to_luna(self) -> None:
+    def test_schema_invalid_secondary_answer_falls_back_to_luna(self) -> None:
         routed = _routed(
-            qwen_answer=SCHEMA_INVALID_ANSWER,
+            secondary_answer=SCHEMA_INVALID_ANSWER,
             policy=OpenCodeRoutingPolicy(call_directing=True),
         )
         result = _call(routed)
         self.assertEqual(result.actual_model, LUNA)
         self.assertIsInstance(result.parsed, _DecisionProbe)
 
-    def test_opencode_timeout_falls_back_to_luna(self) -> None:
+    def test_opencode_timeout_falls_back_to_the_secondary(self) -> None:
+        """A Muse timeout is offered to the secondary leg first."""
+
         routed = _routed(muse_answer=TimeoutError("request timed out"))
         result = _call(routed)
-        self.assertEqual(result.actual_model, LUNA)
+        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
-    def test_opencode_api_error_falls_back_to_luna(self) -> None:
+    def test_opencode_timeout_on_both_legs_falls_back_to_luna(self) -> None:
+        routed = _routed(
+            muse_answer=TimeoutError("request timed out"),
+            secondary_answer=TimeoutError("request timed out"),
+        )
+        self.assertEqual(_call(routed).actual_model, LUNA)
+
+    def test_opencode_api_error_falls_back_to_the_secondary(self) -> None:
+        """The live Muse HTTP 500 case ends on the secondary leg."""
+
         failure = OpenCodeTransportError(
             "opencode_messages_http_500:upstream failure", status_code=500
         )
         routed = _routed(muse_answer=failure)
-        self.assertEqual(_call(routed).actual_model, LUNA)
+        self.assertEqual(_call(routed).actual_model, DEEPSEEK)
 
-    def test_qwen_transport_failure_falls_back_to_luna(self) -> None:
+    def test_secondary_transport_failure_falls_back_to_luna(self) -> None:
         routed = _routed(
-            qwen_answer=OpenCodeTransportError(
-                "opencode_messages_http_502:bad gateway", status_code=502
+            secondary_answer=OpenCodeTransportError(
+                "Error code: 502 - bad gateway", status_code=502
             ),
             policy=OpenCodeRoutingPolicy(call_directing=True),
         )
         self.assertEqual(_call(routed).actual_model, LUNA)
+        # The important route: a failing secondary primary never falls back to Muse.
+        self.assertEqual(len(routed._muse.transport_double.calls), 0)
 
     def test_an_unusable_empty_response_falls_back_to_luna(self) -> None:
         routed = _routed(
-            qwen_answer="",
-            qwen_as_text=True,
+            secondary_answer="",
             policy=OpenCodeRoutingPolicy(call_directing=True),
         )
         self.assertEqual(_call(routed).actual_model, LUNA)
 
     def test_a_bad_opencode_answer_is_not_re_asked_of_the_same_model(self) -> None:
-        """One OpenCode attempt, then Luna -- never a second billed Muse call."""
+        """One call per leg -- never a second billed Muse (or secondary) call.
 
-        routed = _routed(muse_answer=SCHEMA_INVALID_ANSWER)
+        The chain is Muse -> secondary -> Luna; both OpenCode legs answer badly
+        here so every leg is reached, and each exactly once.
+        """
+
+        routed = _routed(muse_answer=SCHEMA_INVALID_ANSWER, secondary_answer=SCHEMA_INVALID_ANSWER)
         _call(routed)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
         self.assertEqual(len(routed._fallback.transport_double.calls), 1)
 
-    def test_a_bad_qwen_answer_is_not_re_asked_of_the_same_model(self) -> None:
+    def test_a_bad_secondary_answer_is_not_re_asked_of_the_same_model(self) -> None:
         routed = _routed(
-            qwen_answer=SCHEMA_INVALID_ANSWER,
+            secondary_answer=SCHEMA_INVALID_ANSWER,
             policy=OpenCodeRoutingPolicy(call_directing=True),
         )
         _call(routed)
-        self.assertEqual(len(routed._qwen.transport_double.requests), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
 
     def test_an_unmapped_importance_takes_the_strongest_route_not_the_cheapest(self) -> None:
         """Fail-safe direction if a fourth level is ever added to the policy."""
@@ -687,7 +756,7 @@ class FallbackContractTests(unittest.TestCase):
         with self.assertRaises(ProviderCallError):
             _call(routed)
         self.assertEqual(len(routed._muse.transport_double.calls), 0)
-        self.assertEqual(len(routed._qwen.transport_double.requests), 0)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
 
     def test_the_fallback_is_skipped_when_the_deadline_cannot_cover_it(self) -> None:
         """The absolute deadline is never extended to make room for a fallback."""
@@ -718,6 +787,7 @@ class FallbackContractTests(unittest.TestCase):
         routed = _routed(muse_answer=MALFORMED_ANSWER)
         with self.assertRaises(ProviderCallError):
             _call(routed, deadline=_Deadline())
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
     def test_routing_and_fallback_telemetry_is_explicit(self) -> None:
@@ -734,6 +804,9 @@ class FallbackContractTests(unittest.TestCase):
         self.assertIn("[opencode_fallback_completed]", text)
         self.assertIn("validation=passed", text)
         self.assertIn("latency_sec=", text)
+        self.assertIn("stage=1", text)
+        self.assertIn(f"to_model={DEEPSEEK}", text)
+        self.assertIn(f"fallback_chain={MUSE}>{DEEPSEEK}>{LUNA}", text)
         # Never a credential, on any line.
         self.assertNotIn("oc-test-key", text)
         self.assertNotIn("sk-test-openai", text)
@@ -745,6 +818,218 @@ class FallbackContractTests(unittest.TestCase):
         self.assertIn("[opencode_call_completed]", text)
         self.assertIn("fallback_used=false", text)
         self.assertNotIn("[opencode_fallback]", text)
+
+
+class _SwitchableDeadline:
+    """Absolute-deadline double whose budget can run out mid-chain."""
+
+    policy = SimpleNamespace(min_attempt_ms=0, python_deadline_ms=600000)
+
+    def __init__(self, exhausted_when=lambda: False) -> None:
+        self.exhausted_when = exhausted_when
+
+    def can_start_attempt(self) -> bool:
+        return not self.exhausted_when()
+
+    def remaining_ms(self) -> int:
+        return 0 if self.exhausted_when() else 600000
+
+    def expired(self) -> bool:
+        return bool(self.exhausted_when())
+
+    @staticmethod
+    def as_log_fields() -> str:
+        return ""
+
+    @staticmethod
+    def provider_timeout_sec(configured: float) -> float:
+        return configured
+
+
+class SecondaryFallbackChainTests(unittest.TestCase):
+    """Normal route: Muse -> secondary -> Luna, each leg at most once.
+
+    Before the intermediate stage existed the live gate sent every Muse failure
+    -- 19 HTTP 500s, 404 HTTP 429s, connection errors -- straight to the paid
+    Luna leg, and the 200-character failure detail cut every 500 body off
+    mid-message.  The secondary leg is deepseek-v4.1-flash since 2026-09-13.
+    """
+
+    @staticmethod
+    def _muse_500(message: str = "upstream generation failed") -> OpenCodeTransportError:
+        return OpenCodeTransportError(
+            "Error code: 500 - {'type': 'error', 'error': {'type': 'error', 'message': '"
+            + message
+            + "'}}",
+            status_code=500,
+        )
+
+    @staticmethod
+    def _secondary_502() -> OpenCodeTransportError:
+        return OpenCodeTransportError("Error code: 502 - bad gateway", status_code=502)
+
+    @staticmethod
+    def _lines(routed, prefix: str) -> list[str]:
+        return [line for line in routed.log_lines if line.startswith(prefix)]
+
+    def test_muse_http_500_is_answered_by_the_secondary(self) -> None:
+        routed = _routed(muse_answer=self._muse_500())
+        result = _call(routed)
+        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
+        self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._fallback.transport_double.calls), 0)
+        hop = self._lines(routed, "[opencode_fallback] ")
+        self.assertEqual(len(hop), 1)
+        self.assertIn("stage=1", hop[0])
+        self.assertIn(f"from_model={MUSE}", hop[0])
+        self.assertIn(f"to_model={DEEPSEEK}", hop[0])
+        self.assertIn("http_status=500", hop[0])
+        self.assertIn(f"fallback_chain={MUSE}>{DEEPSEEK}>{LUNA}", hop[0])
+        completed = self._lines(routed, "[opencode_fallback_completed]")
+        self.assertEqual(len(completed), 1)
+        self.assertIn("stage=1", completed[0])
+        self.assertIn(f"model={DEEPSEEK}", completed[0])
+
+    def test_muse_and_secondary_failing_ends_on_luna_with_each_leg_asked_once(self) -> None:
+        routed = _routed(muse_answer=self._muse_500(), secondary_answer=self._secondary_502())
+        result = _call(routed)
+        self.assertEqual(result.actual_model, LUNA)
+        self.assertEqual(result.provider_mode, PROVIDER_MODE_REMOTE)
+        self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._fallback.transport_double.calls), 1)
+        hops = self._lines(routed, "[opencode_fallback] ")
+        self.assertEqual(len(hops), 2)
+        self.assertIn("stage=1", hops[0])
+        self.assertIn(f"to_model={DEEPSEEK}", hops[0])
+        self.assertIn("stage=2", hops[1])
+        self.assertIn(f"from_model={DEEPSEEK}", hops[1])
+        self.assertIn(f"to_model={LUNA}", hops[1])
+        self.assertIn("http_status=502", hops[1])
+        completed = self._lines(routed, "[opencode_fallback_completed]")
+        self.assertEqual(len(completed), 1)
+        self.assertIn("stage=2", completed[0])
+        self.assertIn(f"model={LUNA}", completed[0])
+
+    def test_every_leg_failing_raises_after_exactly_one_call_per_leg(self) -> None:
+        routed = _routed(
+            muse_answer=self._muse_500(),
+            secondary_answer=SCHEMA_INVALID_ANSWER,
+            luna_answer=RuntimeError("luna down"),
+        )
+        with self.assertRaises(ProviderCallError):
+            _call(routed)
+        self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._fallback.transport_double.calls), 1)
+
+    def test_disabling_the_secondary_stage_restores_muse_then_luna(self) -> None:
+        routed = _routed(muse_answer=self._muse_500(), secondary_fallback_enable=False)
+        result = _call(routed)
+        self.assertEqual(result.actual_model, LUNA)
+        self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
+        self.assertEqual(len(routed._fallback.transport_double.calls), 1)
+        hops = self._lines(routed, "[opencode_fallback] ")
+        self.assertEqual(len(hops), 1)
+        self.assertIn(f"fallback_chain={MUSE}>{LUNA}", hops[0])
+
+    def test_a_failing_secondary_primary_never_falls_back_to_muse(self) -> None:
+        routed = _routed(
+            secondary_answer=self._secondary_502(),
+            policy=OpenCodeRoutingPolicy(call_directing=True),
+        )
+        result = _call(routed)  # live, rule_score 5.0 -> important -> secondary primary
+        self.assertEqual(result.actual_model, LUNA)
+        self.assertEqual(len(routed._muse.transport_double.calls), 0)
+        self.assertIn(
+            f"fallback_chain={DEEPSEEK}>{LUNA}",
+            self._lines(routed, "[opencode_fallback] ")[0],
+        )
+
+    def test_the_deadline_can_stop_the_chain_before_luna(self) -> None:
+        """Stage 2 is gated by the same absolute deadline as stage 1."""
+
+        routed = _routed(muse_answer=self._muse_500(), secondary_answer=self._secondary_502())
+        deadline = _SwitchableDeadline(
+            exhausted_when=lambda: len(routed._secondary.transport_double.calls) > 0
+        )
+        with self.assertRaises(Exception):
+            _call(routed, deadline=deadline)
+        self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._fallback.transport_double.calls), 0)
+        skipped = [
+            line
+            for line in self._lines(routed, "[opencode_fallback] ")
+            if "action=skipped" in line
+        ]
+        self.assertEqual(len(skipped), 1)
+        self.assertIn("stage=2", skipped[0])
+        self.assertIn("reason=insufficient_remaining_budget", skipped[0])
+
+    def test_the_full_upstream_error_reaches_the_log_on_one_line(self) -> None:
+        tail = "END_OF_UPSTREAM_BODY"
+        routed = _routed(muse_answer=self._muse_500("x" * 900 + " line\nbreak\r\n " + tail))
+        _call(routed)
+        hop = self._lines(routed, "[opencode_fallback] ")[0]
+        # The pre-change 200-character cut lost everything after "'mess".
+        self.assertIn(tail, hop)
+        self.assertIn("line break", hop)
+        self.assertNotIn("\n", hop)
+        self.assertNotIn("\r", hop)
+
+    def test_an_oversized_error_is_bounded(self) -> None:
+        routed = _routed(muse_answer=self._muse_500("y" * 6000))
+        _call(routed)
+        hop = self._lines(routed, "[opencode_fallback] ")[0]
+        reason = hop.split(" fallback_reason=", 1)[1]
+        self.assertTrue(reason.endswith("...[truncated]"))
+        self.assertLessEqual(
+            len(reason),
+            OpenCodeRoutedProvider._FAILURE_DETAIL_MAX_CHARS + len("...[truncated]"),
+        )
+
+    def test_a_credential_echoed_by_the_upstream_never_reaches_a_fallback_line(self) -> None:
+        routed = _routed(
+            muse_answer=self._muse_500("bad key sk-live-ABCDEF123456 Bearer abc.def.ghi")
+        )
+        _call(routed)
+        hop = self._lines(routed, "[opencode_fallback] ")[0]
+        self.assertNotIn("sk-live-ABCDEF123456", hop)
+        self.assertNotIn("abc.def.ghi", hop)
+        self.assertIn("[redacted]", hop)
+        text = "\n".join(routed.log_lines)
+        self.assertNotIn("oc-test-key", text)
+        self.assertNotIn("sk-test-openai", text)
+
+    def test_config_flag_defaults_on_and_an_invalid_value_keeps_the_default(self) -> None:
+        self.assertTrue(_config().opencode_secondary_fallback_enable)
+        self.assertFalse(
+            _config(
+                OPENCODE_SECONDARY_FALLBACK_ENABLE="false"
+            ).opencode_secondary_fallback_enable
+        )
+        bad = _config(OPENCODE_SECONDARY_FALLBACK_ENABLE="maybe")
+        self.assertTrue(bad.opencode_secondary_fallback_enable)
+        self.assertIn(
+            "OPENCODE_SECONDARY_FALLBACK_ENABLE=invalid_bool", bad.validation_warnings
+        )
+        self.assertTrue(_config().safe_log_dict()["opencode_secondary_fallback_enable"])
+
+    def test_the_built_provider_carries_the_configured_flag(self) -> None:
+        secrets = {"OPENCODE_GO_API_KEY": "oc-test-key", "OPENAI_API_KEY": "sk-test-openai"}
+        with mock.patch.dict(os.environ, secrets):
+            for raw, expected in (("", True), ("true", True), ("false", False)):
+                with self.subTest(raw=raw):
+                    provider = ai_gate._build_ai_provider(
+                        _config(OPENCODE_SECONDARY_FALLBACK_ENABLE=raw)
+                    )
+                    self.assertIsInstance(provider, OpenCodeRoutedProvider)
+                    self.assertEqual(provider._secondary_fallback_enabled, expected)
 
 
 class MessagesDialectAdapterTests(unittest.TestCase):
@@ -997,8 +1282,40 @@ class OpenCodeWireContractTests(unittest.TestCase):
             request_metadata={"request_id": "591813800_1786509126_GBPNZD_13183"},
         )
         headers = muse.transport_double.calls[0]["extra_headers"]
+        session = headers["x-opencode-session"]
+        # Since 2026-09-13 the session names the static prefix (model + schema),
+        # per OpenCode's "stable session ID ... for prompt caching" guidance.
+        self.assertTrue(session.startswith("po3-prefix-"), session)
+        self.assertNotIn("GBPNZD", session)
+        self.assertNotIn("591813800", session)
+
+    def test_request_session_scope_restores_the_per_request_derivation(self) -> None:
+        """``OPENCODE_SESSION_SCOPE=request`` is the operator rollback."""
+
+        double = _ResponsesDouble(VALID_ANSWER)
+        muse = OpenCodeResponsesProvider(
+            base_url=BASE_URL,
+            api_key="oc-test-key",
+            model=MUSE,
+            reasoning_effort="high",
+            timeout_sec=60.0,
+            max_output_tokens=2048,
+            circuit_failure_threshold=3,
+            circuit_cooldown_sec=1.0,
+            log=lambda _m: None,
+            client_factory=lambda **_k: double.as_client(),
+            session_scope="request",
+        )
+        muse.generate_structured(
+            role="analyst",
+            system_prompt="Return JSON.",
+            evidence={"x": 1},
+            response_schema=_DecisionProbe,
+            request_metadata={"request_id": "591813800_1786509126_GBPNZD_13183"},
+        )
         self.assertEqual(
-            headers["x-opencode-session"], "po3-591813800_1786509126_GBPNZD_13183"
+            double.calls[0]["extra_headers"]["x-opencode-session"],
+            "po3-591813800_1786509126_GBPNZD_13183",
         )
 
     def test_muse_asks_for_the_configured_reasoning_level(self) -> None:
@@ -1027,7 +1344,8 @@ class OpenCodeWireContractTests(unittest.TestCase):
 
     def test_opencode_legs_never_repair_a_bad_answer_in_place(self) -> None:
         self.assertEqual(OpenCodeResponsesProvider.schema_repair_attempts, 0)
-        self.assertEqual(_qwen(VALID_ANSWER).max_retries, 0)
+        self.assertEqual(_secondary(VALID_ANSWER).schema_repair_attempts, 0)
+        self.assertEqual(_messages_leg(VALID_ANSWER).max_retries, 0)
 
     def test_opencode_legs_never_resubmit_an_ambiguous_failure(self) -> None:
         """A paid endpoint: a resubmission after a timeout can be a second
@@ -1036,18 +1354,18 @@ class OpenCodeWireContractTests(unittest.TestCase):
         self.assertFalse(OpenCodeResponsesProvider.resubmit_ambiguous_transport_failures)
         self.assertFalse(OpenCodeMessagesProvider.resubmit_ambiguous_transport_failures)
 
-    def test_qwen_health_is_configuration_not_a_model_listing(self) -> None:
+    def test_messages_transport_health_is_configuration_not_a_model_listing(self) -> None:
         """The inherited ``/models`` GET would report a healthy transport as
         unhealthy and keep the circuit breaker permanently open, because breaker
         recovery re-runs exactly this check."""
 
-        health = _qwen(VALID_ANSWER).healthcheck()
+        health = _messages_leg(VALID_ANSWER).healthcheck()
         self.assertTrue(health.healthy)
         self.assertEqual(health.provider_mode, PROVIDER_MODE_OPENCODE)
         self.assertEqual(health.model_id, QWEN)
 
     def test_thinking_is_only_sent_when_it_is_configured(self) -> None:
-        off = _qwen(VALID_ANSWER)
+        off = _messages_leg(VALID_ANSWER)
         self.assertEqual(off._wire_extra_body(), {})
         self.assertEqual(off._wire_max_tokens(1000), 1000)
         on = OpenCodeMessagesProvider(
@@ -1085,7 +1403,8 @@ class OpenCodeWireContractTests(unittest.TestCase):
         self.assertIsInstance(provider, OpenCodeRoutedProvider)
         self.assertEqual(provider.provider_mode, PROVIDER_MODE_OPENCODE)
         self.assertIsInstance(provider._muse, OpenCodeResponsesProvider)
-        self.assertIsInstance(provider._qwen, OpenCodeMessagesProvider)
+        self.assertIsInstance(provider._secondary, OpenCodeResponsesProvider)
+        self.assertNotIsInstance(provider._secondary, OpenCodeMessagesProvider)
         # The fallback is the system's existing OpenAI integration, configured --
         # not a second implementation of it.
         self.assertIsInstance(provider._fallback, RemoteAPIProvider)
@@ -1252,6 +1571,172 @@ class UnchangedBehaviourTests(unittest.TestCase):
             local._wire_extra_body(), {"chat_template_kwargs": {"enable_thinking": True}}
         )
         self.assertTrue(local.resubmit_ambiguous_transport_failures)
+
+
+class SecondaryLegContractTests(unittest.TestCase):
+    """2026-09-13: the secondary OpenCode leg is deepseek-v4.1-flash at
+    ``reasoning.effort=high`` on ``/responses``, replacing qwen3.8-flash on the
+    Anthropic-dialect ``/messages``.  Muse stays the primary and keeps its id."""
+
+    _SECRETS = {"OPENCODE_GO_API_KEY": "oc-test-key", "OPENAI_API_KEY": "sk-test-openai"}
+
+    def test_secondary_defaults(self) -> None:
+        cfg = _config()
+        self.assertTrue(cfg.provider_config_valid)
+        self.assertEqual(cfg.model, MUSE)
+        self.assertEqual(cfg.opencode_secondary_model, DEEPSEEK)
+        self.assertEqual(cfg.opencode_secondary_reasoning_effort, "high")
+        self.assertEqual(cfg.opencode_secondary_reasoning_token_reserve, 24000)
+        self.assertTrue(cfg.opencode_secondary_fallback_enable)
+        self.assertEqual(cfg.validation_warnings, ())
+
+    def test_secondary_effort_is_configurable_and_an_invalid_value_keeps_high(self) -> None:
+        self.assertEqual(
+            _config(OPENCODE_SECONDARY_REASONING_EFFORT="medium").opencode_secondary_reasoning_effort,
+            "medium",
+        )
+        bad = _config(OPENCODE_SECONDARY_REASONING_EFFORT="extreme")
+        self.assertEqual(bad.opencode_secondary_reasoning_effort, "high")
+        self.assertIn("OPENCODE_SECONDARY_REASONING_EFFORT=invalid", bad.validation_warnings)
+
+    def test_retired_qwen_settings_are_reported_and_never_read(self) -> None:
+        """Mapping the Qwen model onto the ``/responses`` leg would send a model
+        that endpoint refuses ("not supported for format openai")."""
+
+        cfg = _config(
+            OPENCODE_QWEN_MODEL=QWEN,
+            OPENCODE_QWEN_FALLBACK_ENABLE="false",
+            OPENCODE_ANTHROPIC_VERSION="2023-06-01",
+            OPENCODE_ENABLE_THINKING="true",
+            OPENCODE_THINKING_BUDGET_TOKENS="4000",
+            OPENCODE_CONTEXT_BUDGET_TOKENS="131072",
+        )
+        self.assertTrue(cfg.provider_config_valid)
+        self.assertEqual(cfg.opencode_secondary_model, DEEPSEEK)
+        self.assertTrue(cfg.opencode_secondary_fallback_enable)
+        for expected in (
+            "OPENCODE_QWEN_MODEL=ignored_superseded_by_OPENCODE_SECONDARY_MODEL",
+            "OPENCODE_QWEN_FALLBACK_ENABLE=ignored_superseded_by_OPENCODE_SECONDARY_FALLBACK_ENABLE",
+            "OPENCODE_ANTHROPIC_VERSION=ignored_retired_with_qwen_leg",
+            "OPENCODE_ENABLE_THINKING=ignored_retired_with_qwen_leg",
+            "OPENCODE_THINKING_BUDGET_TOKENS=ignored_retired_with_qwen_leg",
+            "OPENCODE_CONTEXT_BUDGET_TOKENS=ignored_retired_with_qwen_leg",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, cfg.validation_warnings)
+        for retired in (
+            "opencode_qwen_model",
+            "opencode_qwen_fallback_enable",
+            "opencode_anthropic_version",
+            "opencode_enable_thinking",
+            "opencode_thinking_budget_tokens",
+            "opencode_context_budget_tokens",
+        ):
+            with self.subTest(retired=retired):
+                self.assertFalse(hasattr(cfg, retired))
+                self.assertNotIn(retired, cfg.safe_log_dict())
+
+    def test_retired_settings_are_not_reported_under_another_selection(self) -> None:
+        cfg = AIGateRuntimeConfig.from_env(
+            {"AI_PROVIDER_SELECT": "openai_remote", "OPENAI_API_KEY": "sk", "OPENCODE_QWEN_MODEL": QWEN}
+        )
+        self.assertFalse(any("OPENCODE_QWEN" in w for w in cfg.validation_warnings))
+
+    def test_banner_reports_the_secondary_leg_only_under_this_selection(self) -> None:
+        rendered = _config().safe_log_dict()
+        self.assertEqual(rendered["opencode_secondary_model"], DEEPSEEK)
+        self.assertEqual(rendered["opencode_secondary_reasoning_effort"], "high")
+        self.assertEqual(rendered["opencode_secondary_reasoning_token_reserve"], 24000)
+        other = AIGateRuntimeConfig.from_env(
+            {"AI_PROVIDER_SELECT": "openai_remote", "OPENAI_API_KEY": "sk"}
+        ).safe_log_dict()
+        self.assertEqual(other["opencode_secondary_model"], "")
+        self.assertEqual(other["opencode_secondary_reasoning_effort"], "")
+        self.assertEqual(other["opencode_secondary_reasoning_token_reserve"], 0)
+        self.assertFalse(other["opencode_secondary_fallback_enable"])
+
+    def test_the_gate_builds_the_secondary_leg_as_configured(self) -> None:
+        with mock.patch.dict(os.environ, self._SECRETS):
+            provider = ai_gate._build_ai_provider(
+                _config(OPENCODE_SECONDARY_REASONING_TOKEN_RESERVE="16000")
+            )
+        secondary = provider._secondary
+        self.assertIsInstance(secondary, OpenCodeResponsesProvider)
+        self.assertEqual(secondary.model_for_role("analyst"), DEEPSEEK)
+        self.assertEqual(secondary.reasoning_effort, "high")
+        self.assertEqual(secondary.reasoning_token_reserve, 16000)
+        self.assertEqual(secondary.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        self.assertEqual(secondary.provider_mode, PROVIDER_MODE_OPENCODE)
+        self.assertEqual(provider._muse.model_for_role("analyst"), MUSE)
+        self.assertEqual(provider._muse.provider_id, OPENCODE_PRIMARY_PROVIDER_ID)
+
+    def test_muse_keeps_its_provider_id_so_cached_muse_rows_still_match(self) -> None:
+        """The primary's id is decision-cache identity; it must not move."""
+
+        self.assertEqual(OPENCODE_PRIMARY_PROVIDER_ID, "opencode_go_responses")
+        self.assertNotEqual(OPENCODE_SECONDARY_PROVIDER_ID, OPENCODE_PRIMARY_PROVIDER_ID)
+        self.assertEqual(_muse(VALID_ANSWER).provider_id, "opencode_go_responses")
+        identity = _routed().identity("analyst")
+        self.assertEqual(identity["provider_id"], "opencode_go_responses")
+        self.assertEqual(identity["configured_model_ids"], [MUSE])
+
+    def test_secondary_wire_request_carries_every_opencode_requirement(self) -> None:
+        secondary = _secondary(VALID_ANSWER)
+        secondary.reasoning_token_reserve = 24000
+        secondary.generate_structured(
+            role="analyst",
+            system_prompt="Return JSON.",
+            evidence={"x": 1},
+            response_schema=_DecisionProbe,
+            request_metadata={"request_id": "req-9", "service_tier": "auto"},
+        )
+        sent = secondary.transport_double.calls[0]
+        self.assertEqual(sent["model"], DEEPSEEK)
+        self.assertEqual(sent["reasoning"], {"effort": "high"})
+        self.assertEqual(sent["truncation"], "disabled")
+        # A stable prefix session (model + schema), never the request id.
+        self.assertTrue(sent["extra_headers"]["x-opencode-session"].startswith("po3-prefix-"))
+        self.assertNotIn("req-9", sent["extra_headers"]["x-opencode-session"])
+        self.assertEqual(sent["text"]["format"]["type"], "json_schema")
+        self.assertTrue(sent["text"]["format"]["strict"])
+        self.assertNotIn("service_tier", sent)
+        self.assertNotIn("prompt_cache_key", sent)
+
+        bare = _secondary(VALID_ANSWER)
+        bare.reasoning_token_reserve = 0
+        bare.generate_structured(
+            role="analyst",
+            system_prompt="Return JSON.",
+            evidence={"x": 1},
+            response_schema=_DecisionProbe,
+            request_metadata={"request_id": "req-9"},
+        )
+        self.assertEqual(
+            sent["max_output_tokens"],
+            bare.transport_double.calls[0]["max_output_tokens"] + 24000,
+        )
+
+    def test_the_usage_ledger_records_each_legs_own_effort(self) -> None:
+        cfg = _config(
+            OPENCODE_MUSE_REASONING_EFFORT="medium",
+            OPENCODE_SECONDARY_REASONING_EFFORT="high",
+        )
+        effort = ai_gate._opencode_leg_reasoning_effort
+        self.assertEqual(effort(OPENCODE_PRIMARY_PROVIDER_ID, cfg), "medium")
+        self.assertEqual(effort(OPENCODE_SECONDARY_PROVIDER_ID, cfg), "high")
+        self.assertEqual(effort("opencode_go_messages", cfg), "none")
+
+    def test_telemetry_names_the_secondary_leg_that_answered(self) -> None:
+        routed = _routed(muse_answer=MALFORMED_ANSWER)
+        result = _call(routed)
+        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        text = "\n".join(routed.log_lines)
+        self.assertIn(f"from={OPENCODE_PRIMARY_PROVIDER_ID}", text)
+        self.assertIn(f"to={OPENCODE_SECONDARY_PROVIDER_ID}", text)
+        self.assertIn(f"provider={OPENCODE_SECONDARY_PROVIDER_ID}", text)
+        self.assertIn("secondary_fallback=true", text)
+        self.assertNotIn("qwen", text.lower())
 
 
 class PythonMqlAgreementTests(unittest.TestCase):

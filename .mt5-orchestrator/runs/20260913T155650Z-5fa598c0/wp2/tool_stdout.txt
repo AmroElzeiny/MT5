@@ -1,0 +1,105 @@
+[command] python\tools\opencode_token_attribution.py --wp-dir .mt5-orchestrator\runs\20260913T155650Z-5fa598c0\wp2 --stage all --sample-size 36 --force
+[select] 36 requests (>=30: True) strata={'cand_3plus/FX-cross': 5, 'cand_3plus/FX-major': 5, 'cand_3plus/index': 5, 'cand_3plus/crypto': 3, 'cand_1/FX-cross': 1, 'cand_3plus/metal': 3, 'cand_2/FX-cross': 3, 'cand_2/index': 2, 'cand_1/FX-major': 2, 'cand_1/index': 2, 'cand_2/FX-major': 2, 'cand_2/energy': 1, 'cand_2/metal': 1, 'cand_3plus/energy': 1}
+[capture 1/36] 591813800_1788925102_208218984_1788951947_AUDJPY_32618 rc=0 5.4s 
+[capture 2/36] 591813800_1788925102_208218984_1788951325_USDCHF_19925 rc=0 5.0s 
+[capture 3/36] 903871_1789148402_173202328_1789151032_EURAUD_5869 rc=0 4.9s 
+[capture 4/36] 903871_1788999394_24185000_1789004983_NAS100_9597 rc=0 4.9s 
+[capture 5/36] 591813800_1785715200_305658125_1785759967_BITCOIN_9173 rc=0 6.4s 
+[capture 6/36] 591813800_1785715200_305658125_1785762972_AUDUSD_11360 rc=0 6.5s 
+[capture 7/36] 903871_1788983285_8075437_1788995216_GBPCAD_29371 rc=0 4.1s 
+[capture 8/36] 591813800_1785715200_305658125_1785725109_GOLD_25455 rc=0 6.5s 
+[capture 9/36] 903871_1789093630_118426656_1789096071_XAUUSD_13096 rc=0 5.1s 
+[capture 10/36] 903871_1788983285_8075437_1788988231_NZDJPY_13045 rc=0 4.2s 
+[capture 11/36] 903871_1789148402_173202328_1789155320_UK100_2328 rc=0 4.6s 
+[capture 12/36] 591813800_1785715200_305658125_1785768982_USDCHF_2988 rc=0 6.2s 
+[capture 13/36] 903871_1789062748_87542921_1789068109_US30_16044 rc=0 4.6s 
+[capture 14/36] 591813800_1785715200_305658125_1785740735_BITCOIN_469 rc=0 6.4s 
+[capture 15/36] 903871_1789062748_87542921_1789071381_USDCHF_5236 rc=0 5.1s 
+[capture 16/36] 903871_1788983285_8075437_1788988231_EURAUD_21885 rc=0 4.5s 
+[capture 17/36] 591813800_1785715200_305658125_1785744942_#Germany40_32424 rc=0 4.6s 
+[capture 18/36] 903871_1788999394_24185000_1789002917_NAS100_10901 rc=0 4.0s 
+[capture 19/36] 903871_1788999394_24185000_1789033279_NZDJPY_20411 rc=0 4.0s 
+[capture 20/36] 591813800_1785715200_305658125_1785753356_GBPUSD_22093 rc=0 3.6s 
+[capture 21/36] 903871_1789093630_118426656_1789094249_US30_14363 rc=0 3.6s 
+[capture 22/36] 903871_1789093630_118426656_1789098513_AUDJPY_32323 rc=0 4.2s 
+[capture 23/36] 903871_1789148402_173202328_1789154707_GBPUSD_19340 rc=0 3.9s 
+[capture 24/36] 903871_1789148402_173202328_1789149197_WTI_22682 rc=0 4.4s 
+[capture 25/36] 903871_1789062748_87542921_1789066099_US30_18866 rc=0 4.4s 
+[capture 26/36] 903871_1789093630_118426656_1789102197_XAUUSD_1646 rc=0 4.4s 
+[capture 27/36] 903871_1789093630_118426656_1789102811_CHFJPY_32047 rc=0 5.1s 
+[capture 28/36] 903871_1789093630_118426656_1789097294_USDJPY_5699 rc=0 5.3s 
+[capture 29/36] 591813800_1785715200_305658125_1785740134_BITCOIN_1317 rc=0 6.3s 
+[capture 30/36] 903871_1789093630_118426656_1789094249_WTI_24227 rc=0 4.4s 
+[capture 31/36] 903871_1788999394_24185000_1789028921_JPN225_10535 rc=0 5.4s 
+[capture 32/36] 903871_1788999394_24185000_1789036511_XAUUSD_7721 rc=0 4.8s 
+[capture 33/36] 591813800_1785715200_305658125_1785749750_AUDUSD_9445 rc=0 4.2s 
+[capture 34/36] 903871_1789062748_87542921_1789067423_US30_19703 rc=0 3.9s 
+[capture 35/36] 903871_1789148402_173202328_1789152868_EURNZD_21011 rc=0 5.0s 
+[capture 36/36] 903871_1789062748_87542921_1789064597_USDCHF_11315 rc=0 4.8s 
+
+================ WP2 SUMMARY ================
+sample: 36 archived requests (>=30: True), role rows: 108 {'analyst': 36, 'critic': 36, 'adjudicator': 36}, live-cohort sealed: 12
+strata: {'cand_3plus/FX-cross': 5, 'cand_3plus/FX-major': 5, 'cand_3plus/index': 5, 'cand_3plus/crypto': 3, 'cand_1/FX-cross': 1, 'cand_3plus/metal': 3, 'cand_2/FX-cross': 3, 'cand_2/index': 2, 'cand_1/FX-major': 2, 'cand_1/index': 2, 'cand_2/FX-major': 2, 'cand_2/energy': 1, 'cand_2/metal': 1, 'cand_3plus/energy': 1}
+proxy: documented deterministic proxy (tiktoken: NOT importable: ModuleNotFoundError: No module named 'tiktoken')
+per-request Muse factor: min=0.54223 median=0.57512 max=0.63992 n=75
+static-prefix factor from anchor only: min=0.70747 median=0.70747 max=1.03774 n=21
+uncalibrated proxy error pct: {'n': 79, 'avg': 73.998, 'p50': 74.124, 'p95': 82.8, 'min': 56.27, 'max': 88.451}
+calibrated (leave-one-out) error pct: {'definition': "the per-request factor is exact on its own request by construction, so the reported calibrated error is leave-one-out: the factor learned from every OTHER request predicts this request's provider input_tokens", 'single_global_factor_all_rows': {'n': 79, 'avg': 2.942, 'p50': 2.009, 'p95': 9.595, 'min': 0.077, 'max': 10.379}, 'single_global_factor_muse_rows': {'n': 75, 'avg': 2.756, 'p50': 1.932, 'p95': 9.367, 'min': 0.047, 'max': 10.134}, 'two_regime_muse_rows': {'n': 75, 'avg': 4.622, 'p50': 5.134, 'p95': 13.511, 'min': 0.029, 'max': 14.364}}
+escalation >15%: uncalibrated=True calibrated=False two_regime=False
+static prefix anchors checked: 21 (6,513 analyst rows=17, 1,265 critic rows=4); global-factor error on the anchor: {'n': 21, 'avg': 25.552, 'p50': 21.46, 'p95': 43.826, 'min': 18.616, 'max': 45.152}
+  hypothesis: cached prefix = static head of instructions only -> roles=['analyst', 'critic'] unit_spread=2.403 char_spread=2.372
+  hypothesis: cached prefix = instructions only (full text, per-request tail included) -> roles=['analyst', 'critic'] unit_spread=1.231 char_spread=1.42
+  hypothesis: cached prefix = instructions + strict response schema -> roles=['analyst', 'critic'] unit_spread=1.467 char_spread=1.559
+top-10 input subtrees by median tokens [analyst]:
+   envelope.evidence_catalog                                  p50= 13379.89 p95=34517.904 pct_input= 35.06 static=False dup=None
+   evidence_catalog.items                                     p50=13302.653 p95=34439.974 pct_input= 34.86 static=True dup=None
+   envelope.entry_and_invalidation                            p50=10703.888 p95=29298.192 pct_input= 28.05 static=False dup=yes_class_a_c
+   key_names:whole_input                                      p50= 9767.487 p95=25230.204 pct_input= 25.59 static=False dup=None
+   leaf_class:labels_descriptions_prose                       p50= 7986.617 p95=20533.766 pct_input= 20.93 static=False dup=None
+   evidence_catalog.items.p                                   p50=   6844.5 p95=17911.282 pct_input= 17.93 static=True dup=None
+   evidence_catalog.items.keys_punctuation                    p50= 4582.242 p95=11602.513 pct_input= 12.01 static=True dup=None
+   leaf_class:labels_short                                    p50= 4002.038 p95= 9993.455 pct_input= 10.49 static=False dup=None
+   evidence_catalog.items.key_names_only                      p50= 3956.155 p95=10003.792 pct_input= 10.37 static=True dup=None
+   instructions                                               p50= 3798.425 p95= 3798.425 pct_input=  9.95 static=True dup=None
+top-10 input subtrees by median tokens [critic]:
+   envelope.evidence_catalog                                  p50= 5421.334 p95=  5464.04 pct_input= 33.53 static=False dup=None
+   evidence_catalog.items                                     p50=  5378.33 p95= 5420.688 pct_input= 33.27 static=True dup=None
+   key_names:whole_input                                      p50= 4750.053 p95= 7209.801 pct_input= 29.38 static=False dup=None
+   envelope.candidate                                         p50= 3748.388 p95= 5443.118 pct_input= 23.18 static=False dup=None
+   envelope.historical_analogues                              p50= 2857.387 p95= 8284.624 pct_input= 17.67 static=False dup=None
+   evidence_catalog.items.p                                   p50= 2656.139 p95= 2680.733 pct_input= 16.43 static=True dup=None
+   leaf_class:labels_descriptions_prose                       p50= 2594.303 p95= 2736.666 pct_input= 16.05 static=False dup=None
+   leaf_class:labels_short                                    p50= 1974.785 p95= 2687.619 pct_input= 12.21 static=False dup=None
+   evidence_catalog.items.keys_punctuation                    p50= 1939.403 p95= 1950.084 pct_input=  12.0 static=True dup=None
+   evidence_catalog.items.key_names_only                      p50= 1677.443 p95= 1686.437 pct_input= 10.38 static=True dup=None
+top-10 input subtrees by median tokens [adjudicator]:
+   envelope.evidence_catalog                                  p50= 6105.423 p95= 6113.805 pct_input= 46.17 static=False dup=None
+   evidence_catalog.items                                     p50= 6056.529 p95= 6065.673 pct_input=  45.8 static=True dup=None
+   envelope.candidate                                         p50=  4212.52 p95=  5553.49 pct_input= 31.86 static=False dup=None
+   key_names:whole_input                                      p50= 3639.759 p95= 4218.489 pct_input= 27.53 static=False dup=None
+   evidence_catalog.items.p                                   p50= 3000.325 p95= 3000.325 pct_input= 22.69 static=True dup=None
+   leaf_class:labels_descriptions_prose                       p50= 2920.316 p95= 3026.868 pct_input= 22.09 static=False dup=None
+   evidence_catalog.items.keys_punctuation                    p50= 2190.713 p95= 2191.158 pct_input= 16.57 static=True dup=None
+   evidence_catalog.items.key_names_only                      p50= 1894.808 p95= 1894.808 pct_input= 14.33 static=True dup=None
+   leaf_class:labels_short                                    p50= 1829.404 p95= 1853.471 pct_input= 13.84 static=False dup=None
+   leaf_class:numbers_int_float                               p50=  695.948 p95= 1001.124 pct_input=  5.26 static=False dup=None
+duplication totals (catalog rows): {'a_same_fact_serialized_twice': 16329, 'b_distinct_equal_value_nontrivial': 188, 'b2_distinct_equal_value_trivial_scalar': 0, 'c_alias': 2023, 'd_catalog_material': 158, 'e_contract_required': 3971}
+duplication calibrated tokens: {'a_same_fact_serialized_twice': 472817.8, 'b_distinct_equal_value_nontrivial': 4817.9, 'b2_distinct_equal_value_trivial_scalar': 0.0, 'c_alias': 64404.6, 'd_catalog_material': 6438.8, 'e_contract_required': 137243.0}
+precision: provable units=0 hypothetical units=7261 across 53 field/rule pairs
+cache[analyst] n=36 static_proxy_units=9206.0 first_volatile_byte_body=16981.0 first_volatile_byte_instructions=16880.0 sort_keys_interleaves=True runs=11
+cache[critic] n=36 static_proxy_units=1219.0 first_volatile_byte_body=2367.0 first_volatile_byte_instructions=1382.0 sort_keys_interleaves=True runs=6
+cache[adjudicator] n=36 static_proxy_units=954.0 first_volatile_byte_body=2201.0 first_volatile_byte_instructions=1216.0 sort_keys_interleaves=True runs=4
+output roles: {"analyst": {"muse_rows": {"n": 34, "output_tokens": {"n": 34, "avg": 12772.382, "p50": 12547.5, "p95": 17910.4, "min": 5948, "max": 20574}, "reasoning_output_tokens": {"n": 34, "avg": 9253.618, "p50": 9192.0, "p95": 13153.2, "min": 4936, "max": 13587}, "visible_output_tokens": {"n": 34, "avg": 3518.765, "p50": 3222.0, "p95": 7785.25, "min": 1012, "max": 7956}, "reasoning_share_pct": {"n": 34, "av
+top-10 output fields by visible tokens:
+   analyst.target_arbitration                       p50= 464.744 p95= 512.338 consumer=decision_value
+   critic.evidence_refs                             p50=   190.3 p95= 239.114 consumer=not_in_output_schema
+   analyst.evidence_refs                            p50=   166.3 p95= 237.411 consumer=not_in_output_schema
+   adjudicator.evidence_refs                        p50= 145.413 p95= 167.383 consumer=not_in_output_schema
+   analyst.major_risks                              p50=  40.595 p95=  60.753 consumer=persisted
+   adjudicator.resolution_reason                    p50=  35.559 p95=  41.846 consumer=persisted
+   analyst.summary                                  p50=  33.036 p95=  40.455 consumer=telemetry_only
+   analyst.reasons                                  p50=  31.636 p95=  36.676 consumer=decision_value
+   critic.summary                                   p50=  26.811 p95=  34.388 consumer=telemetry_only
+   adjudicator.candidate_id                         p50=  24.765 p95=    25.4 consumer=not_in_output_schema
+consumer categories: {'decision_value': 21, 'diagnostic_logged_only': 8, 'validated_or_bound': 17, 'persisted': 15, 'telemetry_only': 1, 'never_read': 0}
+[done] 36/36 payloads captured in 203.0s

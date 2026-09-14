@@ -24,10 +24,12 @@ Preferred flow:
 
 ```text
 Supervisor
--> one worker
--> focused tests
+-> one worker (per work package: no suite, no compile)
+-> focused test only if the package is MAJOR
 -> one logic reviewer
+-> final verification once: full Python suite + MQL5 compile
 -> done
+
 ```
 
 Do not automatically invoke explorer, dedicated test worker, adversarial reviewer or vision.
@@ -44,9 +46,10 @@ Preferred flow:
 Deep supervisor
 -> explorer only if ownership is unclear
 -> worker
--> test/debug if genuinely needed
+-> test/debug only for MAJOR packages
 -> logic reviewer
 -> adversarial reviewer only for high risk
+-> final verification once: full Python suite + MQL5 compile
 -> done
 ```
 

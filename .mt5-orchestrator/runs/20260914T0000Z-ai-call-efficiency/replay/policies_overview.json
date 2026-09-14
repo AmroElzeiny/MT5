@@ -1,0 +1,61 @@
+{
+ "borderline_deferral": {
+  "missed_actionable": 10,
+  "missed_any_approval": 27,
+  "overrides": {
+   "AI_REVIEW_DEFER_BORDERLINE": "true"
+  },
+  "predetermined": 204,
+  "requests": 2168,
+  "unchanged_state": 291
+ },
+ "default": {
+  "missed_actionable": 0,
+  "missed_any_approval": 10,
+  "overrides": {},
+  "predetermined": 204,
+  "requests": 2168,
+  "unchanged_state": 99
+ },
+ "offhours10": {
+  "missed_actionable": 0,
+  "missed_any_approval": 10,
+  "overrides": {
+   "AI_REVIEW_CADENCE_OFF_HOURS_MIN": "10"
+  },
+  "predetermined": 204,
+  "requests": 2168,
+  "unchanged_state": 61
+ },
+ "tol025": {
+  "missed_actionable": 1,
+  "missed_any_approval": 11,
+  "overrides": {
+   "AI_REVIEW_PRICE_TOLERANCE_R": "0.25"
+  },
+  "predetermined": 204,
+  "requests": 2168,
+  "unchanged_state": 129
+ },
+ "ttl2": {
+  "missed_actionable": 0,
+  "missed_any_approval": 10,
+  "overrides": {
+   "AI_REVIEW_DECISIVE_TTL_CADENCES": "2"
+  },
+  "predetermined": 204,
+  "requests": 2168,
+  "unchanged_state": 179
+ },
+ "ttl3_cap90": {
+  "missed_actionable": 1,
+  "missed_any_approval": 11,
+  "overrides": {
+   "AI_REVIEW_DECISIVE_TTL_CADENCES": "3",
+   "AI_REVIEW_MAX_REUSE_MINUTES": "90"
+  },
+  "predetermined": 204,
+  "requests": 2168,
+  "unchanged_state": 214
+ }
+}

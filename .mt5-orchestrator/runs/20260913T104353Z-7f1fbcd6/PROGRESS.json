@@ -1,0 +1,15 @@
+﻿{
+    "run_id":  "20260913T104353Z-7f1fbcd6",
+    "active_role":  "supervisor",
+    "active_model":  "opencode-go/minimax-m3",
+    "updated_at_utc":  "2026-09-13T10:50:00Z",
+    "completed_work_packages":  [],
+    "status":  "baseline_established",
+    "current_action":  "Starting WP1 implementation: Qwen fallback chain in OpenCodeRoutedProvider",
+    "current_work_package":  "WP1",
+    "baseline":  {
+        "commit":  "e6cae59e",
+        "focused_tests_passing":  72,
+        "files_clean":  ["python/ai_provider.py", "python/ai_gate.py", "python/.env.example", "python/tests/test_opencode_provider_contract.py"]
+    }
+}

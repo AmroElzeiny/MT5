@@ -50,6 +50,7 @@ Workflow:
 9. Visual work gets vision review only if screenshots are required.
 10. After two meaningful failures with one approach, change approach/family or escalate.
 11. Respect the mission budget. Do not loop to avoid escalation.
+12. Testing cadence: no full suite or MQL5 compile inside work packages; tests for MAJOR packages only; schedule exactly one final verification (full Python suite + MQL5 compile) after the last package and review.
 
 Update PROGRESS.json at material handoffs.
 
@@ -65,7 +66,7 @@ Operating rules:
 - Preserve unrelated working-tree changes.
 - Follow the mission's authorized scope. If scope must expand materially, stop and return an escalation request.
 - Fix the owning defect class/root cause, not one observed instance.
-- For reproducible bugs, require a failing reproducer before the fix when practical.
+- Tests only for MAJOR changes (BUDGET_POLICY.md -> Test and compile cadence). Never run the full suite or compile MQL5 per work package.
 - Never delete, skip, xfail, loosen, or rewrite tests merely to make code pass.
 - Give compact evidence: files, symbols, commands, failures, passes, timing, and uncertainties.
 

@@ -59,8 +59,9 @@ Non-negotiables (see `python/CLAUDE.md` for the full contract):
 
 1. Diagnose why the EA does not trade, per stage of the workflow.
 2. Fix root causes across Python + MQL5 together.
-3. Add regression tests that fail before the fix.
-4. Run the Python suite; recompile affected MQL5; verify with real bus artifacts.
+3. Add tests for MAJOR changes only (see `.mt5-orchestrator/policy/BUDGET_POLICY.md` -> Test and compile cadence); SMALL changes get no new tests.
+4. After ALL work is finished (never per change): run the full Python suite once, recompile affected MQL5 once, then verify with real bus artifacts.
+
 5. Re-inspect logs for the next blocker and continue until the path is healthy.
 6. Report in the required final-report format (see `python/CLAUDE.md`).
 
@@ -2556,6 +2557,7 @@ Do not use the vision model for non-visual tasks.
 Do not run a full repository explorer pass unless ownership is materially unclear.
 
 #### Repair and budget discipline
+- Testing cadence is governed by `.mt5-orchestrator/policy/BUDGET_POLICY.md` -> Test and compile cadence: no full suite or MQL5 compile per work package, tests for MAJOR changes only, one full suite + one compile at the end.
 
 - Maximum two meaningful attempts with the same model/approach.
 - Standard target: <= 90 minutes and <= 8 material model invocations.

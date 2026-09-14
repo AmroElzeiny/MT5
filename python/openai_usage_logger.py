@@ -635,6 +635,65 @@ def as_token_count(value: Any) -> int:
     return _int_value(value)
 
 
+# Provider-traffic classes.  Trading roles, repairs and non-production traffic
+# share one provider allowance, so every usage row states which one it was.
+TRAFFIC_TRADING_DECISION = "TRADING_DECISION"
+TRAFFIC_TRADING_CRITIC = "TRADING_CRITIC"
+TRAFFIC_TRADING_ADJUDICATOR = "TRADING_ADJUDICATOR"
+TRAFFIC_REPAIR = "REPAIR"
+TRAFFIC_CAPABILITY_PROBE = "CAPABILITY_PROBE"
+TRAFFIC_QA = "QA"
+TRAFFIC_REPLAY = "REPLAY"
+TRAFFIC_SHADOW = "SHADOW"
+TRAFFIC_BENCHMARK = "BENCHMARK"
+TRAFFIC_OTHER = "OTHER"
+TRAFFIC_CLASSES = (
+    TRAFFIC_TRADING_DECISION,
+    TRAFFIC_TRADING_CRITIC,
+    TRAFFIC_TRADING_ADJUDICATOR,
+    TRAFFIC_REPAIR,
+    TRAFFIC_CAPABILITY_PROBE,
+    TRAFFIC_QA,
+    TRAFFIC_REPLAY,
+    TRAFFIC_SHADOW,
+    TRAFFIC_BENCHMARK,
+    TRAFFIC_OTHER,
+)
+
+
+def traffic_class_for(
+    operation: str,
+    request_id: str = "",
+    extra: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Deterministic traffic class of one provider usage row.
+
+    ``AI_TRAFFIC_CLASS`` lets an offline tool (benchmark, replay, QA harness)
+    label everything its process sends; it can only name a non-trading class,
+    so production rows can never be relabelled as research by accident.
+    """
+
+    override = str(os.getenv("AI_TRAFFIC_CLASS", "") or "").strip().upper()
+    if override in {TRAFFIC_QA, TRAFFIC_REPLAY, TRAFFIC_BENCHMARK, TRAFFIC_CAPABILITY_PROBE, TRAFFIC_SHADOW}:
+        return override
+    extra = extra or {}
+    rid = str(request_id or "")
+    if "__shadow_repeat_" in rid or bool(extra.get("non_trading_shadow")):
+        return TRAFFIC_SHADOW
+    op = str(operation or "")
+    if "probe" in op or "healthcheck" in op:
+        return TRAFFIC_CAPABILITY_PROBE
+    if "repair" in op:
+        return TRAFFIC_REPAIR
+    if op.endswith("provider_neutral_analyst") or op.endswith("create_structured"):
+        return TRAFFIC_TRADING_DECISION
+    if op.endswith("provider_neutral_critic"):
+        return TRAFFIC_TRADING_CRITIC
+    if op.endswith("provider_neutral_adjudicator"):
+        return TRAFFIC_TRADING_ADJUDICATOR
+    return TRAFFIC_OTHER
+
+
 def log_ai_usage(
     *,
     source: str,
@@ -765,6 +824,8 @@ def log_ai_usage(
         "error_type": error_type,
         "error_message": error_message[:500],
         "raw_usage": usage,
+        # NDJSON only (not in CSV_FIELDS), same column-stability reason as above.
+        "traffic_class": traffic_class_for(str(operation or ""), str(request_id or ""), extra),
     }
     if extra:
         row["extra"] = _plain(extra)

@@ -1,0 +1,5125 @@
+{
+ "generated_utc": "2026-09-13T18:49:39Z",
+ "bus": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS",
+ "seed": 20260913,
+ "target_requests": 60,
+ "request_count": 187,
+ "selection_rule": "BEN-001: anchors first (stable), then every stage-A sample id that is eligible, then every eligible request whose response_debug shows python_final_allow=true or decision_state=APPROVE, then stratified round-robin over (candidate-count stratum x symbol class) cells; eligible == archived payload (completed|rejected) AND response_debug present AND historical decision_quality_tier == FULL_STRUCTURED; deterministic under the fixed seed (sha256(seed|request_id) order)",
+ "anchors": {
+  "AUDJPY_32618": [
+   "591813800_1788925102_208218984_1788951947_AUDJPY_32618"
+  ],
+  "USDCHF_19925": [
+   "591813800_1788925102_208218984_1788951325_USDCHF_19925"
+  ]
+ },
+ "stratum_summary": {
+  "cand_3plus/FX-cross": 56,
+  "cand_3plus/FX-major": 55,
+  "cand_3plus/index": 19,
+  "cand_3plus/crypto": 23,
+  "cand_1/FX-cross": 1,
+  "cand_3plus/metal": 16,
+  "cand_2/FX-cross": 4,
+  "cand_2/index": 2,
+  "cand_1/FX-major": 2,
+  "cand_1/index": 2,
+  "cand_2/FX-major": 3,
+  "cand_2/energy": 1,
+  "cand_2/metal": 1,
+  "cand_3plus/energy": 1,
+  "cand_1/metal": 1
+ },
+ "covered_cells": [
+  "cand_1/FX-cross",
+  "cand_1/FX-major",
+  "cand_1/index",
+  "cand_1/metal",
+  "cand_2/FX-cross",
+  "cand_2/FX-major",
+  "cand_2/energy",
+  "cand_2/index",
+  "cand_2/metal",
+  "cand_3plus/FX-cross",
+  "cand_3plus/FX-major",
+  "cand_3plus/crypto",
+  "cand_3plus/energy",
+  "cand_3plus/index",
+  "cand_3plus/metal"
+ ],
+ "available_population": {
+  "cand_3plus/index": 461,
+  "cand_2/index": 34,
+  "cand_1/index": 7,
+  "cand_3plus/FX-cross": 972,
+  "cand_3plus/metal": 201,
+  "cand_3plus/FX-major": 856,
+  "cand_3plus/crypto": 148,
+  "cand_2/metal": 14,
+  "cand_2/FX-cross": 93,
+  "cand_1/metal": 4,
+  "cand_1/FX-cross": 9,
+  "cand_1/FX-major": 38,
+  "cand_2/crypto": 4,
+  "cand_3plus/energy": 22,
+  "cand_2/energy": 4,
+  "cand_2/FX-major": 39
+ },
+ "skipped_eligible_pool": {
+  "no_response_debug": 19,
+  "historical_tier_not_full_structured": 535
+ },
+ "notes": [],
+ "measurement_version": "wp1.c1",
+ "rows": [
+  {
+   "request_id": "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788951947_AUDJPY_32618.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "anchor_required_by_claude_md_4ac"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788951325_USDCHF_19925",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788951325_USDCHF_19925.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "anchor_required_by_claude_md_4ac"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789151032_EURAUD_5869",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789151032_EURAUD_5869.json",
+   "archive_kind": "rejected",
+   "symbol": "EURAUD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 5.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789004983_NAS100_9597",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_14752_1788992581__903871_1788999394_24185000_1789004983_NAS100_9597.json",
+   "archive_kind": "rejected",
+   "symbol": "NAS100",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785759967_BITCOIN_9173",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785759967_BITCOIN_9173.json",
+   "archive_kind": "rejected",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785762972_AUDUSD_11360.json",
+   "archive_kind": "rejected",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 4,
+    "veto_code": "",
+    "llm_quality_score": 5.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788983285_8075437_1788995216_GBPCAD_29371",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12980_1788971959__903871_1788983285_8075437_1788995216_GBPCAD_29371.json",
+   "archive_kind": "rejected",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 1,
+   "candidate_stratum": "cand_1",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_1",
+    "FX-cross"
+   ],
+   "stratum": "cand_1/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_10236_1789295269__591813800_1785715200_305658125_1785725109_GOLD_25455.json",
+   "archive_kind": "rejected",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789096071_XAUUSD_13096",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789096071_XAUUSD_13096.json",
+   "archive_kind": "rejected",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 7,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788983285_8075437_1788988231_NZDJPY_13045",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12980_1788971959__903871_1788983285_8075437_1788988231_NZDJPY_13045.json",
+   "archive_kind": "rejected",
+   "symbol": "NZDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 3.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_2",
+    "FX-cross"
+   ],
+   "stratum": "cand_2/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789155320_UK100_2328",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789155320_UK100_2328.json",
+   "archive_kind": "rejected",
+   "symbol": "UK100",
+   "symbol_class": "index",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 5.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785768982_USDCHF_2988",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785768982_USDCHF_2988.json",
+   "archive_kind": "rejected",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 5.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789068109_US30_16044",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789068109_US30_16044.json",
+   "archive_kind": "rejected",
+   "symbol": "US30",
+   "symbol_class": "index",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 6.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_2",
+    "index"
+   ],
+   "stratum": "cand_2/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785740735_BITCOIN_469",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785740735_BITCOIN_469.json",
+   "archive_kind": "rejected",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789071381_USDCHF_5236",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789071381_USDCHF_5236.json",
+   "archive_kind": "rejected",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 4.3,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788983285_8075437_1788988231_EURAUD_21885",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12980_1788971959__903871_1788983285_8075437_1788988231_EURAUD_21885.json",
+   "archive_kind": "rejected",
+   "symbol": "EURAUD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785744942_#Germany40_32424.json",
+   "archive_kind": "rejected",
+   "symbol": "#Germany40",
+   "symbol_class": "index",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.3,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789002917_NAS100_10901",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_12296_1788989149__903871_1788999394_24185000_1789002917_NAS100_10901.json",
+   "archive_kind": "rejected",
+   "symbol": "NAS100",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789033279_NZDJPY_20411",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1788999394_24185000_1789033279_NZDJPY_20411.json",
+   "archive_kind": "rejected",
+   "symbol": "NZDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785753356_GBPUSD_22093",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19228_1789300679__591813800_1785715200_305658125_1785753356_GBPUSD_22093.json",
+   "archive_kind": "rejected",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 1,
+   "candidate_stratum": "cand_1",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 4.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_1",
+    "FX-major"
+   ],
+   "stratum": "cand_1/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789094249_US30_14363",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789094249_US30_14363.json",
+   "archive_kind": "rejected",
+   "symbol": "US30",
+   "symbol_class": "index",
+   "candidate_count_archive": 1,
+   "candidate_stratum": "cand_1",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_1",
+    "index"
+   ],
+   "stratum": "cand_1/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789098513_AUDJPY_32323",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789098513_AUDJPY_32323.json",
+   "archive_kind": "rejected",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 3.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_2",
+    "FX-cross"
+   ],
+   "stratum": "cand_2/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789154707_GBPUSD_19340",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789154707_GBPUSD_19340.json",
+   "archive_kind": "rejected",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 3.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_2",
+    "FX-major"
+   ],
+   "stratum": "cand_2/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789149197_WTI_22682",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789149197_WTI_22682.json",
+   "archive_kind": "rejected",
+   "symbol": "WTI",
+   "symbol_class": "energy",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 4.3,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_2",
+    "energy"
+   ],
+   "stratum": "cand_2/energy",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789066099_US30_18866",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789066099_US30_18866.json",
+   "archive_kind": "rejected",
+   "symbol": "US30",
+   "symbol_class": "index",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_2",
+    "index"
+   ],
+   "stratum": "cand_2/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789102197_XAUUSD_1646",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789102197_XAUUSD_1646.json",
+   "archive_kind": "rejected",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 3.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_2",
+    "metal"
+   ],
+   "stratum": "cand_2/metal",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789102811_CHFJPY_32047",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789102811_CHFJPY_32047.json",
+   "archive_kind": "rejected",
+   "symbol": "CHFJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 7,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 5,
+    "veto_code": "",
+    "llm_quality_score": 5.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789097294_USDJPY_5699",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789097294_USDJPY_5699.json",
+   "archive_kind": "rejected",
+   "symbol": "USDJPY",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785740134_BITCOIN_1317.json",
+   "archive_kind": "rejected",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789094249_WTI_24227",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_11104_1789082965__903871_1789093630_118426656_1789094249_WTI_24227.json",
+   "archive_kind": "rejected",
+   "symbol": "WTI",
+   "symbol_class": "energy",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 4.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "energy"
+   ],
+   "stratum": "cand_3plus/energy",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789028921_JPN225_10535",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1788999394_24185000_1789028921_JPN225_10535.json",
+   "archive_kind": "rejected",
+   "symbol": "JPN225",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789036511_XAUUSD_7721",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1788999394_24185000_1789036511_XAUUSD_7721.json",
+   "archive_kind": "rejected",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.3,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_26708_1789297622__591813800_1785715200_305658125_1785749750_AUDUSD_9445.json",
+   "archive_kind": "rejected",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 1,
+   "candidate_stratum": "cand_1",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 5.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_1",
+    "FX-major"
+   ],
+   "stratum": "cand_1/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789067423_US30_19703",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789067423_US30_19703.json",
+   "archive_kind": "rejected",
+   "symbol": "US30",
+   "symbol_class": "index",
+   "candidate_count_archive": 1,
+   "candidate_stratum": "cand_1",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "ABSTAIN",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 5.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_abstained"
+   },
+   "strata": [
+    "cand_1",
+    "index"
+   ],
+   "stratum": "cand_1/index",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789152868_EURNZD_21011",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_19560_1789137648__903871_1789148402_173202328_1789152868_EURNZD_21011.json",
+   "archive_kind": "rejected",
+   "symbol": "EURNZD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 4.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_2",
+    "FX-cross"
+   ],
+   "stratum": "cand_2/FX-cross",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789064597_USDCHF_11315",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\rejected\\python_25160_1789004663__903871_1789062748_87542921_1789064597_USDCHF_11315.json",
+   "archive_kind": "rejected",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "REJECT",
+    "python_final_allow": false,
+    "chosen_index": 0,
+    "veto_code": "ai_veto_structural_contradiction",
+    "llm_quality_score": 3.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_rejected"
+   },
+   "strata": [
+    "cand_2",
+    "FX-major"
+   ],
+   "stratum": "cand_2/FX-major",
+   "selection_reasons": [
+    "stage_a_sample_seed"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789158408_GBPAUD_3719",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789158408_GBPAUD_3719.json",
+   "archive_kind": "completed",
+   "symbol": "GBPAUD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789169375_GBPJPY_3422",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789169375_GBPJPY_3422.json",
+   "archive_kind": "completed",
+   "symbol": "GBPJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785970199_GBPCHF_13384",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785970199_GBPCHF_13384.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCHF",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788931222_GBPCAD_5377",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788931222_GBPCAD_5377.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788837043_120154281_1788844299_#Germany40_9560",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788837043_120154281_1788844299_#Germany40_9560.json",
+   "archive_kind": "completed",
+   "symbol": "#Germany40",
+   "symbol_class": "index",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 5.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789006198_GBPUSD_2800",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14752_1788992581__903871_1788999394_24185000_1789006198_GBPUSD_2800.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 7,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789162120_XAUUSD_19843",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789162120_XAUUSD_19843.json",
+   "archive_kind": "completed",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789159027_XAUUSD_32549",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789159027_XAUUSD_32549.json",
+   "archive_kind": "completed",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785960299_USDCAD_29025",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785960299_USDCAD_29025.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788110797_BITCOIN_24028",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788110797_BITCOIN_24028.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788926968_GBPCAD_32579",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788926968_GBPCAD_32579.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1786932611_30404328_1786945598_GOLD_14104",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30564_1786921821__591813800_1786932611_30404328_1786945598_GOLD_14104.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 4,
+    "veto_code": "",
+    "llm_quality_score": 7.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789072358_AUDJPY_32691",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789072358_AUDJPY_32691.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 7,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788950097_AUDJPY_12044",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788950097_AUDJPY_12044.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789005590_EURUSD_31539",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14752_1788992581__903871_1788999394_24185000_1789005590_EURUSD_31539.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789160263_XAUUSD_10031",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789160263_XAUUSD_10031.json",
+   "archive_kind": "completed",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788540249_79807218_1788542123_EURCHF_28310",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_20020_1788529221__591813800_1788540249_79807218_1788542123_EURCHF_28310.json",
+   "archive_kind": "completed",
+   "symbol": "EURCHF",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788837043_120154281_1788841277_#Germany40_5208",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788837043_120154281_1788841277_#Germany40_5208.json",
+   "archive_kind": "completed",
+   "symbol": "#Germany40",
+   "symbol_class": "index",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788837043_120154281_1788843091_#Germany40_7893",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788837043_120154281_1788843091_#Germany40_7893.json",
+   "archive_kind": "completed",
+   "symbol": "#Germany40",
+   "symbol_class": "index",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 5.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788931827_AUDJPY_8772",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788931827_AUDJPY_8772.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788940313_AUDJPY_25550",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788940313_AUDJPY_25550.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785796628_GBPCAD_15961",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785796628_GBPCAD_15961.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788940923_GBPCAD_31677",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788940923_GBPCAD_31677.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789156550_NZDUSD_3356",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789156550_NZDUSD_3356.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788307200_129229515_1788338791_AUDUSD_5317",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788307200_129229515_1788338791_AUDUSD_5317.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788052500_#Japan225_7536",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788052500_#Japan225_7536.json",
+   "archive_kind": "completed",
+   "symbol": "#Japan225",
+   "symbol_class": "index",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785963899_#Germany40_14504",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_1840_1788611869__591813800_1785715200_13176437_1785963899_#Germany40_14504.json",
+   "archive_kind": "completed",
+   "symbol": "#Germany40",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785793623_GBPUSD_23864",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785793623_GBPUSD_23864.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789077957_NZDJPY_31942",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789077957_NZDJPY_31942.json",
+   "archive_kind": "completed",
+   "symbol": "NZDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789162735_NZDUSD_1213",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789162735_NZDUSD_1213.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788929402_USDCHF_28995",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788929402_USDCHF_28995.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789013928_GBPUSD_20899",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_4504_1789000319__903871_1788999394_24185000_1789013928_GBPUSD_20899.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1786932611_30404328_1786943761_NZDCAD_22143",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30564_1786921821__591813800_1786932611_30404328_1786943761_NZDCAD_22143.json",
+   "archive_kind": "completed",
+   "symbol": "NZDCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789048742_USDJPY_24431",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1788999394_24185000_1789048742_USDJPY_24431.json",
+   "archive_kind": "completed",
+   "symbol": "USDJPY",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785780401_GBPUSD_589",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19228_1789300679__591813800_1785715200_305658125_1785780401_GBPUSD_589.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788052500_AUDUSD_20970",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788052500_AUDUSD_20970.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_2",
+    "FX-major"
+   ],
+   "stratum": "cand_2/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788941533_AUDJPY_8200",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788941533_AUDJPY_8200.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785799032_GBPUSD_16463",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785799032_GBPUSD_16463.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788069929_BITCOIN_25094",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788069929_BITCOIN_25094.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 7,
+    "veto_code": "",
+    "llm_quality_score": 6.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789164597_NZDUSD_27671",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789164597_NZDUSD_27671.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788983285_8075437_1788994470_NAS100_7194",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_12980_1788971959__903871_1788983285_8075437_1788994470_NAS100_7194.json",
+   "archive_kind": "completed",
+   "symbol": "NAS100",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789076820_GBPCAD_19756",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789076820_GBPCAD_19756.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.3,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789167692_UK100_23114",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789167692_UK100_23114.json",
+   "archive_kind": "completed",
+   "symbol": "UK100",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 4,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788983285_8075437_1788987005_EURUSD_24595",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_12980_1788971959__903871_1788983285_8075437_1788987005_EURUSD_24595.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 4,
+    "veto_code": "",
+    "llm_quality_score": 8.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789165836_XAUUSD_21150",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789165836_XAUUSD_21150.json",
+   "archive_kind": "completed",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788935465_GOLD_3977",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788935465_GOLD_3977.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788933039_USDCHF_13596",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788933039_USDCHF_13596.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789029979_EURUSD_32191",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1788999394_24185000_1789029979_EURUSD_32191.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785728114_BITCOIN_15507",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_10236_1789295269__591813800_1785715200_305658125_1785728114_BITCOIN_15507.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788934856_AUDJPY_17596",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788934856_AUDJPY_17596.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788122216_BITCOIN_8017",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788122216_BITCOIN_8017.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785722705_GBPUSD_1359",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14908_1789270846__591813800_1785715200_305658125_1785722705_GBPUSD_1359.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788837043_120154281_1788848530_GOLD_5856",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788837043_120154281_1788848530_GOLD_5856.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785794825_GBPCAD_14442",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785794825_GBPCAD_14442.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785793022_GBPUSD_20854",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785793022_GBPUSD_20854.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 5,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788942756_AUDJPY_13213",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788942756_AUDJPY_13213.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788948255_USDCHF_8486",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788948255_USDCHF_8486.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788933039_AUDJPY_12810",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788933039_AUDJPY_12810.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788951325_USDCAD_6280",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788951325_USDCAD_6280.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788936674_AUDJPY_3276",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788936674_AUDJPY_3276.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785795426_GBPUSD_24102",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785795426_GBPUSD_24102.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1786744136_102001000_1786749666_EURUSD_32627",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24380_1786733312__591813800_1786744136_102001000_1786749666_EURUSD_32627.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788086757_BITCOIN_15339",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788086757_BITCOIN_15339.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 5,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785915299_EURUSD_20774",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785915299_EURUSD_20774.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788946415_AUDJPY_19805",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788946415_AUDJPY_19805.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788931222_USDCHF_2673",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788931222_USDCHF_2673.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788928180_GBPCAD_27717",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788928180_GBPCAD_27717.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789093630_118426656_1789100962_GBPNZD_31161",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_11104_1789082965__903871_1789093630_118426656_1789100962_GBPNZD_31161.json",
+   "archive_kind": "completed",
+   "symbol": "GBPNZD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785902699_USDCAD_25122",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785902699_USDCAD_25122.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785770399_#Japan225_16567",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785770399_#Japan225_16567.json",
+   "archive_kind": "completed",
+   "symbol": "#Japan225",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789156550_GER40_13532",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789156550_GER40_13532.json",
+   "archive_kind": "completed",
+   "symbol": "GER40",
+   "symbol_class": "index",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789167692_NZDUSD_17020",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789167692_NZDUSD_17020.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788837043_120154281_1788878753_GBPUSD_12399",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788837043_120154281_1788878753_GBPUSD_12399.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788307200_129229515_1788320731_GBPCAD_24633",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788307200_129229515_1788320731_GBPCAD_24633.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789168134_GBPJPY_29945",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789168134_GBPJPY_29945.json",
+   "archive_kind": "completed",
+   "symbol": "GBPJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789165836_GER40_30878",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789165836_GER40_30878.json",
+   "archive_kind": "completed",
+   "symbol": "GER40",
+   "symbol_class": "index",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788927574_GBPCAD_8859",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788927574_GBPCAD_8859.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788930010_GBPCAD_619",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788930010_GBPCAD_619.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788307200_129229515_1788348122_GBPJPY_19576",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788307200_129229515_1788348122_GBPJPY_19576.json",
+   "archive_kind": "completed",
+   "symbol": "GBPJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785798431_GOLD_8499",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785798431_GOLD_8499.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789070364_NZDJPY_22376",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789070364_NZDJPY_22376.json",
+   "archive_kind": "completed",
+   "symbol": "NZDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785960299_CADJPY_19105",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785960299_CADJPY_19105.json",
+   "archive_kind": "completed",
+   "symbol": "CADJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 2,
+   "candidate_stratum": "cand_2",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 6.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_2",
+    "FX-cross"
+   ],
+   "stratum": "cand_2/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788796160_79268421_1788796170_#Japan225_29002",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_4932_1788785324__591813800_1788796160_79268421_1788796170_#Japan225_29002.json",
+   "archive_kind": "completed",
+   "symbol": "#Japan225",
+   "symbol_class": "index",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 6.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788933039_GBPCAD_25813",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788933039_GBPCAD_25813.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1786135799_GBPJPY_15548",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_1840_1788611869__591813800_1785715200_13176437_1786135799_GBPJPY_15548.json",
+   "archive_kind": "completed",
+   "symbol": "GBPJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788614076_331468_1788614091_BITCOIN_21986",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_6572_1788603234__591813800_1788614076_331468_1788614091_BITCOIN_21986.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788131231_BITCOIN_22536",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788131231_BITCOIN_22536.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785793022_GBPCAD_5086",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785793022_GBPCAD_5086.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 4,
+    "veto_code": "",
+    "llm_quality_score": 7.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788925757_GOLD_22067",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788925757_GOLD_22067.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785723306_#USNDAQ100_23435",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14908_1789270846__591813800_1785715200_305658125_1785723306_#USNDAQ100_23435.json",
+   "archive_kind": "completed",
+   "symbol": "#USNDAQ100",
+   "symbol_class": "index",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789019724_AUDUSD_26918",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1788999394_24185000_1789019724_AUDUSD_26918.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788095171_BITCOIN_10657",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788095171_BITCOIN_10657.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 7,
+    "veto_code": "",
+    "llm_quality_score": 6.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788307200_129229515_1788330965_GBPCAD_24510",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788307200_129229515_1788330965_GBPCAD_24510.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789067423_NZDJPY_14844",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789067423_NZDJPY_14844.json",
+   "archive_kind": "completed",
+   "symbol": "NZDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785737129_BITCOIN_25456",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_26708_1789297622__591813800_1785715200_305658125_1785737129_BITCOIN_25456.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788127625_BITCOIN_6182",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788127625_BITCOIN_6182.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785723306_USDCAD_20589",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_10236_1789295269__591813800_1785715200_305658125_1785723306_USDCAD_20589.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 6,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788088560_BITCOIN_4437",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788088560_BITCOIN_4437.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 5,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788937283_AUDJPY_4684",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788937283_AUDJPY_4684.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788106590_BITCOIN_25775",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788106590_BITCOIN_25775.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789163359_NZDUSD_23040",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789163359_NZDUSD_23040.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785799633_GOLD_2121",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785799633_GOLD_2121.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789080766_JPN225_9042",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789080766_JPN225_9042.json",
+   "archive_kind": "completed",
+   "symbol": "JPN225",
+   "symbol_class": "index",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789003525_GBPUSD_22698",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14752_1788992581__903871_1788999394_24185000_1789003525_GBPUSD_22698.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 7,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789157167_XAUUSD_3254",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789157167_XAUUSD_3254.json",
+   "archive_kind": "completed",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788307200_129229515_1788350530_USDCHF_8752",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788307200_129229515_1788350530_USDCHF_8752.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788932433_AUDJPY_21446",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788932433_AUDJPY_21446.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788943973_GBPCAD_15336",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788943973_GBPCAD_15336.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789161500_NZDUSD_29619",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789161500_NZDUSD_29619.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1786139399_GBPJPY_12066",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_1840_1788611869__591813800_1785715200_13176437_1786139399_GBPJPY_12066.json",
+   "archive_kind": "completed",
+   "symbol": "GBPJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788943973_GBPUSD_19340",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788943973_GBPUSD_19340.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 6,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789062748_87542921_1789064597_AUDJPY_5680",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1789062748_87542921_1789064597_AUDJPY_5680.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788118610_BITCOIN_32222",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788118610_BITCOIN_32222.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785761169_#Germany40_11293",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19228_1789300679__591813800_1785715200_305658125_1785761169_#Germany40_11293.json",
+   "archive_kind": "completed",
+   "symbol": "#Germany40",
+   "symbol_class": "index",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "index"
+   ],
+   "stratum": "cand_3plus/index",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789159645_XAUUSD_14022",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789159645_XAUUSD_14022.json",
+   "archive_kind": "completed",
+   "symbol": "XAUUSD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 6.9,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785720301_USDCAD_20966",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14908_1789270846__591813800_1785715200_305658125_1785720301_USDCAD_20966.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 6,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788070530_BITCOIN_7570",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788070530_BITCOIN_7570.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 7,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1785791999_AUDUSD_12967",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_35868_1788626276__591813800_1785715200_13176437_1785791999_AUDUSD_12967.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 2,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788124019_BITCOIN_4564",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788124019_BITCOIN_4564.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788929401_GBPUSD_13011",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788929401_GBPUSD_13011.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788120413_BITCOIN_26532",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788120413_BITCOIN_26532.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 8.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788949481_AUDJPY_26449",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788949481_AUDJPY_26449.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785794825_GBPUSD_9857",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785794825_GBPUSD_9857.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785719700_USDCAD_8794",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14908_1789270846__591813800_1785715200_305658125_1785719700_USDCAD_8794.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 6,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785791820_EURCAD_10246",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785791820_EURCAD_10246.json",
+   "archive_kind": "completed",
+   "symbol": "EURCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 5,
+    "veto_code": "",
+    "llm_quality_score": 8.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789007417_EURUSD_31666",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_14752_1788992581__903871_1788999394_24185000_1789007417_EURUSD_31666.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 6.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785795426_GBPCAD_10760",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785795426_GBPCAD_10760.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785737129_EURUSD_21025",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_26708_1789297622__591813800_1785715200_305658125_1785737129_EURUSD_21025.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 6,
+    "veto_code": "",
+    "llm_quality_score": 7.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785792421_AUDUSD_9777",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785792421_AUDUSD_9777.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 7,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_13176437_1786101599_SILVER_2069",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_1840_1788611869__591813800_1785715200_13176437_1786101599_SILVER_2069.json",
+   "archive_kind": "completed",
+   "symbol": "SILVER",
+   "symbol_class": "metal",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 5,
+    "veto_code": "",
+    "llm_quality_score": 6.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "metal"
+   ],
+   "stratum": "cand_3plus/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788495063_34619250_1788496040_NZDCHF_27355",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_4584_1788483298__591813800_1788495063_34619250_1788496040_NZDCHF_27355.json",
+   "archive_kind": "completed",
+   "symbol": "NZDCHF",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.5,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785791219_USDCHF_13913",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785791219_USDCHF_13913.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1786561284_9977718_1786565161_GOLD_30305",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19296_1786554384__591813800_1786561284_9977718_1786565161_GOLD_30305.json",
+   "archive_kind": "completed",
+   "symbol": "GOLD",
+   "symbol_class": "metal",
+   "candidate_count_archive": 1,
+   "candidate_stratum": "cand_1",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 0.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_1",
+    "metal"
+   ],
+   "stratum": "cand_1/metal",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789031053_AUDUSD_1360",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1788999394_24185000_1789031053_AUDUSD_1360.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785778598_GBPCAD_4044",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19228_1789300679__591813800_1785715200_305658125_1785778598_GBPCAD_4044.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788113201_BITCOIN_17591",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788113201_BITCOIN_17591.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785798431_GBPUSD_26526",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785798431_GBPUSD_26526.json",
+   "archive_kind": "completed",
+   "symbol": "GBPUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.8,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788111999_BITCOIN_30760",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788111999_BITCOIN_30760.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789058400_NZDJPY_18130",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1788999394_24185000_1789058400_NZDJPY_18130.json",
+   "archive_kind": "completed",
+   "symbol": "NZDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788942143_AUDJPY_1354",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788942143_AUDJPY_1354.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.6,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1789148402_173202328_1789160263_NZDUSD_32010",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19560_1789137648__903871_1789148402_173202328_1789160263_NZDUSD_32010.json",
+   "archive_kind": "completed",
+   "symbol": "NZDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785799032_USDCAD_32292",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785799032_USDCAD_32292.json",
+   "archive_kind": "completed",
+   "symbol": "USDCAD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785780401_AUDUSD_10106",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_19228_1789300679__591813800_1785715200_305658125_1785780401_AUDUSD_10106.json",
+   "archive_kind": "completed",
+   "symbol": "AUDUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 7,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788048000_295326640_1788099378_BITCOIN_30592",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_24792_1789259624__591813800_1788048000_295326640_1788099378_BITCOIN_30592.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 8,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 7,
+    "veto_code": "",
+    "llm_quality_score": 6.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788925102_208218984_1788928793_GBPCAD_388",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_30792_1788911767__591813800_1788925102_208218984_1788928793_GBPCAD_388.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 3,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785744341_GBPCAD_20207",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_26708_1789297622__591813800_1785715200_305658125_1785744341_GBPCAD_20207.json",
+   "archive_kind": "completed",
+   "symbol": "GBPCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 4,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788307200_129229515_1788354142_AUDJPY_30178",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_16272_1788826001__591813800_1788307200_129229515_1788354142_AUDJPY_30178.json",
+   "archive_kind": "completed",
+   "symbol": "AUDJPY",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 3,
+    "veto_code": "",
+    "llm_quality_score": 6.7,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "903871_1788999394_24185000_1789037774_EURUSD_24725",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_25160_1789004663__903871_1788999394_24185000_1789037774_EURUSD_24725.json",
+   "archive_kind": "completed",
+   "symbol": "EURUSD",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 5,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.1,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1785715200_305658125_1785794224_USDCHF_10635",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_376_1789303136__591813800_1785715200_305658125_1785794224_USDCHF_10635.json",
+   "archive_kind": "completed",
+   "symbol": "USDCHF",
+   "symbol_class": "FX-major",
+   "candidate_count_archive": 7,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.2,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-major"
+   ],
+   "stratum": "cand_3plus/FX-major",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788798902_82010906_1788798915_EURCAD_11096",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_13880_1788788004__591813800_1788798902_82010906_1788798915_EURCAD_11096.json",
+   "archive_kind": "completed",
+   "symbol": "EURCAD",
+   "symbol_class": "FX-cross",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 0,
+    "veto_code": "",
+    "llm_quality_score": 7.4,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "FX-cross"
+   ],
+   "stratum": "cand_3plus/FX-cross",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  },
+  {
+   "request_id": "591813800_1788614076_331468_1788615908_BITCOIN_31656",
+   "archive_path": "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\python_6572_1788603234__591813800_1788614076_331468_1788615908_BITCOIN_31656.json",
+   "archive_kind": "completed",
+   "symbol": "BITCOIN",
+   "symbol_class": "crypto",
+   "candidate_count_archive": 6,
+   "candidate_stratum": "cand_3plus",
+   "has_response_debug": true,
+   "historical_decision": {
+    "decision_state": "APPROVE",
+    "python_final_allow": true,
+    "chosen_index": 1,
+    "veto_code": "",
+    "llm_quality_score": 7.0,
+    "decision_quality_tier": "FULL_STRUCTURED",
+    "decision_source": "ai_approved"
+   },
+   "strata": [
+    "cand_3plus",
+    "crypto"
+   ],
+   "stratum": "cand_3plus/crypto",
+   "selection_reasons": [
+    "historical_allow_or_approve"
+   ]
+  }
+ ]
+}

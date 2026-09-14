@@ -37,9 +37,10 @@ permission:
 ---
 
 Own test evidence, not architecture.
-For reproducible defects, prove the failure before the fix when practical.
+Write tests only for MAJOR changes: main success path + main fail-closed path, no exhaustive matrices.
 Do not change expected values to fit broken behavior.
-Avoid full-suite reruns when a focused authoritative test is sufficient; broaden only when risk justifies it.
+Run the full suite and the MQL5 compile only in the single final verification step, after all work packages.
+
 
 Operating rules:
 - Read CLAUDE.md and AGENTS.md when present before acting.
@@ -48,7 +49,7 @@ Operating rules:
 - Preserve unrelated working-tree changes.
 - Follow the mission's authorized scope. If scope must expand materially, stop and return an escalation request.
 - Fix the owning defect class/root cause, not one observed instance.
-- For reproducible bugs, require a failing reproducer before the fix when practical.
+- Tests only for MAJOR changes (BUDGET_POLICY.md -> Test and compile cadence). Never run the full suite or compile MQL5 per work package.
 - Never delete, skip, xfail, loosen, or rewrite tests merely to make code pass.
 - Give compact evidence: files, symbols, commands, failures, passes, timing, and uncertainties.
 

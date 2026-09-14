@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ai_gate
+from provider_wire_projection import expand_evidence_from_wire
 from decision_integrity import (
     AI_DECISION_SCHEMA_VERSION,
     AI_PROMPT_CONTRACT_VERSION,
@@ -153,7 +154,8 @@ def catalog_ids_for(evidence: dict, candidate_index: int, count: int = 2) -> lis
     cite only ids scoped to this candidate or global.
     """
 
-    items = ((evidence or {}).get("evidence_catalog") or {}).get("items") or []
+    # Decode first: the wire may carry canonical rows or compact_v1 groups.
+    items = (expand_evidence_from_wire(evidence or {}).get("evidence_catalog") or {}).get("items") or []
     usable = [
         int(item["id"])
         for item in items

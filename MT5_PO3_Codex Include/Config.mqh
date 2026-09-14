@@ -25,6 +25,13 @@ const string AI_RETRIEVAL_POLICY_VERSION = "20260718_hybrid_analogue_retrieval_v
 const string AI_CONSENSUS_RESOLVER_VERSION = "20260718_deterministic_consensus_v1";
 const string TRADE_LEDGER_SCHEMA_VERSION = "20260718_trade_ledger_provider_identity_v8";
 const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
+// Session context sent with every AI request so the Python AI review gate
+// (python/ai_review_gate.py REVIEW_CONTEXT_VERSION) uses MQL's own session and
+// killzone authority instead of re-deriving boundaries.  Operational only: it
+// is not a hashed manifest field and not a decision input.
+const string AI_REVIEW_CONTEXT_VERSION = "20260914_ai_review_context_v1";
+// Python decision_source of a proven-unnecessary review (non-trading reuse).
+const string AI_REVIEW_GATE_REUSE_SOURCE = "ai_review_gate_reuse";
 
 //--- Provider transport modes MT5 will bind a decision to.
 // Single definition shared by the response validator (AIGateBridge.mqh) and the
@@ -689,8 +696,12 @@ input bool   InpShadowTrackPreAiRejects = true;
 // horizon ends.  Shorter than this and a re-scan of the same sweep creates a
 // second statistical sample; the memory is bounded so it cannot grow forever.
 input int    InpShadowIdentityRetentionMinutes = 4320;
-// Evaluation budget.  M1 bars change once a minute, so re-reading the path at
-// 1 Hz buys nothing and costs a CopyRates per pending tracker per second.
+// Station-driven tracking.  A pending tracker is never polled: once per closed
+// M1 bar each tracked symbol is read once, and a tracker is replayed only when
+// one of its stations (entry, TP1, TP2, SL) was touched or its horizon passed.
+// InpShadowEvaluationIntervalSeconds now only spaces the post-horizon history
+// retries; InpShadowMaxEvaluationsPerTick bounds the station replays per call
+// (the rest continue on the very next call, not on the next bar).
 input int    InpShadowEvaluationIntervalSeconds = 60;
 input int    InpShadowMaxEvaluationsPerTick = 25;
 // Bounded CopyRates retries before a candidate is declared DATA_LOSS rather

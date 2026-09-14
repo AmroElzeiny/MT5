@@ -35,10 +35,15 @@ from threading import Lock
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from tester_replay_provenance import build_replay_provenance
 
+from opencode_go_accounting import OpenCodeGoAttemptLedger, bus_attempt_ledger_path
 from ai_provider import (
     AIProvider,
     LocalOpenAICompatibleProvider,
-    OpenCodeMessagesProvider,
+    MAX_PROVIDER_PARALLELISM,
+    OPENCODE_PRIMARY_PROVIDER_ID,
+    OPENCODE_SECONDARY_PROVIDER_ID,
+    OPENCODE_SESSION_SCOPE_PROMPT_PREFIX,
+    OPENCODE_SESSION_SCOPES,
     OpenCodeResponsesProvider,
     OpenCodeRoutedProvider,
     OpenRouterProvider,
@@ -115,7 +120,21 @@ from decision_integrity import (
     validate_request_identity_echo,
 )
 from bus_cohort_migration import CohortIdentity, migrate_bus_cohorts
-from decision_evidence import EVIDENCE_ENVELOPE_VERSION, build_decision_evidence_envelope
+from decision_evidence import (
+    EVIDENCE_ENVELOPE_VERSION,
+    PROVIDER_DECISION_CONTEXT_VERSION,
+    build_decision_evidence_envelope,
+)
+from ai_review_gate import (
+    REUSE_DECISION_SOURCE as AI_REVIEW_REUSE_DECISION_SOURCE,
+    REUSE_NARRATIVE_STATE as AI_REVIEW_REUSE_NARRATIVE_STATE,
+    REUSE_REJECTION_CODE as AI_REVIEW_REUSE_REJECTION_CODE,
+    REVIEW_GATE_VERSION,
+    ReviewGate,
+    ReviewGateConfig,
+    ReviewVerdict,
+    shadow_outcome_equivalent as ai_review_shadow_outcome_equivalent,
+)
 from shadow_outcome_ledger import (
     SHADOW_LEDGER_SCHEMA_VERSION,
     EvidencePolicy as ShadowEvidencePolicy,
@@ -124,6 +143,14 @@ from shadow_outcome_ledger import (
     historical_evidence as shadow_historical_evidence,
     historical_evidence_ladder as shadow_historical_evidence_ladder,
     read_shadow_events,
+)
+from provider_wire_projection import (
+    WIRE_PROJECTION_CANONICAL,
+    WIRE_PROJECTION_ENV,
+    WIRE_PROJECTION_METADATA_KEY,
+    analyst_catalog_description,
+    normalize_wire_projection,
+    project_evidence_for_wire,
 )
 from evidence_catalog import (
     EVIDENCE_CATALOG_VERSION,
@@ -526,22 +553,29 @@ class AIGateRuntimeConfig:
     openrouter_context_budget_tokens: int
     openrouter_app_url: str
     openrouter_app_title: str
-    # OpenCode Go transport.  One base URL serves both dialects: the OpenAI SDK
-    # appends ``/responses`` for Muse and the messages adapter appends
-    # ``/messages`` for Qwen, so the two documented endpoints are one setting.
+    # OpenCode Go transport.  Both routed OpenCode legs -- Muse (primary) and
+    # the secondary (deepseek-v4.1-flash) -- speak ``/responses`` on this one
+    # base URL.
     opencode_base_url: str
     opencode_api_key: str
     opencode_call_directing: bool
     opencode_muse_model: str
     opencode_muse_reasoning_effort: str
     opencode_muse_reasoning_token_reserve: int
-    opencode_qwen_model: str
-    opencode_anthropic_version: str
-    opencode_enable_thinking: bool
-    opencode_thinking_budget_tokens: int
+    # The secondary OpenCode leg: the important route's primary and the
+    # intermediate stage of the normal route.  Replaced qwen3.8-flash on the
+    # Anthropic-dialect ``/messages`` on 2026-09-13.
+    opencode_secondary_model: str
+    opencode_secondary_reasoning_effort: str
+    opencode_secondary_reasoning_token_reserve: int
+    # Intermediate secondary stage on the Muse primary route.  When True
+    # (default) a Muse failure is followed by one secondary call before Luna;
+    # when False the chain is the two-leg Muse->Luna path.  The secondary
+    # primary route (important) and the Luna primary route (critical) are
+    # unaffected -- they never fall back to Muse.
+    opencode_secondary_fallback_enable: bool
     opencode_timeout_sec: float
     opencode_max_output_tokens: int
-    opencode_context_budget_tokens: int
     opencode_parallelism: int
     # The fallback is the system's existing OpenAI integration, configured -- not
     # reimplemented.  These three values are what that one RemoteAPIProvider is
@@ -556,6 +590,16 @@ class AIGateRuntimeConfig:
     trade_memory_file: Path
     provider_circuit_failure_threshold: int
     provider_circuit_cooldown_sec: float
+    # What one ``x-opencode-session`` value names on the OpenCode /responses
+    # legs: ``prompt_prefix`` (default; one session per model + response schema,
+    # so the provider can route calls to its warm prefix cache) or ``request``
+    # (the previous per-request derivation, kept as an operator rollback).
+    opencode_session_scope: str = OPENCODE_SESSION_SCOPE_PROMPT_PREFIX
+    # Provider-wire ENCODING of the evidence payload (provider_wire_projection.py):
+    # ``canonical`` is the Phase-1 wire byte for byte, ``compact_v1`` the lossless
+    # grouped catalog encoding.  It cannot change which evidence is sent, how an
+    # answer is validated, which calls are made, or any identity or cache key.
+    provider_wire_projection: str = WIRE_PROJECTION_CANONICAL
     validation_warnings: tuple[str, ...] = ()
 
     @classmethod
@@ -600,9 +644,52 @@ class AIGateRuntimeConfig:
             _env_lookup(env, ("OPENCODE_MUSE_MODEL", "OPENCODE_MODEL"), "muse-spark-1.3-contributor")
             or "muse-spark-1.3-contributor"
         )
-        opencode_qwen_model = (
-            _env_lookup(env, ("OPENCODE_QWEN_MODEL",), "qwen3.8-flash") or "qwen3.8-flash"
+        opencode_secondary_model = (
+            _env_lookup(env, ("OPENCODE_SECONDARY_MODEL",), "deepseek-v4.1-flash")
+            or "deepseek-v4.1-flash"
         )
+        # Default ON: the secondary stage is the cheaper OpenCode-Go fallback.
+        # An invalid value reverts to True (the safe behaviour) and is logged
+        # exactly like every other ``*_ENABLE`` setting in this block.
+        opencode_secondary_fallback_enable_raw = _env_bool(
+            env, "OPENCODE_SECONDARY_FALLBACK_ENABLE", True, warnings, safe_default=True
+        )
+        # Routing/caching key only -- it cannot change which leg answers, what is
+        # sent, or how the answer is validated, so an invalid value is warned and
+        # replaced by the documented default rather than failing the selection.
+        opencode_session_scope = (
+            str(env.get("OPENCODE_SESSION_SCOPE") or "").strip().lower()
+            or OPENCODE_SESSION_SCOPE_PROMPT_PREFIX
+        )
+        if opencode_session_scope not in OPENCODE_SESSION_SCOPES:
+            warnings.append("OPENCODE_SESSION_SCOPE=invalid")
+            opencode_session_scope = OPENCODE_SESSION_SCOPE_PROMPT_PREFIX
+        # Encoding only, same posture as the session scope above: an invalid value
+        # is warned and replaced by the Phase-1 canonical wire.
+        provider_wire_projection = normalize_wire_projection(env.get(WIRE_PROJECTION_ENV))
+        if provider_wire_projection is None:
+            warnings.append(f"{WIRE_PROJECTION_ENV}=invalid")
+            provider_wire_projection = WIRE_PROJECTION_CANONICAL
+        if is_opencode:
+            # The Qwen leg is retired.  Its settings are reported, never read:
+            # mapping OPENCODE_QWEN_MODEL onto the secondary leg would send a
+            # model to ``/responses`` that the endpoint refuses outright ("not
+            # supported for format openai"), and the Anthropic-dialect keys
+            # configure a transport the router no longer builds.
+            for retired_key, superseded_by in (
+                ("OPENCODE_QWEN_MODEL", "OPENCODE_SECONDARY_MODEL"),
+                ("OPENCODE_QWEN_FALLBACK_ENABLE", "OPENCODE_SECONDARY_FALLBACK_ENABLE"),
+                ("OPENCODE_ANTHROPIC_VERSION", ""),
+                ("OPENCODE_ENABLE_THINKING", ""),
+                ("OPENCODE_THINKING_BUDGET_TOKENS", ""),
+                ("OPENCODE_CONTEXT_BUDGET_TOKENS", ""),
+            ):
+                if str(env.get(retired_key) or "").strip():
+                    warnings.append(
+                        f"{retired_key}=ignored_superseded_by_{superseded_by}"
+                        if superseded_by
+                        else f"{retired_key}=ignored_retired_with_qwen_leg"
+                    )
         if is_local:
             selected_model = _env_lookup(env, ("LOCAL_AI_ANALYST_MODEL",), local_model) or local_model
             fallback_raw = _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "")
@@ -723,6 +810,25 @@ class AIGateRuntimeConfig:
         }:
             warnings.append("OPENCODE_MUSE_REASONING_EFFORT=invalid")
             opencode_muse_reasoning_effort = "high"
+        # Same dialect, same accepted set, same default as Muse.  ``high`` was
+        # verified on the live endpoint for deepseek-v4.1-flash on 2026-09-13:
+        # the response echoed ``reasoning.effort=high`` and reported reasoning
+        # tokens alongside a strict-schema answer.
+        opencode_secondary_reasoning_effort = _env_lookup(
+            env, ("OPENCODE_SECONDARY_REASONING_EFFORT",), "high"
+        ).strip().lower()
+        if opencode_secondary_reasoning_effort not in {
+            "",
+            "auto",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        }:
+            warnings.append("OPENCODE_SECONDARY_REASONING_EFFORT=invalid")
+            opencode_secondary_reasoning_effort = "high"
         opencode_fallback_reasoning_effort = _env_lookup(
             env, ("OPENCODE_FALLBACK_REASONING_EFFORT",), "low"
         ).strip().lower()
@@ -777,8 +883,8 @@ class AIGateRuntimeConfig:
                 provider_errors.append("OPENCODE_GO_API_KEY=missing")
             if not opencode_muse_model:
                 provider_errors.append("OPENCODE_MUSE_MODEL=missing")
-            if not opencode_qwen_model:
-                provider_errors.append("OPENCODE_QWEN_MODEL=missing")
+            if not opencode_secondary_model:
+                provider_errors.append("OPENCODE_SECONDARY_MODEL=missing")
             if endpoint_class(opencode_base_url) == "invalid":
                 provider_errors.append("OPENCODE_GO_BASE_URL=invalid")
             # The OpenAI leg is not optional in this mode: every OpenCode route
@@ -801,7 +907,12 @@ class AIGateRuntimeConfig:
         local_parallelism = _env_int(env, "LOCAL_AI_PARALLELISM", 1, warnings, min_value=1, max_value=3)
 
         openrouter_parallelism = _env_int(
-            env, "OPENROUTER_PARALLELISM", 3, warnings, min_value=1, max_value=8
+            env,
+            "OPENROUTER_PARALLELISM",
+            3,
+            warnings,
+            min_value=1,
+            max_value=MAX_PROVIDER_PARALLELISM,
         )
         openrouter_fallback_models: list[str] = []
         for item in _env_lookup(env, ("OPENROUTER_FALLBACK_MODELS",), "").split(","):
@@ -998,27 +1109,34 @@ class AIGateRuntimeConfig:
                 min_value=0,
                 max_value=120000,
             ),
-            opencode_qwen_model=opencode_qwen_model,
-            opencode_anthropic_version=(
-                _env_lookup(env, ("OPENCODE_ANTHROPIC_VERSION",), "2023-06-01") or "2023-06-01"
+            opencode_secondary_model=opencode_secondary_model,
+            opencode_secondary_reasoning_effort=opencode_secondary_reasoning_effort,
+            # Same trap as Muse: max_output_tokens bounds reasoning and content
+            # together on /responses, and this leg runs at effort=high too.
+            opencode_secondary_reasoning_token_reserve=_env_int(
+                env,
+                "OPENCODE_SECONDARY_REASONING_TOKEN_RESERVE",
+                24000,
+                warnings,
+                min_value=0,
+                max_value=120000,
             ),
-            opencode_enable_thinking=_env_bool(
-                env, "OPENCODE_ENABLE_THINKING", False, warnings, safe_default=False
-            ),
-            opencode_thinking_budget_tokens=_env_int(
-                env, "OPENCODE_THINKING_BUDGET_TOKENS", 0, warnings, min_value=0, max_value=120000
-            ),
+            opencode_secondary_fallback_enable=opencode_secondary_fallback_enable_raw,
+            opencode_session_scope=opencode_session_scope,
+            provider_wire_projection=provider_wire_projection,
             opencode_timeout_sec=_env_float(
                 env, "OPENCODE_TIMEOUT_SEC", 900.0, warnings, min_value=10.0, max_value=9000.0
             ),
             opencode_max_output_tokens=_env_int(
                 env, "OPENCODE_MAX_OUTPUT_TOKENS", 25000, warnings, min_value=1024, max_value=128000
             ),
-            opencode_context_budget_tokens=_env_int(
-                env, "OPENCODE_CONTEXT_BUDGET_TOKENS", 131072, warnings, min_value=2048, max_value=1000000
-            ),
             opencode_parallelism=_env_int(
-                env, "OPENCODE_PARALLELISM", 3, warnings, min_value=1, max_value=8
+                env,
+                "OPENCODE_PARALLELISM",
+                3,
+                warnings,
+                min_value=1,
+                max_value=MAX_PROVIDER_PARALLELISM,
             ),
             opencode_fallback_model=(
                 _env_lookup(env, ("OPENCODE_FALLBACK_MODEL",), "gpt-5.6-luna") or "gpt-5.6-luna"
@@ -1198,13 +1316,20 @@ class AIGateRuntimeConfig:
             "opencode_muse_reasoning_token_reserve": (
                 self.opencode_muse_reasoning_token_reserve if self.is_opencode_provider else 0
             ),
-            "opencode_qwen_model": self.opencode_qwen_model if self.is_opencode_provider else "",
-            "opencode_anthropic_version": self.opencode_anthropic_version if self.is_opencode_provider else "",
-            "opencode_enable_thinking": self.opencode_enable_thinking if self.is_opencode_provider else False,
-            "opencode_thinking_budget_tokens": self.opencode_thinking_budget_tokens if self.is_opencode_provider else 0,
+            "opencode_secondary_model": self.opencode_secondary_model if self.is_opencode_provider else "",
+            "opencode_secondary_reasoning_effort": (
+                self.opencode_secondary_reasoning_effort if self.is_opencode_provider else ""
+            ),
+            "opencode_secondary_reasoning_token_reserve": (
+                self.opencode_secondary_reasoning_token_reserve if self.is_opencode_provider else 0
+            ),
+            "opencode_secondary_fallback_enable": (
+                self.opencode_secondary_fallback_enable if self.is_opencode_provider else False
+            ),
+            "opencode_session_scope": self.opencode_session_scope if self.is_opencode_provider else "",
+            "provider_wire_projection": self.provider_wire_projection,
             "opencode_timeout_sec": self.opencode_timeout_sec if self.is_opencode_provider else 0.0,
             "opencode_max_output_tokens": self.opencode_max_output_tokens if self.is_opencode_provider else 0,
-            "opencode_context_budget_tokens": self.opencode_context_budget_tokens if self.is_opencode_provider else 0,
             "opencode_parallelism": self.opencode_parallelism if self.is_opencode_provider else 0,
             "opencode_fallback_model": self.opencode_fallback_model if self.is_opencode_provider else "",
             "opencode_fallback_reasoning_effort": self.opencode_fallback_reasoning_effort if self.is_opencode_provider else "",
@@ -1222,6 +1347,13 @@ class AIGateRuntimeConfig:
 
 # ---------- Provider-neutral AI transport ----------
 AI_CONFIG = AIGateRuntimeConfig.from_env()
+# Session-aware AI review gate (ai_review_gate.py).  Built from the same process
+# environment as AI_CONFIG, after the provider bootstrap, so AI_REVIEW_* keys in
+# the runtime .env are honoured.  ``log`` is resolved at call time.
+AI_REVIEW_GATE = ReviewGate(
+    ReviewGateConfig.from_env(os.environ, resolve_path=resolve_project_path),
+    logger=lambda message: log(message),
+)
 # Explicit migration globals remain for old diagnostics/tests. In local mode
 # the remote secret variables are not read and remain empty.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip() if AI_CONFIG.use_remote_api is True else ""
@@ -1319,6 +1451,24 @@ def log(msg: str) -> None:
             pass
 
 
+def _opencode_leg_reasoning_effort(
+    provider_id: str, config: AIGateRuntimeConfig | None = None
+) -> str:
+    """The reasoning effort the OpenCode leg that answered was configured with.
+
+    Both routed OpenCode legs share one transport class, so the provider id is
+    what distinguishes them.  An id this mode does not build reports ``none``
+    rather than borrowing another leg's setting.
+    """
+
+    cfg = AI_CONFIG if config is None else config
+    if provider_id == OPENCODE_PRIMARY_PROVIDER_ID:
+        return cfg.opencode_muse_reasoning_effort
+    if provider_id == OPENCODE_SECONDARY_PROVIDER_ID:
+        return cfg.opencode_secondary_reasoning_effort
+    return "none"
+
+
 def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
     cfg = config or AI_CONFIG
     if not cfg.provider_config_valid or cfg.provider_select is None:
@@ -1385,7 +1535,7 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
             admission_backoff_max_sec=cfg.admission_backoff_max_sec,
             log=log,
         )
-        return OpenCodeRoutedProvider(
+        routed = OpenCodeRoutedProvider(
             muse=OpenCodeResponsesProvider(
                 base_url=cfg.opencode_base_url,
                 api_key=opencode_key,
@@ -1394,19 +1544,22 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
                 timeout_sec=cfg.opencode_timeout_sec,
                 max_output_tokens=cfg.opencode_max_output_tokens,
                 reasoning_token_reserve=cfg.opencode_muse_reasoning_token_reserve,
+                session_scope=cfg.opencode_session_scope,
                 **common,
             ),
-            qwen=OpenCodeMessagesProvider(
+            # Same transport class as Muse, on the same /responses endpoint,
+            # with its own provider id so every result names the leg that
+            # answered.
+            secondary=OpenCodeResponsesProvider(
                 base_url=cfg.opencode_base_url,
                 api_key=opencode_key,
-                model=cfg.opencode_qwen_model,
+                model=cfg.opencode_secondary_model,
+                reasoning_effort=cfg.opencode_secondary_reasoning_effort,
                 timeout_sec=cfg.opencode_timeout_sec,
                 max_output_tokens=cfg.opencode_max_output_tokens,
-                context_budget_tokens=cfg.opencode_context_budget_tokens,
-                anthropic_version=cfg.opencode_anthropic_version,
-                enable_thinking=cfg.opencode_enable_thinking,
-                thinking_budget_tokens=cfg.opencode_thinking_budget_tokens,
-                parallelism=cfg.opencode_parallelism,
+                reasoning_token_reserve=cfg.opencode_secondary_reasoning_token_reserve,
+                provider_id=OPENCODE_SECONDARY_PROVIDER_ID,
+                session_scope=cfg.opencode_session_scope,
                 **common,
             ),
             # The system's existing OpenAI integration, configured -- not a
@@ -1433,8 +1586,19 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
             ),
             policy=cfg.opencode_routing_policy,
             fallback_service_tier=cfg.opencode_fallback_service_tier,
+            secondary_fallback_enable=cfg.opencode_secondary_fallback_enable,
             log=log,
         )
+        # Per-attempt Go consumption ledger (<bus>/logs/opencode_go_attempts.ndjson).
+        # Observability only: every leg of this selection records each outbound
+        # HTTP attempt -- including the validation failures, timeouts and late
+        # results the usage ledger never sees -- and the router records one row
+        # per logical call.  Nothing reads these records back into a decision.
+        attempt_ledger = OpenCodeGoAttemptLedger(path_resolver=bus_attempt_ledger_path)
+        for leg in (routed._muse, routed._secondary, routed._fallback):
+            leg.attempt_observer = attempt_ledger
+        routed.call_observer = attempt_ledger
+        return routed
     if cfg.use_remote_api:
         # This is the only branch allowed to read the remote secret.
         remote_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -2302,6 +2466,7 @@ def _log_ai_runtime_config_once() -> None:
         return
     _AI_RUNTIME_CONFIG_LOGGED = True
     log(f"[ai_gate] Active AI config: {json.dumps(AI_CONFIG.safe_log_dict(), sort_keys=True)}")
+    log(f"[ai_review_gate] config {json.dumps(AI_REVIEW_GATE.config.safe_log_dict(), sort_keys=True)}")
     log(
         "[ai_gate] prompt_cache_enabled="
         + str(AI_CONFIG.prompt_cache_enable).lower()
@@ -4147,7 +4312,7 @@ WHY THIS MATTERS. These decisions move real capital in a live account that a per
 
 For each candidate return candidate_index and verdict equal to decision_state. Fill thesis_supported, material_contradictions, missing_required_evidence, historical_evidence_state, major_risks, evidence_ref_ids, confidence_band, and summary. Historical evidence state must be SUPPORTIVE, MIXED, ADVERSE, or INSUFFICIENT_SAMPLE. confidence_band must be exactly {" or ".join(CONFIDENCE_BANDS)}. Do not request or reveal hidden chain-of-thought; provide only concise auditable conclusions.
 
-Evidence citation is by integer id only. The payload contains evidence_catalog.items, where each item has id, p (the Python-owned canonical path), v (the observed value), and optionally c (the candidate index it belongs to). Items without c are global. Every candidate row also contains allowed_evidence_ref_ids: for that candidate, both evidence_ref_ids and veto.evidence_ref_ids may contain only distinct integers copied from that exact list. A candidate may cite its own items and global items; citing another candidate's item is invalid. Never invent an id, never return a path string, and never construct a canonical path yourself: Python owns all canonical paths, value hashes, and authority labels.
+Evidence citation is by integer id only. {analyst_catalog_description(AI_CONFIG.provider_wire_projection)} Every candidate row also contains allowed_evidence_ref_ids: for that candidate, both evidence_ref_ids and veto.evidence_ref_ids may contain only distinct integers copied from that exact list. A candidate may cite its own items and global items; citing another candidate's item is invalid. Never invent an id, never return a path string, and never construct a canonical path yourself: Python owns all canonical paths, value hashes, and authority labels.
 
 Return analytical content only. Python exclusively owns and injects every internal contract version, schema version, prompt contract version, target arbitration schema version, request identity, and candidate identity. Never emit, guess, or echo those constants.
 
@@ -4186,7 +4351,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 provider_result = provider.generate_structured(
                     role="analyst",
                     system_prompt=system_msg,
-                    evidence=model_payload,
+                    evidence=project_evidence_for_wire(model_payload, AI_CONFIG.provider_wire_projection),
                     response_schema=ModelAIGateOutput,
                     request_metadata={
                         "request_id": request_id,
@@ -4244,15 +4409,13 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         else "none"
                     )
                 elif provider_result.provider_mode == PROVIDER_MODE_OPENCODE:
-                    # An OpenCode result is Muse or Qwen; a Luna fallback returns
-                    # PROVIDER_MODE_REMOTE and is handled by the first branch, so
-                    # the ledger records each leg's own budget and effort rather
-                    # than the local server's.
+                    # An OpenCode result is Muse or the secondary leg; a Luna
+                    # fallback returns PROVIDER_MODE_REMOTE and is handled by the
+                    # first branch, so the ledger records each leg's own budget
+                    # and effort rather than the local server's.
                     budget = AI_CONFIG.opencode_max_output_tokens
-                    reasoning_effort = (
-                        AI_CONFIG.opencode_muse_reasoning_effort
-                        if provider_result.provider_id == "opencode_go_responses"
-                        else "none"
+                    reasoning_effort = _opencode_leg_reasoning_effort(
+                        provider_result.provider_id
                     )
                 else:
                     budget = AI_CONFIG.local_max_output_tokens
@@ -4390,7 +4553,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     repaired_result = provider.generate_structured(
                         role="analyst",
                         system_prompt=repair_prompt,
-                        evidence=model_payload,
+                        evidence=project_evidence_for_wire(model_payload, AI_CONFIG.provider_wire_projection),
                         response_schema=ModelAIGateOutput,
                         request_metadata={
                             "request_id": request_id,
@@ -4561,7 +4724,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             repaired_result = provider.generate_structured(
                                 role="analyst",
                                 system_prompt=repair_prompt,
-                                evidence=model_payload,
+                                evidence=project_evidence_for_wire(model_payload, AI_CONFIG.provider_wire_projection),
                                 response_schema=ModelAIGateOutput,
                                 request_metadata={
                                     "request_id": request_id,
@@ -5128,6 +5291,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         ),
                         "request_id": request_id,
                         "symbol": symbol,
+                        WIRE_PROJECTION_METADATA_KEY: AI_CONFIG.provider_wire_projection,
                         "non_trading_shadow": bool(
                             non_authoritative_shadow
                             or _as_dict(payload.get("shadow_repeat")).get("trading_authority") is False
@@ -5229,6 +5393,11 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             and AI_CONFIG.openrouter_enable_thinking
                             else "none"
                             if role_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                            # The analyst row already records each OpenCode
+                            # leg's own effort; the critic and adjudicator rows
+                            # recorded "" and the local server's budget.
+                            else _opencode_leg_reasoning_effort(role_result.provider_id)
+                            if role_result.provider_mode == PROVIDER_MODE_OPENCODE
                             else ""
                         ),
                         max_output_tokens=(
@@ -5236,6 +5405,8 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             if role_result.provider_mode == PROVIDER_MODE_REMOTE
                             else AI_CONFIG.openrouter_max_output_tokens
                             if role_result.provider_mode == PROVIDER_MODE_OPENROUTER
+                            else AI_CONFIG.opencode_max_output_tokens
+                            if role_result.provider_mode == PROVIDER_MODE_OPENCODE
                             else AI_CONFIG.local_max_output_tokens
                         ),
                         provider_mode=role_result.provider_mode,
@@ -8950,6 +9121,150 @@ def _run_provider_shadow_comparison(payload: Dict[str, Any], selected_decision: 
         )
 
 
+def _ai_review_python_identity() -> Dict[str, str]:
+    """Identity the NEXT provider call would carry, without per-call values.
+
+    ``generation_identity`` folds the per-request timeout and output budget
+    into its hash, so it changes with candidate count and remaining deadline;
+    the static ``identity`` hash describes the configured leg itself.  The
+    record side replaces provider/model with the leg that actually answered.
+    """
+
+    try:
+        static = _provider().identity("analyst")
+    except Exception:
+        static = {}
+    return {
+        "provider_id": str(static.get("provider_id") or ""),
+        "model_id": str(static.get("model_id") or ""),
+        "static_generation_settings_hash": str(static.get("generation_settings_hash") or ""),
+        "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
+        "decision_schema_version": AI_DECISION_SCHEMA_VERSION,
+        "target_arbitration_schema_version": AI_TARGET_ARBITRATION_SCHEMA_VERSION,
+        "family_profile_version": FAMILY_PROFILE_VERSION,
+        "evidence_envelope_version": EVIDENCE_ENVELOPE_VERSION,
+        "provider_decision_context_version": PROVIDER_DECISION_CONTEXT_VERSION,
+        "provider_wire_projection": str(AI_CONFIG.provider_wire_projection),
+        "review_gate_version": REVIEW_GATE_VERSION,
+    }
+
+
+def _evaluate_ai_review_gate(payload: Dict[str, Any]) -> ReviewVerdict:
+    try:
+        verdict = AI_REVIEW_GATE.evaluate(payload, python_identity=_ai_review_python_identity())
+    except Exception as exc:
+        # The gate may only ever withhold a call it can prove unnecessary.  A
+        # local failure inside it therefore degrades to the pre-gate behaviour.
+        log(
+            "[ai_review_gate] evaluate_failed"
+            f" request_id={str(payload.get('id') or '')}"
+            f" error={type(exc).__name__}:{_ascii_compact(str(exc))} action=call_ai"
+        )
+        return ReviewVerdict(
+            mode=AI_REVIEW_GATE.config.mode,
+            action="CALL",
+            category="OTHER_REQUIRED",
+            reason="review_gate_evaluate_failed",
+        )
+    if verdict.reason not in {"review_gate_off", "non_live_workload"}:
+        log(
+            "[ai_review_gate]"
+            f" request_id={str(payload.get('id') or '')}"
+            f" symbol={str(payload.get('symbol') or '')}"
+            + verdict.as_log_fields()
+        )
+    if verdict.enforced_reuse:
+        _inc_counter("ai_review_gate_reuse")
+    elif verdict.would_reuse:
+        _inc_counter("ai_review_gate_shadow_would_reuse")
+    elif verdict.reason not in {"review_gate_off", "non_live_workload"}:
+        _inc_counter("ai_review_gate_call")
+    return verdict
+
+
+def _ai_review_reuse_decision(verdict: ReviewVerdict, best_index: int) -> "Decision":
+    """Non-trading, identity-bound envelope for a proven-unnecessary review.
+
+    Same tier as the other deterministic no-provider decisions (taxonomy and
+    mandatory-prior hard gates).  It can never authorize a trade: the gate only
+    reuses non-approving priors, and this envelope carries no assessment.
+    """
+
+    return Decision(
+        allow=False,
+        raw_allow=False,
+        score=0.0,
+        chosen_index=best_index,
+        confidence=0.0,
+        decision_state=DECISION_REJECT,
+        decision_quality_tier=DECISION_QUALITY_RULE_ONLY_NON_TRADING,
+        mandatory_fields_complete=False,
+        reasons={"ai_review_gate": verdict.as_reason_dict()},
+        decision_source=AI_REVIEW_REUSE_DECISION_SOURCE,
+        rejection_codes=[AI_REVIEW_REUSE_REJECTION_CODE],
+        narrative_state=AI_REVIEW_REUSE_NARRATIVE_STATE,
+        invalidation_risks=[],
+        missing_confirmations=[],
+        suggested_risk_multiplier=0.0,
+        model_version=AI_GATE_MODEL_VERSION,
+    )
+
+
+def _record_ai_review_decision(verdict: ReviewVerdict, payload: Dict[str, Any], decision: "Decision") -> None:
+    if verdict.fingerprint is None:
+        return
+    view = {
+        "decision_quality_tier": decision.decision_quality_tier,
+        "decision_source": decision.decision_source,
+        "mandatory_fields_complete": decision.mandatory_fields_complete,
+        "rejection_codes": list(decision.rejection_codes or []),
+        "candidate_assessments": list(decision.candidate_assessments or []),
+        "decision_state": decision.decision_state,
+        "python_final_allow": bool(decision.python_final_allow or decision.allow),
+        "provider_id": decision.provider_id,
+        "actual_model_id": decision.actual_model_id,
+        "model_version": decision.model_version,
+    }
+    request_id = str(payload.get("id") or "")
+    if verdict.would_reuse and not verdict.enforced_reuse:
+        equivalent = ai_review_shadow_outcome_equivalent(verdict, view)
+        log(
+            "[ai_review_gate_shadow_outcome]"
+            f" request_id={request_id}"
+            f" symbol={str(payload.get('symbol') or '')}"
+            f" would_reuse=true prior_request_id={verdict.prior_request_id}"
+            f" actual_decision_state={decision.decision_state}"
+            f" actual_python_final_allow={str(view['python_final_allow']).lower()}"
+            f" actual_decision_source={decision.decision_source}"
+            f" executable_outcome_equivalent={str(bool(equivalent)).lower()}"
+        )
+        if not equivalent:
+            _inc_counter("ai_review_gate_shadow_divergence")
+    try:
+        stored, reason = AI_REVIEW_GATE.record(
+            verdict,
+            payload,
+            view,
+            family_threshold=lambda index: float(
+                effective_llm_quality_score_threshold(payload, chosen_index=index)[0]
+            ),
+        )
+    except Exception as exc:
+        log(
+            "[ai_review_gate] record_failed"
+            f" request_id={request_id} error={type(exc).__name__}:{_ascii_compact(str(exc))}"
+            " action=next_request_calls_ai"
+        )
+        return
+    if stored:
+        _inc_counter("ai_review_gate_recorded")
+    log(
+        "[ai_review_gate] record"
+        f" request_id={request_id} stored={str(stored).lower()} reason={reason}"
+        f" decision_state={decision.decision_state} decision_source={decision.decision_source}"
+    )
+
+
 def _score_setup_impl(
     payload: Dict[str, Any],
     *,
@@ -9060,6 +9375,36 @@ def _score_setup_impl(
             openai_called=False,
             skip_reason=";".join(fatal_integrity_codes),
         )
+        return decision
+
+    # Every deterministic hard gate above keeps precedence: it states a fact
+    # about THIS request.  Only a request that would otherwise reach the
+    # provider is asked whether a fresh review could change anything.
+    review_verdict = _evaluate_ai_review_gate(payload)
+    if review_verdict.enforced_reuse:
+        _inc_counter("ai_calls_skipped_by_review_gate")
+        decision = _ai_review_reuse_decision(review_verdict, best_index)
+        _write_ai_cost_report(
+            payload,
+            request_id=str(payload.get("id") or ""),
+            decision_source=decision.decision_source,
+            model="",
+            reasoning_effort=AI_CONFIG.reasoning_effort,
+            service_tier="",
+            prompt_cache_enabled=AI_CONFIG.prompt_cache_enable,
+            cache_status="ai_review_gate_reuse",
+            batch_used=False,
+            flex_used=False,
+            openai_called=False,
+            skip_reason=AI_REVIEW_REUSE_REJECTION_CODE,
+        )
+        if frozen_request is not None:
+            frozen_request.assert_unchanged(
+                payload,
+                stage="after_ai_review_gate",
+                provider_call_attempted=False,
+                http_request_sent=False,
+            )
         return decision
 
     health = _refresh_provider_health(force=False)
@@ -9396,6 +9741,7 @@ def _score_setup_impl(
             f"[ai_cache] store_skipped request_id={str(payload.get('id') or '')} "
             "reason=repeatability_non_authoritative_live_decision"
         )
+    _record_ai_review_decision(review_verdict, payload, final_decision)
     if frozen_request is not None:
         frozen_request.assert_unchanged(
             payload,
@@ -10048,9 +10394,28 @@ def effective_worker_count(configured_workers: int, workflow_source: str) -> int
     the terminal already gave up.
     """
 
-    workers = max(1, min(16, int(configured_workers)))
+    workers = max(1, min(MAX_PROVIDER_PARALLELISM, int(configured_workers)))
     if str(workflow_source) == "live_wait_debug":
         return 1
+    return workers
+
+
+def request_pool_size(
+    configured_workers: int, provider_mode: str, config: AIGateRuntimeConfig
+) -> int:
+    """Size of the request pool: the system-wide ceiling, then the selected
+    transport's own ceiling -- whichever is stricter."""
+
+    workers = max(1, min(MAX_PROVIDER_PARALLELISM, int(configured_workers)))
+    if provider_mode == PROVIDER_MODE_LOCAL:
+        return min(workers, config.local_parallelism)
+    if provider_mode == PROVIDER_MODE_OPENROUTER:
+        # Routed endpoints publish a per-key concurrency ceiling; exceeding it
+        # turns into upstream 429s that spend the request deadline on retries.
+        return min(workers, config.openrouter_parallelism)
+    if provider_mode == PROVIDER_MODE_OPENCODE:
+        # Same reasoning as OpenRouter: a per-key ceiling on a paid gateway.
+        return min(workers, config.opencode_parallelism)
     return workers
 
 
@@ -12229,7 +12594,10 @@ def main() -> None:
         "--workers",
         type=int,
         default=int(os.getenv("AI_GATE_WORKERS", "4")),
-        help="Maximum AI requests processed concurrently (default: 4).",
+        help=(
+            "Maximum AI requests processed concurrently (default: 4, "
+            f"ceiling: {MAX_PROVIDER_PARALLELISM})."
+        ),
     )
     ap.add_argument(
         "--fill-tester-cache-once",
@@ -12431,17 +12799,10 @@ def main() -> None:
     if set_expectancy_ai_provider is not None:
         set_expectancy_ai_provider(selected_provider)
     global AI_CONFIG_WORKERS
-    AI_CONFIG_WORKERS = max(1, min(16, args.workers))
-    worker_count = AI_CONFIG_WORKERS
-    if selected_provider.provider_mode == PROVIDER_MODE_LOCAL:
-        worker_count = min(worker_count, AI_CONFIG.local_parallelism)
-    elif selected_provider.provider_mode == PROVIDER_MODE_OPENROUTER:
-        # Routed endpoints publish a per-key concurrency ceiling; exceeding it
-        # turns into upstream 429s that spend the request deadline on retries.
-        worker_count = min(worker_count, AI_CONFIG.openrouter_parallelism)
-    elif selected_provider.provider_mode == PROVIDER_MODE_OPENCODE:
-        # Same reasoning as OpenRouter: a per-key ceiling on a paid gateway.
-        worker_count = min(worker_count, AI_CONFIG.opencode_parallelism)
+    AI_CONFIG_WORKERS = max(1, min(MAX_PROVIDER_PARALLELISM, args.workers))
+    worker_count = request_pool_size(
+        AI_CONFIG_WORKERS, selected_provider.provider_mode, AI_CONFIG
+    )
     request_pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ai-gate")
 
     log(f"[ai_gate] Bus root: {bus}")

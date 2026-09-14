@@ -362,6 +362,15 @@ class PendingAiRecoveryFalsificationTests(unittest.TestCase):
     the change under test.
     """
 
+    # The tree immediately before the recovery change.  These assertions read
+    # HEAD while the change was an uncommitted working-tree diff; commit
+    # e6cae59e ("Snapshot system: shadow tracker, pending AI recovery, ...")
+    # committed it, so HEAD now IS the post-change tree and every check here
+    # failed by construction.  Pinning the parent keeps the falsification
+    # meaningful: it still proves the asserted tokens/values did not exist
+    # before the change.
+    PRE_CHANGE_REV = "e6cae59e~1"
+
     def _git_show(self, rev_path: str) -> str:
         proc = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", rev_path],
@@ -375,7 +384,7 @@ class PendingAiRecoveryFalsificationTests(unittest.TestCase):
         return proc.stdout
 
     def test_pre_change_trade_engine_lacks_the_recovery_surface(self) -> None:
-        head = self._git_show("HEAD:MT5_PO3_Codex Include/TradeEngine.mqh")
+        head = self._git_show(f"{self.PRE_CHANGE_REV}:MT5_PO3_Codex Include/TradeEngine.mqh")
         for token in (
             "_ReconcileRestoredPendingAi",
             "_RecoveredEntryWithinContract",
@@ -387,11 +396,11 @@ class PendingAiRecoveryFalsificationTests(unittest.TestCase):
                 self.assertNotIn(token, head)
 
     def test_pre_change_config_default_shadow_horizon_was_1440(self) -> None:
-        head = self._git_show("HEAD:MT5_PO3_Codex Include/Config.mqh")
+        head = self._git_show(f"{self.PRE_CHANGE_REV}:MT5_PO3_Codex Include/Config.mqh")
         self.assertIn("InpShadowCandidateHorizonMinutes = 1440", head)
 
     def test_pre_change_preset_shadow_horizon_was_480(self) -> None:
-        head = self._git_show("HEAD:scalp_v2_full.set")
+        head = self._git_show(f"{self.PRE_CHANGE_REV}:scalp_v2_full.set")
         self.assertIn("InpShadowCandidateHorizonMinutes=480", head)
 
 

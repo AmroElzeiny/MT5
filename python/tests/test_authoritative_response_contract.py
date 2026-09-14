@@ -1048,7 +1048,9 @@ class WorkerModeTests(unittest.TestCase):
 
     def test_configured_workers_are_clamped(self) -> None:
         self.assertEqual(ai_gate.effective_worker_count(0, "tester"), 1)
-        self.assertEqual(ai_gate.effective_worker_count(99, "tester"), 16)
+        # System-wide ceiling raised from 16 to 25 on 2026-09-13.
+        self.assertEqual(ai_gate.effective_worker_count(25, "tester"), 25)
+        self.assertEqual(ai_gate.effective_worker_count(99, "tester"), 25)
 
     def test_file_bus_claims_never_exceed_available_workers(self) -> None:
         self.assertEqual(ai_gate.available_request_claim_slots(3, 0), 3)

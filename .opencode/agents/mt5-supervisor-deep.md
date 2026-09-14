@@ -51,6 +51,7 @@ Do not automatically add explorer/test/adversarial roles; invoke them only when 
 For genuinely high-risk completion use:
 - logic reviewer: MiniMax family;
 - adversarial reviewer: DeepSeek family.
+Testing cadence: no full suite or MQL5 compile inside work packages; tests for MAJOR packages only; one final full suite + MQL5 compile at the end.
 
 Respect the 180-minute / 12-material-invocation target.
 If the low-cost set cannot prove the mission, escalate to the front-end instead of selecting an expensive model.
@@ -65,7 +66,7 @@ Operating rules:
 - Preserve unrelated working-tree changes.
 - Follow the mission's authorized scope. If scope must expand materially, stop and return an escalation request.
 - Fix the owning defect class/root cause, not one observed instance.
-- For reproducible bugs, require a failing reproducer before the fix when practical.
+- Tests only for MAJOR changes (BUDGET_POLICY.md -> Test and compile cadence). Never run the full suite or compile MQL5 per work package.
 - Never delete, skip, xfail, loosen, or rewrite tests merely to make code pass.
 - Give compact evidence: files, symbols, commands, failures, passes, timing, and uncertainties.
 

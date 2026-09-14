@@ -1,0 +1,1002 @@
+﻿opencode.exe : 
+At C:\Users\amroe\AppData\Roaming\npm\opencode.ps1:14 char:3
++   & "$basedir/node_modules/opencode-ai/bin/opencode.exe"   $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> mt5-supervisor-deep · deepseek-v4.1-flash
+
+→ Read CLAUDE.md
+→ Read .mt5-orchestrator/policy/ROUTING_POLICY.md
+→ Read .mt5-orchestrator/policy/BUDGET_POLICY.md
+→ Read .mt5-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+→ Read .mt5-orchestrator/models/ROLE_MODEL_MAP.md
+→ Read .mt5-orchestrator/models/LIVE_MODELS.md
+I'll start by reading the required policies and repository context.
+→ Read .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/WP2_SPEC.md
+→ Read .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8
+→ Read .mt5-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+Let me examine the stage A artifacts and current run state.
+→ Read .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/PROGRESS.json
+→ Read .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/BASELINE_STATUS.txt
+→ Read .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/USAGE_BEFORE.txt
+
+$ Get-ChildItem -LiteralPath ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\wp2" | Select-Object 
+Name,Length,LastWriteTime | Format-Table -AutoSize
+Name                    Length LastWriteTime       
+----                    ------ -------------       
+captures                       9/13/2026 8:41:28 PM
+cache_layout.json       13482  9/13/2026 9:02:04 PM
+calibration.json        123256 9/13/2026 9:02:04 PM
+consumer_table.json     189884 9/13/2026 9:02:08 PM
+duplication.json        59957  9/13/2026 9:02:04 PM
+input_attribution.csv   32191  9/13/2026 9:02:04 PM
+input_attribution.json  114587 9/13/2026 9:02:04 PM
+output_attribution.csv  31865  9/13/2026 9:02:08 PM
+output_attribution.json 108295 9/13/2026 9:02:08 PM
+precision.json          342090 9/13/2026 9:02:04 PM
+sample_manifest.json    41615  9/13/2026 9:02:04 PM
+
+$ git status --porcelain=v1; echo "---LOG---"; git log --oneline -5; echo "---BRANCH---"; git rev-parse 
+--abbrev-ref HEAD
+M .mt5-orchestrator/current/MISSION.md
+ M .mt5-orchestrator/current/RUN.json
+ M .mt5-orchestrator/models/LIVE_MODELS.md
+ M .mt5-orchestrator/policy/BUDGET_POLICY.md
+ M .mt5-orchestrator/policy/ROUTING_POLICY.md
+ M .mt5-orchestrator/templates/MISSION_TEMPLATE.md
+ M .opencode/agents/mt5-direct-read.md
+ M .opencode/agents/mt5-direct-write.md
+ M .opencode/agents/mt5-explorer.md
+ M .opencode/agents/mt5-reviewer-adversarial.md
+ M .opencode/agents/mt5-reviewer-logic.md
+ M .opencode/agents/mt5-reviewer-visual.md
+ M .opencode/agents/mt5-supervisor-deep.md
+ M .opencode/agents/mt5-supervisor.md
+ M .opencode/agents/mt5-test-debugger.md
+ M .opencode/agents/mt5-worker-fast.md
+ M .opencode/agents/mt5-worker-strong.md
+ M CLAUDE.md
+ M "MT5_PO3_Codex Include/Config.mqh"
+ M "MT5_PO3_Codex Include/StateStore.mqh"
+ M "MT5_PO3_Codex Include/TradeEngine.mqh"
+ M "MT5_PO3_Codex Include/Types.mqh"
+ M python/CLAUDE.md
+ M python/__pycache__/ai_gate.cpython-311.pyc
+ M python/__pycache__/ai_gate.cpython-312.pyc
+ M python/__pycache__/ai_provider.cpython-311.pyc
+ M python/__pycache__/ai_provider.cpython-312.pyc
+ M python/__pycache__/decision_pipeline.cpython-311.pyc
+ M python/__pycache__/decision_pipeline.cpython-312.pyc
+ M python/__pycache__/execution_adjustment_contract.cpython-312.pyc
+ M python/__pycache__/shadow_outcome_ledger.cpython-311.pyc
+ M python/__pycache__/shadow_outcome_ledger.cpython-312.pyc
+ M python/ai_gate.py
+ M python/ai_provider.py
+ M python/data/ai_repeatability_artifact.json
+ M python/data/ai_trade_memory.sqlite3
+ M python/data/artifact_compatibility_report_latest.json
+ M python/data/startup_policy_manifest_latest.json
+ M python/data/unknown_setup_taxonomy.jsonl
+ M python/decision_pipeline.py
+ M python/docs/runtime_env_template_opencode.txt
+ M python/docs/shadow_outcome_lifecycle_contract.md
+ M python/logs/ai_cost_report.jsonl
+ M python/logs/ai_request_response_fingerprints.jsonl
+ M python/shadow_outcome_ledger.py
+ M python/tests/__pycache__/test_ai_gate_logic.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_architecture_contracts.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_authoritative_response_contract.cpython-311-pytest-9.1.0.pyc
+ M python/tests/__pycache__/test_authoritative_response_contract.cpython-311-pytest-9.1.1.pyc
+ M python/tests/__pycache__/test_authoritative_response_contract.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_canonical_request_wait_contract.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_decision_integrity.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_evidence_catalog_contract.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_execution_adjustment_contract.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_governance_contracts.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_harness_provider_integration.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_local_ai_review_bridge.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_opencode_provider_contract.cpython-311-pytest-9.1.0.pyc
+ M python/tests/__pycache__/test_opencode_provider_contract.cpython-311-pytest-9.1.1.pyc
+ M python/tests/__pycache__/test_pending_ai_recovery_lifecycle.cpython-311-pytest-9.1.1.pyc
+ M python/tests/__pycache__/test_provider_neutral_ai.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_runtime_governance.cpython-312-pytest-8.4.1.pyc
+ M python/tests/__pycache__/test_shadow_outcome_lifecycle.cpython-311-pytest-9.1.0.pyc
+ M python/tests/__pycache__/test_shadow_outcome_lifecycle.cpython-311-pytest-9.1.1.pyc
+ M python/tests/test_authoritative_response_contract.py
+ M python/tests/test_opencode_provider_contract.py
+ M python/tests/test_pending_ai_recovery_lifecycle.py
+ M python/tests/test_shadow_outcome_lifecycle.py
+?? .mt5-orchestrator/current/DIRECT_MODE.json
+?? .mt5-orchestrator/runs/20260913T104353Z-7f1fbcd6/
+?? .mt5-orchestrator/runs/20260913T113107Z-6a42ed80/
+?? .mt5-orchestrator/runs/20260913T132919Z-7706175f/
+?? .mt5-orchestrator/runs/20260913T145826Z-99e5815c/
+?? .mt5-orchestrator/runs/20260913T155650Z-5fa598c0/
+?? .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/
+?? OPENCODE_GO_BILLING_EVIDENCE.md
+?? python/__pycache__/opencode_go_accounting.cpython-311.pyc
+?? python/__pycache__/opencode_go_accounting.cpython-312.pyc
+?? python/__pycache__/tester_cache_rekey.cpython-312.pyc
+?? python/opencode_go_accounting.py
+?? python/tests/__pycache__/conftest.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_admission_retry_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_approval_binding_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_configuration_circuit_recovery.cpython-311-pytest-9.1.0.pyc
+?? python/tests/__pycache__/test_configuration_circuit_recovery.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_execution_contract_coherence.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_final_first_leg_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_flex_service_tier.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_infra_rejection_fixes.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_opencode_go_cost_correctness.cpython-311-pytest-9.1.0.pyc
+?? python/tests/__pycache__/test_opencode_go_cost_correctness.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_opencode_provider_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_openrouter_flex_routing_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_openrouter_provider_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_panel_shortcircuit.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_pending_ai_recovery_lifecycle.cpython-311-pytest-9.1.0.pyc
+?? python/tests/__pycache__/test_pending_ai_recovery_lifecycle.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_pre_close_flatten_scope.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_provider_secret_isolation.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_provider_transport_parity.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_replay_cohort_startup_gate.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_replay_identity_freeze.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_review_contract_semantics.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_semantic_requeue_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_shadow_evidence_ladder.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_shadow_outcome_lifecycle.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_target_menu_feasibility.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_target_menu_python_contract.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_tester_cache_rekey.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_tester_replay_provenance.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_transport_failure_recovery.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_usage_cost_accounting.cpython-312-pytest-8.4.1.pyc
+?? python/tests/__pycache__/test_worker_ceiling.cpython-311-pytest-9.1.0.pyc
+?? python/tests/__pycache__/test_worker_ceiling.cpython-311-pytest-9.1.1.pyc
+?? python/tests/test_configuration_circuit_recovery.py
+?? python/tests/test_opencode_go_cost_correctness.py
+?? python/tests/test_worker_ceiling.py
+?? python/tools/__pycache__/opencode_token_attribution.cpython-312.pyc
+?? python/tools/opencode_token_attribution.py
+---LOG---
+e6cae59e Snapshot system: shadow tracker, pending AI recovery, orchestration tooling
+25cca426 Windows runtime export: shadow trades, decisions, cache, logs for merge into Linux instance
+1c9b5167 Fix runaway [execution_identity_quarantine] log spam in TradeEngine
+f3313759 Publish complete runtime state: refreshed snapshot, compressed oversized ledgers, VPS env template
+6d2afcaf Capture latest live trade memory and log tail
+---BRANCH---
+main
+
+→ Read .mt5-orchestrator/current/DIRECT_MODE.json
+Let me check direct-mode state and inspect the key APIs and stage A tool.
+
+$ $m = Get-Content -LiteralPath ".mt5-orchestrator\runs\20260913T155650Z-5fa598c0\wp2\sample_manifest.json" 
+-Raw | ConvertFrom-Json; if ($m -is [array]) { "count=$($m.Count)"; $m[0] | ConvertTo-Json -Depth 4 } else { 
+"type=object keys: $($m.PSObject.Properties.Name -join ', ')" }
+type=object keys: generated_at_utc, bus, sample_size, meets_minimum_30, seed, selection_rule, available_population, 
+selected_strata_summary, anchor_requests_in_sample, critic_anchor_requests_in_sample, muse_ledger_ok_rows_by_role, 
+rows, captured_requests, measurement_version, stale_captures_skipped, role_row_count, role_row_summary, 
+selected_strata_summary_by_wire_candidates, cohort_sealed_requests, analyst_wires, critic_wires, adjudicator_wires
+
+✱ Grep "^def |^class |^_provider|^AI_CONFIG|^REASONING|read_json_any_encoding|def _score_setup_impl|def 
+_score_setup_ai|def _write_ai_cost_report|def build_decision_evidence_envelope|def build_evidence_catalog|def 
+_compact_model_evidence_payload" in python/ai_gate.py · 100 matches
+→ Read python/ai_gate.py [offset=414, limit=200]
+
+$ Get-ChildItem -LiteralPath "python\tools\opencode_token_attribution.py" | Select-Object Name,Length; echo 
+"---"; Get-ChildItem -LiteralPath "python\opencode_go_accounting.py" | Select-Object Name,Length; echo "---venv---"; 
+Test-Path "python\.venv\Scripts\python.exe"
+Name                          Length
+----                          ------
+opencode_token_attribution.py 141248
+---
+opencode_go_accounting.py      27325
+---venv---
+True
+
+→ Read python/ai_gate.py [offset=1314, limit=160]
+→ Read python/ai_gate.py [limit=160, offset=1474]
+✱ Grep "^def |^class |^MUSE|^RATE|rate|def cost|def .*cost" in python/opencode_go_accounting.py · 100 
+matches
+✱ Grep "^def _score_setup_impl|^def _score_setup_ai|^def 
+_score_setup_openai|_score_setup_impl\(|_score_setup_ai\(" in python/ai_gate.py · 23 matches
+→ Read python/ai_gate.py [limit=260, offset=4067]
+→ Read python/ai_gate.py [limit=220, offset=9080]
+→ Read python/opencode_go_accounting.py [limit=120]
+✱ Grep "^import |^from |^def |^class |^ANALYST_|^CRITIC_|^ADJUDICATOR_|^BUS|_provider 
+=|LOG_FILE|_write_ai_cost_report|RequestDeadline|run_qualitative_consensus|__main__|def main" in 
+python/tools/opencode_token_attribution.py · 100 matches
+→ Read python/ai_gate.py [limit=180, offset=4327]
+This is a large, intricate mission. Let me gather the remaining integration facts efficiently.
+→ Read python/tools/opencode_token_attribution.py [limit=150, offset=1000]
+
+$ Select-String -LiteralPath "python\tools\opencode_token_attribution.py" -Pattern "^import |^from |^def 
+|^class |^[A-Z_]+ =|__main__" | ForEach-Object { "$($_.LineNumber): $($_.Line)" }
+42: from __future__ import annotations
+44: import argparse
+45: import ast
+46: import csv
+47: import hashlib
+48: import json
+49: import math
+50: import os
+51: import re
+52: import shutil
+53: import subprocess
+54: import sys
+55: import time
+56: from pathlib import Path
+57: from typing import Any, Iterator
+63: MUSE_MODEL = "muse-spark-1.3-contributor"
+64: ANALYST_STATIC_ANCHOR_TOKENS = 6513
+65: CRITIC_STATIC_ANCHOR_TOKENS = 1265
+66: ESCALATION_ERROR_THRESHOLD = 0.15
+71: MEASUREMENT_VERSION = "wp2.3"
+72: DEFAULT_BUS = r"C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"
+73: ROLES = ("analyst", "critic", "adjudicator")
+79: _PROXY_PIECE_RE = re.compile(r"'s|'t|'re|'ve|'m|'ll|'d|[A-Za-z]+|[0-9]+|[^\sA-Za-z0-9]+|\s+")
+82: def raw_units(text: str) -> int:
+106: _HAS_LETTER = re.compile(r"[A-Za-z]")
+109: def tokenizer_environment() -> dict:
+136: def canon(value: Any) -> str:
+141: def sha256_text(text: str) -> str:
+145: def read_json_any_encoding(path: Path) -> Any:
+157: def percentile(values, pct: float):
+172: def stats_block(values) -> dict:
+190: class BusReader:
+266: _TIMESTAMP_KEY_RE = re.compile(r"(^|_)(t|ts|time|timestamp|_at|created|updated|expires|as_of)($|_)")
+267: _EPOCH_RE = re.compile(r"^\d{9,11}$")
+268: _ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+269: _HASH_RE = re.compile(r"^[0-9a-fA-F]{8,}$")
+270: _LABEL_KEY_RE = re.compile(
+274: _ID_KEY_RE = re.compile(r"(^|_)(id|ids|hash|hashes|fingerprint|nonce|key|signature)($|_)")
+275: _PROSE_KEY_RE = 
+re.compile(r"(summary|reason|reasons|narrative|justification|description|rules|purpose|usage|notes)")
+278: def walk_leaves(value: Any, path: str = "") -> Iterator[tuple[str, str, Any]]:
+290: def walk_keys(value: Any, path: str = "") -> Iterator[tuple[str, str]]:
+301: def leaf_class(key: str, value: Any) -> str:
+330: class _CaptureStop(Exception):
+334: class _WireRecorder:
+358: class _quiet:
+376: def _scratch_dir() -> Path:
+382: def _configure_offline_child(scratch: Path, bus: Path, use_shadow: bool) -> None:
+410: def _volatile_offsets(text: str, needles: list[str]) -> list[int]:
+432: def _wire_measure(wire: dict, volatile_needles: list[str]) -> dict:
+497: def _envelope_measure(envelope: dict) -> dict:
+595: _ALIAS_TARGETS = (
+611: def _alias_of(path: str) -> str | None:
+618: _CONTRACT_TERMS = (
+629: def _dup_measure(envelope: dict, instructions: str) -> dict:
+709: _TRIVIAL_SCALARS = {"null", "true", "false", "0", "1", "0.0", '""'}
+712: def _truncation_of(value: Any) -> str:
+720: def walk_leaves_dotted(value: Any, path: str = "") -> Iterator[tuple[str, str, Any]]:
+733: _PRICE_KEY_RE = re.compile(
+740: _DERIVED_NAME_RE = re.compile(
+746: def _exact_shorter_decimal(value: float) -> str | None:
+765: def _find_first(value: Any, names: tuple[str, ...], path: str = "$") -> tuple[Any, str] | None:
+783: _FIXED_DECIMAL_STRING_RE = re.compile(r"^-?\d+\.\d*$")
+786: def _precision_measure(envelope: dict, payload: dict) -> dict:
+917: class _CannedReviewProvider:
+945: def child_capture(payload_path: Path, request_id: str, out_path: Path, want_review: bool, use_shadow: bool) -> 
+int:
+1095: def _review_capture(envelope: dict, payload: dict, request_id: str, make_leg, quiet) -> dict:
+1236: def _archived_assessment(request_id: str, candidate_index: int) -> dict | None:
+1262: SYMBOL_MAJOR = {"EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD"}
+1263: _SYMBOL_METAL = re.compile(r"(GOLD|SILVER|^XAU|^XAG)")
+1264: _SYMBOL_CRYPTO = re.compile(r"(BITCOIN|ETHEREUM|^BTC|^ETH|SOLUSD|XRP|LTCUSD)")
+1265: _SYMBOL_INDEX = re.compile(r"(NDAQ|NASDAQ|US30|US500|SPX|N225|225|DAX|GER40|JPN|US100|TECH|USTEC)")
+1266: _SYMBOL_ENERGY = re.compile(r"(OIL|WTI|BRENT|NATGAS|^NG)")
+1269: def symbol_class(symbol: str) -> str:
+1286: def candidate_stratum(count: int) -> str:
+1294: KNOWN_IDS = (
+1300: def select_sample(bus_reader: BusReader, sample_size: int, seed: int) -> dict:
+1438: def calibrate(captures: list[dict], usage: dict) -> dict:
+1737: PARTITION_GROUPS = {
+1750: def attribute_inputs(captures: list[dict], calibration: dict) -> list[dict]:
+1893: def _put(acc, role, name, kind, tokens, units, serializations) -> None:
+1902: def cache_layout(captures: list[dict], calibration: dict) -> dict:
+1968: def _sort_keys_interleave(captures: list[dict], role: str) -> dict:
+2005: OUTPUT_SCHEMA_MODELS = (
+2010: PYTHON_OWNED_MODELS = (
+2016: def schema_field_map() -> dict[str, list[str]]:
+2036: def authoritative_field_set() -> set[str]:
+2052: _DECISION_SCOPE_RE = re.compile(
+2057: _VALIDATION_SCOPE_RE = re.compile(
+2060: _TELEMETRY_SCOPE_RE = re.compile(
+2063: _TELEMETRY_FILES = {
+2068: _DECISION_FILES = {
+2074: def build_consumer_table() -> dict:
+2287: def _guard_node_ids(function) -> set:
+2313: def _read_site_field(node, names: list) -> tuple[str, str] | None:
+2337: def _dedupe(sites: list[dict]) -> list[dict]:
+2353: def output_attribution(
+2496: def _echo_index(envelope: dict, budget_entries: int = 1400, min_chars: int = 12) -> dict:
+2519: def _echoed_inputs(request_ids: list[str], captures: list[dict]) -> dict:
+2580: def _reasoning_correlation(request_ids: list[str], usage: dict) -> dict:
+2617: def write_csv(path: Path, rows: list[dict]) -> None:
+2629: def _cell(value):
+2639: def run_parent(args) -> int:
+2908: def _top_keys(captures: list[dict]) -> list[dict]:
+2916: def run_child(args) -> int:
+2926: def main(argv=None) -> int:
+2949: if __name__ == "__main__":
+
+→ Read python/opencode_go_accounting.py [limit=200, offset=120]
+✱ Grep "def load_env|load_dotenv|dotenv|\.env" in python · 100 matches
+✱ Grep "run_qualitative_consensus|def _apply_ai_veto_gate|def _apply_family_ai_threshold_gate|def 
+_hard_pretrade_decision|def _write_ai_cost_report|def _freeze_request_for_provider|def _request_deadline_for|def 
+_best_candidate|def _apply_repeatability_authority" in python/ai_gate.py · 31 matches
+• Extract benchmark integration contract Mt5-Explorer Agent
+I now have a good architectural picture. Let me delegate a precise integration-contract extraction while I prepare the protocol.
+✓ Extract benchmark integration contract Mt5-Explorer Agent
+→ Read python/po3_env.py [limit=60, offset=180]
+→ Read python/opencode_go_accounting.py [limit=55, offset=319]
+Now let me confirm a few final details for the implementation spec.
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern "load_dotenv\(" | ForEach-Object { 
+"$($_.LineNumber): $($_.Line.Trim())" }
+(no output)
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern "def main\(|def 
+_bootstrap|sys\.argv|argparse|__main__" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+18: import argparse
+12350: def main() -> None:
+12351: ap = argparse.ArgumentParser()
+12757: if __name__ == "__main__":
+
+$ Select-String -Path "python\*.py","tools\mt5-orchestrator\*.ps1","*.ps1","*.bat" -Pattern 
+"load_dotenv|po3_env" -List | ForEach-Object { "$($_.Path): $($_.Line.Trim())" }; echo "---scripts---"; Get-ChildItem 
+-Path . -Recurse -Include *.ps1,*.bat,*.cmd -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 
+'\\.venv\\|node_modules|\\runs\\' } | Select-String -Pattern "load_dotenv|PO3_DOTENV_FILE|dotenv" -List | 
+ForEach-Object { $_.Path }
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\python\ai_gate.py: from po3_env import (
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\python\expectancy_report.py: from po3_env import (
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\python\po3_env.py: load_dotenv(override=True, 
+exclude_keys=excluded)
+---scripts---
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\autonomous_ai_browser_bridge\run_demo_forward_live_ai_ga
+te.ps1
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\autonomous_ai_browser_bridge\run_demo_forward_live_remot
+e_api.ps1
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\autonomous_ai_browser_bridge\run_demo_live_ai_gate.ps1
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\autonomous_ai_browser_bridge\run_full_ai_1m_ai_gate.ps1
+
+→ Read python/po3_env.py [limit=80, offset=70]
+→ Read python/ai_gate.py [limit=45, offset=12350]
+
+$ Select-String -LiteralPath "autonomous_ai_browser_bridge\run_demo_forward_live_ai_gate.ps1" -Pattern 
+"env:|dotenv|\.env|python|PYTHONPATH|WORKDIR" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }; echo "=== 
+ai_gate main head ==="; 
+3: $pythonRoot = "C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\python"
+14: $sourceEnv = Join-Path $pythonRoot ".env"
+16: $tempEnv = Join-Path $tempRoot ("po3_demo_forward_live_" + [guid]::NewGuid().ToString("N") + ".env")
+31: # tab lanes, so three Python requests may progress concurrently while each tab
+48: $env:PO3_DOTENV_FILE = $tempEnv
+50: Push-Location $pythonRoot
+52: python ai_gate.py run --workers 3
+=== ai_gate main head ===
+
+← Write .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/benchmark_protocol.md
+Wrote file successfully.
+
+I have enough to architect precisely. Let me write the pre-registered protocol (required before the first paid call) and the implementation spec.
+← Write .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/WP1_SPEC.md
+Wrote file successfully.
+
+← Write .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/PROGRESS.json
+Wrote file successfully.
+
+# Todos
+[✓] WP1a: write protocol + implementation spec + manifest freeze
+[•] WP1b: implement opencode_reasoning_benchmark.py + focused test (delegate)
+[ ] WP1c: py_compile, focused test, dry-run on 2 requests
+[ ] WP1d: paid 3-request pilot, effort verification for every arm
+[ ] WP2a: full paid run (>=60 requests x 6 arms), resume-safe
+[ ] WP2b: report subcommand -> BENCHMARK_REPORT.md + csv + summary
+[ ] WP2c: logic review (minimax-m3) + adversarial review (deepseek)
+[ ] WP2d: final full Python suite once; write SUPERVISOR_REPORT.json/md
+
+• Implement reasoning benchmark tool Mt5-Worker-Strong Agent
+Now I'll delegate the WP1 implementation to a strong worker.
+✓ Implement reasoning benchmark tool Mt5-Worker-Strong Agent
+The worker delivered, but the manifest is 187 requests — the live grid would be too large. Let me inspect the composition.
+
+$ $m = Get-Content -LiteralPath ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\benchmark_manifest.json" 
+-Raw | ConvertFrom-Json; "request_count=$($m.request_count)"; "selection_rule=$($m.selection_rule)"; 
+"keys=$($m.PSObject.Properties.Name -join ', ')"; ""; "--- strata summary ---"; $m.stratum_summary | ConvertTo-Json 
+-Depth 4; ""; "--- anchors ---"; $m.anchors | ConvertTo-Json -Depth 4; ""; "--- historical decision distribution ---"; 
+$m.requests | Group-Object { $_.historical_decision.decision_state } | ForEach-Object { "$($_.Name): $($_.Count)" }; 
+"final_allow true: $(($m.requests | Where-Object { $_.historical_decision.python_final_allow -eq $true }).Count)"; 
+"decision_quality FULL_STRUCTURED: $(($m.requests | Where-Object { $_.historical_decision.decision_quality_tier -eq 
+'FULL_STRUCTURED' }).Count)"
+request_count=187
+selection_rule=BEN-001: anchors first (stable), then every stage-A sample id that is eligible, then every eligible 
+request whose response_debug shows python_final_allow=true or decision_state=APPROVE, then stratified round-robin over 
+(candidate-count stratum x symbol class) cells; eligible == archived payload (completed|rejected) AND response_debug 
+present AND historical decision_quality_tier == FULL_STRUCTURED; deterministic under the fixed seed 
+(sha256(seed|request_id) order)
+keys=generated_utc, bus, seed, target_requests, request_count, selection_rule, anchors, stratum_summary, 
+covered_cells, available_population, skipped_eligible_pool, notes, measurement_version, rows
+
+--- strata summary ---
+{
+    "cand_3plus/FX-cross":  56,
+    "cand_3plus/FX-major":  55,
+    "cand_3plus/index":  19,
+    "cand_3plus/crypto":  23,
+    "cand_1/FX-cross":  1,
+    "cand_3plus/metal":  16,
+    "cand_2/FX-cross":  4,
+    "cand_2/index":  2,
+    "cand_1/FX-major":  2,
+    "cand_1/index":  2,
+    "cand_2/FX-major":  3,
+    "cand_2/energy":  1,
+    "cand_2/metal":  1,
+    "cand_3plus/energy":  1,
+    "cand_1/metal":  1
+}
+
+--- anchors ---
+{
+    "AUDJPY_32618":  [
+                         "591813800_1788925102_208218984_1788951947_AUDJPY_32618"
+                     ],
+    "USDCHF_19925":  [
+                         "591813800_1788925102_208218984_1788951325_USDCHF_19925"
+                     ]
+}
+
+--- historical decision distribution ---
+final_allow true: 0
+decision_quality FULL_STRUCTURED: 0
+
+$ $m = Get-Content -LiteralPath ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\benchmark_manifest.json" 
+-Raw | ConvertFrom-Json; "rows count=$($m.rows.Count)"; "notes:"; $m.notes | ConvertTo-Json -Depth 4; ""; 
+"available_population:"; $m.available_population | ConvertTo-Json -Depth 4; ""; "skipped_eligible_pool:"; 
+$m.skipped_eligible_pool | ConvertTo-Json -Depth 4; ""; "--- row[0] ---"; $m.rows[0] | ConvertTo-Json -Depth 5
+rows count=187
+notes:
+
+available_population:
+{
+    "cand_3plus/index":  461,
+    "cand_2/index":  34,
+    "cand_1/index":  7,
+    "cand_3plus/FX-cross":  972,
+    "cand_3plus/metal":  201,
+    "cand_3plus/FX-major":  856,
+    "cand_3plus/crypto":  148,
+    "cand_2/metal":  14,
+    "cand_2/FX-cross":  93,
+    "cand_1/metal":  4,
+    "cand_1/FX-cross":  9,
+    "cand_1/FX-major":  38,
+    "cand_2/crypto":  4,
+    "cand_3plus/energy":  22,
+    "cand_2/energy":  4,
+    "cand_2/FX-major":  39
+}
+
+skipped_eligible_pool:
+{
+    "no_response_debug":  19,
+    "historical_tier_not_full_structured":  535
+}
+
+--- row[0] ---
+{
+    "request_id":  "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+    "archive_path":  "C:\\Users\\amroe\\AppData\\Roaming\\MetaQuotes\\Terminal\\Common\\Files\\PO3_AI_BUS\\completed\\p
+ython_30792_1788911767__591813800_1788925102_208218984_1788951947_AUDJPY_32618.json",
+    "archive_kind":  "completed",
+    "symbol":  "AUDJPY",
+    "symbol_class":  "FX-cross",
+    "candidate_count_archive":  5,
+    "candidate_stratum":  "cand_3plus",
+    "has_response_debug":  true,
+    "historical_decision":  {
+                                "decision_state":  "APPROVE",
+                                "python_final_allow":  true,
+                                "chosen_index":  0,
+                                "veto_code":  "",
+                                "llm_quality_score":  7.8,
+                                "decision_quality_tier":  "FULL_STRUCTURED",
+                                "decision_source":  "ai_approved"
+                            },
+    "strata":  [
+                   "cand_3plus",
+                   "FX-cross"
+               ],
+    "stratum":  "cand_3plus/FX-cross",
+    "selection_reasons":  [
+                              "anchor_required_by_claude_md_4ac"
+                          ]
+}
+
+$ $m = Get-Content -LiteralPath ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\benchmark_manifest.json" 
+-Raw | ConvertFrom-Json; $m.rows | ForEach-Object { $_.selection_reasons -join '+' } | Group-Object | Sort-Object 
+Count -Descending | ForEach-Object { "$($_.Count): $($_.Name)" }; ""; "allow_or_approve rows: $(($m.rows | 
+Where-Object { $_.historical_decision.python_final_allow -eq $true -or $_.historical_decision.decision_state -eq 
+'APPROVE' }).Count)"; "APPROVE rows: $(($m.rows | Where-Object { $_.historical_decision.decision_state -eq 'APPROVE' 
+}).Count)"; "final_allow true rows: $(($m.rows | Where-Object { $_.historical_decision.python_final_allow -eq $true 
+}).Count)"
+151: historical_allow_or_approve
+34: stage_a_sample_seed
+2: anchor_required_by_claude_md_4ac
+
+allow_or_approve rows: 153
+APPROVE rows: 153
+final_allow true rows: 153
+
+→ Read python/ai_gate.py [limit=100, offset=2053]
+→ Read python/ai_gate.py [limit=60, offset=2352]
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern "_apply_repeatability_authority\(|_apply_ai_veto_gate
+\(|_apply_family_ai_threshold_gate\(|_synchronize_candidate_authority_fields\(" | ForEach-Object { "$($_.LineNumber): 
+$($_.Line.Trim())" }
+2352: def _apply_repeatability_authority(
+6178: def _synchronize_candidate_authority_fields(decision: Decision) -> Decision:
+6212: def _apply_ai_veto_gate(payload: Dict[str, Any], decision: Decision) -> Decision:
+8628: def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision, chosen_index: int | None = 
+None) -> Decision:
+9024: shadow_decision = _apply_repeatability_authority(
+9035: shadow_decision = _apply_ai_veto_gate(payload, shadow_decision)
+9036: shadow_decision = _apply_family_ai_threshold_gate(
+9041: shadow_decision = _synchronize_candidate_authority_fields(shadow_decision)
+9239: cached_decision = _apply_repeatability_authority(cached_decision, payload=payload)
+9240: cached_decision = _apply_ai_veto_gate(payload, cached_decision)
+9241: cached_decision = _apply_family_ai_threshold_gate(payload, cached_decision, cached_decision.chosen_index)
+9242: cached_decision = _synchronize_candidate_authority_fields(cached_decision)
+9392: dec = _apply_repeatability_authority(dec, repeatability_authority_before_shadow, payload=payload)
+9483: final_decision = _apply_ai_veto_gate(payload, final_decision)
+9484: final_decision = _apply_family_ai_threshold_gate(payload, final_decision, chosen_index)
+9485: final_decision = _synchronize_candidate_authority_fields(final_decision)
+
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern 
+"AI_REQUIRE_REPEATABILITY_LIVE|require_repeatability_live|AI_SHADOW_REPEAT|AI_REPEATABILITY" | ForEach-Object { 
+"$($_.LineNumber): $($_.Line.Trim())" }; echo "=== template ==="; Select-String -LiteralPath 
+"python\docs\runtime_env_template_opencode.txt" -Pattern "REPEAT|REASONING|MUSE|PARALLEL|TIMEOUT|MAX_OUTPUT" | 
+ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
+469: require_repeatability_live: bool
+981: require_repeatability_live=_env_bool(
+982: env, "AI_REQUIRE_REPEATABILITY_LIVE", True, warnings, safe_default=True
+984: shadow_repeat_enable=_env_bool(env, "AI_SHADOW_REPEAT_ENABLE", False, warnings, safe_default=False),
+985: shadow_repeat_sample_rate=_env_float(env, "AI_SHADOW_REPEAT_SAMPLE_RATE", 0.02, warnings, min_value=0.0, 
+max_value=1.0),
+986: shadow_repeat_count=_env_int(env, "AI_SHADOW_REPEAT_COUNT", 3, warnings, min_value=2, max_value=20),
+987: shadow_repeat_min_evaluated_candidates=_env_int(env, "AI_SHADOW_REPEAT_MIN_EVALUATED_CANDIDATES", 30, warnings, 
+min_value=2, max_value=100000),
+988: shadow_repeat_max_score_stddev=_env_float(env, "AI_SHADOW_REPEAT_MAX_SCORE_STDDEV", 0.75, warnings, 
+min_value=0.0, max_value=10.0),
+989: shadow_repeat_min_decision_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_DECISION_AGREEMENT", 0.90, warnings, 
+min_value=0.0, max_value=1.0),
+990: shadow_repeat_min_chosen_candidate_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_CHOSEN_CANDIDATE_AGREEMENT", 
+0.90, warnings, min_value=0.0, max_value=1.0),
+991: shadow_repeat_min_veto_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_VETO_AGREEMENT", 0.90, warnings, 
+min_value=0.0, max_value=1.0),
+992: shadow_repeat_min_target_choice_agreement=_env_float(env, "AI_SHADOW_REPEAT_MIN_TARGET_CHOICE_AGREEMENT", 0.85, 
+warnings, min_value=0.0, max_value=1.0),
+994: _env_lookup(env, ("AI_SHADOW_REPEAT_ARTIFACT_FILE",), "data/ai_repeatability_artifact.json")
+1219: "require_repeatability_live": self.require_repeatability_live,
+1898: ``require_repeatability_live``.  A group becomes QUALIFIED solely from real
+1939: if AI_CONFIG.require_repeatability_live and not evaluation.trading_authority:
+1944: f" require_repeatability_live=true state={evaluation.state}"
+2366: strict_live = bool(AI_CONFIG.require_repeatability_live and _is_live_payload(payload))
+9506: AI_CONFIG.require_repeatability_live
+11108: AI_CONFIG.require_repeatability_live and _is_live_payload(payload)
+11790: AI_CONFIG.require_repeatability_live or AI_CONFIG.shadow_repeat_enable
+12233: AI_CONFIG.require_repeatability_live,
+=== template ===
+15: # AI_GATE_MODEL / AI_GATE_REASONING_EFFORT, which this selection does not read.
+20: # from AI_GATE_REASONING_EFFORT -- so all three keys below ARE read.  po3_env.py:36
+37: AI_GATE_REASONING_EFFORT=low
+38: AI_MAX_OUTPUT_TOKENS=
+81: # Retuned 2026-09-08 by user request: gpt-5.6-luna, reasoning effort low, flex
+99: #       -> 7 endpoints.  supported_parameters on every one contains reasoning,
+100: #          reasoning_effort, seed, response_format, structured_outputs -- and
+104: #        (reasoning{enabled:true,effort:low}, provider.require_parameters=true,
+126: # Reasoning.  ENABLE_THINKING=true is what actually puts
+127: # reasoning={"enabled":true,"effort":...} on the wire (ai_provider.py:2344);
+132: # Effort is "low" by user decision, matching AI_GATE_REASONING_EFFORT on the
+137: # bounds reasoning tokens AND content together, so ai_provider.py:2368 adds the
+139: # 10,800-token budget went entirely to 10,798 reasoning tokens and returned
+144: OPENROUTER_REASONING_EFFORT=low
+145: OPENROUTER_REASONING_TOKEN_RESERVE=
+184: OPENROUTER_TIMEOUT_SEC=900
+186: OPENROUTER_MAX_OUTPUT_TOKENS=
+216: # (ai_gate.py run --workers N), so increasing transport parallelism cannot
+221: OPENROUTER_PARALLELISM=6
+233: #   normal    muse-spark-1.3-contributor   POST <base>/responses
+237: # Every OpenCode call -- Muse and DeepSeek alike -- falls back ONCE to Luna on a
+238: # timeout, a provider/API failure, malformed JSON, a schema-validation failure,
+263: # THE MODELS.  Muse verified in GET <base>/models on 2026-09-09.
+265: # deepseek-v4.1-flash that day: /responses accepted reasoning.effort=high
+266: # (echoed back, reasoning tokens reported) with a strict json_schema and
+269: # effort control.  So it uses the same /responses transport as Muse.
+272: OPENCODE_MUSE_MODEL=muse-spark-1.3-contributor
+274: OPENCODE_SECONDARY_REASONING_EFFORT=high
+275: OPENCODE_SECONDARY_REASONING_TOKEN_RESERVE=
+281: # Muse at a 0.1-1.1% token-weighted cache-read ratio.  request: the previous
+287: # Muse reasoning.  Sent as the Responses-API `reasoning.effort`.  Verified
+288: # accepted at "high" (HTTP 200, 555-821 reasoning tokens reported in
+292: OPENCODE_MUSE_REASONING_EFFORT=high
+293: # Reasoning reserve, added ON TOP of the schema-derived output budget above.
+294: # max_output_tokens bounds reasoning tokens AND content together on this API, so
+295: # the schema budget is not a content budget -- it is a budget the reasoning
+297: # Muse at effort=high returned `status=incomplete incomplete_reason=
+298: # max_output_tokens` with an EMPTY message on every analyst call, while the
+300: # Same trap and same remedy as OPENROUTER_REASONING_TOKEN_RESERVE above; the
+302: OPENCODE_MUSE_REASONING_TOKEN_RESERVE=
+304: # Importance directing.  OFF (the default) sends every request to Muse and the
+311: #             non-trading shadow repeat
+329: OPENCODE_FALLBACK_REASONING_EFFORT=low
+337: OPENCODE_TIMEOUT_SEC=900
+338: OPENCODE_MAX_OUTPUT_TOKENS=
+339: OPENCODE_PARALLELISM=3
+345: EXPECTANCY_AI_REASONING_EFFORT=low
+347: EXPECTANCY_AI_MAX_OUTPUT_TOKENS=
+406: AI_OPENAI_TIMEOUT_SEC=1800
+407: AI_OPENAI_FLEX_TIMEOUT_SEC=1800
+454: # Live authority requires a valid REPEATABLE group; shadow repeats never trade.
+455: AI_REQUIRE_REPEATABILITY_LIVE=false
+456: AI_SHADOW_REPEAT_ENABLE=true
+457: AI_SHADOW_REPEAT_SAMPLE_RATE=0.02
+458: AI_SHADOW_REPEAT_COUNT=3
+459: AI_SHADOW_REPEAT_MIN_EVALUATED_CANDIDATES=30
+460: AI_SHADOW_REPEAT_MAX_SCORE_STDDEV=0.75
+461: AI_SHADOW_REPEAT_MIN_DECISION_AGREEMENT=0.90
+462: AI_SHADOW_REPEAT_MIN_CHOSEN_CANDIDATE_AGREEMENT=0.90
+463: AI_SHADOW_REPEAT_MIN_VETO_AGREEMENT=0.90
+464: AI_SHADOW_REPEAT_MIN_TARGET_CHOICE_AGREEMENT=0.85
+465: AI_SHADOW_REPEAT_ARTIFACT_FILE=data/ai_repeatability_artifact.json
+477: LOCAL_AI_TIMEOUT_SEC=1800
+479: LOCAL_AI_MAX_OUTPUT_TOKENS=
+485: LOCAL_AI_PARALLELISM=3
+487: # no Python code reads them -- there is no per-role timeout. Verified by a
+490: # The real per-call bound is OPENROUTER_TIMEOUT_SEC (default 900) and it is
+492: # so a call can never outlive AI_MT5_TERMINAL_TIMEOUT_SEC.
+493: LOCAL_AI_ANALYST_TIMEOUT_SEC=900
+494: LOCAL_AI_CRITIC_TIMEOUT_SEC=450
+495: LOCAL_AI_ADJUDICATOR_TIMEOUT_SEC=300
+496: AI_PROVIDER_ANALYST_TIMEOUT_SEC=1200
+497: AI_PROVIDER_CRITIC_TIMEOUT_SEC=600
+498: AI_PROVIDER_ADJUDICATOR_TIMEOUT_SEC=400
+500: AI_MT5_TERMINAL_TIMEOUT_SEC=2700
+
+$ Get-ChildItem -LiteralPath ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8" -Recurse -File | Select-Object 
+FullName,Length,LastWriteTime | Format-Table -AutoSize
+FullName                                                                                                               
+--------                                                                                                               
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\BASE...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\BASE...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\BASE...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\BASE...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\benc...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\benc...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\LAUN...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\MISS...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\PROG...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\self...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\SUPE...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\USAG...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\WP1_...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\resu...
+
+$ Select-String -LiteralPath "python\tools\opencode_reasoning_benchmark.py" -Pattern "^def |^class 
+|^ARMS|^ARM_|^DEFAULT_|^PROTECTED|^_REQ|add_parser|set_defaults\(|def _child|def cmd_" | ForEach-Object { 
+"$($_.LineNumber): $($_.Line.Trim())" }
+82: DEFAULT_RUN_DIR = REPO_ROOT / ".mt5-orchestrator" / "runs" / "20260913T180610Z-eee8a0a8"
+83: DEFAULT_BUS = r"C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS"
+88: DEFAULT_SEED = 20260913
+89: DEFAULT_TARGET_N = 60
+104: ARMS: dict[str, dict[str, str]] = {
+112: ARM_ORDER = tuple(ARMS)
+152: def _now_utc() -> str:
+156: def safe_component(text: str) -> str:
+160: def result_path(results_dir: Path, request_id: str, arm: str) -> Path:
+164: def read_json_bytes_any_encoding(path: Path) -> Any:
+178: def write_json(path: Path, value: Any) -> None:
+186: def _json_safe(value: Any) -> Any:
+203: def decision_document(decision: Any) -> dict:
+209: def build_result_document(
+256: def stage_a_request_ids(path: Path) -> list[str]:
+270: def select_manifest_requests(
+460: def _tally(mapping: dict[str, str]) -> dict[str, int]:
+468: def cmd_manifest(args: argparse.Namespace) -> int:
+488: def build_arm_leg(
+581: def arm_config_block(arm: str, leg: Any) -> dict:
+601: class DryWireCaptured(RuntimeError):
+613: class _DryFakeResponses:
+622: class DryFakeClient:
+643: def configure_child_env(scratch: Path, *, mode: str, bus: Path) -> None:
+689: def neutralize_inprocess_writers(ai_gate_mod: Any) -> None:
+709: def run_child(request_file: Path, out_path: Path) -> int:
+811: def order_arms(request_id: str, arms: Iterable[str], seed: int) -> list[str]:
+820: def completed_ok(results_dir: Path, request_id: str, arm: str) -> bool:
+830: def build_pair_plan(
+850: def snapshot_path(path: Path) -> dict:
+858: def snapshot_tree(path: Path) -> dict:
+875: def isolation_snapshot(bus: Path, repo_python: Path) -> dict:
+915: def go_limit_hit(result: dict) -> bool:
+935: def launch_child(pair: dict, repo_python: Path, child_timeout_sec: float) -> int:
+962: def cmd_run(args: argparse.Namespace) -> int:
+1169: def wilson_interval(successes: int, total: int, z: float = 1.959964) -> list[float] | None:
+1181: def _rate(numerator: int, denominator: int) -> dict:
+1190: def _avg(values: list) -> float | None:
+1195: def _p50(values: list) -> float | None:
+1200: def _pct_delta(arm_value, high_value):
+1206: def result_pair_flags(result: dict) -> dict:
+1239: def role_rollup(result: dict) -> dict:
+1280: def total_cost_usd(result: dict) -> float | None:
+1290: def vetoed_candidate_ids(result: dict) -> set[str]:
+1314: def aggregate_results(manifest: dict, results: list[dict]) -> dict:
+1543: def csv_rows(manifest: dict, results: list[dict]) -> list[dict]:
+1600: def render_report_md(manifest: dict, summary: dict, results: list[dict]) -> str:
+1707: def load_results(results_dir: Path) -> list[dict]:
+1720: def cmd_report(args: argparse.Namespace) -> int:
+1759: def main(argv: list[str] | None = None) -> int:
+1766: p_manifest = subs.add_parser("manifest", help="freeze the request set (read-only bus scan)")
+1772: p_run = subs.add_parser("run", help="drive (request, arm) pairs in fresh children")
+1785: p_report = subs.add_parser("report", help="aggregate results into csv/json/md")
+1788: p_child = subs.add_parser("_child", help=argparse.SUPPRESS)
+
+→ Read python/tools/opencode_reasoning_benchmark.py [limit=340, offset=488]
+
+$ $p = "C:\Users\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS\completed\python_30792_17889
+11767__591813800_1788925102_208218984_1788951947_AUDJPY_32618.json"; $bytes=[IO.File]::ReadAllBytes($p); if($bytes[0] 
+-eq 0xFF -and $bytes[1] -eq 0xFE){$t=[Text.Encoding]::Unicode.GetString($bytes)} elseif($bytes[0] -eq 
+0xEF){$t=[Text.Encoding]::UTF8.GetString($bytes,3,$bytes.Length-3)} else {$t=[Text.Encoding]::UTF8.GetString($bytes)}; 
+$j=$t|ConvertFrom-Json; "workload_mode=$($j.workload_mode)"; "candidates=$($j.candidates.Count)"; "workload keys..."; 
+$j.runtime_inputs | ConvertTo-Json -Depth 3 | Select-Object -First 1; ""; 
+"ai_veto_enable=$($j.runtime_inputs.ai_veto_enable)"; "require_snapshots=$($j.runtime.require_snapshots)"; 
+"tester_cache_signature=$($j.tester_cache_signature)"
+ConvertFrom-Json : Invalid JSON primitive: .
+workload_mode=
+candidates=0
+workload keys...
+
+ai_veto_enable=
+require_snapshots=
+tester_cache_signature=
+At line:1 char:455
++ ... xt.Encoding]::UTF8.GetString($bytes)}; $j=$t|ConvertFrom-Json; "workl ...
++                                                  ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [ConvertFrom-Json], ArgumentException
+    + FullyQualifiedErrorId : System.ArgumentException,Microsoft.PowerShell.Commands.ConvertFromJsonCommand
+
+$ .\.venv\Scripts\python.exe -c "import json,pathlib; p=pathlib.Path(r'C:\Users\amroe\AppData\Roaming\MetaQuote
+s\Terminal\Common\Files\PO3_AI_BUS\completed\python_30792_1788911767__591813800_1788925102_208218984_1788951947_AUDJPY_
+32618.json'); raw=p.read_bytes(); t=raw.decode('utf-16') if raw[:2] in (b'\xff\xfe',b'\xfe\xff') else 
+raw.decode('utf-8-sig'); d=json.loads(t); print('workload_mode=',d.get('workload_mode')); 
+print('candidates=',len(d.get('candidates') or [])); ri=d.get('runtime_inputs') or {}; 
+print('ai_veto_enable=',ri.get('ai_veto_enable')); print('require_snapshots=',(d.get('runtime') or 
+{}).get('require_snapshots')); print('keys_runtime_inputs_sample=',list(ri)[:20])"
+workload_mode= LIVE_FORWARD
+candidates= 5
+ai_veto_enable= True
+require_snapshots= False
+keys_runtime_inputs_sample= ['engine_version', 'engine_input_schema', 'ai_decision_schema_version', 
+'ai_target_arbitration_schema_version', 'ai_prompt_contract_version', 'repeatability_schema_version', 
+'hierarchical_prior_schema_version', 'risk_factor_schema_version', 'commission_model_schema_version', 
+'management_schema_version', 'management_experiment_schema_version', 'management_counterfactual_schema_version', 
+'invalidation_policy_schema_version', 'shadow_candidate_schema_version', 'normalized_fvg_schema_version', 
+'runtime_input_hash', 'decision_input_hash', 'ai_wait_timeout_ms', 'ai_wait_poll_ms', 'strategy_mode']
+
+→ Read python/tools/opencode_reasoning_benchmark.py [limit=345, offset=828]
+→ Read python/tools/opencode_reasoning_benchmark.py [limit=52, offset=1759]
+→ Read python/tools/opencode_reasoning_benchmark.py [limit=55, offset=96]
+The tool is well-built. Now I'll add two controlled harness settings (documented) so the benchmark measures model quality rather than a repeatability artifact keyed by the very effort under test.
+✗ Edit python/tools/opencode_reasoning_benchmark.py failed
+Error: The user has specified a rule which prevents you from using this specific tool call. Here are some 
+of the relevant rules [{"permission":"*","action":"allow","pattern":"*"},{"permission":"edit","pattern":"*","action":"d
+eny"},{"permission":"edit","pattern":".mt5-orchestrator/runs/*","action":"allow"}]
+• Add harness control env vars Mt5-Worker-Fast Agent
+I'm restricted from editing product files; I'll delegate this small control change to a fast worker.
+✓ Add harness control env vars Mt5-Worker-Fast Agent
+
+$ $m = Get-Content -LiteralPath ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\benchmark_manifest.json" 
+-Raw | ConvertFrom-Json; $m.rows | Where-Object { $_.candidate_stratum -eq 'cand_1' } | Select-Object -First 4 
+request_id,symbol,candidate_count_archive,stratum | Format-List; "---"; $m.rows | Where-Object { $_.candidate_stratum 
+-eq 'cand_2' } | Select-Object -First 2 request_id,symbol,candidate_count_archive | Format-List
+request_id              : 903871_1788983285_8075437_1788995216_GBPCAD_29371
+symbol                  : GBPCAD
+candidate_count_archive : 1
+stratum                 : cand_1/FX-cross
+
+request_id              : 591813800_1785715200_305658125_1785753356_GBPUSD_22093
+symbol                  : GBPUSD
+candidate_count_archive : 1
+stratum                 : cand_1/FX-major
+
+request_id              : 903871_1789093630_118426656_1789094249_US30_14363
+symbol                  : US30
+candidate_count_archive : 1
+stratum                 : cand_1/index
+
+request_id              : 591813800_1785715200_305658125_1785749750_AUDUSD_9445
+symbol                  : AUDUSD
+candidate_count_archive : 1
+stratum                 : cand_1/FX-major
+
+
+
+---
+
+
+request_id              : 903871_1788983285_8075437_1788988231_NZDJPY_13045
+symbol                  : NZDJPY
+candidate_count_archive : 2
+
+request_id              : 903871_1789062748_87542921_1789068109_US30_16044
+symbol                  : US30
+candidate_count_archive : 2
+
+← Edit .mt5-orchestrator/runs/20260913T180610Z-eee8a0a8/benchmark_protocol.md
+Index: C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\
+benchmark_protocol.md
+===================================================================
+--- C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\ben
+chmark_protocol.md
++++ C:\Users\amroe\Downloads\NovaAIS_Systems\Trading\PO3_Codex\MT5\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\ben
+chmark_protocol.md
+@@ -117,8 +117,26 @@
+ `reasoning_tokens`, and the observed model id. If a level is rejected or silently ignored
+ (no distinguishable reasoning behaviour), that exact evidence is recorded, the arm is
+ dropped, and no other level is substituted.
+ 
++## Benchmark harness controls (frozen before the pilot)
++
++Two process-environment settings are fixed for every arm and every request, and are applied
++by the harness itself (`opencode_reasoning_benchmark.py`, `configure_child_env`) so they are
++identical across arms:
++
++- `AI_REQUIRE_REPEATABILITY_LIVE=false` — the live repeatability authority gate groups its
++  evidence by `generation_settings_hash`, which **includes `reasoning_effort`**. Leaving it
++  on would fail-close every lower-effort arm through `repeatability_authority_gate` for a
++  reason unrelated to model quality, making the comparison circular. `false` is the value in
++  the production environment template (`python/docs/runtime_env_template_opencode.txt:455`).
++- `AI_SHADOW_REPEAT_ENABLE=false` — the shadow-repeat research feature would add a random
++  extra provider call to a sampled fraction of pairs, confounding per-arm call counts, cost
++  and latency. It is not a decision gate.
++
++These are benchmark-harness controls, not production-default changes. `.env` and every
++production default are untouched.
++
+ ## Run conditions (BEN-006, BEN-007)
+ 
+ - Every pair runs in a fresh subprocess with a fresh temp bus; decision cache disabled.
+ - No writes to the live bus, `python/data/*`, `python/logs/*` or the shadow ledger;
+
+
+Now the first live smoke test (1 request, 1 cheap arm) to validate credentials and the real path before the full pilot.
+$ .\.venv\Scripts\python.exe tools\opencode_reasoning_benchmark.py run --run-dir 
+..\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8 --mode live --arms muse_minimal --requests AUDJPY_32618 
+--concurrency 1 2>&1 | Select-Object -Last 20
+[run] mode=live requests=1 arms=1 pairs_todo=0 pairs_skipped_ok=1
+[run] done; selfcheck -> ..\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\selfcheck.json; isolation_unchanged=True
+
+$ $run = ".mt5-orchestrator\runs\20260913T180610Z-eee8a0a8"; New-Item -ItemType Directory -Force -Path 
+"$run\results_dry" | Out-Null; Get-ChildItem -LiteralPath "$run\results" -Filter *.json -File | ForEach-Object { 
+Move-Item -LiteralPath $_.FullName -Destination "$run\results_dry\$($_.Name)" -Force; }; "moved dry results: 
+$((Get-ChildItem -LiteralPath "$run\results_dry" -File).Count)"; (Get-ChildItem -LiteralPath "$run\results" -File 
+-ErrorAction SilentlyContinue).Count
+moved dry results: 12
+0
+
+$ .\.venv\Scripts\python.exe tools\opencode_reasoning_benchmark.py run --run-dir 
+..\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8 --mode live --arms muse_minimal --requests AUDJPY_32618 
+--concurrency 1 2>&1 | Select-Object -Last 30
+[run] mode=live requests=1 arms=1 pairs_todo=1 pairs_skipped_ok=0
+[bench] 591813800_1788925102_208218984_1788951947_AUDJPY_32618 muse_minimal status=ok state=REJECT elapsed=176.31s 
+attempts=1
+[run] done; selfcheck -> ..\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\selfcheck.json; isolation_unchanged=True
+
+$ .\.venv\Scripts\python.exe -c "import json,pathlib,glob; 
+p=sorted(glob.glob(r'..\.mt5-orchestrator\runs\20260913T180610Z-eee8a0a8\results\*AUDJPY_32618*muse_minimal*.json')); 
+d=json.loads(pathlib.Path(p[0]).read_text(encoding='utf-8')); 
+print('status',d.get('status'),'elapsed',d.get('elapsed_sec')); print('config',json.dumps(d.get('config'),indent=1)); 
+print('wire',d.get('wire_payload')); print('error',d.get('error')); dec=d.get('decision') or {}; print('state',dec.get(
+'decision_state'),'final_allow',dec.get('python_final_allow'),'tier',dec.get('decision_quality_tier'),'source',dec.get(
+'decision_source')); print('role_latencies',dec.get('role_latencies')); 
+print('provider_usage',json.dumps(dec.get('provider_usage'),indent=1)); 
+print('veto',dec.get('veto_enabled'),dec.get('veto_code')); print('rejection_codes',dec.get('rejection_codes')); 
+print('--- attempts ---'); [print(json.dumps({k:a.get(k) for k in ('role','model','provider_id','outcome','http_status'
+,'latency_sec','reasoning_effort_sent','max_output_tokens_sent','input_tokens','cached_read_tokens','output_tokens','re
+asoning_tokens','expected_go_usage_usd','billing_state','error_category','actual_model')},indent=1)) for a in 
+(d.get('attempts') or [])]"
+status ok elapsed 176.31
+config {
+ "arm": "muse_minimal",
+ "effort": "minimal",
+ "model": "muse-spark-1.3-contributor",
+ "provider_mode": "OPENCODE_API",
+ "provider_id": "opencode_go_responses",
+ "reasoning_token_reserve": 24000,
+ "max_output_tokens": 25000,
+ "timeout_sec": 900.0,
+ "session_scope": "prompt_prefix",
+ "service_tier": ""
+}
+wire {'archive_candidates': 5, 'sealed_candidates': 3}
+error None
+state REJECT final_allow False tier DEGRADED_NON_TRADING source provider_deadline_exceeded
+role_latencies None
+provider_usage null
+veto False 
+rejection_codes ['ai_quality_schema_incomplete', 'degraded_ai_response_non_trading', 'resolved_risk_multiplier_zero']
+--- attempts ---
+{
+ "role": "analyst",
+ "model": "muse-spark-1.3-contributor",
+ "provider_id": "opencode_go_responses",
+ "outcome": "ok",
+ "http_status": 200,
+ "latency_sec": 155.094,
+ "reasoning_effort_sent": "minimal",
+ "max_output_tokens_sent": 30000,
+ "input_tokens": 38129,
+ "cached_read_tokens": 0,
+ "output_tokens": 3868,
+ "reasoning_tokens": 961,
+ "expected_go_usage_usd": {
+  "standard": 0.0045865
+ },
+ "billing_state": "billed_usage_reported",
+ "error_category": "",
+ "actual_model": "muse-spark-1.3-contributor"
+}
+
+The live path works but the pipeline quarantined the valid response as `provider_deadline_exceeded` — the archived deadline patch is incomplete. Let me inspect the deadline code.
+$ Select-String -LiteralPath "python\ai_gate.py" -Pattern 
+"deadline\.expired\(|\.terminal_expired\(|deadline\.can_start_attempt|deadline\.elapsed_ms" | ForEach-Object { 
+"$($_.LineNumber): $($_.Line.Trim())" }
+4335: if request_deadline.expired():
+4342: f" elapsed_ms={request_deadline.elapsed_ms()}"
+4537: if request_deadline.expired():
+4657: ) and not request_deadline.expired():
+4708: if request_deadline.expired():
+11288: elapsed_ms=request_deadline.elapsed_ms() if request_deadline is not None else -1,
+11492: terminal_deadline.elapsed_ms()
+
+$ .\.venv\Scripts\python.exe -c "import json,pathlib; p=pathlib.Path(r'C:\Users\amroe\AppData\Roaming\MetaQuote
+s\Terminal\Common\Files\PO3_AI_BUS\completed\python_30792_1788911767__591813800_1788925102_208218984_1788951947_AUDJPY_
+32618.json'); raw=p.read_bytes(); t=raw.decode('utf-16') if raw[:2] in (b'\xff\xfe',b'\xfe\xff') else 
+raw.decode('utf-8-sig'); d=json.loads(t); ri=d.get('runtime_inputs') or {}; 
+print('ai_wait_timeout_ms=',ri.get('ai_wait_timeout_ms')); print('ai_wait_poll_ms=',ri.get('ai_wait_poll_ms')); 
+print('ai_mt5_terminal_timeout_sec=',ri.get('ai_mt5_terminal_timeout_sec')); print('runtime keys with timeout:',[k for 
+k in ri if 'timeout' in k.lower() or 'wait' in k.lower()]); rt=d.get('runtime') or {}; print('runtime keys with 
+timeout:',[k for k in rt if 'timeout' in k.lower() or 'wait' in k.lower()])"
+ai_wait_timeout_ms= 900000
+ai_wait_poll_ms= 250
+ai_mt5_terminal_timeout_sec= None
+runtime keys with timeout: ['ai_wait_timeout_ms', 'ai_wait_poll_ms', 'tester_allow_live_wait_debug_trading']
+runtime keys with timeout: []
+
+→ Read python/ai_gate.py [limit=55, offset=2499]
+→ Read python/ai_gate.py [limit=30, offset=2471]
+
+$ .\.venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'.'); import po3_env, os; 
+po3_env.bootstrap_provider_env(); import ai_gate; p=ai_gate.read_json_any_encoding(__import__('pathlib').Path(r'C:\User
+s\amroe\AppData\Roaming\MetaQuotes\Terminal\Common\Files\PO3_AI_BUS\completed\python_30792_1788911767__591813800_178892
+5102_208218984_1788951947_AUDJPY_32618.json')); print('is_live',ai_gate._is_live_payload(p)); 
+pol=ai_gate._deadline_policy_for_payload(p); print('policy',pol); d=ai_gate._start_request_deadline(p); 
+print('expired_now',d.expired(),'remaining_ms',d.remaining_ms(),'elapsed',d.elapsed_ms())" 2>&1 | Select-Object -Last 8
+is_live True
+policy DeadlinePolicy(mt5_terminal_timeout_ms=900000, response_write_margin_ms=15000, min_attempt_ms=10000)
+expired_now True remaining_ms -126844640 elapsed 127729640
+
+• Fix deadline and resume-mode Mt5-Worker-Strong Agent
+Root cause found: archived live payloads carry a boot-relative `request_created_wall_time`, so the replayed deadline is backdated ~35 h and `expired()` is true. I'll delegate the fix plus a resume-mode correction.

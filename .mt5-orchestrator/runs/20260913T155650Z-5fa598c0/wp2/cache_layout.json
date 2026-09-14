@@ -1,0 +1,502 @@
+{
+  "meaning": "static prefix = instructions + strict response schema; the provider's own cached_input_tokens is the authority for what it actually caches",
+  "note_on_wire_order": "In the reconstructed HTTP body the SDK sends model, instructions, input, then text.format.schema, so the schema is NOT contiguous with the instructions: the measured cached prefix (instructions+schema) therefore cannot be a byte prefix of this body and must come from a provider-side canonical prompt. Measure, do not assume; SES-001 must confirm the documented meaning.",
+  "roles": {
+    "analyst": {
+      "n_requests": 36,
+      "instructions_static_across_requests": true,
+      "instructions_full_identical_across_requests": true,
+      "schema_identical_across_requests": true,
+      "schema_name": "ModelAIGateOutput",
+      "proxy_units": {
+        "instructions_total": {
+          "n": 36,
+          "avg": 5369.0,
+          "p50": 5369.0,
+          "p95": 5369.0,
+          "min": 5369,
+          "max": 5369
+        },
+        "instructions_static_head": {
+          "n": 36,
+          "avg": 5369.0,
+          "p50": 5369.0,
+          "p95": 5369.0,
+          "min": 5369,
+          "max": 5369
+        },
+        "instructions_volatile_tail": {
+          "n": 36,
+          "avg": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "min": 0,
+          "max": 0
+        },
+        "schema": {
+          "n": 36,
+          "avg": 3837.0,
+          "p50": 3837.0,
+          "p95": 3837.0,
+          "min": 3837,
+          "max": 3837
+        },
+        "static_prefix_instructions_plus_schema": {
+          "n": 36,
+          "avg": 9206.0,
+          "p50": 9206.0,
+          "p95": 9206.0,
+          "min": 9206,
+          "max": 9206
+        },
+        "input_body": {
+          "n": 36,
+          "avg": 59760.139,
+          "p50": 53726.0,
+          "p95": 136382.25,
+          "min": 19466,
+          "max": 154501
+        }
+      },
+      "calibrated_static_prefix_tokens": {
+        "n": 36,
+        "avg": 5149.848,
+        "p50": 5154.387,
+        "p95": 5293.867,
+        "min": 4885.096,
+        "max": 5300.516
+      },
+      "provider_cached_prefix_anchors_observed": [
+        6513
+      ],
+      "static_prefix_error_when_predicted_by_global_factor_pct": {
+        "n": 17,
+        "avg": 21.191,
+        "p50": 20.999,
+        "p95": 23.18,
+        "min": 18.616,
+        "max": 23.357
+      },
+      "first_volatile_byte_in_body": {
+        "n": 36,
+        "avg": 16981.0,
+        "p50": 16981.0,
+        "p95": 16981.0,
+        "min": 16981,
+        "max": 16981
+      },
+      "first_volatile_byte_in_instructions": {
+        "n": 36,
+        "avg": 16880.0,
+        "p50": 16880.0,
+        "p95": 16880.0,
+        "min": 16880,
+        "max": 16880
+      },
+      "wire_flags": {
+        "store": false,
+        "truncation": "disabled",
+        "verbosity": "low",
+        "reasoning": {
+          "effort": "high"
+        },
+        "extra_header_keys": [
+          "X-PO3-Deadline-Contract",
+          "X-PO3-Deadline-Epoch-Ms",
+          "X-PO3-Request-Id",
+          "x-opencode-session"
+        ],
+        "x_opencode_session_sha8_values": [
+          "3dd087fa"
+        ],
+        "session_header_identical_across_requests": true
+      },
+      "sort_keys_interleave": {
+        "available": true,
+        "sorted_key_order": [
+          "authority_manifest",
+          "correlations",
+          "entry_and_invalidation",
+          "evidence_catalog",
+          "evidence_envelope_version",
+          "execution_costs",
+          "historical_analogues",
+          "htf_context",
+          "identity",
+          "input_fingerprint",
+          "instrument",
+          "liquidity",
+          "ltf_execution",
+          "market_regime",
+          "provider_decision_context",
+          "risk",
+          "runtime",
+          "sequence",
+          "setup_taxonomy",
+          "targets_and_obstacles",
+          "validation"
+        ],
+        "static_vs_dynamic_order": [
+          "static",
+          "static",
+          "dynamic",
+          "dynamic",
+          "static",
+          "static",
+          "dynamic",
+          "static",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "static",
+          "dynamic",
+          "static",
+          "static",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "static",
+          "static"
+        ],
+        "static_sections": [
+          "authority_manifest",
+          "correlations",
+          "evidence_envelope_version",
+          "execution_costs",
+          "htf_context",
+          "ltf_execution",
+          "provider_decision_context",
+          "risk",
+          "targets_and_obstacles",
+          "validation"
+        ],
+        "dynamic_sections": [
+          "entry_and_invalidation",
+          "evidence_catalog",
+          "historical_analogues",
+          "identity",
+          "input_fingerprint",
+          "instrument",
+          "liquidity",
+          "market_regime",
+          "runtime",
+          "sequence",
+          "setup_taxonomy"
+        ],
+        "alternating_runs": 11,
+        "static_sections_after_first_dynamic_section": 8,
+        "sort_keys_interleaves_static_and_dynamic": true
+      }
+    },
+    "critic": {
+      "n_requests": 36,
+      "instructions_static_across_requests": true,
+      "instructions_full_identical_across_requests": false,
+      "schema_identical_across_requests": true,
+      "schema_name": "ModelCriticDecision",
+      "proxy_units": {
+        "instructions_total": {
+          "n": 36,
+          "avg": 848.0,
+          "p50": 848.0,
+          "p95": 850.0,
+          "min": 846,
+          "max": 850
+        },
+        "instructions_static_head": {
+          "n": 36,
+          "avg": 434.0,
+          "p50": 434.0,
+          "p95": 434.0,
+          "min": 434,
+          "max": 434
+        },
+        "instructions_volatile_tail": {
+          "n": 36,
+          "avg": 414.0,
+          "p50": 414.0,
+          "p95": 416.0,
+          "min": 412,
+          "max": 416
+        },
+        "schema": {
+          "n": 36,
+          "avg": 785.0,
+          "p50": 785.0,
+          "p95": 785.0,
+          "min": 785,
+          "max": 785
+        },
+        "static_prefix_instructions_plus_schema": {
+          "n": 36,
+          "avg": 1219.0,
+          "p50": 1219.0,
+          "p95": 1219.0,
+          "min": 1219,
+          "max": 1219
+        },
+        "input_body": {
+          "n": 36,
+          "avg": 23882.5,
+          "p50": 23368.0,
+          "p95": 32763.75,
+          "min": 17920,
+          "max": 33155
+        }
+      },
+      "calibrated_static_prefix_tokens": {
+        "n": 36,
+        "avg": 707.19,
+        "p50": 710.361,
+        "p95": 721.577,
+        "min": 673.668,
+        "max": 723.537
+      },
+      "provider_cached_prefix_anchors_observed": [
+        1265
+      ],
+      "static_prefix_error_when_predicted_by_global_factor_pct": {
+        "n": 4,
+        "avg": 44.09,
+        "p50": 43.825,
+        "p95": 44.953,
+        "min": 43.559,
+        "max": 45.152
+      },
+      "first_volatile_byte_in_body": {
+        "n": 36,
+        "avg": 2367.0,
+        "p50": 2367.0,
+        "p95": 2372.0,
+        "min": 2362,
+        "max": 2372
+      },
+      "first_volatile_byte_in_instructions": {
+        "n": 36,
+        "avg": 1382.0,
+        "p50": 1382.0,
+        "p95": 1382.0,
+        "min": 1382,
+        "max": 1382
+      },
+      "wire_flags": {
+        "store": false,
+        "truncation": "disabled",
+        "verbosity": "low",
+        "reasoning": {
+          "effort": "high"
+        },
+        "extra_header_keys": [
+          "X-PO3-Deadline-Contract",
+          "X-PO3-Deadline-Epoch-Ms",
+          "X-PO3-Request-Id",
+          "x-opencode-session"
+        ],
+        "x_opencode_session_sha8_values": [
+          "e5c3df95"
+        ],
+        "session_header_identical_across_requests": true
+      },
+      "sort_keys_interleave": {
+        "available": true,
+        "sorted_key_order": [
+          "allowed_evidence_ref_ids",
+          "authority_manifest",
+          "candidate",
+          "correlations",
+          "evidence_catalog",
+          "historical_analogues",
+          "liquidity",
+          "market_regime",
+          "request_id",
+          "request_identity_hash",
+          "sequence",
+          "targets_and_obstacles",
+          "validation"
+        ],
+        "static_vs_dynamic_order": [
+          "dynamic",
+          "static",
+          "dynamic",
+          "static",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "static",
+          "static"
+        ],
+        "static_sections": [
+          "authority_manifest",
+          "correlations",
+          "targets_and_obstacles",
+          "validation"
+        ],
+        "dynamic_sections": [
+          "allowed_evidence_ref_ids",
+          "candidate",
+          "evidence_catalog",
+          "historical_analogues",
+          "liquidity",
+          "market_regime",
+          "request_id",
+          "request_identity_hash",
+          "sequence"
+        ],
+        "alternating_runs": 6,
+        "static_sections_after_first_dynamic_section": 4,
+        "sort_keys_interleaves_static_and_dynamic": true
+      }
+    },
+    "adjudicator": {
+      "n_requests": 36,
+      "instructions_static_across_requests": true,
+      "instructions_full_identical_across_requests": false,
+      "schema_identical_across_requests": true,
+      "schema_name": "ModelAdjudicatorDecision",
+      "proxy_units": {
+        "instructions_total": {
+          "n": 36,
+          "avg": 775.0,
+          "p50": 775.0,
+          "p95": 777.0,
+          "min": 773,
+          "max": 777
+        },
+        "instructions_static_head": {
+          "n": 36,
+          "avg": 361.0,
+          "p50": 361.0,
+          "p95": 361.0,
+          "min": 361,
+          "max": 361
+        },
+        "instructions_volatile_tail": {
+          "n": 36,
+          "avg": 414.0,
+          "p50": 414.0,
+          "p95": 416.0,
+          "min": 412,
+          "max": 416
+        },
+        "schema": {
+          "n": 36,
+          "avg": 593.0,
+          "p50": 593.0,
+          "p95": 593.0,
+          "min": 593,
+          "max": 593
+        },
+        "static_prefix_instructions_plus_schema": {
+          "n": 36,
+          "avg": 954.0,
+          "p50": 954.0,
+          "p95": 954.0,
+          "min": 954,
+          "max": 954
+        },
+        "input_body": {
+          "n": 36,
+          "avg": 17770.972,
+          "p50": 17475.0,
+          "p95": 20456.0,
+          "min": 17229,
+          "max": 20609
+        }
+      },
+      "calibrated_static_prefix_tokens": {
+        "n": 7,
+        "avg": 606.448,
+        "p50": 605.78,
+        "p95": 610.409,
+        "min": 603.507,
+        "max": 610.483
+      },
+      "provider_cached_prefix_anchors_observed": [],
+      "static_prefix_error_when_predicted_by_global_factor_pct": {
+        "n": 0,
+        "avg": null,
+        "p50": null,
+        "p95": null,
+        "min": null,
+        "max": null
+      },
+      "first_volatile_byte_in_body": {
+        "n": 36,
+        "avg": 2201.0,
+        "p50": 2201.0,
+        "p95": 2206.0,
+        "min": 2196,
+        "max": 2206
+      },
+      "first_volatile_byte_in_instructions": {
+        "n": 36,
+        "avg": 1216.0,
+        "p50": 1216.0,
+        "p95": 1216.0,
+        "min": 1216,
+        "max": 1216
+      },
+      "wire_flags": {
+        "store": false,
+        "truncation": "disabled",
+        "verbosity": "low",
+        "reasoning": {
+          "effort": "high"
+        },
+        "extra_header_keys": [
+          "X-PO3-Deadline-Contract",
+          "X-PO3-Deadline-Epoch-Ms",
+          "X-PO3-Request-Id",
+          "x-opencode-session"
+        ],
+        "x_opencode_session_sha8_values": [
+          "af0c38f7"
+        ],
+        "session_header_identical_across_requests": true
+      },
+      "sort_keys_interleave": {
+        "available": true,
+        "sorted_key_order": [
+          "analyst",
+          "authority_manifest",
+          "candidate",
+          "critic",
+          "evidence_catalog",
+          "request_id",
+          "request_identity_hash",
+          "validation"
+        ],
+        "static_vs_dynamic_order": [
+          "dynamic",
+          "static",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "dynamic",
+          "static"
+        ],
+        "static_sections": [
+          "authority_manifest",
+          "validation"
+        ],
+        "dynamic_sections": [
+          "analyst",
+          "candidate",
+          "critic",
+          "evidence_catalog",
+          "request_id",
+          "request_identity_hash"
+        ],
+        "alternating_runs": 4,
+        "static_sections_after_first_dynamic_section": 2,
+        "sort_keys_interleaves_static_and_dynamic": true
+      }
+    }
+  }
+}

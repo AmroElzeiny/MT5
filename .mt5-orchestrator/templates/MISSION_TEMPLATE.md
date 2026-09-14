@@ -18,7 +18,8 @@ Runtime authority:
 Allowed scope:
 Forbidden changes:
 Acceptance evidence:
-Tests:
+Change size: SMALL | MAJOR
+         Tests: none (SMALL) | focused test for main success + fail-closed path (MAJOR)
 Escalation triggers:
 
 ## Budgets
@@ -36,7 +37,7 @@ Escalation triggers:
 ## Final proof
 - requirement coverage;
 - changed files;
-- meaningful tests;
+- one final full Python suite run + one MQL5 compile (results recorded);
 - test-integrity audit;
 - independent review;
 - complete diff audit;

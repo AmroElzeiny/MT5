@@ -303,6 +303,13 @@ class VariantRecord:
     tp1_then_sl: bool | None = None
     tp1_then_tp2: bool | None = None
     neither_target_nor_stop: bool | None = None
+    # Station-driven tracking: the terminal station ("TP2"/"SL"), its duration
+    # from the entry, and -- after TP1 -- which station followed it and how long
+    # that leg took from the TP1 touch.  None when not measured.
+    terminal_station: str = ""
+    time_from_entry_to_station_sec: int | None = None
+    station_after_tp1: str = ""
+    time_from_tp1_to_station_sec: int | None = None
     mfe_r: float | None = None
     mae_r: float | None = None
     maximum_favorable_price: float | None = None
@@ -584,6 +591,10 @@ def consolidate_shadow_lifecycle(rows: Sequence[Mapping[str, Any]]) -> Consolida
         record.tp1_then_sl = _tri_bool(row.get("tp1_then_sl"))
         record.tp1_then_tp2 = _tri_bool(row.get("tp1_then_tp2"))
         record.neither_target_nor_stop = _tri_bool(row.get("neither_target_nor_stop"))
+        record.terminal_station = _text(row.get("terminal_station"))
+        record.time_from_entry_to_station_sec = _integer(row.get("time_from_entry_to_station_sec"))
+        record.station_after_tp1 = _text(row.get("station_after_tp1"))
+        record.time_from_tp1_to_station_sec = _integer(row.get("time_from_tp1_to_station_sec"))
         record.mfe_r = _number(row.get("mfe_r"))
         record.mae_r = _number(row.get("mae_r"))
         record.maximum_favorable_price = _number(row.get("maximum_favorable_price"))
@@ -695,6 +706,14 @@ class GroupStats:
     tp1_then_tp2_rate: float | None
     tp1_then_sl_rate: float | None
     sweep_weighted: bool
+    # Station durations in seconds, over CLEAN samples only: entry -> TP1,
+    # entry -> TP2 / SL without TP1, and the leg after TP1 split by the station
+    # that ended it.  A censored or ambiguous row has no station time to report.
+    median_entry_to_tp1_sec: float | None = None
+    median_entry_to_tp2_sec: float | None = None
+    median_entry_to_sl_sec: float | None = None
+    median_tp1_to_tp2_sec: float | None = None
+    median_tp1_to_sl_sec: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = dict(self.__dict__)
@@ -786,6 +805,17 @@ def summarize_group(
 
     tp1_denominator = sum(1 for row in clean if row.tp1_before_sl is not None or row.sl_before_tp1 is not None)
 
+    def _durations(rows: Sequence[VariantRecord], attribute: str) -> list[float]:
+        return [float(getattr(row, attribute)) for row in rows if getattr(row, attribute) is not None]
+
+    entry_to_tp1 = [
+        float(row.time_to_tp1_sec) for row in clean if row.tp1_hit and row.time_to_tp1_sec is not None
+    ]
+    no_tp1_tp2 = [row for row in clean if row.terminal_station == "TP2" and not row.tp1_hit]
+    no_tp1_sl = [row for row in clean if row.terminal_station == "SL" and not row.tp1_hit]
+    after_tp1_tp2 = [row for row in clean if row.station_after_tp1 == "TP2"]
+    after_tp1_sl = [row for row in clean if row.station_after_tp1 == "SL"]
+
     return GroupStats(
         key=key,
         variants=len(records),
@@ -820,6 +850,11 @@ def summarize_group(
         tp1_then_tp2_rate=_rate(tp1_then_tp2, max(1, tp1_before_sl)) if tp1_before_sl else None,
         tp1_then_sl_rate=_rate(tp1_then_sl, max(1, tp1_before_sl)) if tp1_before_sl else None,
         sweep_weighted=weight_by_sweep,
+        median_entry_to_tp1_sec=_median(entry_to_tp1),
+        median_entry_to_tp2_sec=_median(_durations(no_tp1_tp2, "time_from_entry_to_station_sec")),
+        median_entry_to_sl_sec=_median(_durations(no_tp1_sl, "time_from_entry_to_station_sec")),
+        median_tp1_to_tp2_sec=_median(_durations(after_tp1_tp2, "time_from_tp1_to_station_sec")),
+        median_tp1_to_sl_sec=_median(_durations(after_tp1_sl, "time_from_tp1_to_station_sec")),
     )
 
 
@@ -1624,6 +1659,27 @@ LEGACY_PENDING_SCHEMA_MARKERS: tuple[str, ...] = ("shadow_candidate", "shadow_li
 
 QUARANTINE_FILENAME = "shadow_tracker_quarantine.ndjson"
 PENDING_FILENAME = "shadow_candidate_pending.ndjson"
+INDEX_FILENAME = "shadow_tracker_index.ndjson"
+
+
+def _resolved_variant_ids(index_path: Path, *, now: int) -> set[str]:
+    """Unexpired ``resolved|<variant>|<expiry>`` entries of one scope's index."""
+
+    if not index_path.is_file():
+        return set()
+    try:
+        text = decode_ledger_bytes(index_path.read_bytes())
+    except ShadowLedgerError:
+        return set()
+    resolved: set[str] = set()
+    for line in text.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) != 3 or parts[0] != "resolved" or not parts[1]:
+            continue
+        expiry = _integer(parts[2])
+        if expiry is not None and expiry > now:
+            resolved.add(parts[1])
+    return resolved
 
 
 def _pending_record_state(plan: Mapping[str, Any], *, now: int) -> tuple[str, str]:
@@ -1709,6 +1765,11 @@ def reconcile_pending_trackers(
             totals["unreadable_scopes"] += 1
             continue
 
+        # Station-driven tracking writes the terminal-once index at the station
+        # and rewrites the pending queue only at scan end or shutdown, so for a
+        # while a resolved tracker can still sit in the queue.  The EA drops it
+        # on restore; reporting it as overdue here would contradict the EA.
+        resolved_ids = _resolved_variant_ids(scope_dir / INDEX_FILENAME, now=current)
         records: list[dict[str, Any]] = []
         unparseable = 0
         for line in text.splitlines():
@@ -1724,6 +1785,8 @@ def reconcile_pending_trackers(
                 unparseable += 1
                 continue
             state, reason = _pending_record_state(plan, now=current)
+            if state.startswith("ADDRESSABLE") and _text(plan.get("shadow_candidate_variant_id")) in resolved_ids:
+                state, reason = ("ALREADY_RESOLVED", "variant_in_terminal_once_index")
             records.append(
                 {
                     "state": state,

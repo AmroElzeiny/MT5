@@ -1,0 +1,3705 @@
+{
+  "per_role_from_ledger": {
+    "analyst": {
+      "muse_rows": {
+        "n": 34,
+        "output_tokens": {
+          "n": 34,
+          "avg": 12772.382,
+          "p50": 12547.5,
+          "p95": 17910.4,
+          "min": 5948,
+          "max": 20574
+        },
+        "reasoning_output_tokens": {
+          "n": 34,
+          "avg": 9253.618,
+          "p50": 9192.0,
+          "p95": 13153.2,
+          "min": 4936,
+          "max": 13587
+        },
+        "visible_output_tokens": {
+          "n": 34,
+          "avg": 3518.765,
+          "p50": 3222.0,
+          "p95": 7785.25,
+          "min": 1012,
+          "max": 7956
+        },
+        "reasoning_share_pct": {
+          "n": 34,
+          "avg": 73.669,
+          "p50": 77.003,
+          "p95": 84.486,
+          "min": 46.956,
+          "max": 87.492
+        }
+      },
+      "fallback_leg_rows": {
+        "n": 2,
+        "output_tokens": {
+          "n": 2,
+          "avg": 2854.5,
+          "p50": 2854.5,
+          "p95": 2857.65,
+          "min": 2851,
+          "max": 2858
+        },
+        "reasoning_output_tokens": {
+          "n": 2,
+          "avg": 159.0,
+          "p50": 159.0,
+          "p95": 179.7,
+          "min": 136,
+          "max": 182
+        },
+        "visible_output_tokens": {
+          "n": 2,
+          "avg": 2695.5,
+          "p50": 2695.5,
+          "p95": 2719.35,
+          "min": 2669,
+          "max": 2722
+        },
+        "reasoning_share_pct": {
+          "n": 2,
+          "avg": 5.571,
+          "p50": 5.571,
+          "p95": 6.302,
+          "min": 4.759,
+          "max": 6.384
+        }
+      },
+      "all_rows": {
+        "n": 36,
+        "output_tokens": {
+          "n": 36,
+          "avg": 12221.389,
+          "p50": 12395.0,
+          "p95": 17714.0,
+          "min": 2851,
+          "max": 20574
+        },
+        "reasoning_output_tokens": {
+          "n": 36,
+          "avg": 8748.361,
+          "p50": 9056.0,
+          "p95": 13094.0,
+          "min": 136,
+          "max": 13587
+        },
+        "visible_output_tokens": {
+          "n": 36,
+          "avg": 3473.028,
+          "p50": 3192.0,
+          "p95": 7775.75,
+          "min": 1012,
+          "max": 7956
+        },
+        "reasoning_share_pct": {
+          "n": 36,
+          "avg": 69.885,
+          "p50": 76.789,
+          "p95": 84.478,
+          "min": 4.759,
+          "max": 87.492
+        }
+      },
+      "note": "reported separately by ledger model: a Muse row and a fallback-leg row for the same request id are different tokenizers and different generation settings"
+    },
+    "critic": {
+      "muse_rows": {
+        "n": 34,
+        "output_tokens": {
+          "n": 34,
+          "avg": 3986.0,
+          "p50": 3826.5,
+          "p95": 6108.15,
+          "min": 2073,
+          "max": 6893
+        },
+        "reasoning_output_tokens": {
+          "n": 34,
+          "avg": 3872.206,
+          "p50": 3718.0,
+          "p95": 5881.1,
+          "min": 1973,
+          "max": 6688
+        },
+        "visible_output_tokens": {
+          "n": 34,
+          "avg": 113.794,
+          "p50": 104.0,
+          "p95": 203.7,
+          "min": 92,
+          "max": 240
+        },
+        "reasoning_share_pct": {
+          "n": 34,
+          "avg": 97.053,
+          "p50": 97.146,
+          "p95": 97.849,
+          "min": 95.176,
+          "max": 98.328
+        }
+      },
+      "fallback_leg_rows": {
+        "n": 2,
+        "output_tokens": {
+          "n": 2,
+          "avg": 330.0,
+          "p50": 330.0,
+          "p95": 408.3,
+          "min": 243,
+          "max": 417
+        },
+        "reasoning_output_tokens": {
+          "n": 2,
+          "avg": 204.0,
+          "p50": 204.0,
+          "p95": 282.3,
+          "min": 117,
+          "max": 291
+        },
+        "visible_output_tokens": {
+          "n": 2,
+          "avg": 126.0,
+          "p50": 126.0,
+          "p95": 126.0,
+          "min": 126,
+          "max": 126
+        },
+        "reasoning_share_pct": {
+          "n": 2,
+          "avg": 58.966,
+          "p50": 58.966,
+          "p95": 68.702,
+          "min": 48.148,
+          "max": 69.784
+        }
+      },
+      "all_rows": {
+        "n": 36,
+        "output_tokens": {
+          "n": 36,
+          "avg": 3782.889,
+          "p50": 3770.5,
+          "p95": 6057.25,
+          "min": 243,
+          "max": 6893
+        },
+        "reasoning_output_tokens": {
+          "n": 36,
+          "avg": 3668.417,
+          "p50": 3666.5,
+          "p95": 5826.5,
+          "min": 117,
+          "max": 6688
+        },
+        "visible_output_tokens": {
+          "n": 36,
+          "avg": 114.472,
+          "p50": 104.5,
+          "p95": 203.5,
+          "min": 92,
+          "max": 240
+        },
+        "reasoning_share_pct": {
+          "n": 36,
+          "avg": 94.937,
+          "p50": 97.081,
+          "p95": 97.847,
+          "min": 48.148,
+          "max": 98.328
+        }
+      },
+      "note": "reported separately by ledger model: a Muse row and a fallback-leg row for the same request id are different tokenizers and different generation settings"
+    },
+    "adjudicator": {
+      "muse_rows": {
+        "n": 7,
+        "output_tokens": {
+          "n": 7,
+          "avg": 2255.857,
+          "p50": 2280,
+          "p95": 2702.5,
+          "min": 1618,
+          "max": 2728
+        },
+        "reasoning_output_tokens": {
+          "n": 7,
+          "avg": 2160.0,
+          "p50": 2168,
+          "p95": 2609.8,
+          "min": 1522,
+          "max": 2635
+        },
+        "visible_output_tokens": {
+          "n": 7,
+          "avg": 95.857,
+          "p50": 95,
+          "p95": 109.0,
+          "min": 81,
+          "max": 112
+        },
+        "reasoning_share_pct": {
+          "n": 7,
+          "avg": 95.614,
+          "p50": 95.256,
+          "p95": 96.644,
+          "min": 94.067,
+          "max": 96.667
+        }
+      },
+      "fallback_leg_rows": {
+        "n": 0,
+        "output_tokens": {
+          "n": 0,
+          "avg": null,
+          "p50": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "reasoning_output_tokens": {
+          "n": 0,
+          "avg": null,
+          "p50": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "visible_output_tokens": {
+          "n": 0,
+          "avg": null,
+          "p50": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        },
+        "reasoning_share_pct": {
+          "n": 0,
+          "avg": null,
+          "p50": null,
+          "p95": null,
+          "min": null,
+          "max": null
+        }
+      },
+      "all_rows": {
+        "n": 7,
+        "output_tokens": {
+          "n": 7,
+          "avg": 2255.857,
+          "p50": 2280,
+          "p95": 2702.5,
+          "min": 1618,
+          "max": 2728
+        },
+        "reasoning_output_tokens": {
+          "n": 7,
+          "avg": 2160.0,
+          "p50": 2168,
+          "p95": 2609.8,
+          "min": 1522,
+          "max": 2635
+        },
+        "visible_output_tokens": {
+          "n": 7,
+          "avg": 95.857,
+          "p50": 95,
+          "p95": 109.0,
+          "min": 81,
+          "max": 112
+        },
+        "reasoning_share_pct": {
+          "n": 7,
+          "avg": 95.614,
+          "p50": 95.256,
+          "p95": 96.644,
+          "min": 94.067,
+          "max": 96.667
+        }
+      },
+      "note": "reported separately by ledger model: a Muse row and a fallback-leg row for the same request id are different tokenizers and different generation settings"
+    }
+  },
+  "per_field_visible_tokens": [
+    {
+      "role": "analyst",
+      "output_field": "target_arbitration",
+      "n_samples": 36,
+      "visible_tokens_avg": 464.184,
+      "visible_tokens_p50": 464.744,
+      "visible_tokens_p95": 512.338,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "{\"arbitration_required\":true,\"blocker_class\":\"moderate\",\"blocker_is_trade_killer\":false,\"blocker_kind\":\"crossed_htf_opposing_imbalance\",\"blocker_severity\":5.1,\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "{\"arbitration_required\":true,\"blocker_class\":\"major\",\"blocker_is_trade_killer\":false,\"blocker_kind\":\"crossed_opposing_imbalance\",\"blocker_severity\":6.4,\"chosen_"
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "evidence_refs",
+      "n_samples": 36,
+      "visible_tokens_avg": 194.931,
+      "visible_tokens_p50": 190.3,
+      "visible_tokens_p95": 239.114,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[\"sequence.has_displacement\",\"sequence.has_sweep\",\"sequence.t_bos\",\"sequence.t_disp\",\"sequence.t_sweep\",\"validation.hard_blockers\",\"entry_and_invalidation.candi"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[\"sequence.has_bos\",\"sequence.has_sweep\",\"sequence.t_bos\",\"sequence.t_sweep\",\"validation.hard_blockers\",\"validation.missing_fields\",\"entry_and_invalidation.cand"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "evidence_refs",
+      "n_samples": 36,
+      "visible_tokens_avg": 168.337,
+      "visible_tokens_p50": 166.3,
+      "visible_tokens_p95": 237.411,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[\"sequence.daily_bias_dir\",\"sequence.h4_bias_dir\",\"market_regime.expansion_score\",\"entry_and_invalidation.candidates.0.obstacle_kind\",\"entry_and_invalidation.ca"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[\"sequence.displacement_score\",\"sequence.has_sweep\",\"sequence.htf_bos\",\"entry_and_invalidation.candidates.0.obstacle_kind\",\"entry_and_invalidation.candidates.0."
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "evidence_refs",
+      "n_samples": 7,
+      "visible_tokens_avg": 145.231,
+      "visible_tokens_p50": 145.413,
+      "visible_tokens_p95": 167.383,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[\"sequence.daily_bias_dir\",\"sequence.h4_bias_dir\",\"validation.hard_blockers\",\"entry_and_invalidation.candidates.0.obstacle_kind\",\"entry_and_invalidation.candida"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[\"entry_and_invalidation.candidates.0.retest_quality_score\",\"entry_and_invalidation.candidates.0.authoritative_numbers.obstacle_distance_r.value\",\"entry_and_inv"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "major_risks",
+      "n_samples": 36,
+      "visible_tokens_avg": 42.446,
+      "visible_tokens_p50": 40.595,
+      "visible_tokens_p95": 60.753,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[\"Virgin HTF opposing imbalance 0.22R ahead blocks path\",\"Bullish reversal vs daily and H4 bearish bias\",\"Weak origin 1.95 and retest 1.06 quality\",\"Negative me"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[\"Fresh LTF opposing imbalance 0.16R blocks TP1 path\",\"Retest quality 1.0 very weak\",\"No usable history for FX asset class\"]"
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "resolution_reason",
+      "n_samples": 7,
+      "visible_tokens_avg": 34.108,
+      "visible_tokens_p50": 35.559,
+      "visible_tokens_p95": 41.846,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"Uphold ABSTAIN: pending OTE trigger with virgin HTF obstacle 0.22R ahead and bearish HTF bias; critic PASS confirms structure but gives no approval edge.\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"No critic blocks to resolve; ABSTAIN upheld due to insufficient repeatability authority and pending weak retest with near obstacle.\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "summary",
+      "n_samples": 36,
+      "visible_tokens_avg": 33.394,
+      "visible_tokens_p50": 33.036,
+      "visible_tokens_p95": 40.455,
+      "consumer_category": "telemetry_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"MICRO_OTE_REVERSAL virgin FVG with confirmed sweep displacement OTE. Immediate virgin HTF gap 0.22R ahead, bearish HTF bias, weak origin. Staged pending trigge"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"Micro breaker retest with confirmed breaker virgin FVG and strong displacement but fresh opposing imbalance 0.16R ahead blocks even TP1 and history insufficien"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "reasons",
+      "n_samples": 36,
+      "visible_tokens_avg": 30.983,
+      "visible_tokens_p50": 31.636,
+      "visible_tokens_p95": 36.676,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"Sequence complete virgin OTE but HTF obstacle 0.22R ahead plus bearish daily bias and weak origin retest. Pending retracement only; no edge to approve.\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"Breaker thesis intact virgin FVG displacement strong but immediate 0.16R virgin obstacle blocks TP1 and retest quality 1.0 with no FX history prevents approval"
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "summary",
+      "n_samples": 36,
+      "visible_tokens_avg": 26.876,
+      "visible_tokens_p50": 26.811,
+      "visible_tokens_p95": 34.388,
+      "consumer_category": "telemetry_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"Approvals confirmed, sequence ordered, FVG virgin valid, branch matched, keep_current target coherent, no hard blockers.\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"Sweep-displacement-BOS ordered, virgin FVG intact, required breaker events confirmed, keep_current target coherent, no hard blockers.\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "candidate_id",
+      "n_samples": 7,
+      "visible_tokens_avg": 24.039,
+      "visible_tokens_p50": 24.765,
+      "visible_tokens_p95": 25.4,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"GOLD|1785517200|1785528000|1785718800|ote_inside_fvg|4034.56|ote_inside_fvg|0\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"BITCOIN|1785657600|1785668400|1785672000|breaker_retest|63440.50|breaker_retest|0\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "request_identity_hash",
+      "n_samples": 7,
+      "visible_tokens_avg": 23.495,
+      "visible_tokens_p50": 24.13,
+      "visible_tokens_p95": 24.765,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"6febe1fdb5c9c630f8a3210d92e9b9c58fbb315d65b8b165d777410b293daf64\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"a01770cec30bed99a2614aed0d57594bc014381a6fbdd4f745ce4aef93a60322\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "candidate_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 21.08,
+      "visible_tokens_p50": 21.565,
+      "visible_tokens_p95": 23.897,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"GOLD|1785517200|1785528000|1785718800|ote_inside_fvg|4034.56|ote_inside_fvg|0\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"BITCOIN|1785657600|1785668400|1785672000|breaker_retest|63440.50|breaker_retest|0\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "request_identity_hash",
+      "n_samples": 36,
+      "visible_tokens_avg": 21.841,
+      "visible_tokens_p50": 21.565,
+      "visible_tokens_p95": 24.625,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"6febe1fdb5c9c630f8a3210d92e9b9c58fbb315d65b8b165d777410b293daf64\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"a01770cec30bed99a2614aed0d57594bc014381a6fbdd4f745ce4aef93a60322\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "candidate_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 20.251,
+      "visible_tokens_p50": 20.717,
+      "visible_tokens_p95": 22.957,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"GOLD|1785517200|1785528000|1785718800|ote_inside_fvg|4034.56|ote_inside_fvg|0\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"BITCOIN|1785657600|1785668400|1785672000|breaker_retest|63440.50|breaker_retest|0\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "request_identity_hash",
+      "n_samples": 36,
+      "visible_tokens_avg": 20.982,
+      "visible_tokens_p50": 20.717,
+      "visible_tokens_p95": 23.657,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"6febe1fdb5c9c630f8a3210d92e9b9c58fbb315d65b8b165d777410b293daf64\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"a01770cec30bed99a2614aed0d57594bc014381a6fbdd4f745ce4aef93a60322\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "invalidation_risks",
+      "n_samples": 36,
+      "visible_tokens_avg": 19.598,
+      "visible_tokens_p50": 19.038,
+      "visible_tokens_p95": 27.017,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[\"Virgin FVG entry fails on retest without confirmation\",\"Structural sweep stop breaks under expansion\"]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[\"Fresh virgin opposing imbalance 0.16R ahead\",\"TP1 requires crossing obstacle\"]"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "bucket_prior_override_justification",
+      "n_samples": 36,
+      "visible_tokens_avg": 16.689,
+      "visible_tokens_p50": 17.918,
+      "visible_tokens_p95": 25.897,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"No override; ABSTAIN respects negative metals prior and weak origin context.\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "veto",
+      "n_samples": 36,
+      "visible_tokens_avg": 35.556,
+      "visible_tokens_p50": 16.798,
+      "visible_tokens_p95": 113.246,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "{\"code\":\"\",\"enabled\":false,\"evidence_fields\":[],\"reason\":\"\"}"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "{\"code\":\"\",\"enabled\":false,\"evidence_fields\":[],\"reason\":\"\"}"
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "request_id",
+      "n_samples": 7,
+      "visible_tokens_avg": 15.875,
+      "visible_tokens_p50": 15.875,
+      "visible_tokens_p95": 16.764,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"591813800_1785715200_305658125_1785725109_GOLD_25455\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"591813800_1785715200_305658125_1785740134_BITCOIN_1317\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "request_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 14.134,
+      "visible_tokens_p50": 13.988,
+      "visible_tokens_p95": 14.571,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"591813800_1785715200_305658125_1785725109_GOLD_25455\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"591813800_1785715200_305658125_1785740134_BITCOIN_1317\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "request_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 13.578,
+      "visible_tokens_p50": 13.438,
+      "visible_tokens_p95": 13.998,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"591813800_1785715200_305658125_1785725109_GOLD_25455\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"591813800_1785715200_305658125_1785740134_BITCOIN_1317\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "missing_confirmations",
+      "n_samples": 36,
+      "visible_tokens_avg": 11.059,
+      "visible_tokens_p50": 12.878,
+      "visible_tokens_p95": 24.917,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[\"Clean retest still pending MQL trigger\",\"No follow-through yet\"]"
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "role_contract_version",
+      "n_samples": 7,
+      "visible_tokens_avg": 10.795,
+      "visible_tokens_p50": 10.795,
+      "visible_tokens_p95": 10.795,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260724_python_bound_roles_v3\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260724_python_bound_roles_v3\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "role_schema_version",
+      "n_samples": 7,
+      "visible_tokens_avg": 10.795,
+      "visible_tokens_p50": 10.795,
+      "visible_tokens_p95": 10.795,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260724_python_bound_roles_v3\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260724_python_bound_roles_v3\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "role_contract_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 9.908,
+      "visible_tokens_p50": 9.908,
+      "visible_tokens_p95": 9.908,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260724_python_bound_roles_v3\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260724_python_bound_roles_v3\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "role_schema_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 9.908,
+      "visible_tokens_p50": 9.908,
+      "visible_tokens_p95": 9.908,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260724_python_bound_roles_v3\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260724_python_bound_roles_v3\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "role_contract_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 9.519,
+      "visible_tokens_p50": 9.519,
+      "visible_tokens_p95": 9.519,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260724_python_bound_roles_v3\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260724_python_bound_roles_v3\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "role_schema_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 9.519,
+      "visible_tokens_p50": 9.519,
+      "visible_tokens_p95": 9.519,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260724_python_bound_roles_v3\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260724_python_bound_roles_v3\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "model_id",
+      "n_samples": 7,
+      "visible_tokens_avg": 8.89,
+      "visible_tokens_p50": 8.89,
+      "visible_tokens_p95": 8.89,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"muse-spark-1.3-contributor\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"muse-spark-1.3-contributor\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "model_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 8.095,
+      "visible_tokens_p50": 8.16,
+      "visible_tokens_p95": 8.16,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"muse-spark-1.3-contributor\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"muse-spark-1.3-contributor\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "model_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 7.777,
+      "visible_tokens_p50": 7.839,
+      "visible_tokens_p95": 7.839,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"muse-spark-1.3-contributor\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"muse-spark-1.3-contributor\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "model_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 7.777,
+      "visible_tokens_p50": 7.839,
+      "visible_tokens_p95": 7.839,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"muse-spark-1.3-contributor\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"muse-spark-1.3-contributor\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "setup_taxonomy_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 7.839,
+      "visible_tokens_p50": 7.839,
+      "visible_tokens_p95": 7.839,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"20260716_setup_taxonomy_v1\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"20260716_setup_taxonomy_v1\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "taxonomy_mapping_source",
+      "n_samples": 36,
+      "visible_tokens_avg": 7.839,
+      "visible_tokens_p50": 7.839,
+      "visible_tokens_p95": 7.839,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"exact_branch_structure_scope\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"exact_branch_structure_scope\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "narrative_state",
+      "n_samples": 36,
+      "visible_tokens_avg": 7.17,
+      "visible_tokens_p50": 7.279,
+      "visible_tokens_p95": 9.519,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"PENDING_OTE_OBSTRUCTED_WAIT\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"WAITING_BREAKER_RETEST_TRIGGER\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "candidate_hash",
+      "n_samples": 7,
+      "visible_tokens_avg": 7.166,
+      "visible_tokens_p50": 6.985,
+      "visible_tokens_p95": 8.255,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"036327D6E11C597A\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"96933C7A97FF96A6\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "request_execution_fingerprint",
+      "n_samples": 36,
+      "visible_tokens_avg": 6.377,
+      "visible_tokens_p50": 6.439,
+      "visible_tokens_p95": 7.839,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"E0A8DD292D9E05E5\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"EEBF7747BDAE9C73\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "candidate_hash",
+      "n_samples": 36,
+      "visible_tokens_avg": 6.492,
+      "visible_tokens_p50": 6.411,
+      "visible_tokens_p95": 7.723,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"036327D6E11C597A\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"96933C7A97FF96A6\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "provider_id",
+      "n_samples": 7,
+      "visible_tokens_avg": 6.35,
+      "visible_tokens_p50": 6.35,
+      "visible_tokens_p95": 6.35,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"opencode_go_responses\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"opencode_go_responses\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "assessed_execution_fingerprint",
+      "n_samples": 36,
+      "visible_tokens_avg": 6.299,
+      "visible_tokens_p50": 6.159,
+      "visible_tokens_p95": 7.419,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"5298376081D98D14\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"B4B84BF5A20CA859\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "candidate_hash",
+      "n_samples": 36,
+      "visible_tokens_avg": 6.237,
+      "visible_tokens_p50": 6.159,
+      "visible_tokens_p95": 7.419,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"036327D6E11C597A\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"96933C7A97FF96A6\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "provider_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 5.731,
+      "visible_tokens_p50": 5.828,
+      "visible_tokens_p95": 5.828,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"opencode_go_responses\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"opencode_go_responses\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "provider_id",
+      "n_samples": 36,
+      "visible_tokens_avg": 5.506,
+      "visible_tokens_p50": 5.599,
+      "visible_tokens_p95": 5.599,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"opencode_go_responses\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"opencode_go_responses\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "setup_taxonomy_enum",
+      "n_samples": 36,
+      "visible_tokens_avg": 5.646,
+      "visible_tokens_p50": 5.599,
+      "visible_tokens_p95": 6.159,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"MICRO_OTE_REVERSAL\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"MICRO_BREAKER_RETEST\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "historical_evidence_state",
+      "n_samples": 36,
+      "visible_tokens_avg": 4.168,
+      "visible_tokens_p50": 4.479,
+      "visible_tokens_p95": 4.479,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"MIXED\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"INSUFFICIENT_SAMPLE\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "selected_target_identity",
+      "n_samples": 36,
+      "visible_tokens_avg": 3.36,
+      "visible_tokens_p50": 3.36,
+      "visible_tokens_p95": 3.36,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"keep_current\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"keep_current\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "role",
+      "n_samples": 7,
+      "visible_tokens_avg": 3.175,
+      "visible_tokens_p50": 3.175,
+      "visible_tokens_p95": 3.175,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"adjudicator\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"adjudicator\""
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "verdict",
+      "n_samples": 7,
+      "visible_tokens_avg": 2.54,
+      "visible_tokens_p50": 2.54,
+      "visible_tokens_p95": 2.54,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"ABSTAIN\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"ABSTAIN\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "role",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.331,
+      "visible_tokens_p50": 2.331,
+      "visible_tokens_p95": 2.331,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"critic\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"critic\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "blended_legacy_score",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.038,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "8.712"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "8.6109"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "decision_state",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.24,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"ABSTAIN\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"ABSTAIN\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "entry",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.162,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4034.94455"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "63424.99"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "legacy_agreement_confidence",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.131,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.2987"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.5042"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "role",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.24,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"analyst\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"analyst\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "rule_score",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.038,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "10.0"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "9.5485"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "selected_target_price",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.162,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.38,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4087.49"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "62631.03"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "sl",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.1,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4019.52"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "63626.04"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "tp1",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.317,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.8,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4050.3691"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "63244.045"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "tp2",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.162,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.38,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4087.49"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "62631.03"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "verdict",
+      "n_samples": 36,
+      "visible_tokens_avg": 2.24,
+      "visible_tokens_p50": 2.24,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"ABSTAIN\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"ABSTAIN\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "confidence_band",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.991,
+      "visible_tokens_p50": 1.749,
+      "visible_tokens_p95": 2.331,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"HIGH\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"HIGH\""
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "verdict",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.781,
+      "visible_tokens_p50": 1.749,
+      "visible_tokens_p95": 1.894,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"PASS\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"PASS\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "chop_risk",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.42"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.45"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "confidence_band",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.773,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 2.24,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"LOW\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"LOW\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "cost_risk",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.18"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.15"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "entry_timing_score",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4.2"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "4.3"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "final_trade_expectancy_score",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "4.1"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "4.2"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "follow_through_probability",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.38"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.35"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "invalidation_risk",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.55"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.55"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "llm_quality_score",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "5.4"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "6.2"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "llm_self_reported_confidence",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.42"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.62"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "post_entry_failure_risk",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.56"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.6"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "session_bucket_risk",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.48"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.45"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "structure_quality_score",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "5.3"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "6.1"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "suggested_risk_multiplier",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.0"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.0"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "symbol_bucket_risk",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.68,
+      "visible_tokens_p50": 1.68,
+      "visible_tokens_p95": 1.68,
+      "consumer_category": "diagnostic_logged_only",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0.52"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0.5"
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "resolved_objection_codes",
+      "n_samples": 7,
+      "visible_tokens_avg": 1.27,
+      "visible_tokens_p50": 1.27,
+      "visible_tokens_p95": 1.27,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "unresolved_objection_codes",
+      "n_samples": 7,
+      "visible_tokens_avg": 1.27,
+      "visible_tokens_p50": 1.27,
+      "visible_tokens_p95": 1.27,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "blocking_objections",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.166,
+      "visible_tokens_p50": 1.166,
+      "visible_tokens_p95": 1.166,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "missing_required_evidence",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.409,
+      "visible_tokens_p50": 1.166,
+      "visible_tokens_p95": 1.166,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "non_blocking_objections",
+      "n_samples": 36,
+      "visible_tokens_avg": 20.076,
+      "visible_tokens_p50": 1.166,
+      "visible_tokens_p95": 167.278,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_available",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.12,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "false"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_bucket",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.12,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_data_window_end",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.12,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_data_window_start",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.12,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_model_version",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.12,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "\"\""
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "\"\""
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "material_contradictions",
+      "n_samples": 36,
+      "visible_tokens_avg": 8.912,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 39.195,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "missing_required_evidence",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.12,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "persisted",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "raw_allow",
+      "n_samples": 36,
+      "visible_tokens_avg": 1.089,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "false"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "rejection_codes",
+      "n_samples": 36,
+      "visible_tokens_avg": 4.246,
+      "visible_tokens_p50": 1.12,
+      "visible_tokens_p95": 13.858,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "[]"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "[]"
+        }
+      ]
+    },
+    {
+      "role": "adjudicator",
+      "output_field": "candidate_index",
+      "n_samples": 7,
+      "visible_tokens_avg": 0.635,
+      "visible_tokens_p50": 0.635,
+      "visible_tokens_p95": 0.635,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "role": "critic",
+      "output_field": "candidate_index",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.583,
+      "visible_tokens_p50": 0.583,
+      "visible_tokens_p95": 0.583,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibrated_win_probability",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "null"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "null"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_lower_bound",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "null"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "null"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_sample_size",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "calibration_upper_bound",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "null"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "null"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "candidate_index",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "decision_value",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "0"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "expected_net_r",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "null"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "null"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "oos_predicted_probability",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.56,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 0.56,
+      "consumer_category": "not_in_output_schema",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "null"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "null"
+        }
+      ]
+    },
+    {
+      "role": "analyst",
+      "output_field": "thesis_supported",
+      "n_samples": 36,
+      "visible_tokens_avg": 0.7,
+      "visible_tokens_p50": 0.56,
+      "visible_tokens_p95": 1.12,
+      "consumer_category": "validated_or_bound",
+      "examples": [
+        {
+          "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+          "value": "true"
+        },
+        {
+          "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+          "value": "true"
+        }
+      ]
+    }
+  ],
+  "echoed_inputs_and_unconsumed_prose": {
+    "method": "an output field is an echo when its canonical serialization also appears as a wire input value at the listed path(s); only values >= 12 canonical characters are indexed so trivial scalars cannot match",
+    "response_debug_documents": 36,
+    "model_owned_output_fields": [
+      "arbitration_required",
+      "blocker_class",
+      "blocker_is_trade_killer",
+      "blocker_kind",
+      "blocker_severity",
+      "blocking_objections",
+      "bucket_prior_override_justification",
+      "candidate_assessments",
+      "candidate_index",
+      "chop_risk",
+      "chosen_rr1",
+      "chosen_rr2",
+      "chosen_target_model",
+      "chosen_tp1",
+      "chosen_tp2",
+      "code",
+      "confidence_band",
+      "cost_risk",
+      "decision_quality_tier",
+      "decision_state",
+      "enabled",
+      "entry_timing_score",
+      "evidence_ref_ids",
+      "final_trade_expectancy_score",
+      "follow_through_probability",
+      "historical_evidence_state",
+      "invalidation_risk",
+      "invalidation_risks",
+      "llm_quality_score",
+      "llm_self_reported_confidence",
+      "major_risks",
+      "material_contradictions",
+      "missing_confirmations",
+      "missing_required_evidence",
+      "narrative_state",
+      "non_blocking_objections",
+      "post_entry_failure_risk",
+      "raw_allow",
+      "reason",
+      "reasons",
+      "rejected_target_models",
+      "rejection_codes",
+      "resolution_reason",
+      "resolved_objection_codes",
+      "response_quality",
+      "selected_candidate_index",
+      "session_bucket_risk",
+      "structure_quality_score",
+      "suggested_risk_multiplier",
+      "summary",
+      "symbol_bucket_risk",
+      "target_arbitration",
+      "target_comparison",
+      "target_decision_reason",
+      "thesis_supported",
+      "unresolved_objection_codes",
+      "verdict",
+      "veto",
+      "why_not_capped_before_obstacle",
+      "why_not_liquidity_target",
+      "why_not_partial_before_obstacle",
+      "why_not_synthetic_fallback"
+    ],
+    "fields": [
+      {
+        "role": "analyst",
+        "field": "selected_target_identity",
+        "n": 36,
+        "echoed": 36,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].target_choice_menu.incumbent_target.identity",
+              "entry_and_invalidation.candidates[0].target_choice_menu.keep_current_target.model",
+              "entry_and_invalidation.candidates[0].target_semantics.current_selection_identity"
+            ],
+            "value": "\"keep_current\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].target_choice_menu.incumbent_target.identity",
+              "entry_and_invalidation.candidates[0].target_choice_menu.keep_current_target.model",
+              "entry_and_invalidation.candidates[0].target_semantics.current_selection_identity"
+            ],
+            "value": "\"keep_current\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "setup_taxonomy_enum",
+        "n": 36,
+        "echoed": 36,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].family_profile.taxonomy",
+              "entry_and_invalidation.candidates[0].setup_taxonomy_enum",
+              "entry_and_invalidation.candidates[0].shadow_historical_evidence.match_setup_taxonomy"
+            ],
+            "value": "\"MICRO_OTE_REVERSAL\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].family_profile.taxonomy",
+              "entry_and_invalidation.candidates[0].setup_taxonomy_enum",
+              "entry_and_invalidation.candidates[0].shadow_historical_evidence.match_setup_taxonomy"
+            ],
+            "value": "\"MICRO_BREAKER_RETEST\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "setup_taxonomy_version",
+        "n": 36,
+        "echoed": 36,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].family_profile.taxonomy_version",
+              "entry_and_invalidation.candidates[0].setup_taxonomy_version",
+              "entry_and_invalidation.candidates[1].family_profile.taxonomy_version"
+            ],
+            "value": "\"20260716_setup_taxonomy_v1\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].family_profile.taxonomy_version",
+              "entry_and_invalidation.candidates[0].setup_taxonomy_version",
+              "entry_and_invalidation.candidates[1].family_profile.taxonomy_version"
+            ],
+            "value": "\"20260716_setup_taxonomy_v1\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "taxonomy_mapping_source",
+        "n": 36,
+        "echoed": 36,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].taxonomy_mapping_source",
+              "entry_and_invalidation.candidates[1].taxonomy_mapping_source",
+              "entry_and_invalidation.candidates[2].taxonomy_mapping_source"
+            ],
+            "value": "\"exact_branch_structure_scope\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].taxonomy_mapping_source",
+              "entry_and_invalidation.candidates[1].taxonomy_mapping_source",
+              "entry_and_invalidation.candidates[2].taxonomy_mapping_source"
+            ],
+            "value": "\"exact_branch_structure_scope\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "model_id",
+        "n": 36,
+        "echoed": 34,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          }
+        ]
+      },
+      {
+        "role": "critic",
+        "field": "model_id",
+        "n": 36,
+        "echoed": 34,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "model_version",
+        "n": 36,
+        "echoed": 34,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "provider_id",
+        "n": 36,
+        "echoed": 34,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.provider_id"
+            ],
+            "value": "\"opencode_go_responses\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.provider_id"
+            ],
+            "value": "\"opencode_go_responses\""
+          }
+        ]
+      },
+      {
+        "role": "critic",
+        "field": "provider_id",
+        "n": 36,
+        "echoed": 34,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.provider_id"
+            ],
+            "value": "\"opencode_go_responses\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.provider_id"
+            ],
+            "value": "\"opencode_go_responses\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "candidate_hash",
+        "n": 36,
+        "echoed": 32,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "historical_analogues[0].for_candidate_hash",
+              "historical_analogues[1].for_candidate_hash",
+              "historical_analogues[2].for_candidate_hash"
+            ],
+            "value": "\"B465D2542DA02598\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "historical_analogues[0].for_candidate_hash",
+              "historical_analogues[1].for_candidate_hash",
+              "historical_analogues[2].for_candidate_hash"
+            ],
+            "value": "\"4362936E50830102\""
+          }
+        ]
+      },
+      {
+        "role": "critic",
+        "field": "candidate_hash",
+        "n": 36,
+        "echoed": 32,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "historical_analogues[0].for_candidate_hash",
+              "historical_analogues[1].for_candidate_hash",
+              "historical_analogues[2].for_candidate_hash"
+            ],
+            "value": "\"B465D2542DA02598\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "historical_analogues[0].for_candidate_hash",
+              "historical_analogues[1].for_candidate_hash",
+              "historical_analogues[2].for_candidate_hash"
+            ],
+            "value": "\"4362936E50830102\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "historical_evidence_state",
+        "n": 36,
+        "echoed": 31,
+        "model_owned": true,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].shadow_historical_evidence.state",
+              "entry_and_invalidation.candidates[1].shadow_historical_evidence.state",
+              "entry_and_invalidation.candidates[2].shadow_historical_evidence.state"
+            ],
+            "value": "\"INSUFFICIENT_SAMPLE\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740735_BITCOIN_469",
+            "input_paths": [
+              "entry_and_invalidation.candidates[0].shadow_historical_evidence.state",
+              "entry_and_invalidation.candidates[1].shadow_historical_evidence.state",
+              "entry_and_invalidation.candidates[2].shadow_historical_evidence.state"
+            ],
+            "value": "\"INSUFFICIENT_SAMPLE\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "request_id",
+        "n": 36,
+        "echoed": 31,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.lineage_id",
+              "identity.request_id"
+            ],
+            "value": "\"591813800_1785715200_305658125_1785744942_#Germany40_32424\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.lineage_id",
+              "identity.request_id"
+            ],
+            "value": "\"591813800_1785715200_305658125_1785749750_AUDUSD_9445\""
+          }
+        ]
+      },
+      {
+        "role": "critic",
+        "field": "request_id",
+        "n": 36,
+        "echoed": 31,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.lineage_id",
+              "identity.request_id"
+            ],
+            "value": "\"591813800_1785715200_305658125_1785744942_#Germany40_32424\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.lineage_id",
+              "identity.request_id"
+            ],
+            "value": "\"591813800_1785715200_305658125_1785749750_AUDUSD_9445\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "candidate_id",
+        "n": 36,
+        "echoed": 30,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].candidate_id"
+            ],
+            "value": "\"#Germany40|0|1785738600|0|fvg_mid|25872.30|fvg_mid|0\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].candidate_id"
+            ],
+            "value": "\"AUDUSD|1785499200|1785506400|1785510000|range_reentry|0.70384|range_reentry|0\""
+          }
+        ]
+      },
+      {
+        "role": "critic",
+        "field": "candidate_id",
+        "n": 36,
+        "echoed": 30,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].candidate_id"
+            ],
+            "value": "\"#Germany40|0|1785738600|0|fvg_mid|25872.30|fvg_mid|0\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].candidate_id"
+            ],
+            "value": "\"AUDUSD|1785499200|1785506400|1785510000|range_reentry|0.70384|range_reentry|0\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "request_execution_fingerprint",
+        "n": 36,
+        "echoed": 30,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].request_execution_fingerprint"
+            ],
+            "value": "\"D1FDC49080F25C04\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].request_execution_fingerprint"
+            ],
+            "value": "\"9E589D7F6835A7DB\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "request_identity_hash",
+        "n": 36,
+        "echoed": 28,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.request_identity_hash"
+            ],
+            "value": "\"69f1c8529bd242f1e82be8d26d30cbb0bbe7fcf5240571828f701a4323a9e8fb\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.request_identity_hash"
+            ],
+            "value": "\"74ca28733526413afd1a6b5f645f7b11d73455295df0a7749a72be430cbdc6b6\""
+          }
+        ]
+      },
+      {
+        "role": "critic",
+        "field": "request_identity_hash",
+        "n": 36,
+        "echoed": 28,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.request_identity_hash"
+            ],
+            "value": "\"69f1c8529bd242f1e82be8d26d30cbb0bbe7fcf5240571828f701a4323a9e8fb\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+            "input_paths": [
+              "identity.request_identity_hash"
+            ],
+            "value": "\"74ca28733526413afd1a6b5f645f7b11d73455295df0a7749a72be430cbdc6b6\""
+          }
+        ]
+      },
+      {
+        "role": "adjudicator",
+        "field": "model_id",
+        "n": 7,
+        "echoed": 7,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.configured_model_ids[0]",
+              "authority_manifest.provider.model_id"
+            ],
+            "value": "\"muse-spark-1.3-contributor\""
+          }
+        ]
+      },
+      {
+        "role": "adjudicator",
+        "field": "provider_id",
+        "n": 7,
+        "echoed": 7,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785725109_GOLD_25455",
+            "input_paths": [
+              "authority_manifest.provider.provider_id"
+            ],
+            "value": "\"opencode_go_responses\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+            "input_paths": [
+              "authority_manifest.provider.provider_id"
+            ],
+            "value": "\"opencode_go_responses\""
+          }
+        ]
+      },
+      {
+        "role": "adjudicator",
+        "field": "candidate_hash",
+        "n": 7,
+        "echoed": 3,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "historical_analogues[0].for_candidate_hash",
+              "historical_analogues[1].for_candidate_hash",
+              "historical_analogues[2].for_candidate_hash"
+            ],
+            "value": "\"B465D2542DA02598\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+            "input_paths": [
+              "historical_analogues[28].for_candidate_hash",
+              "historical_analogues[29].for_candidate_hash",
+              "historical_analogues[30].for_candidate_hash"
+            ],
+            "value": "\"2468C8A458515D50\""
+          }
+        ]
+      },
+      {
+        "role": "adjudicator",
+        "field": "request_id",
+        "n": 7,
+        "echoed": 2,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.lineage_id",
+              "identity.request_id"
+            ],
+            "value": "\"591813800_1785715200_305658125_1785744942_#Germany40_32424\""
+          },
+          {
+            "request_id": "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+            "input_paths": [
+              "identity.lineage_id"
+            ],
+            "value": "\"591813800_1785715200_305658125_1785762972_AUDUSD_11360\""
+          }
+        ]
+      },
+      {
+        "role": "adjudicator",
+        "field": "candidate_id",
+        "n": 7,
+        "echoed": 1,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.ordered_candidate_identities[0].candidate_id"
+            ],
+            "value": "\"#Germany40|0|1785738600|0|fvg_mid|25872.30|fvg_mid|0\""
+          }
+        ]
+      },
+      {
+        "role": "adjudicator",
+        "field": "request_identity_hash",
+        "n": 7,
+        "echoed": 1,
+        "model_owned": false,
+        "examples": [
+          {
+            "request_id": "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+            "input_paths": [
+              "identity.request_identity_hash"
+            ],
+            "value": "\"69f1c8529bd242f1e82be8d26d30cbb0bbe7fcf5240571828f701a4323a9e8fb\""
+          }
+        ]
+      },
+      {
+        "role": "analyst",
+        "field": "assessed_execution_fingerprint",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "blended_legacy_score",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "blocking_objections",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "bucket_prior_override_justification",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibrated_win_probability",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_available",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_bucket",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_data_window_end",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_data_window_start",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_lower_bound",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_model_version",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_sample_size",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "calibration_upper_bound",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "candidate_index",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "candidate_index",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "candidate_index",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "chop_risk",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "confidence_band",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "confidence_band",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "cost_risk",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "decision_state",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "entry",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "entry_timing_score",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "evidence_refs",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "evidence_refs",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "evidence_refs",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "expected_net_r",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "final_trade_expectancy_score",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "follow_through_probability",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "invalidation_risk",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "invalidation_risks",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "legacy_agreement_confidence",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "llm_quality_score",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "llm_self_reported_confidence",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "major_risks",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "material_contradictions",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "missing_confirmations",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "missing_required_evidence",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "missing_required_evidence",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "narrative_state",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "non_blocking_objections",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "oos_predicted_probability",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "post_entry_failure_risk",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "raw_allow",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "reasons",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "rejection_codes",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "resolution_reason",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "resolved_objection_codes",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "role",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "role",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "role",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "role_contract_version",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "role_contract_version",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "role_contract_version",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "role_schema_version",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "role_schema_version",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "role_schema_version",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "rule_score",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "selected_target_price",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "session_bucket_risk",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "sl",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "structure_quality_score",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "suggested_risk_multiplier",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "summary",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "summary",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "symbol_bucket_risk",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "target_arbitration",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "thesis_supported",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "tp1",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "tp2",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": false,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "unresolved_objection_codes",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "verdict",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "critic",
+        "field": "verdict",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "adjudicator",
+        "field": "verdict",
+        "n": 7,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      },
+      {
+        "role": "analyst",
+        "field": "veto",
+        "n": 36,
+        "echoed": 0,
+        "model_owned": true,
+        "examples": []
+      }
+    ],
+    "echoed_field_count": 25,
+    "never_echoed_model_owned_fields": [
+      "critic.blocking_objections",
+      "analyst.bucket_prior_override_justification",
+      "analyst.candidate_index",
+      "critic.candidate_index",
+      "adjudicator.candidate_index",
+      "analyst.chop_risk",
+      "analyst.confidence_band",
+      "critic.confidence_band",
+      "analyst.cost_risk",
+      "analyst.decision_state",
+      "analyst.entry_timing_score",
+      "analyst.final_trade_expectancy_score",
+      "analyst.follow_through_probability",
+      "analyst.invalidation_risk",
+      "analyst.invalidation_risks",
+      "analyst.llm_quality_score",
+      "analyst.llm_self_reported_confidence",
+      "analyst.major_risks",
+      "analyst.material_contradictions",
+      "analyst.missing_confirmations",
+      "analyst.missing_required_evidence",
+      "critic.missing_required_evidence",
+      "analyst.narrative_state",
+      "critic.non_blocking_objections",
+      "analyst.post_entry_failure_risk",
+      "analyst.raw_allow",
+      "analyst.reasons",
+      "analyst.rejection_codes",
+      "adjudicator.resolution_reason",
+      "adjudicator.resolved_objection_codes",
+      "analyst.session_bucket_risk",
+      "analyst.structure_quality_score",
+      "analyst.suggested_risk_multiplier",
+      "analyst.summary",
+      "critic.summary",
+      "analyst.symbol_bucket_risk",
+      "analyst.target_arbitration",
+      "analyst.thesis_supported",
+      "adjudicator.unresolved_objection_codes",
+      "analyst.verdict",
+      "critic.verdict",
+      "adjudicator.verdict",
+      "analyst.veto"
+    ]
+  },
+  "visible_length_vs_reasoning": {
+    "definition": "pearson(visible_output_tokens, reasoning_output_tokens) per role, sample rows",
+    "by_role": {
+      "analyst": {
+        "n": 36,
+        "r": 0.2082
+      },
+      "critic": {
+        "n": 36,
+        "r": 0.4617
+      },
+      "adjudicator": {
+        "n": 7,
+        "r": -0.2692
+      }
+    }
+  },
+  "output_budget_vs_used": {
+    "analyst": {
+      "wire_max_output_tokens": {
+        "n": 34,
+        "avg": 30517.647,
+        "p50": 30000.0,
+        "p95": 38000.0,
+        "min": 26800,
+        "max": 38000
+      },
+      "provider_output_tokens": {
+        "n": 36,
+        "avg": 12221.389,
+        "p50": 12395.0,
+        "p95": 17714.0,
+        "min": 2851.0,
+        "max": 20574.0
+      },
+      "provider_reasoning_tokens": {
+        "n": 36,
+        "avg": 8748.361,
+        "p50": 9056.0,
+        "p95": 13094.0,
+        "min": 136.0,
+        "max": 13587.0
+      },
+      "median_budget_minus_median_output": 17605.0,
+      "configured_reasoning_token_reserve": 24000,
+      "reserve_is_ceiling_not_spend": "max_output_tokens is a ceiling added on top of the schema budget (ai_provider.OpenCodeResponsesProvider._wire_responses_kwargs); an answer that reasons less is billed less"
+    },
+    "critic": {
+      "wire_max_output_tokens": {
+        "n": 34,
+        "avg": 49000.0,
+        "p50": 49000.0,
+        "p95": 49000.0,
+        "min": 49000,
+        "max": 49000
+      },
+      "provider_output_tokens": {
+        "n": 36,
+        "avg": 3782.889,
+        "p50": 3770.5,
+        "p95": 6057.25,
+        "min": 243.0,
+        "max": 6893.0
+      },
+      "provider_reasoning_tokens": {
+        "n": 36,
+        "avg": 3668.417,
+        "p50": 3666.5,
+        "p95": 5826.5,
+        "min": 117.0,
+        "max": 6688.0
+      },
+      "median_budget_minus_median_output": 45229.5,
+      "configured_reasoning_token_reserve": 24000,
+      "reserve_is_ceiling_not_spend": "max_output_tokens is a ceiling added on top of the schema budget (ai_provider.OpenCodeResponsesProvider._wire_responses_kwargs); an answer that reasons less is billed less"
+    },
+    "adjudicator": {
+      "wire_max_output_tokens": {
+        "n": 7,
+        "avg": 49000.0,
+        "p50": 49000,
+        "p95": 49000.0,
+        "min": 49000,
+        "max": 49000
+      },
+      "provider_output_tokens": {
+        "n": 7,
+        "avg": 2255.857,
+        "p50": 2280.0,
+        "p95": 2702.5,
+        "min": 1618.0,
+        "max": 2728.0
+      },
+      "provider_reasoning_tokens": {
+        "n": 7,
+        "avg": 2160.0,
+        "p50": 2168.0,
+        "p95": 2609.8,
+        "min": 1522.0,
+        "max": 2635.0
+      },
+      "median_budget_minus_median_output": 46720.0,
+      "configured_reasoning_token_reserve": 24000,
+      "reserve_is_ceiling_not_spend": "max_output_tokens is a ceiling added on top of the schema budget (ai_provider.OpenCodeResponsesProvider._wire_responses_kwargs); an answer that reasons less is billed less"
+    }
+  },
+  "field_factor_note": "visible tokens per field = proxy units of the stored field x the median Muse global factor for that role",
+  "consumer_summary": {
+    "decision_value": 21,
+    "diagnostic_logged_only": 8,
+    "validated_or_bound": 17,
+    "persisted": 15,
+    "telemetry_only": 1,
+    "never_read": 0
+  },
+  "sample_request_ids": [
+    "591813800_1785715200_305658125_1785725109_GOLD_25455",
+    "591813800_1785715200_305658125_1785740134_BITCOIN_1317",
+    "591813800_1785715200_305658125_1785740735_BITCOIN_469",
+    "591813800_1785715200_305658125_1785744942_#Germany40_32424",
+    "591813800_1785715200_305658125_1785749750_AUDUSD_9445",
+    "591813800_1785715200_305658125_1785753356_GBPUSD_22093",
+    "591813800_1785715200_305658125_1785759967_BITCOIN_9173",
+    "591813800_1785715200_305658125_1785762972_AUDUSD_11360",
+    "591813800_1785715200_305658125_1785768982_USDCHF_2988",
+    "591813800_1788925102_208218984_1788951325_USDCHF_19925",
+    "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+    "903871_1788983285_8075437_1788988231_EURAUD_21885",
+    "903871_1788983285_8075437_1788988231_NZDJPY_13045",
+    "903871_1788983285_8075437_1788995216_GBPCAD_29371",
+    "903871_1788999394_24185000_1789002917_NAS100_10901",
+    "903871_1788999394_24185000_1789004983_NAS100_9597",
+    "903871_1788999394_24185000_1789028921_JPN225_10535",
+    "903871_1788999394_24185000_1789033279_NZDJPY_20411",
+    "903871_1788999394_24185000_1789036511_XAUUSD_7721",
+    "903871_1789062748_87542921_1789064597_USDCHF_11315",
+    "903871_1789062748_87542921_1789066099_US30_18866",
+    "903871_1789062748_87542921_1789067423_US30_19703",
+    "903871_1789062748_87542921_1789068109_US30_16044",
+    "903871_1789062748_87542921_1789071381_USDCHF_5236",
+    "903871_1789093630_118426656_1789094249_US30_14363",
+    "903871_1789093630_118426656_1789094249_WTI_24227",
+    "903871_1789093630_118426656_1789096071_XAUUSD_13096",
+    "903871_1789093630_118426656_1789097294_USDJPY_5699",
+    "903871_1789093630_118426656_1789098513_AUDJPY_32323",
+    "903871_1789093630_118426656_1789102197_XAUUSD_1646",
+    "903871_1789093630_118426656_1789102811_CHFJPY_32047",
+    "903871_1789148402_173202328_1789149197_WTI_22682",
+    "903871_1789148402_173202328_1789151032_EURAUD_5869",
+    "903871_1789148402_173202328_1789152868_EURNZD_21011",
+    "903871_1789148402_173202328_1789154707_GBPUSD_19340",
+    "903871_1789148402_173202328_1789155320_UK100_2328"
+  ]
+}

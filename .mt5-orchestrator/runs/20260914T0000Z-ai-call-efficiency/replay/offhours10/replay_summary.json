@@ -1,0 +1,1234 @@
+{
+ "allowance_usd_per_week": 30.0,
+ "call_level": {
+  "pointless_adjudications_analyst_reject": 77,
+  "pointless_adjudications_by_model": {
+   "luna": 77
+  },
+  "repair_calls_in_usage_ledger_kept_requests": 82,
+  "repair_passes_in_gate_log_all_requests": 121,
+  "shadow_repeat_calls_in_kept_requests": 175
+ },
+ "fractions": {
+  "predetermined_consumed_sweep_new": 0.0226,
+  "unchanged_state_reuse_all": 0.0281,
+  "unchanged_state_reuse_muse": 0.0424
+ },
+ "gate_events": {
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mid_mitigated+fvg_mitigation_state+fvg_touched": 21,
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mid_mitigated+fvg_mitigation_state+fvg_touched+target_source+tp_model": 1,
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mid_mitigated+fvg_touched": 4,
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mitigation_state+fvg_touched": 19,
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mitigation_state+fvg_touched+ote_state": 3,
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mitigation_state+fvg_touched+ote_state+target_source+tp_model": 1,
+  "candidate_state:entry_trigger_phase+fvg_execution_class+fvg_mitigation_state+fvg_touched+target_source+tp_model": 4,
+  "candidate_state:fvg_execution_class+fvg_mid_mitigated+fvg_mitigation_state": 11,
+  "candidate_state:fvg_execution_class+fvg_mid_mitigated+fvg_mitigation_state+fvg_touched": 8,
+  "candidate_state:fvg_execution_class+fvg_mid_mitigated+fvg_mitigation_state+fvg_touched+target_source+tp_model": 1,
+  "candidate_state:fvg_execution_class+fvg_mid_mitigated+fvg_mitigation_state+target_source+tp_model": 8,
+  "candidate_state:fvg_execution_class+fvg_mid_mitigated+fvg_touched": 1,
+  "candidate_state:fvg_execution_class+fvg_mitigation_state+fvg_touched": 9,
+  "candidate_state:fvg_mitigation_state": 1,
+  "candidate_state:liquidity_target_blocked_by_obstacle": 1,
+  "candidate_state:liquidity_target_blocked_by_obstacle+obstacle_kind": 5,
+  "candidate_state:obstacle_kind": 3,
+  "candidate_state:obstacle_kind+target_arbitration_required": 1,
+  "candidate_state:obstacle_kind+target_source+tp_model": 7,
+  "candidate_state:target_source+tp_model": 92,
+  "identity:contract_manifest_hash+decision_input_hash+python.family_profile_version+python.model_id+python.prompt_contract_version+python.provider_id+runtime_input_hash": 1,
+  "identity:contract_manifest_hash+decision_input_hash+python.family_profile_version+python.model_id+python.provider_id+runtime_input_hash": 58,
+  "identity:contract_manifest_hash+decision_input_hash+python.family_profile_version+python.model_id+runtime_input_hash": 6,
+  "identity:contract_manifest_hash+decision_input_hash+python.family_profile_version+python.prompt_contract_version+runtime_input_hash": 1,
+  "identity:contract_manifest_hash+decision_input_hash+python.family_profile_version+runtime_input_hash": 18,
+  "identity:contract_manifest_hash+decision_input_hash+runtime_input_hash": 1,
+  "identity:decision_input_hash+python.family_profile_version+python.model_id+python.prompt_contract_version+python.provider_id+runtime_input_hash": 6,
+  "identity:decision_input_hash+python.family_profile_version+python.prompt_contract_version+runtime_input_hash": 6,
+  "identity:decision_input_hash+python.model_id+python.provider_id+runtime_input_hash": 28,
+  "identity:decision_input_hash+python.model_id+runtime_input_hash": 12,
+  "identity:decision_input_hash+runtime_input_hash": 32,
+  "identity:python.model_id": 6,
+  "identity:python.model_id+python.provider_id": 261,
+  "identity:python.model_id+python.provider_id+runtime_input_hash": 14,
+  "identity:runtime_input_hash": 19,
+  "killzone_transition": 178,
+  "new_candidate": 1010,
+  "price_drift": 313,
+  "regime_label": 16,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 4,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.liquidity_kind+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 18,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 5,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:is_buy+po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 12,
+  "request_state:is_buy+po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.has_follow_through+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 5,
+  "request_state:is_buy+po3.has_follow_through+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:is_buy+po3.has_follow_through+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:is_buy+po3.has_follow_through+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.sweep_side+po3.t_disp+po3.t_sweep": 2,
+  "request_state:is_buy+po3.has_follow_through+po3.liquidity_kind+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 7,
+  "request_state:is_buy+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 5,
+  "request_state:is_buy+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:is_buy+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 7,
+  "request_state:is_buy+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.sweep_side+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 9,
+  "request_state:is_buy+po3.liquidity_kind+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 6,
+  "request_state:is_buy+po3.liquidity_kind+po3.sweep_side+po3.t_disp+po3.t_sweep": 1,
+  "request_state:is_buy+po3.liquidity_kind+po3.t_disp": 5,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.po3_state+po3.structure_type+po3.t_bos": 2,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.has_follow_through+po3.htf_bos+po3.po3_state+po3.structure_type+po3.t_bos": 2,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 4,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.po3_state+po3.structure_type+po3.t_bos": 7,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.liquidity_kind+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.developing_bos+po3.has_bos+po3.htf_bos+po3.po3_state+po3.structure_type+po3.t_bos": 2,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 7,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 4,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 4,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_follow_through+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 10,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 36,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_sweep": 1,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 5,
+  "request_state:po3.context_tier+po3.has_bos+po3.has_sweep+po3.htf_bos+po3.liquidity_kind+po3.ltf_bos+po3.po3_state+po3.structure_type+po3.sweep_side+po3.t_bos+po3.t_disp+po3.t_sweep": 11,
+  "request_state:po3.developing_bos+po3.has_follow_through+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 5,
+  "request_state:po3.developing_bos+po3.has_follow_through+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_sweep": 3,
+  "request_state:po3.developing_bos+po3.has_follow_through+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 3,
+  "request_state:po3.developing_bos+po3.has_follow_through+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.structure_type+po3.sweep_side+po3.t_sweep": 2,
+  "request_state:po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 33,
+  "request_state:po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.sweep_side+po3.t_sweep": 3,
+  "request_state:po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 6,
+  "request_state:po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.ltf_bos+po3.structure_type+po3.sweep_side+po3.t_sweep": 2,
+  "request_state:po3.developing_bos+po3.has_sweep+po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.has_follow_through+po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.has_follow_through+po3.htf_choch+po3.htf_mss+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.has_follow_through+po3.liquidity_kind+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.has_follow_through+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.t_bos+po3.t_disp": 1,
+  "request_state:po3.has_follow_through+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.has_follow_through+po3.liquidity_kind+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:po3.has_follow_through+po3.ltf_bos+po3.ltf_choch+po3.ltf_mss+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.has_follow_through+po3.t_bos+po3.t_disp+po3.t_sweep": 4,
+  "request_state:po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:po3.htf_choch+po3.htf_mss+po3.liquidity_kind+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.htf_choch+po3.htf_mss+po3.ltf_choch+po3.ltf_mss+po3.structure_type+po3.t_bos+po3.t_disp+po3.t_sweep": 14,
+  "request_state:po3.liquidity_kind": 34,
+  "request_state:po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.t_bos+po3.t_disp+po3.t_sweep": 4,
+  "request_state:po3.liquidity_kind+po3.ltf_choch+po3.ltf_mss+po3.t_disp+po3.t_sweep": 1,
+  "request_state:po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_disp+po3.t_sweep": 13,
+  "request_state:po3.liquidity_kind+po3.structure_type+po3.sweep_side+po3.t_sweep": 1,
+  "request_state:po3.liquidity_kind+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.ltf_choch+po3.ltf_mss+po3.t_bos+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.ltf_choch+po3.ltf_mss+po3.t_disp+po3.t_sweep": 2,
+  "request_state:po3.t_bos+po3.t_disp+po3.t_sweep": 3,
+  "request_state:po3.t_disp": 30,
+  "request_state:po3.t_disp+po3.t_sweep": 5,
+  "request_state:po3.t_sweep": 1,
+  "session_transition": 370
+ },
+ "gate_reasons": {
+  "borderline_prior_requires_fresh_review": 406,
+  "decisive_prior_ttl_expired": 145,
+  "meaningful_change": 1330,
+  "no_prior_authoritative_decision": 121,
+  "prior_decision_approved_never_reused": 105,
+  "unchanged_decisive_non_approval_within_ttl": 61
+ },
+ "generated_utc": "2026-09-14T00:52:09.370101+00:00",
+ "journals": {
+  "consumed_sweep_events": 12,
+  "files": [
+   "20260907.log",
+   "20260908.log",
+   "20260909.log",
+   "20260910.log",
+   "20260911.log",
+   "20260912.log",
+   "20260913.log"
+  ],
+  "queued_requests": 1822
+ },
+ "muse_economics": {
+  "calls_per_request_by_traffic_class": {
+   "REPAIR": 0.0012,
+   "SHADOW": 0.0788,
+   "TRADING_ADJUDICATOR": 0.0352,
+   "TRADING_CRITIC": 0.9976,
+   "TRADING_DECISION": 0.9988
+  },
+  "cost_share_by_traffic_class": {
+   "REPAIR": 0.0008,
+   "SHADOW": 0.0367,
+   "TRADING_ADJUDICATOR": 0.007,
+   "TRADING_CRITIC": 0.2595,
+   "TRADING_DECISION": 0.696
+  },
+  "mean_cost_per_request_usd": 0.009232,
+  "median_cost_per_request_usd": 0.008955,
+  "requests_with_muse_cost": 825
+ },
+ "opportunities": {
+  "actionable_added_to_watchlist": 44,
+  "detail": [
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788837043_120154281_1788841277_#Germany40_5208",
+    "session_code": "ASIA",
+    "symbol": "#Germany40"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788837043_120154281_1788843091_#Germany40_7893",
+    "session_code": "ASIA",
+    "symbol": "#Germany40"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788837043_120154281_1788844299_#Germany40_9560",
+    "session_code": "ASIA",
+    "symbol": "#Germany40"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "other",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788796160_79268421_1788796170_#Japan225_29002",
+    "session_code": "LON",
+    "symbol": "#Japan225"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788931827_AUDJPY_8772",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788932433_AUDJPY_21446",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788933039_AUDJPY_12810",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788934856_AUDJPY_17596",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788936674_AUDJPY_3276",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788937283_AUDJPY_4684",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788940313_AUDJPY_25550",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788941533_AUDJPY_8200",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788942143_AUDJPY_1354",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788942756_AUDJPY_13213",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788946415_AUDJPY_19805",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788949481_AUDJPY_26449",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788950097_AUDJPY_12044",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1788925102_208218984_1788951947_AUDJPY_32618",
+    "session_code": "ASIA",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "other",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1788614076_331468_1788614091_BITCOIN_21986",
+    "session_code": "LON",
+    "symbol": "BITCOIN"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "other",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1788614076_331468_1788615908_BITCOIN_31656",
+    "session_code": "LON",
+    "symbol": "BITCOIN"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788798902_82010906_1788798915_EURCAD_11096",
+    "session_code": "LON",
+    "symbol": "EURCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1788540249_79807218_1788542123_EURCHF_28310",
+    "session_code": "LON",
+    "symbol": "EURCHF"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1786744136_102001000_1786749666_EURUSD_32627",
+    "session_code": "NY",
+    "symbol": "EURUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788926968_GBPCAD_32579",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788927574_GBPCAD_8859",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788928180_GBPCAD_27717",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788928793_GBPCAD_388",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788930010_GBPCAD_619",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788931222_GBPCAD_5377",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788933039_GBPCAD_25813",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788940923_GBPCAD_31677",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "591813800_1788925102_208218984_1788943973_GBPCAD_15336",
+    "session_code": "ASIA",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788837043_120154281_1788878753_GBPUSD_12399",
+    "session_code": "LON",
+    "symbol": "GBPUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788929401_GBPUSD_13011",
+    "session_code": "ASIA",
+    "symbol": "GBPUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788943973_GBPUSD_19340",
+    "session_code": "ASIA",
+    "symbol": "GBPUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "other",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1786561284_9977718_1786565161_GOLD_30305",
+    "session_code": "OFF",
+    "symbol": "GOLD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1786932611_30404328_1786945598_GOLD_14104",
+    "session_code": "ASIA",
+    "symbol": "GOLD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788837043_120154281_1788848530_GOLD_5856",
+    "session_code": "ASIA",
+    "symbol": "GOLD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788925757_GOLD_22067",
+    "session_code": "ASIA",
+    "symbol": "GOLD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788935465_GOLD_3977",
+    "session_code": "ASIA",
+    "symbol": "GOLD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1786932611_30404328_1786943761_NZDCAD_22143",
+    "session_code": "ASIA",
+    "symbol": "NZDCAD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "591813800_1788495063_34619250_1788496040_NZDCHF_27355",
+    "session_code": "ASIA",
+    "symbol": "NZDCHF"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788951325_USDCAD_6280",
+    "session_code": "ASIA",
+    "symbol": "USDCAD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788929402_USDCHF_28995",
+    "session_code": "ASIA",
+    "symbol": "USDCHF"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788931222_USDCHF_2673",
+    "session_code": "ASIA",
+    "symbol": "USDCHF"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788933039_USDCHF_13596",
+    "session_code": "ASIA",
+    "symbol": "USDCHF"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "591813800_1788925102_208218984_1788948255_USDCHF_8486",
+    "session_code": "ASIA",
+    "symbol": "USDCHF"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "591813800_1788925102_208218984_1788951325_USDCHF_19925",
+    "session_code": "ASIA",
+    "symbol": "USDCHF"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789062748_87542921_1789064597_AUDJPY_5680",
+    "session_code": "LON",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "muse",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "903871_1789062748_87542921_1789072358_AUDJPY_32691",
+    "session_code": "OFF",
+    "symbol": "AUDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1788999394_24185000_1789019724_AUDUSD_26918",
+    "session_code": "ASIA",
+    "symbol": "AUDUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": null,
+    "gated_action": "SKIP",
+    "model_family": "muse",
+    "mql_outcome": "no_journal_line",
+    "request_id": "903871_1788999394_24185000_1789031053_AUDUSD_1360",
+    "session_code": "ASIA",
+    "symbol": "AUDUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1788983285_8075437_1788987005_EURUSD_24595",
+    "session_code": "OFF",
+    "symbol": "EURUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "approved_no_watchlist_outcome_line",
+    "request_id": "903871_1788999394_24185000_1789005590_EURUSD_31539",
+    "session_code": "NY",
+    "symbol": "EURUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1788999394_24185000_1789007417_EURUSD_31666",
+    "session_code": "NY",
+    "symbol": "EURUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "903871_1788999394_24185000_1789029979_EURUSD_32191",
+    "session_code": "ASIA",
+    "symbol": "EURUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "approved_no_watchlist_outcome_line",
+    "request_id": "903871_1788999394_24185000_1789037774_EURUSD_24725",
+    "session_code": "ASIA",
+    "symbol": "EURUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789158408_GBPAUD_3719",
+    "session_code": "OFF",
+    "symbol": "GBPAUD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789062748_87542921_1789076820_GBPCAD_19756",
+    "session_code": "OFF",
+    "symbol": "GBPCAD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789168134_GBPJPY_29945",
+    "session_code": "NY",
+    "symbol": "GBPJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789169375_GBPJPY_3422",
+    "session_code": "NY",
+    "symbol": "GBPJPY"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "approved_no_watchlist_outcome_line",
+    "request_id": "903871_1789093630_118426656_1789100962_GBPNZD_31161",
+    "session_code": "ASIA",
+    "symbol": "GBPNZD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1788999394_24185000_1789003525_GBPUSD_22698",
+    "session_code": "NY",
+    "symbol": "GBPUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "watchlist_skipped:sweep already consumed by a filled trade",
+    "request_id": "903871_1788999394_24185000_1789006198_GBPUSD_2800",
+    "session_code": "NY",
+    "symbol": "GBPUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "approved_no_watchlist_outcome_line",
+    "request_id": "903871_1788999394_24185000_1789013928_GBPUSD_20899",
+    "session_code": "ASIA",
+    "symbol": "GBPUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789156550_GER40_13532",
+    "session_code": "OFF",
+    "symbol": "GER40"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789165836_GER40_30878",
+    "session_code": "OFF",
+    "symbol": "GER40"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "approved_no_watchlist_outcome_line",
+    "request_id": "903871_1789062748_87542921_1789080766_JPN225_9042",
+    "session_code": "OFF",
+    "symbol": "JPN225"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1788983285_8075437_1788994470_NAS100_7194",
+    "session_code": "OFF",
+    "symbol": "NAS100"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "approved_no_watchlist_outcome_line",
+    "request_id": "903871_1788999394_24185000_1789058400_NZDJPY_18130",
+    "session_code": "LON",
+    "symbol": "NZDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789062748_87542921_1789067423_NZDJPY_14844",
+    "session_code": "OFF",
+    "symbol": "NZDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789062748_87542921_1789070364_NZDJPY_22376",
+    "session_code": "OFF",
+    "symbol": "NZDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "muse",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789062748_87542921_1789077957_NZDJPY_31942",
+    "session_code": "OFF",
+    "symbol": "NZDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789156550_NZDUSD_3356",
+    "session_code": "OFF",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "903871_1789148402_173202328_1789160263_NZDUSD_32010",
+    "session_code": "OFF",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "903871_1789148402_173202328_1789161500_NZDUSD_29619",
+    "session_code": "OFF",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "903871_1789148402_173202328_1789162735_NZDUSD_1213",
+    "session_code": "OFF",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "903871_1789148402_173202328_1789163359_NZDUSD_23040",
+    "session_code": "OFF",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "watchlist_skipped:sweep trade cap reached",
+    "request_id": "903871_1789148402_173202328_1789164597_NZDUSD_27671",
+    "session_code": "OFF",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789167692_NZDUSD_17020",
+    "session_code": "NY",
+    "symbol": "NZDUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789167692_UK100_23114",
+    "session_code": "NY",
+    "symbol": "UK100"
+   },
+   {
+    "actionable": false,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "no_journal_line",
+    "request_id": "903871_1788999394_24185000_1789048742_USDJPY_24431",
+    "session_code": "LON",
+    "symbol": "USDJPY"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789157167_XAUUSD_3254",
+    "session_code": "OFF",
+    "symbol": "XAUUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789159027_XAUUSD_32549",
+    "session_code": "OFF",
+    "symbol": "XAUUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789159645_XAUUSD_14022",
+    "session_code": "OFF",
+    "symbol": "XAUUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789160263_XAUUSD_10031",
+    "session_code": "OFF",
+    "symbol": "XAUUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789162120_XAUUSD_19843",
+    "session_code": "OFF",
+    "symbol": "XAUUSD"
+   },
+   {
+    "actionable": true,
+    "delay_minutes": 0.0,
+    "gated_action": "CALL",
+    "model_family": "luna",
+    "mql_outcome": "added_to_watchlist",
+    "request_id": "903871_1789148402_173202328_1789165836_XAUUSD_21150",
+    "session_code": "OFF",
+    "symbol": "XAUUSD"
+   }
+  ],
+  "materially_delayed": 0,
+  "missed_actionable": 0,
+  "missed_any_approval": 10,
+  "mql_outcomes": {
+   "added_to_watchlist": 44,
+   "approved_no_watchlist_outcome_line": 6,
+   "no_journal_line": 12,
+   "watchlist_skipped:sweep already consumed by a filled trade": 10,
+   "watchlist_skipped:sweep trade cap reached": 16
+  },
+  "python_approvals": 88
+ },
+ "premise_requests_per_week": 11000,
+ "request_categories": {
+  "OTHER_REQUIRED": {
+   "count": 531,
+   "muse_cost_usd": 1.9979,
+   "pct": 24.49,
+   "provider_calls": {
+    "REPAIR": 7,
+    "SHADOW": 54,
+    "TRADING_ADJUDICATOR": 202,
+    "TRADING_CRITIC": 530,
+    "TRADING_DECISION": 532
+   }
+  },
+  "POINTLESS_ADJUDICATION": {
+   "count": 0,
+   "muse_cost_usd": 0,
+   "pct": 0.0,
+   "provider_calls": {}
+  },
+  "PREDETERMINED_OUTCOME": {
+   "count": 204,
+   "muse_cost_usd": 0.222,
+   "pct": 9.41,
+   "provider_calls": {
+    "SHADOW": 15,
+    "TRADING_ADJUDICATOR": 19,
+    "TRADING_CRITIC": 43,
+    "TRADING_DECISION": 43
+   }
+  },
+  "QA_OR_NON_PRODUCTION": {
+   "count": 0,
+   "muse_cost_usd": 0,
+   "pct": 0.0,
+   "provider_calls": {}
+  },
+  "REPAIR": {
+   "count": 0,
+   "muse_cost_usd": 0,
+   "pct": 0.0,
+   "provider_calls": {}
+  },
+  "REQUIRED_NEW_DECISION": {
+   "count": 555,
+   "muse_cost_usd": 2.343,
+   "pct": 25.6,
+   "provider_calls": {
+    "REPAIR": 31,
+    "SHADOW": 57,
+    "TRADING_ADJUDICATOR": 156,
+    "TRADING_CRITIC": 487,
+    "TRADING_DECISION": 517
+   }
+  },
+  "SCHEDULED_REVIEW_WITH_MEANINGFUL_CHANGE": {
+   "count": 744,
+   "muse_cost_usd": 2.8762,
+   "pct": 34.32,
+   "provider_calls": {
+    "REPAIR": 43,
+    "SHADOW": 64,
+    "TRADING_ADJUDICATOR": 215,
+    "TRADING_CRITIC": 641,
+    "TRADING_DECISION": 686
+   }
+  },
+  "UNCHANGED_STATE": {
+   "count": 61,
+   "muse_cost_usd": 0.3359,
+   "pct": 2.81,
+   "provider_calls": {
+    "REPAIR": 1,
+    "SHADOW": 8,
+    "TRADING_ADJUDICATOR": 6,
+    "TRADING_CRITIC": 61,
+    "TRADING_DECISION": 61
+   }
+  },
+  "UNKNOWN": {
+   "count": 73,
+   "muse_cost_usd": 0.0242,
+   "pct": 3.37,
+   "provider_calls": {
+    "REPAIR": 1,
+    "TRADING_ADJUDICATOR": 1,
+    "TRADING_CRITIC": 5,
+    "TRADING_DECISION": 6
+   }
+  }
+ },
+ "request_categories_muse_only": {
+  "OTHER_REQUIRED": 223,
+  "POINTLESS_ADJUDICATION": 0,
+  "PREDETERMINED_OUTCOME": 21,
+  "QA_OR_NON_PRODUCTION": 0,
+  "REPAIR": 0,
+  "REQUIRED_NEW_DECISION": 239,
+  "SCHEDULED_REVIEW_WITH_MEANINGFUL_CHANGE": 307,
+  "UNCHANGED_STATE": 35,
+  "UNKNOWN": 0
+ },
+ "requests_by_model_family": {
+  "luna": 873,
+  "muse": 825,
+  "other": 392,
+  "unknown": 78
+ },
+ "requests_by_session": {
+  "ASIA": 999,
+  "LON": 332,
+  "NY": 287,
+  "OFF": 550
+ },
+ "requests_per_utc_day": {
+  "2026-08-11": 24,
+  "2026-08-12": 92,
+  "2026-08-13": 28,
+  "2026-08-14": 56,
+  "2026-08-16": 10,
+  "2026-08-17": 57,
+  "2026-09-04": 110,
+  "2026-09-05": 20,
+  "2026-09-07": 156,
+  "2026-09-08": 227,
+  "2026-09-09": 468,
+  "2026-09-10": 564,
+  "2026-09-11": 356
+ },
+ "requests_total": 2168,
+ "review_gate_config": {
+  "cadence_minutes": {
+   "ASIA": 30.0,
+   "LON": 15.0,
+   "NY": 7.0,
+   "OFF": 10.0
+  },
+  "decisive_margin": 2.0,
+  "decisive_ttl_cadences": 1.0,
+  "defer_borderline": false,
+  "max_records": 2000,
+  "max_reuse_minutes": 60.0,
+  "mode": "enforce",
+  "price_tolerance_r": 0.1,
+  "review_gate_version": "20260914_ai_review_gate_v1",
+  "state_file": "data\\ai_review_state.json",
+  "warnings": []
+ },
+ "session_reconstruction_check": {
+  "broker_comment_session_token_match": {
+   "true": 7123
+  }
+ }
+}
