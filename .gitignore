@@ -12,6 +12,8 @@
 /python/.codex_validation/approval_execution_20260907/terminal/terminal64.exe
 /python/.codex_validation/approval_execution_20260907/terminal/MetaEditor64.exe
 /python/data/ai_decision_cache.jsonl
+# Published as .gz beside the live file; the gate keeps appending to the raw copy locally.
+/python/logs/ai_request_response_fingerprints.jsonl
 
 # Orchestrator takeover isolation backups duplicate python/data (152 MB cache copy).
 /.mt5-orchestrator/runs/*/takeover/isolation_backup/
