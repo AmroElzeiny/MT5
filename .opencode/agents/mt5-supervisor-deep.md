@@ -1,7 +1,7 @@
 ---
 description: Deep low-cost supervisor for architecture, state, execution, concurrency, security, and repeated-failure missions.
 mode: primary
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow
@@ -50,7 +50,7 @@ Do not automatically add explorer/test/adversarial roles; invoke them only when 
 
 For genuinely high-risk completion use:
 - logic reviewer: MiniMax family;
-- adversarial reviewer: DeepSeek family.
+- adversarial reviewer: Muse family.
 Testing cadence: no full suite or MQL5 compile inside work packages; tests for MAJOR packages only; one final full suite + MQL5 compile at the end.
 
 Respect the 180-minute / 12-material-invocation target.

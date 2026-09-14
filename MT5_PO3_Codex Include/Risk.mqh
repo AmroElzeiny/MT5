@@ -187,6 +187,65 @@ double CalcDesiredRiskMoney() {
    return 0.0;
 }
 
+// Pure, broker-free resolution of one order's governed risk budget.  Executed
+// verbatim by python/tests/test_governed_risk_scaling.py, so keep the body to
+// declarations, assignments, single-line ifs, MathMin/MathMax and returns.
+//   pre    = cap_enabled ? min(base, portfolio_remaining) : base
+//   mult   = subtype_context_session * active * bucket * ai * (execution_cost if reduced)
+//   risk   = pre * mult, then <= portfolio_remaining when the cap is enabled
+//   upscale (mult > 1) can never lift risk above max(pre, equity * hard_max_pct / 100)
+// Owner ranges: session/weekday (0, SESSION_WEEKDAY_RISK_MULTIPLIER_MAX];
+// subtype x context (session removed), active, bucket, AI and execution cost
+// are reduce-only (0, GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX].
+bool ResolveGovernedRiskMoney(const double base_risk_money,
+                              const bool portfolio_cap_enabled,
+                              const double portfolio_remaining,
+                              const double equity,
+                              const double hard_max_risk_pct,
+                              const double subtype_context_session_multiplier,
+                              const double session_weekday_multiplier,
+                              const double active_policy_multiplier,
+                              const double bucket_policy_multiplier,
+                              const double ai_risk_multiplier,
+                              const bool execution_cost_reduced,
+                              const double execution_cost_multiplier,
+                              double &out_risk_money,
+                              double &out_multiplier,
+                              string &out_reason) {
+   double eps = 0.000001;
+   out_risk_money = 0.0;
+   out_multiplier = 0.0;
+   out_reason = "ok";
+   if(base_risk_money <= 0.0) { out_reason = "risk budget resolved to zero"; return false; }
+   if(subtype_context_session_multiplier <= 0.0) { out_reason = "resolved_risk_multiplier_zero"; return false; }
+   if(active_policy_multiplier <= 0.0 || bucket_policy_multiplier <= 0.0) { out_reason = "resolved_risk_multiplier_zero"; return false; }
+   if(ai_risk_multiplier <= 0.0) { out_reason = "resolved_risk_multiplier_zero"; return false; }
+   if(execution_cost_reduced && execution_cost_multiplier <= 0.0) { out_reason = "resolved_risk_multiplier_zero"; return false; }
+   if(session_weekday_multiplier <= 0.0) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   if(session_weekday_multiplier > SESSION_WEEKDAY_RISK_MULTIPLIER_MAX + eps) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   double reduce_only_base = subtype_context_session_multiplier / session_weekday_multiplier;
+   if(reduce_only_base > GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX + eps) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   if(active_policy_multiplier > GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX + eps) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   if(bucket_policy_multiplier > GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX + eps) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   if(ai_risk_multiplier > GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX + eps) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   if(execution_cost_multiplier > GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX + eps) { out_reason = "resolved_risk_multiplier_invalid"; return false; }
+   double multiplier = subtype_context_session_multiplier * active_policy_multiplier * bucket_policy_multiplier * ai_risk_multiplier;
+   if(execution_cost_reduced) multiplier = multiplier * execution_cost_multiplier;
+   if(multiplier <= 0.0) { out_reason = "resolved_risk_multiplier_zero"; return false; }
+   double pre_scale = base_risk_money;
+   if(portfolio_cap_enabled) pre_scale = MathMin(pre_scale, portfolio_remaining);
+   if(pre_scale <= 0.0) { out_reason = "portfolio risk capacity exhausted"; return false; }
+   double scaled = pre_scale * multiplier;
+   if(portfolio_cap_enabled) scaled = MathMin(scaled, portfolio_remaining);
+   double hard_cap_money = 0.0;
+   if(hard_max_risk_pct > 0.0 && equity > 0.0) hard_cap_money = equity * hard_max_risk_pct / 100.0;
+   if(multiplier > 1.0 && hard_cap_money > 0.0) scaled = MathMin(scaled, MathMax(pre_scale, hard_cap_money));
+   if(scaled <= 0.0) { out_reason = "resolved_risk_multiplier_zero"; return false; }
+   out_risk_money = scaled;
+   out_multiplier = multiplier;
+   return true;
+}
+
 bool PositionMatchesMagic(const ulong ticket) {
    if(ticket == 0) return false;
    if(!PositionSelectByTicket(ticket)) return false;

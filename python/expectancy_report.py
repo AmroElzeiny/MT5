@@ -1717,6 +1717,15 @@ def _blend_from_neutral(neutral: float, target: float, strength: float) -> float
     return neutral + (target - neutral) * _clamp(strength, 0.0, 1.0)
 
 
+# The session/weekday policy is the one statistical owner allowed to UPSCALE
+# risk.  MQL validates its lines against SESSION_WEEKDAY_RISK_MULTIPLIER_MAX in
+# Config.mqh; the two constants are asserted equal by
+# tests/test_governed_risk_scaling.py.
+SESSION_WEEKDAY_WATCH_RISK_MULTIPLIER = 1.05
+SESSION_WEEKDAY_UPGRADE_RISK_MULTIPLIER = 1.15
+SESSION_WEEKDAY_RISK_MULTIPLIER_MAX = SESSION_WEEKDAY_UPGRADE_RISK_MULTIPLIER
+
+
 def _session_weekday_policy(records: List[Dict[str, Any]], min_count: int = 10) -> List[Dict[str, Any]]:
     thresholds = _decision_thresholds()
     min_supported_count = max(_safe_int(min_count, thresholds["session_weekday_min_trades"]), thresholds["session_weekday_min_trades"])
@@ -1767,14 +1776,14 @@ def _session_weekday_policy(records: List[Dict[str, Any]], min_count: int = 10) 
                 strength = _policy_strength(count, thresholds["session_weekday_upgrade_trades"], thresholds["session_weekday_upgrade_trades"] * 3)
                 action = "upgrade"
                 reason = "strong_repeated_session_weekday_edge"
-                risk_multiplier = _blend_from_neutral(1.0, 1.15, strength)
+                risk_multiplier = _blend_from_neutral(1.0, SESSION_WEEKDAY_UPGRADE_RISK_MULTIPLIER, strength)
                 rr_floor_delta = _blend_from_neutral(0.0, -0.05, strength)
                 score_bias = _blend_from_neutral(0.0, 1.5, strength)
             elif strong and count >= thresholds["session_weekday_strong_trades"]:
                 strength = _policy_strength(count, thresholds["session_weekday_strong_trades"], thresholds["session_weekday_strong_trades"] * 3)
                 action = "watch_for_upgrade"
                 reason = "promising_session_weekday_edge"
-                risk_multiplier = _blend_from_neutral(1.0, 1.05, strength)
+                risk_multiplier = _blend_from_neutral(1.0, SESSION_WEEKDAY_WATCH_RISK_MULTIPLIER, strength)
                 rr_floor_delta = 0.0
                 score_bias = _blend_from_neutral(0.0, 0.75, strength)
 
@@ -1785,7 +1794,7 @@ def _session_weekday_policy(records: List[Dict[str, Any]], min_count: int = 10) 
                 "session_weekday_key": f"{weekday}|{session}",
                 "action": action,
                 "reason": reason,
-                "risk_multiplier": round(risk_multiplier, 4),
+                "risk_multiplier": round(min(risk_multiplier, SESSION_WEEKDAY_RISK_MULTIPLIER_MAX), 4),
                 "rr_floor_delta": round(rr_floor_delta, 4),
                 "score_bias": round(score_bias, 4),
                 "sample_count": count,

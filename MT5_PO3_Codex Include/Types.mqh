@@ -892,6 +892,15 @@ struct TradePlan {
    double planned_tp1;
    double planned_tp2;
    datetime planned_at;
+   // Rollover suspension of a pending limit.  first_placed_at and expires_at are
+   // fixed by the FIRST broker placement and survive every restore, so a restored
+   // order can never outlive the lifetime the original decision was given.
+   datetime pending_first_placed_at;
+   datetime pending_expires_at;
+   datetime rollover_suspended_at;
+   ulong    rollover_suspended_ticket;
+   double   rollover_suspended_volume;
+   int      rollover_restore_count;
    double filled_entry;
    datetime filled_at;
    double fill_slippage;
@@ -1209,6 +1218,27 @@ struct PenaltyState {
    datetime first_breach_time;
    datetime confirmed_time;
    datetime confirming_bar;
+
+   // AI management review (MANAGEMENT_AI_REVIEW_SCHEMA_VERSION).  Absent in
+   // older state files: every field restores to "" / 0, i.e. no review bound.
+   int      management_ai_review_seq;
+   string   management_ai_request_id;
+   string   management_ai_action_id;
+   string   management_ai_request_fingerprint;
+   string   management_ai_requested_action;
+   double   management_ai_requested_cut_fraction;
+   string   management_ai_verdict;          // PENDING | APPROVE | DENY | UNRESOLVED
+   string   management_ai_reason_codes;
+   string   management_ai_reason;
+   string   management_ai_status_reason;
+   datetime management_ai_requested_at;
+   datetime management_ai_resolved_at;
+   datetime management_ai_denied_at;
+   datetime management_ai_cooldown_until;
+   string   management_ai_provider;
+   string   management_ai_model;
+   string   management_ai_response_fingerprint;
+   string   management_ai_schema_version;
 };
 
 #endif

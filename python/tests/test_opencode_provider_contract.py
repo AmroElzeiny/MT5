@@ -47,8 +47,10 @@ from ai_gate import (  # noqa: E402
 )
 from ai_provider import (  # noqa: E402
     LocalOpenAICompatibleProvider,
+    OPENCODE_MUSE_FALLBACK_PROVIDER_ID,
     OPENCODE_PRIMARY_PROVIDER_ID,
     OPENCODE_SECONDARY_PROVIDER_ID,
+    OpenCodeChatCompletionsProvider,
     OpenCodeMessagesProvider,
     OpenCodeResponsesProvider,
     OpenCodeRoutedProvider,
@@ -76,8 +78,12 @@ from opencode_routing import (  # noqa: E402
 from structured_models import StrictStructuredModel  # noqa: E402
 
 MUSE = "muse-spark-1.3-contributor"
-# The secondary routed OpenCode leg since 2026-09-13 (replaced qwen3.8-flash).
-DEEPSEEK = "deepseek-v4.1-flash"
+# The secondary routed OpenCode leg: the important route's primary.  It was
+# qwen3.8-flash until 2026-09-13, deepseek-v4.1-flash until 2026-09-14, and is
+# Muse since.  It keeps its own provider id, so legs are told apart by id.
+SECONDARY_LEG_MODEL = MUSE
+# The Muse fallback leg since 2026-09-14 (replaced deepseek-v4.1-flash there).
+GLM = "glm-5.3-flash"
 # Only the Anthropic-dialect transport tests still use this model name; that
 # transport is no longer wired into the router.
 QWEN = "qwen3.8-flash"
@@ -151,6 +157,54 @@ class _ResponsesDouble:
         return _Client
 
 
+class _ChatDouble:
+    """OpenCode ``/chat/completions`` transport double for the GLM Muse-fallback leg.
+
+    Returns the live wire shape measured 2026-09-14 (``choices[].message`` with
+    ``content`` and ``reasoning_content``), so the leg runs its genuine chat
+    extraction and schema validation.
+    """
+
+    def __init__(self, answer: str | Exception, *, model: str | None = None) -> None:
+        self.answer = answer
+        self.model = model
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return {
+            "id": f"chatcmpl-{len(self.calls)}",
+            "object": "chat.completion",
+            "model": self.model or kwargs["model"],
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": self.answer,
+                        "reasoning_content": "reasoning is never content",
+                    },
+                }
+            ],
+            "usage": {"prompt_tokens": 41, "completion_tokens": 73, "total_tokens": 114},
+        }
+
+    def as_client(self):
+        outer = self
+
+        class _Client:
+            chat = SimpleNamespace(completions=outer)
+
+            @staticmethod
+            def with_options(**_kwargs):
+                return _Client
+
+        return _Client
+
+
 class _MessagesDouble:
     """OpenCode Anthropic-dialect HTTP double for the (unwired) messages transport.
 
@@ -213,7 +267,7 @@ def _secondary(answer, log=None) -> OpenCodeResponsesProvider:
     provider = OpenCodeResponsesProvider(
         base_url=BASE_URL,
         api_key="oc-test-key",
-        model=DEEPSEEK,
+        model=SECONDARY_LEG_MODEL,
         reasoning_effort="high",
         timeout_sec=60.0,
         max_output_tokens=2048,
@@ -223,6 +277,28 @@ def _secondary(answer, log=None) -> OpenCodeResponsesProvider:
         client_factory=lambda **_k: double.as_client(),
         provider_id=OPENCODE_SECONDARY_PROVIDER_ID,
     )
+    provider.transport_double = double
+    return provider
+
+
+def _glm(answer, log=None, **overrides) -> OpenCodeChatCompletionsProvider:
+    """The Muse fallback leg exactly as the gate builds it: /chat/completions, effort high."""
+
+    double = _ChatDouble(answer, model=overrides.pop("answer_model", None))
+    kwargs = dict(
+        base_url=BASE_URL,
+        api_key="oc-test-key",
+        model=GLM,
+        reasoning_effort="high",
+        timeout_sec=60.0,
+        max_output_tokens=2048,
+        circuit_failure_threshold=3,
+        circuit_cooldown_sec=1.0,
+        log=log or (lambda _m: None),
+        client_factory=lambda **_k: double.as_client(),
+    )
+    kwargs.update(overrides)
+    provider = OpenCodeChatCompletionsProvider(**kwargs)
     provider.transport_double = double
     return provider
 
@@ -282,6 +358,7 @@ def _luna(answer, log=None, *, service_tier: str = "flex") -> RemoteAPIProvider:
 def _routed(
     *,
     muse_answer=VALID_ANSWER,
+    muse_fallback_answer=VALID_ANSWER,
     secondary_answer=VALID_ANSWER,
     luna_answer=VALID_ANSWER,
     policy: OpenCodeRoutingPolicy | None = None,
@@ -292,6 +369,7 @@ def _routed(
     sink = log if log is not None else lines.append
     routed = OpenCodeRoutedProvider(
         muse=_muse(muse_answer, sink),
+        muse_fallback=_glm(muse_fallback_answer, sink),
         secondary=_secondary(secondary_answer, sink),
         fallback=_luna(luna_answer, sink),
         policy=policy or OpenCodeRoutingPolicy(),
@@ -340,7 +418,7 @@ class ProviderSelectionTests(unittest.TestCase):
     def test_defaults_pin_the_documented_models_and_endpoint(self) -> None:
         cfg = _config()
         self.assertEqual(cfg.opencode_muse_model, MUSE)
-        self.assertEqual(cfg.opencode_secondary_model, DEEPSEEK)
+        self.assertEqual(cfg.opencode_secondary_model, SECONDARY_LEG_MODEL)
         self.assertEqual(cfg.opencode_secondary_reasoning_effort, "high")
         self.assertEqual(cfg.opencode_base_url, BASE_URL)
         self.assertEqual(cfg.model, MUSE)
@@ -545,6 +623,7 @@ class RoutedDispatchTests(unittest.TestCase):
         self.assertEqual(result.actual_model, MUSE)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
         self.assertEqual(result.provider_id, "opencode_go_responses")
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
@@ -555,22 +634,25 @@ class RoutedDispatchTests(unittest.TestCase):
         )
         result = _call(routed, workload_mode="backtest")
         self.assertEqual(result.actual_model, MUSE)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
-    def test_important_routes_to_deepseek_over_responses_at_high_effort(self) -> None:
-        """Intent changed 2026-09-13: the important route is deepseek-v4.1-flash on
-        ``/responses`` at effort=high (it was qwen3.8-flash on ``/messages``)."""
+    def test_important_routes_to_the_secondary_leg_over_responses_at_high_effort(self) -> None:
+        """The important route is the secondary leg on ``/responses`` at
+        effort=high (qwen3.8-flash on ``/messages`` until 2026-09-13,
+        deepseek-v4.1-flash until 2026-09-14, Muse since)."""
 
         routed = _routed(policy=OpenCodeRoutingPolicy(call_directing=True))
         result = _call(routed)  # live, rule_score 5.0 -> important
-        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.actual_model, SECONDARY_LEG_MODEL)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
         self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
         self.assertEqual(len(routed._muse.transport_double.calls), 0)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
         sent = routed._secondary.transport_double.calls[0]
-        self.assertEqual(sent["model"], DEEPSEEK)
+        self.assertEqual(sent["model"], SECONDARY_LEG_MODEL)
         self.assertEqual(sent["reasoning"], {"effort": "high"})
 
     def test_critical_route_never_touches_opencode(self) -> None:
@@ -585,6 +667,7 @@ class RoutedDispatchTests(unittest.TestCase):
         self.assertEqual(result.actual_model, LUNA)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_REMOTE)
         self.assertEqual(len(routed._muse.transport_double.calls), 0)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertEqual(len(routed._secondary.transport_double.calls), 0)
 
     def test_the_luna_leg_is_asked_at_the_configured_service_tier(self) -> None:
@@ -614,7 +697,7 @@ class RoutedDispatchTests(unittest.TestCase):
         self.assertEqual(identity["provider_mode"], PROVIDER_MODE_OPENCODE)
         self.assertEqual(identity["provider_id"], "opencode_go_responses")
         self.assertEqual(identity["configured_model_ids"], [MUSE])
-        self.assertEqual(identity["opencode_legs"]["important"], DEEPSEEK)
+        self.assertEqual(identity["opencode_legs"]["important"], SECONDARY_LEG_MODEL)
         self.assertEqual(identity["opencode_legs"]["critical"], LUNA)
         self.assertTrue(identity["opencode_routing"]["routing_policy_version"])
         result = _call(routed)
@@ -627,21 +710,22 @@ class RoutedDispatchTests(unittest.TestCase):
 class FallbackContractTests(unittest.TestCase):
     """Requirements 6-8: every OpenCode failure class ends at a validated answer.
 
-    The normal route is Muse -> secondary -> Luna (each leg at most once); the
-    important route is secondary -> Luna; the critical route is Luna only.  The
-    secondary leg is deepseek-v4.1-flash on ``/responses`` since 2026-09-13
-    (qwen3.8-flash on ``/messages`` before that).
+    The normal route is Muse -> GLM-5.3-Flash -> Luna (each leg at most once);
+    the important route is secondary (Muse, its own provider id) -> Luna; the
+    critical route is Luna only.  GLM replaced deepseek-v4.1-flash as the Muse
+    fallback on 2026-09-14.
     """
 
-    def test_malformed_muse_json_falls_back_to_the_secondary_first(self) -> None:
-        """A Muse failure is offered to the secondary leg before Luna."""
+    def test_malformed_muse_json_falls_back_to_glm_first(self) -> None:
+        """A Muse failure is offered to the GLM leg before Luna, never to DeepSeek."""
 
         routed = _routed(muse_answer=MALFORMED_ANSWER)
         result = _call(routed)
-        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.actual_model, GLM)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
-        self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        self.assertEqual(result.provider_id, OPENCODE_MUSE_FALLBACK_PROVIDER_ID)
         self.assertEqual(result.parsed.decision_state, "ABSTAIN")
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
     def test_malformed_secondary_json_falls_back_to_luna(self) -> None:
@@ -656,12 +740,14 @@ class FallbackContractTests(unittest.TestCase):
     def test_schema_invalid_opencode_answer_falls_back_to_luna(self) -> None:
         """Valid JSON, invalid decision: it must not reach a consumer.
 
-        Both OpenCode legs answer schema-invalid (a Muse failure is first offered
-        to the secondary leg), so this still proves that neither invalid
-        answer is forwarded and that the chain ends on a validated Luna answer.
+        Both OpenCode legs on the route answer schema-invalid (a Muse failure is
+        first offered to GLM), so this still proves that neither invalid answer
+        is forwarded and that the chain ends on a validated Luna answer.
         """
 
-        routed = _routed(muse_answer=SCHEMA_INVALID_ANSWER, secondary_answer=SCHEMA_INVALID_ANSWER)
+        routed = _routed(
+            muse_answer=SCHEMA_INVALID_ANSWER, muse_fallback_answer=SCHEMA_INVALID_ANSWER
+        )
         result = _call(routed)
         self.assertEqual(result.actual_model, LUNA)
         # And the fallback answer is itself validated, not merely returned.
@@ -677,29 +763,30 @@ class FallbackContractTests(unittest.TestCase):
         self.assertEqual(result.actual_model, LUNA)
         self.assertIsInstance(result.parsed, _DecisionProbe)
 
-    def test_opencode_timeout_falls_back_to_the_secondary(self) -> None:
-        """A Muse timeout is offered to the secondary leg first."""
+    def test_opencode_timeout_falls_back_to_glm(self) -> None:
+        """A Muse timeout is offered to the GLM leg first."""
 
         routed = _routed(muse_answer=TimeoutError("request timed out"))
         result = _call(routed)
-        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.actual_model, GLM)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
     def test_opencode_timeout_on_both_legs_falls_back_to_luna(self) -> None:
         routed = _routed(
             muse_answer=TimeoutError("request timed out"),
-            secondary_answer=TimeoutError("request timed out"),
+            muse_fallback_answer=TimeoutError("request timed out"),
         )
         self.assertEqual(_call(routed).actual_model, LUNA)
 
-    def test_opencode_api_error_falls_back_to_the_secondary(self) -> None:
-        """The live Muse HTTP 500 case ends on the secondary leg."""
+    def test_opencode_api_error_falls_back_to_glm(self) -> None:
+        """The live Muse HTTP 500 case ends on the GLM leg."""
 
         failure = OpenCodeTransportError(
             "opencode_messages_http_500:upstream failure", status_code=500
         )
         routed = _routed(muse_answer=failure)
-        self.assertEqual(_call(routed).actual_model, DEEPSEEK)
+        self.assertEqual(_call(routed).actual_model, GLM)
 
     def test_secondary_transport_failure_falls_back_to_luna(self) -> None:
         routed = _routed(
@@ -720,16 +807,19 @@ class FallbackContractTests(unittest.TestCase):
         self.assertEqual(_call(routed).actual_model, LUNA)
 
     def test_a_bad_opencode_answer_is_not_re_asked_of_the_same_model(self) -> None:
-        """One call per leg -- never a second billed Muse (or secondary) call.
+        """One call per leg -- never a second billed Muse (or GLM) call.
 
-        The chain is Muse -> secondary -> Luna; both OpenCode legs answer badly
-        here so every leg is reached, and each exactly once.
+        The chain is Muse -> GLM -> Luna; both OpenCode legs answer badly here so
+        every leg is reached, and each exactly once.
         """
 
-        routed = _routed(muse_answer=SCHEMA_INVALID_ANSWER, secondary_answer=SCHEMA_INVALID_ANSWER)
+        routed = _routed(
+            muse_answer=SCHEMA_INVALID_ANSWER, muse_fallback_answer=SCHEMA_INVALID_ANSWER
+        )
         _call(routed)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
-        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 1)
 
     def test_a_bad_secondary_answer_is_not_re_asked_of_the_same_model(self) -> None:
@@ -787,6 +877,7 @@ class FallbackContractTests(unittest.TestCase):
         routed = _routed(muse_answer=MALFORMED_ANSWER)
         with self.assertRaises(ProviderCallError):
             _call(routed, deadline=_Deadline())
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
 
@@ -805,8 +896,11 @@ class FallbackContractTests(unittest.TestCase):
         self.assertIn("validation=passed", text)
         self.assertIn("latency_sec=", text)
         self.assertIn("stage=1", text)
-        self.assertIn(f"to_model={DEEPSEEK}", text)
-        self.assertIn(f"fallback_chain={MUSE}>{DEEPSEEK}>{LUNA}", text)
+        self.assertIn(f"to_model={GLM}", text)
+        self.assertIn(f"to={OPENCODE_MUSE_FALLBACK_PROVIDER_ID}", text)
+        self.assertIn(f"fallback_chain={MUSE}>{GLM}>{LUNA}", text)
+        # The secondary leg shares Muse's model id, so it is excluded by id.
+        self.assertNotIn(OPENCODE_SECONDARY_PROVIDER_ID, text)
         # Never a credential, on any line.
         self.assertNotIn("oc-test-key", text)
         self.assertNotIn("sk-test-openai", text)
@@ -847,12 +941,13 @@ class _SwitchableDeadline:
 
 
 class SecondaryFallbackChainTests(unittest.TestCase):
-    """Normal route: Muse -> secondary -> Luna, each leg at most once.
+    """Normal route: Muse -> GLM-5.3-Flash -> Luna, each leg at most once.
 
     Before the intermediate stage existed the live gate sent every Muse failure
     -- 19 HTTP 500s, 404 HTTP 429s, connection errors -- straight to the paid
     Luna leg, and the 200-character failure detail cut every 500 body off
-    mid-message.  The secondary leg is deepseek-v4.1-flash since 2026-09-13.
+    mid-message.  The intermediate leg was deepseek-v4.1-flash from 2026-09-13
+    and is glm-5.3-flash on /chat/completions since 2026-09-14.
     """
 
     @staticmethod
@@ -872,41 +967,43 @@ class SecondaryFallbackChainTests(unittest.TestCase):
     def _lines(routed, prefix: str) -> list[str]:
         return [line for line in routed.log_lines if line.startswith(prefix)]
 
-    def test_muse_http_500_is_answered_by_the_secondary(self) -> None:
+    def test_muse_http_500_is_answered_by_glm(self) -> None:
         routed = _routed(muse_answer=self._muse_500())
         result = _call(routed)
-        self.assertEqual(result.actual_model, DEEPSEEK)
+        self.assertEqual(result.actual_model, GLM)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_OPENCODE)
-        self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        self.assertEqual(result.provider_id, OPENCODE_MUSE_FALLBACK_PROVIDER_ID)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
-        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
         hop = self._lines(routed, "[opencode_fallback] ")
         self.assertEqual(len(hop), 1)
         self.assertIn("stage=1", hop[0])
         self.assertIn(f"from_model={MUSE}", hop[0])
-        self.assertIn(f"to_model={DEEPSEEK}", hop[0])
+        self.assertIn(f"to_model={GLM}", hop[0])
         self.assertIn("http_status=500", hop[0])
-        self.assertIn(f"fallback_chain={MUSE}>{DEEPSEEK}>{LUNA}", hop[0])
+        self.assertIn(f"fallback_chain={MUSE}>{GLM}>{LUNA}", hop[0])
         completed = self._lines(routed, "[opencode_fallback_completed]")
         self.assertEqual(len(completed), 1)
         self.assertIn("stage=1", completed[0])
-        self.assertIn(f"model={DEEPSEEK}", completed[0])
+        self.assertIn(f"model={GLM}", completed[0])
 
-    def test_muse_and_secondary_failing_ends_on_luna_with_each_leg_asked_once(self) -> None:
-        routed = _routed(muse_answer=self._muse_500(), secondary_answer=self._secondary_502())
+    def test_muse_and_glm_failing_ends_on_luna_with_each_leg_asked_once(self) -> None:
+        routed = _routed(muse_answer=self._muse_500(), muse_fallback_answer=self._secondary_502())
         result = _call(routed)
         self.assertEqual(result.actual_model, LUNA)
         self.assertEqual(result.provider_mode, PROVIDER_MODE_REMOTE)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
-        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 1)
         hops = self._lines(routed, "[opencode_fallback] ")
         self.assertEqual(len(hops), 2)
         self.assertIn("stage=1", hops[0])
-        self.assertIn(f"to_model={DEEPSEEK}", hops[0])
+        self.assertIn(f"to_model={GLM}", hops[0])
         self.assertIn("stage=2", hops[1])
-        self.assertIn(f"from_model={DEEPSEEK}", hops[1])
+        self.assertIn(f"from_model={GLM}", hops[1])
         self.assertIn(f"to_model={LUNA}", hops[1])
         self.assertIn("http_status=502", hops[1])
         completed = self._lines(routed, "[opencode_fallback_completed]")
@@ -917,13 +1014,14 @@ class SecondaryFallbackChainTests(unittest.TestCase):
     def test_every_leg_failing_raises_after_exactly_one_call_per_leg(self) -> None:
         routed = _routed(
             muse_answer=self._muse_500(),
-            secondary_answer=SCHEMA_INVALID_ANSWER,
+            muse_fallback_answer=SCHEMA_INVALID_ANSWER,
             luna_answer=RuntimeError("luna down"),
         )
         with self.assertRaises(ProviderCallError):
             _call(routed)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
-        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 1)
+        self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 1)
 
     def test_disabling_the_secondary_stage_restores_muse_then_luna(self) -> None:
@@ -931,6 +1029,7 @@ class SecondaryFallbackChainTests(unittest.TestCase):
         result = _call(routed)
         self.assertEqual(result.actual_model, LUNA)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertEqual(len(routed._secondary.transport_double.calls), 0)
         self.assertEqual(len(routed._fallback.transport_double.calls), 1)
         hops = self._lines(routed, "[opencode_fallback] ")
@@ -945,22 +1044,24 @@ class SecondaryFallbackChainTests(unittest.TestCase):
         result = _call(routed)  # live, rule_score 5.0 -> important -> secondary primary
         self.assertEqual(result.actual_model, LUNA)
         self.assertEqual(len(routed._muse.transport_double.calls), 0)
+        # The important route never takes the Muse fallback leg either.
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 0)
         self.assertIn(
-            f"fallback_chain={DEEPSEEK}>{LUNA}",
+            f"fallback_chain={SECONDARY_LEG_MODEL}>{LUNA}",
             self._lines(routed, "[opencode_fallback] ")[0],
         )
 
     def test_the_deadline_can_stop_the_chain_before_luna(self) -> None:
         """Stage 2 is gated by the same absolute deadline as stage 1."""
 
-        routed = _routed(muse_answer=self._muse_500(), secondary_answer=self._secondary_502())
+        routed = _routed(muse_answer=self._muse_500(), muse_fallback_answer=self._secondary_502())
         deadline = _SwitchableDeadline(
-            exhausted_when=lambda: len(routed._secondary.transport_double.calls) > 0
+            exhausted_when=lambda: len(routed._muse_fallback.transport_double.calls) > 0
         )
         with self.assertRaises(Exception):
             _call(routed, deadline=deadline)
         self.assertEqual(len(routed._muse.transport_double.calls), 1)
-        self.assertEqual(len(routed._secondary.transport_double.calls), 1)
+        self.assertEqual(len(routed._muse_fallback.transport_double.calls), 1)
         self.assertEqual(len(routed._fallback.transport_double.calls), 0)
         skipped = [
             line
@@ -1346,6 +1447,7 @@ class OpenCodeWireContractTests(unittest.TestCase):
         self.assertEqual(OpenCodeResponsesProvider.schema_repair_attempts, 0)
         self.assertEqual(_secondary(VALID_ANSWER).schema_repair_attempts, 0)
         self.assertEqual(_messages_leg(VALID_ANSWER).max_retries, 0)
+        self.assertEqual(_glm(VALID_ANSWER).max_retries, 0)
 
     def test_opencode_legs_never_resubmit_an_ambiguous_failure(self) -> None:
         """A paid endpoint: a resubmission after a timeout can be a second
@@ -1353,6 +1455,7 @@ class OpenCodeWireContractTests(unittest.TestCase):
 
         self.assertFalse(OpenCodeResponsesProvider.resubmit_ambiguous_transport_failures)
         self.assertFalse(OpenCodeMessagesProvider.resubmit_ambiguous_transport_failures)
+        self.assertFalse(OpenCodeChatCompletionsProvider.resubmit_ambiguous_transport_failures)
 
     def test_messages_transport_health_is_configuration_not_a_model_listing(self) -> None:
         """The inherited ``/models`` GET would report a healthy transport as
@@ -1405,6 +1508,10 @@ class OpenCodeWireContractTests(unittest.TestCase):
         self.assertIsInstance(provider._muse, OpenCodeResponsesProvider)
         self.assertIsInstance(provider._secondary, OpenCodeResponsesProvider)
         self.assertNotIsInstance(provider._secondary, OpenCodeMessagesProvider)
+        self.assertEqual(provider._secondary.model_for_role("analyst"), SECONDARY_LEG_MODEL)
+        # The Muse fallback is GLM on /chat/completions, never the secondary leg.
+        self.assertIsInstance(provider._muse_fallback, OpenCodeChatCompletionsProvider)
+        self.assertEqual(provider._muse_fallback.model_for_role("analyst"), GLM)
         # The fallback is the system's existing OpenAI integration, configured --
         # not a second implementation of it.
         self.assertIsInstance(provider._fallback, RemoteAPIProvider)
@@ -1574,9 +1681,10 @@ class UnchangedBehaviourTests(unittest.TestCase):
 
 
 class SecondaryLegContractTests(unittest.TestCase):
-    """2026-09-13: the secondary OpenCode leg is deepseek-v4.1-flash at
-    ``reasoning.effort=high`` on ``/responses``, replacing qwen3.8-flash on the
-    Anthropic-dialect ``/messages``.  Muse stays the primary and keeps its id."""
+    """2026-09-13: the secondary OpenCode leg runs at ``reasoning.effort=high``
+    on ``/responses``, replacing qwen3.8-flash on the Anthropic-dialect
+    ``/messages``.  Its model is Muse since 2026-09-14 (was deepseek-v4.1-flash).
+    Muse stays the primary and keeps its id."""
 
     _SECRETS = {"OPENCODE_GO_API_KEY": "oc-test-key", "OPENAI_API_KEY": "sk-test-openai"}
 
@@ -1584,7 +1692,7 @@ class SecondaryLegContractTests(unittest.TestCase):
         cfg = _config()
         self.assertTrue(cfg.provider_config_valid)
         self.assertEqual(cfg.model, MUSE)
-        self.assertEqual(cfg.opencode_secondary_model, DEEPSEEK)
+        self.assertEqual(cfg.opencode_secondary_model, SECONDARY_LEG_MODEL)
         self.assertEqual(cfg.opencode_secondary_reasoning_effort, "high")
         self.assertEqual(cfg.opencode_secondary_reasoning_token_reserve, 24000)
         self.assertTrue(cfg.opencode_secondary_fallback_enable)
@@ -1612,7 +1720,7 @@ class SecondaryLegContractTests(unittest.TestCase):
             OPENCODE_CONTEXT_BUDGET_TOKENS="131072",
         )
         self.assertTrue(cfg.provider_config_valid)
-        self.assertEqual(cfg.opencode_secondary_model, DEEPSEEK)
+        self.assertEqual(cfg.opencode_secondary_model, SECONDARY_LEG_MODEL)
         self.assertTrue(cfg.opencode_secondary_fallback_enable)
         for expected in (
             "OPENCODE_QWEN_MODEL=ignored_superseded_by_OPENCODE_SECONDARY_MODEL",
@@ -1644,7 +1752,7 @@ class SecondaryLegContractTests(unittest.TestCase):
 
     def test_banner_reports_the_secondary_leg_only_under_this_selection(self) -> None:
         rendered = _config().safe_log_dict()
-        self.assertEqual(rendered["opencode_secondary_model"], DEEPSEEK)
+        self.assertEqual(rendered["opencode_secondary_model"], SECONDARY_LEG_MODEL)
         self.assertEqual(rendered["opencode_secondary_reasoning_effort"], "high")
         self.assertEqual(rendered["opencode_secondary_reasoning_token_reserve"], 24000)
         other = AIGateRuntimeConfig.from_env(
@@ -1662,7 +1770,7 @@ class SecondaryLegContractTests(unittest.TestCase):
             )
         secondary = provider._secondary
         self.assertIsInstance(secondary, OpenCodeResponsesProvider)
-        self.assertEqual(secondary.model_for_role("analyst"), DEEPSEEK)
+        self.assertEqual(secondary.model_for_role("analyst"), SECONDARY_LEG_MODEL)
         self.assertEqual(secondary.reasoning_effort, "high")
         self.assertEqual(secondary.reasoning_token_reserve, 16000)
         self.assertEqual(secondary.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
@@ -1691,7 +1799,7 @@ class SecondaryLegContractTests(unittest.TestCase):
             request_metadata={"request_id": "req-9", "service_tier": "auto"},
         )
         sent = secondary.transport_double.calls[0]
-        self.assertEqual(sent["model"], DEEPSEEK)
+        self.assertEqual(sent["model"], SECONDARY_LEG_MODEL)
         self.assertEqual(sent["reasoning"], {"effort": "high"})
         self.assertEqual(sent["truncation"], "disabled")
         # A stable prefix session (model + schema), never the request id.
@@ -1727,13 +1835,15 @@ class SecondaryLegContractTests(unittest.TestCase):
         self.assertEqual(effort("opencode_go_messages", cfg), "none")
 
     def test_telemetry_names_the_secondary_leg_that_answered(self) -> None:
-        routed = _routed(muse_answer=MALFORMED_ANSWER)
-        result = _call(routed)
-        self.assertEqual(result.actual_model, DEEPSEEK)
+        """The secondary answers the important route; since 2026-09-14 it no
+        longer answers a Muse failure (GLM does)."""
+
+        routed = _routed(policy=OpenCodeRoutingPolicy(call_directing=True))
+        result = _call(routed)  # live, rule_score 5.0 -> important
+        self.assertEqual(result.actual_model, SECONDARY_LEG_MODEL)
         self.assertEqual(result.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
         text = "\n".join(routed.log_lines)
-        self.assertIn(f"from={OPENCODE_PRIMARY_PROVIDER_ID}", text)
-        self.assertIn(f"to={OPENCODE_SECONDARY_PROVIDER_ID}", text)
+        self.assertIn(f"routed_provider={OPENCODE_SECONDARY_PROVIDER_ID}", text)
         self.assertIn(f"provider={OPENCODE_SECONDARY_PROVIDER_ID}", text)
         self.assertIn("secondary_fallback=true", text)
         self.assertNotIn("qwen", text.lower())

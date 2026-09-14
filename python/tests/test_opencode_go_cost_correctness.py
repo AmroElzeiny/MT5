@@ -30,6 +30,7 @@ import ai_gate  # noqa: E402
 import opencode_go_accounting as acct  # noqa: E402
 from ai_provider import (  # noqa: E402
     OPENCODE_SECONDARY_PROVIDER_ID,
+    OpenCodeChatCompletionsProvider,
     OpenCodeResponsesProvider,
     OpenCodeRoutedProvider,
     ProviderCallError,
@@ -44,6 +45,7 @@ from structured_models import (  # noqa: E402
 
 MUSE = "muse-spark-1.3-contributor"
 DEEPSEEK = "deepseek-v4.1-flash"
+GLM = "glm-5.3-flash"
 LUNA = "gpt-5.6-luna"
 BASE_URL = "https://opencode.ai/zen/go/v1"
 SECRET_OPENCODE = "oc-test-secret-key-DO-NOT-LOG"
@@ -155,10 +157,65 @@ def _luna(answer) -> RemoteAPIProvider:
     return leg
 
 
-def _routed(*, muse=VALID, secondary=VALID, luna=VALID, secondary_enable=True, ledger=None):
+class _ChatDouble:
+    """/chat/completions double for the GLM Muse-fallback leg."""
+
+    def __init__(self, answer) -> None:
+        self.answer = answer
+        self.calls: list[dict] = []
+        self._lock = threading.Lock()
+
+    def create(self, **kwargs):
+        with self._lock:
+            self.calls.append(dict(kwargs))
+        answer = self.answer(kwargs) if callable(self.answer) else self.answer
+        if isinstance(answer, BaseException):
+            raise answer
+        return {
+            "id": f"chatcmpl_{len(self.calls)}",
+            "model": kwargs["model"],
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": answer}}],
+            "usage": {"prompt_tokens": 37000, "completion_tokens": 12000, "total_tokens": 49000},
+        }
+
+    def factory(self, **_kwargs):
+        outer = self
+
+        class _Client:
+            chat = SimpleNamespace(completions=outer)
+
+            @staticmethod
+            def with_options(**_options):
+                return _Client
+
+        return _Client
+
+
+def _glm_leg(answer, **extra) -> OpenCodeChatCompletionsProvider:
+    double = _ChatDouble(answer)
+    kwargs = dict(
+        base_url=BASE_URL,
+        api_key=SECRET_OPENCODE,
+        model=GLM,
+        reasoning_effort="high",
+        timeout_sec=60.0,
+        max_output_tokens=2048,
+        circuit_failure_threshold=10_000,
+        circuit_cooldown_sec=1.0,
+        log=lambda _m: None,
+        client_factory=double.factory,
+    )
+    kwargs.update(extra)
+    leg = OpenCodeChatCompletionsProvider(**kwargs)
+    leg.double = double
+    return leg
+
+
+def _routed(*, muse=VALID, muse_fallback=VALID, secondary=VALID, luna=VALID, secondary_enable=True, ledger=None):
     routed = OpenCodeRoutedProvider(
         muse=_opencode_leg(MUSE, muse),
-        secondary=_opencode_leg(DEEPSEEK, secondary, provider_id=OPENCODE_SECONDARY_PROVIDER_ID),
+        muse_fallback=_glm_leg(muse_fallback),
+        secondary=_opencode_leg(MUSE, secondary, provider_id=OPENCODE_SECONDARY_PROVIDER_ID),
         fallback=_luna(luna),
         policy=OpenCodeRoutingPolicy(),
         log=lambda _m: None,
@@ -166,7 +223,7 @@ def _routed(*, muse=VALID, secondary=VALID, luna=VALID, secondary_enable=True, l
         secondary_fallback_enable=secondary_enable,
     )
     if ledger is not None:
-        for leg in (routed._muse, routed._secondary, routed._fallback):
+        for leg in (routed._muse, routed._muse_fallback, routed._secondary, routed._fallback):
             leg.attempt_observer = ledger.append
         routed.call_observer = ledger.append
     return routed
@@ -183,9 +240,13 @@ def _call(routed, index: int = 0, *, role="analyst", evidence=None, system="Retu
 
 
 def _counts(routed) -> tuple[int, int, int]:
+    """(Muse, Muse fallback, Luna) -- the normal route.  The secondary
+    (important route) must never be reached from it."""
+
+    assert len(routed._secondary.double.calls) == 0, "secondary reached from the normal route"
     return (
         len(routed._muse.double.calls),
-        len(routed._secondary.double.calls),
+        len(routed._muse_fallback.double.calls),
         len(routed._fallback.double.calls),
     )
 
@@ -229,13 +290,17 @@ class CallCountInvariantTests(unittest.TestCase):
         self.assertEqual((secondary, luna), (0, self.N))
 
     def test_configured_secondary_stage_is_one_request_per_leg(self) -> None:
-        routed = _routed(muse=SCHEMA_INVALID, secondary=MALFORMED, secondary_enable=True)
+        routed = _routed(muse=SCHEMA_INVALID, muse_fallback=MALFORMED, secondary_enable=True)
         for i in range(self.N):
             self.assertEqual(_call(routed, i).actual_model, LUNA)
         self.assertEqual(_counts(routed), (self.N, self.N, self.N))
 
     def test_successful_muse_answer_never_touches_any_fallback_leg(self) -> None:
-        routed = _routed(secondary=AssertionError("secondary must not run"), luna=AssertionError("luna must not run"))
+        routed = _routed(
+            muse_fallback=AssertionError("muse fallback must not run"),
+            secondary=AssertionError("secondary must not run"),
+            luna=AssertionError("luna must not run"),
+        )
         _call(routed)
         self.assertEqual(_counts(routed), (1, 0, 0))
 
@@ -438,7 +503,7 @@ class JsonEnforcementTests(unittest.TestCase):
 
     def test_invalid_output_can_never_reach_the_consumer(self) -> None:
         for bad in (SCHEMA_INVALID, MALFORMED, ""):
-            routed = _routed(muse=bad, secondary=bad, luna=bad)
+            routed = _routed(muse=bad, muse_fallback=bad, secondary=bad, luna=bad)
             with self.assertRaises(ProviderCallError):
                 _call(routed)
 
@@ -503,7 +568,7 @@ class AccountingTests(unittest.TestCase):
         def _boom(_record):
             raise RuntimeError("ledger down")
 
-        for leg in (routed._muse, routed._secondary, routed._fallback):
+        for leg in (routed._muse, routed._muse_fallback, routed._secondary, routed._fallback):
             leg.attempt_observer = _boom
         routed.call_observer = _boom
         self.assertEqual(_call(routed).actual_model, MUSE)
@@ -584,9 +649,10 @@ class GateWiringTests(unittest.TestCase):
             provider = ai_gate._build_ai_provider(cfg)
         self.assertIsInstance(provider, OpenCodeRoutedProvider)
         self.assertIsInstance(provider.call_observer, acct.OpenCodeGoAttemptLedger)
-        for leg in (provider._muse, provider._secondary, provider._fallback):
+        for leg in (provider._muse, provider._muse_fallback, provider._secondary, provider._fallback):
             self.assertIs(leg.attempt_observer, provider.call_observer)
         self.assertEqual(provider._muse.session_scope, "request")
+        self.assertEqual(provider._muse_fallback.session_scope, "request")
         self.assertEqual(provider._secondary.session_scope, "request")
 
     def test_openai_selection_is_not_instrumented(self) -> None:

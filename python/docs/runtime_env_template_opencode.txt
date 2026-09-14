@@ -228,13 +228,15 @@ OPENROUTER_APP_TITLE=PO3_AIGate
 # Added 2026-09-09.  Every value below was measured against the live endpoint on
 # that date with this key, not copied from documentation.
 #
-# One selection, three legs:
+# One selection, four legs:
 #
-#   normal    muse-spark-1.3-contributor   POST <base>/responses
-#   important deepseek-v4.1-flash (high)   POST <base>/responses
-#   critical  OpenAI gpt-5.6-luna          the system's EXISTING OpenAI transport
+#   normal         muse-spark-1.3-contributor   POST <base>/responses
+#   muse fallback  glm-5.3-flash (high)         POST <base>/chat/completions
+#   important      muse-spark-1.3-contributor (high)  POST <base>/responses
+#   critical       OpenAI gpt-5.6-luna          the system's EXISTING OpenAI transport
 #
-# Every OpenCode call -- Muse and DeepSeek alike -- falls back ONCE to Luna on a
+# Normal route: Muse -> GLM-5.3-Flash -> Luna.  Important route: Muse -> Luna.
+# Every OpenCode call -- Muse and GLM alike -- falls back ONCE to Luna on a
 # timeout, a provider/API failure, malformed JSON, a schema-validation failure,
 # or an otherwise unusable response.  The fallback answer is then validated by
 # the same strict contract, so an invalid OpenCode response never reaches a
@@ -246,7 +248,7 @@ OPENROUTER_APP_TITLE=PO3_AIGate
 # OpenRouter and local credentials are still stripped from the process by
 # po3_env.py, so provider selection remains single-authority.
 #
-# Both OpenCode legs speak the same /responses endpoint on this base URL.
+# Both Muse legs speak /responses; GLM speaks /chat/completions; one base URL.
 #
 # TWO WIRE REQUIREMENTS ARE NOT CONFIGURABLE HERE, because getting them wrong is
 # a total outage rather than a tuning choice.  Both are enforced in
@@ -267,12 +269,20 @@ OPENCODE_GO_API_KEY=
 # truncation=disabled; /chat/completions refused the json_schema
 # response_format with HTTP 400; /messages has neither a strict schema nor an
 # effort control.  So it uses the same /responses transport as Muse.
+# 2026-09-14: the secondary leg's model changed from deepseek-v4.1-flash to Muse.
 # OPENCODE_QWEN_MODEL / OPENCODE_QWEN_FALLBACK_ENABLE and the Anthropic-dialect
 # keys are retired: if present they are reported as ignored, never read.
 OPENCODE_MUSE_MODEL=muse-spark-1.3-contributor
-OPENCODE_SECONDARY_MODEL=deepseek-v4.1-flash
+OPENCODE_SECONDARY_MODEL=muse-spark-1.3-contributor
 OPENCODE_SECONDARY_REASONING_EFFORT=high
 OPENCODE_SECONDARY_REASONING_TOKEN_RESERVE=
+# The Muse fallback leg (replaced deepseek-v4.1-flash in that position on
+# 2026-09-14): /responses answered HTTP 500 for glm-5.3-flash, /chat/completions
+# answered HTTP 200 with a strict json_schema and reasoning_effort=high.
+OPENCODE_MUSE_FALLBACK_MODEL=glm-5.3-flash
+OPENCODE_MUSE_FALLBACK_REASONING_EFFORT=high
+OPENCODE_MUSE_FALLBACK_REASONING_TOKEN_RESERVE=
+# Muse fails -> GLM-5.3-Flash once -> Luna once.  false restores Muse -> Luna.
 OPENCODE_SECONDARY_FALLBACK_ENABLE=true
 
 # x-opencode-session scope.  prompt_prefix (default): one stable session per

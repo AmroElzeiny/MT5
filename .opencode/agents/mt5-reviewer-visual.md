@@ -1,7 +1,7 @@
 ---
 description: Vision reviewer for actual screenshots against the front-end visual contract.
 mode: all
-model: opencode-go/deepseek-v4-flash-vision-exp
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow

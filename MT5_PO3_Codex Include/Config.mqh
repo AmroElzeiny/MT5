@@ -68,6 +68,15 @@ const string HIERARCHICAL_PRIOR_SCHEMA_VERSION = "20260717_hierarchical_prior_v1
 const string RISK_FACTOR_SCHEMA_VERSION = "20260717_risk_factor_v1";
 const string COMMISSION_MODEL_SCHEMA_VERSION = "20260717_broker_cost_v1";
 const string MANAGEMENT_SCHEMA_VERSION = "20260718_management_action_lifecycle_v4";
+// Bus contract of the single-call management AI review (python/management_review.py).
+const string MANAGEMENT_AI_REVIEW_SCHEMA_VERSION = "20260915_management_ai_review_v1";
+// Governed risk-multiplier ranges, each owned by the policy that produces it.
+// Reduce-only owners: subtype, context, active-policy default, bucket policy,
+// execution cost and the AI suggested_risk_multiplier.  The session/weekday
+// policy (python/expectancy_report.py _session_weekday_policy) is the only
+// statistical owner that may upscale, to at most its "upgrade" target.
+const double GOVERNED_REDUCE_ONLY_RISK_MULTIPLIER_MAX = 1.0;
+const double SESSION_WEEKDAY_RISK_MULTIPLIER_MAX = 1.15;
 const string MANAGEMENT_EXPERIMENT_SCHEMA_VERSION = "20260717_management_experiment_v1";
 const string MANAGEMENT_COUNTERFACTUAL_SCHEMA_VERSION = "20260717_management_counterfactual_v2";
 const string INVALIDATION_POLICY_SCHEMA_VERSION = "20260717_invalidation_asset_class_v1";
@@ -238,6 +247,14 @@ input bool   InpJournalTesterOnly     = false;
 input bool   InpRolloverProtectionEnable = true;
 input string InpTradingFreezeStartServerTime = "23:54";
 input string InpTradingFreezeEndServerTime = "01:05";
+// Managed pending limits removed by the trading freeze are re-placed once it ends,
+// but only while the expiry fixed at their FIRST placement has not passed and the
+// price is still valid.  Validity is measured on M1 bars from the removal to now,
+// skipping every bar inside the rollover quote window below: the spread spike and
+// thin quotes of the daily rollover can neither invalidate nor validate a setup.
+input bool   InpRolloverRestorePendingOrders = true;
+input string InpRolloverQuoteExclusionStartServerTime = "23:58";
+input string InpRolloverQuoteExclusionEndServerTime = "01:05";
 input string InpServerMarketCloseTime = "00:00";
 input int    InpCloseManagedTradesBeforeMarketCloseMin = 0;
 // Explicit switch for the pre-close flatten.  Before this input the feature was
@@ -660,7 +677,19 @@ input int InpTargetTradesPerDayMin = 8;
 input int InpTargetTradesPerDayMax = 16;
 
 // --- Penalty (strikes/cooldowns) ---
+// InpPenaltyCooldownMin is the single management cooldown: it spaces executed
+// reductions AND it is the cooldown after an AI management-review DENY (or an
+// unresolved review).  The model never owns that duration.
 input int    InpPenaltyCooldownMin   = 20;
+// AI second-approval layer for PenaltyWatcher broker actions (PARTIAL_CLOSE /
+// FULL_CLOSE).  One provider call per frozen deterministic proposal; only a
+// bound, fresh, schema-valid APPROVE executes.  Account-level protections
+// (broker SL/TP, loss locks, margin) never pass through this layer.
+input bool   InpPenaltyAiReviewEnable = true;
+// Strategy Tester has no live management gate; keep deterministic management
+// there unless a tester run explicitly serves reviews.
+input bool   InpPenaltyAiReviewInTester = false;
+input int    InpPenaltyAiReviewTimeoutSec = 180;
 input int    InpManagementActionRetryCooldownSec = 30;
 input int    InpManagementActionMaxRetries = 20;
 input int    InpPenaltyCloseStrikes  = 6;

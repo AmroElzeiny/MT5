@@ -516,6 +516,12 @@ private:
       j += JsonKVNum("planned_tp1", p.planned_tp1, 8) + ",";
       j += JsonKVNum("planned_tp2", p.planned_tp2, 8) + ",";
       j += JsonKVInt("planned_at", (int)p.planned_at) + ",";
+      j += JsonKVInt("pending_first_placed_at", (int)p.pending_first_placed_at) + ",";
+      j += JsonKVInt("pending_expires_at", (int)p.pending_expires_at) + ",";
+      j += JsonKVInt("rollover_suspended_at", (int)p.rollover_suspended_at) + ",";
+      j += JsonKVNum("rollover_suspended_ticket", (double)p.rollover_suspended_ticket, 0) + ",";
+      j += JsonKVNum("rollover_suspended_volume", p.rollover_suspended_volume, 4) + ",";
+      j += JsonKVInt("rollover_restore_count", p.rollover_restore_count) + ",";
       j += JsonKVNum("filled_entry", p.filled_entry, 8) + ",";
       j += JsonKVInt("filled_at", (int)p.filled_at) + ",";
       j += JsonKVNum("fill_slippage", p.fill_slippage, 8) + ",";
@@ -968,7 +974,25 @@ private:
       j += JsonKVNum("confirmation_buffer", st.confirmation_buffer, 8) + ",";
       j += JsonKVInt("first_breach_time", (int)st.first_breach_time) + ",";
       j += JsonKVInt("confirmed_time", (int)st.confirmed_time) + ",";
-      j += JsonKVInt("confirming_bar", (int)st.confirming_bar);
+      j += JsonKVInt("confirming_bar", (int)st.confirming_bar) + ",";
+      j += JsonKVInt("management_ai_review_seq", st.management_ai_review_seq) + ",";
+      j += JsonKVStr("management_ai_request_id", st.management_ai_request_id) + ",";
+      j += JsonKVStr("management_ai_action_id", st.management_ai_action_id) + ",";
+      j += JsonKVStr("management_ai_request_fingerprint", st.management_ai_request_fingerprint) + ",";
+      j += JsonKVStr("management_ai_requested_action", st.management_ai_requested_action) + ",";
+      j += JsonKVNum("management_ai_requested_cut_fraction", st.management_ai_requested_cut_fraction, 8) + ",";
+      j += JsonKVStr("management_ai_verdict", st.management_ai_verdict) + ",";
+      j += JsonKVStr("management_ai_reason_codes", st.management_ai_reason_codes) + ",";
+      j += JsonKVStr("management_ai_reason", st.management_ai_reason) + ",";
+      j += JsonKVStr("management_ai_status_reason", st.management_ai_status_reason) + ",";
+      j += JsonKVInt("management_ai_requested_at", (int)st.management_ai_requested_at) + ",";
+      j += JsonKVInt("management_ai_resolved_at", (int)st.management_ai_resolved_at) + ",";
+      j += JsonKVInt("management_ai_denied_at", (int)st.management_ai_denied_at) + ",";
+      j += JsonKVInt("management_ai_cooldown_until", (int)st.management_ai_cooldown_until) + ",";
+      j += JsonKVStr("management_ai_provider", st.management_ai_provider) + ",";
+      j += JsonKVStr("management_ai_model", st.management_ai_model) + ",";
+      j += JsonKVStr("management_ai_response_fingerprint", st.management_ai_response_fingerprint) + ",";
+      j += JsonKVStr("management_ai_schema_version", st.management_ai_schema_version);
       j += "}";
       return j;
    }
@@ -1524,6 +1548,12 @@ private:
       p.planned_tp1 = JsonGetNumber(json, "planned_tp1", 0);
       p.planned_tp2 = JsonGetNumber(json, "planned_tp2", 0);
       p.planned_at = (datetime)(int)JsonGetNumber(json, "planned_at", 0);
+      p.pending_first_placed_at = (datetime)(int)JsonGetNumber(json, "pending_first_placed_at", 0);
+      p.pending_expires_at = (datetime)(int)JsonGetNumber(json, "pending_expires_at", 0);
+      p.rollover_suspended_at = (datetime)(int)JsonGetNumber(json, "rollover_suspended_at", 0);
+      p.rollover_suspended_ticket = (ulong)JsonGetNumber(json, "rollover_suspended_ticket", 0);
+      p.rollover_suspended_volume = JsonGetNumber(json, "rollover_suspended_volume", 0);
+      p.rollover_restore_count = (int)JsonGetNumber(json, "rollover_restore_count", 0);
       p.filled_entry = JsonGetNumber(json, "filled_entry", 0);
       p.filled_at = (datetime)(int)JsonGetNumber(json, "filled_at", 0);
       p.fill_slippage = JsonGetNumber(json, "fill_slippage", 0);
@@ -1982,6 +2012,27 @@ private:
       st.first_breach_time = (datetime)JsonGetNumber(json, "first_breach_time", 0);
       st.confirmed_time = (datetime)JsonGetNumber(json, "confirmed_time", 0);
       st.confirming_bar = (datetime)JsonGetNumber(json, "confirming_bar", 0);
+      // Added by MANAGEMENT_AI_REVIEW_SCHEMA_VERSION; an older file restores
+      // "no review bound, no cooldown", which routes any pending broker action
+      // back through a fresh review instead of executing it unreviewed.
+      st.management_ai_review_seq = (int)JsonGetNumber(json, "management_ai_review_seq", 0);
+      st.management_ai_request_id = JsonGetString(json, "management_ai_request_id", "");
+      st.management_ai_action_id = JsonGetString(json, "management_ai_action_id", "");
+      st.management_ai_request_fingerprint = JsonGetString(json, "management_ai_request_fingerprint", "");
+      st.management_ai_requested_action = JsonGetString(json, "management_ai_requested_action", "");
+      st.management_ai_requested_cut_fraction = JsonGetNumber(json, "management_ai_requested_cut_fraction", 0);
+      st.management_ai_verdict = JsonGetString(json, "management_ai_verdict", "");
+      st.management_ai_reason_codes = JsonGetString(json, "management_ai_reason_codes", "");
+      st.management_ai_reason = JsonGetString(json, "management_ai_reason", "");
+      st.management_ai_status_reason = JsonGetString(json, "management_ai_status_reason", "");
+      st.management_ai_requested_at = (datetime)(int)JsonGetNumber(json, "management_ai_requested_at", 0);
+      st.management_ai_resolved_at = (datetime)(int)JsonGetNumber(json, "management_ai_resolved_at", 0);
+      st.management_ai_denied_at = (datetime)(int)JsonGetNumber(json, "management_ai_denied_at", 0);
+      st.management_ai_cooldown_until = (datetime)(int)JsonGetNumber(json, "management_ai_cooldown_until", 0);
+      st.management_ai_provider = JsonGetString(json, "management_ai_provider", "");
+      st.management_ai_model = JsonGetString(json, "management_ai_model", "");
+      st.management_ai_response_fingerprint = JsonGetString(json, "management_ai_response_fingerprint", "");
+      st.management_ai_schema_version = JsonGetString(json, "management_ai_schema_version", "");
       return (st.position_identifier > 0 && st.management_version == MANAGEMENT_SCHEMA_VERSION &&
               StringLen(st.current_state) > 0);
    }
@@ -2011,6 +2062,7 @@ public:
    string RuntimeScope() const { return m_scope_key; }
    string WatchlistPath() const { return _ScopedPath("watchlist.ndjson"); }
    string PendingAiPath() const { return _ScopedPath("pending_ai.ndjson"); }
+   string RolloverSuspendedPendingPath() const { return _ScopedPath("rollover_suspended_pending.ndjson"); }
    string PenaltyPath() const { return _ScopedPath("penalty.ndjson"); }
    string CounterfactualPendingPath() const { return _ScopedPath("counterfactual_pending.ndjson"); }
    string ShadowPendingPath() const { return _ScopedPath("shadow_candidate_pending.ndjson"); }

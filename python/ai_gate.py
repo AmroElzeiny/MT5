@@ -41,10 +41,12 @@ from ai_provider import (
     AIProvider,
     LocalOpenAICompatibleProvider,
     MAX_PROVIDER_PARALLELISM,
+    OPENCODE_MUSE_FALLBACK_PROVIDER_ID,
     OPENCODE_PRIMARY_PROVIDER_ID,
     OPENCODE_SECONDARY_PROVIDER_ID,
     OPENCODE_SESSION_SCOPE_PROMPT_PREFIX,
     OPENCODE_SESSION_SCOPES,
+    OpenCodeChatCompletionsProvider,
     OpenCodeResponsesProvider,
     OpenCodeRoutedProvider,
     OpenRouterProvider,
@@ -197,6 +199,11 @@ from po3_env import (
     resolve_provider_select,
 )
 from opencode_routing import OpenCodeRoutingPolicy
+from management_review import (
+    MANAGEMENT_REVIEW_SCHEMA_VERSION,
+    ManagementReviewService,
+    management_review_schema_preflight,
+)
 from runtime_governance import (
     DECISION_NON_REPEATABLE,
     HIERARCHICAL_PRIOR_SCHEMA_VERSION,
@@ -556,27 +563,37 @@ class AIGateRuntimeConfig:
     openrouter_context_budget_tokens: int
     openrouter_app_url: str
     openrouter_app_title: str
-    # OpenCode Go transport.  Both routed OpenCode legs -- Muse (primary) and
-    # the secondary (deepseek-v4.1-flash) -- speak ``/responses`` on this one
-    # base URL.
+    # OpenCode Go transport.  Muse (primary) and the secondary
+    # (also Muse since 2026-09-14, the important route) speak ``/responses`` on this
+    # base URL; the Muse fallback (glm-5.3-flash) speaks ``/chat/completions``
+    # on the same base URL.
     opencode_base_url: str
     opencode_api_key: str
     opencode_call_directing: bool
     opencode_muse_model: str
     opencode_muse_reasoning_effort: str
     opencode_muse_reasoning_token_reserve: int
-    # The secondary OpenCode leg: the important route's primary and the
-    # intermediate stage of the normal route.  Replaced qwen3.8-flash on the
-    # Anthropic-dialect ``/messages`` on 2026-09-13.
+    # The secondary OpenCode leg: the important route's primary.  Replaced
+    # qwen3.8-flash on the Anthropic-dialect ``/messages`` on 2026-09-13.  Since
+    # 2026-09-14 it is no longer the intermediate stage of the normal route, and
+    # its model is Muse (was deepseek-v4.1-flash).  It keeps its own provider id,
+    # so telemetry still names the leg that answered.
     opencode_secondary_model: str
     opencode_secondary_reasoning_effort: str
     opencode_secondary_reasoning_token_reserve: int
-    # Intermediate secondary stage on the Muse primary route.  When True
-    # (default) a Muse failure is followed by one secondary call before Luna;
+    # Intermediate stage on the Muse primary route.  When True (default) a Muse
+    # failure is followed by one Muse-fallback (glm-5.3-flash) call before Luna;
     # when False the chain is the two-leg Muse->Luna path.  The secondary
     # primary route (important) and the Luna primary route (critical) are
-    # unaffected -- they never fall back to Muse.
+    # unaffected -- they never fall back to Muse.  The key keeps its historical
+    # name so existing deployments keep their setting.
     opencode_secondary_fallback_enable: bool
+    # The Muse fallback leg (replaced deepseek-v4.1-flash in that position on
+    # 2026-09-14).  glm-5.3-flash on ``/chat/completions``: ``/responses``
+    # answered HTTP 500 for it, ``/chat/completions`` accepted a strict schema.
+    opencode_muse_fallback_model: str
+    opencode_muse_fallback_reasoning_effort: str
+    opencode_muse_fallback_reasoning_token_reserve: int
     opencode_timeout_sec: float
     opencode_max_output_tokens: int
     opencode_parallelism: int
@@ -648,8 +665,12 @@ class AIGateRuntimeConfig:
             or "muse-spark-1.3-contributor"
         )
         opencode_secondary_model = (
-            _env_lookup(env, ("OPENCODE_SECONDARY_MODEL",), "deepseek-v4.1-flash")
-            or "deepseek-v4.1-flash"
+            _env_lookup(env, ("OPENCODE_SECONDARY_MODEL",), "muse-spark-1.3-contributor")
+            or "muse-spark-1.3-contributor"
+        )
+        opencode_muse_fallback_model = (
+            _env_lookup(env, ("OPENCODE_MUSE_FALLBACK_MODEL",), "glm-5.3-flash")
+            or "glm-5.3-flash"
         )
         # Default ON: the secondary stage is the cheaper OpenCode-Go fallback.
         # An invalid value reverts to True (the safe behaviour) and is logged
@@ -832,6 +853,25 @@ class AIGateRuntimeConfig:
         }:
             warnings.append("OPENCODE_SECONDARY_REASONING_EFFORT=invalid")
             opencode_secondary_reasoning_effort = "high"
+        # Sent as the chat-completions ``reasoning_effort`` body key; ``high``
+        # was accepted by the live endpoint for glm-5.3-flash on 2026-09-14,
+        # which also publishes ``max``.  ``auto``/``none``/empty omit the key.
+        opencode_muse_fallback_reasoning_effort = _env_lookup(
+            env, ("OPENCODE_MUSE_FALLBACK_REASONING_EFFORT",), "high"
+        ).strip().lower()
+        if opencode_muse_fallback_reasoning_effort not in {
+            "",
+            "auto",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        }:
+            warnings.append("OPENCODE_MUSE_FALLBACK_REASONING_EFFORT=invalid")
+            opencode_muse_fallback_reasoning_effort = "high"
         opencode_fallback_reasoning_effort = _env_lookup(
             env, ("OPENCODE_FALLBACK_REASONING_EFFORT",), "low"
         ).strip().lower()
@@ -888,6 +928,8 @@ class AIGateRuntimeConfig:
                 provider_errors.append("OPENCODE_MUSE_MODEL=missing")
             if not opencode_secondary_model:
                 provider_errors.append("OPENCODE_SECONDARY_MODEL=missing")
+            if not opencode_muse_fallback_model:
+                provider_errors.append("OPENCODE_MUSE_FALLBACK_MODEL=missing")
             if endpoint_class(opencode_base_url) == "invalid":
                 provider_errors.append("OPENCODE_GO_BASE_URL=invalid")
             # The OpenAI leg is not optional in this mode: every OpenCode route
@@ -1125,6 +1167,18 @@ class AIGateRuntimeConfig:
                 max_value=120000,
             ),
             opencode_secondary_fallback_enable=opencode_secondary_fallback_enable_raw,
+            opencode_muse_fallback_model=opencode_muse_fallback_model,
+            opencode_muse_fallback_reasoning_effort=opencode_muse_fallback_reasoning_effort,
+            # max_tokens bounds reasoning and content together on
+            # /chat/completions too, and this leg runs at effort=high.
+            opencode_muse_fallback_reasoning_token_reserve=_env_int(
+                env,
+                "OPENCODE_MUSE_FALLBACK_REASONING_TOKEN_RESERVE",
+                24000,
+                warnings,
+                min_value=0,
+                max_value=120000,
+            ),
             opencode_session_scope=opencode_session_scope,
             provider_wire_projection=provider_wire_projection,
             opencode_timeout_sec=_env_float(
@@ -1329,6 +1383,15 @@ class AIGateRuntimeConfig:
             "opencode_secondary_fallback_enable": (
                 self.opencode_secondary_fallback_enable if self.is_opencode_provider else False
             ),
+            "opencode_muse_fallback_model": (
+                self.opencode_muse_fallback_model if self.is_opencode_provider else ""
+            ),
+            "opencode_muse_fallback_reasoning_effort": (
+                self.opencode_muse_fallback_reasoning_effort if self.is_opencode_provider else ""
+            ),
+            "opencode_muse_fallback_reasoning_token_reserve": (
+                self.opencode_muse_fallback_reasoning_token_reserve if self.is_opencode_provider else 0
+            ),
             "opencode_session_scope": self.opencode_session_scope if self.is_opencode_provider else "",
             "provider_wire_projection": self.provider_wire_projection,
             "opencode_timeout_sec": self.opencode_timeout_sec if self.is_opencode_provider else 0.0,
@@ -1459,9 +1522,8 @@ def _opencode_leg_reasoning_effort(
 ) -> str:
     """The reasoning effort the OpenCode leg that answered was configured with.
 
-    Both routed OpenCode legs share one transport class, so the provider id is
-    what distinguishes them.  An id this mode does not build reports ``none``
-    rather than borrowing another leg's setting.
+    The routed OpenCode legs are told apart by provider id.  An id this mode
+    does not build reports ``none`` rather than borrowing another leg's setting.
     """
 
     cfg = AI_CONFIG if config is None else config
@@ -1469,6 +1531,8 @@ def _opencode_leg_reasoning_effort(
         return cfg.opencode_muse_reasoning_effort
     if provider_id == OPENCODE_SECONDARY_PROVIDER_ID:
         return cfg.opencode_secondary_reasoning_effort
+    if provider_id == OPENCODE_MUSE_FALLBACK_PROVIDER_ID:
+        return cfg.opencode_muse_fallback_reasoning_effort
     return "none"
 
 
@@ -1550,9 +1614,24 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
                 session_scope=cfg.opencode_session_scope,
                 **common,
             ),
-            # Same transport class as Muse, on the same /responses endpoint,
-            # with its own provider id so every result names the leg that
-            # answered.
+            # The stage after a Muse failure: glm-5.3-flash on
+            # /chat/completions (it is not servable on /responses), validated
+            # by the same strict schema contract before it can answer.
+            muse_fallback=OpenCodeChatCompletionsProvider(
+                base_url=cfg.opencode_base_url,
+                api_key=opencode_key,
+                model=cfg.opencode_muse_fallback_model,
+                reasoning_effort=cfg.opencode_muse_fallback_reasoning_effort,
+                timeout_sec=cfg.opencode_timeout_sec,
+                max_output_tokens=cfg.opencode_max_output_tokens,
+                reasoning_token_reserve=cfg.opencode_muse_fallback_reasoning_token_reserve,
+                parallelism=cfg.opencode_parallelism,
+                session_scope=cfg.opencode_session_scope,
+                **common,
+            ),
+            # The important route's primary: same transport class as Muse, on
+            # the same /responses endpoint, with its own provider id so every
+            # result names the leg that answered.
             secondary=OpenCodeResponsesProvider(
                 base_url=cfg.opencode_base_url,
                 api_key=opencode_key,
@@ -1598,7 +1677,7 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
         # results the usage ledger never sees -- and the router records one row
         # per logical call.  Nothing reads these records back into a decision.
         attempt_ledger = OpenCodeGoAttemptLedger(path_resolver=bus_attempt_ledger_path)
-        for leg in (routed._muse, routed._secondary, routed._fallback):
+        for leg in (routed._muse, routed._muse_fallback, routed._secondary, routed._fallback):
             leg.attempt_observer = attempt_ledger
         routed.call_observer = attempt_ledger
         return routed
@@ -4452,7 +4531,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                         else "none"
                     )
                 elif provider_result.provider_mode == PROVIDER_MODE_OPENCODE:
-                    # An OpenCode result is Muse or the secondary leg; a Luna
+                    # An OpenCode result is Muse, the Muse fallback or the secondary leg; a Luna
                     # fallback returns PROVIDER_MODE_REMOTE and is handled by the
                     # first branch, so the ledger records each leg's own budget
                     # and effort rather than the local server's.
@@ -13341,6 +13420,20 @@ def main() -> None:
             request_pool.shutdown(wait=True)
             _log_file_bus_summary()
         return
+    # PenaltyWatcher second-approval reviews share the bounded worker pool with
+    # entry requests: one provider call per frozen deterministic proposal.
+    management_review_service = ManagementReviewService(bus, selected_provider, log=log)
+    management_review_service.ensure()
+    management_review_preflight = management_review_schema_preflight()
+    management_reviews_recovered = management_review_service.recover()
+    log(
+        "[management_ai_review] service_ready"
+        f" dir={management_review_service.root}"
+        f" schema_version={MANAGEMENT_REVIEW_SCHEMA_VERSION}"
+        f" schema_preflight_valid={str(management_review_preflight.valid).lower()}"
+        f" recovered={management_reviews_recovered}"
+        " provider_calls_per_request=1 cooldown_authority=mql_InpPenaltyCooldownMin"
+    )
     active_request_futures: set[Any] = set()
     while True:
         try:
@@ -13410,6 +13503,13 @@ def main() -> None:
                     # Production and live-forward concurrency are unaffected.
                     future.result()
                     active_request_futures.discard(future)
+            if management_review_preflight.valid:
+                for review_path in management_review_service.claim_ready(claim_slots):
+                    future = request_pool.submit(
+                        management_review_service.process_claimed, review_path
+                    )
+                    active_request_futures.add(future)
+                    claim_slots -= 1
             for job_path in sorted(analytics_jobs_dir.glob("*.json")):
                 if job_path.name.endswith(".tmp") or not _is_stable_input_file(job_path):
                     continue

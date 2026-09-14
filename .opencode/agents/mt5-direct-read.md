@@ -1,7 +1,7 @@
 ---
 description: Generic read-only model runner for one-off analysis using a selected normal-cost model.
 mode: all
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow

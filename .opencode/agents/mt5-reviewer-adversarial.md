@@ -1,6 +1,6 @@
 ---
 description: Adversarial high-risk reviewer. Tries to falsify the claimed fix and uncover unsafe state or boundary failures.
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/muse-spark-1.3-contributor
 
 mode: subagent
 permission:

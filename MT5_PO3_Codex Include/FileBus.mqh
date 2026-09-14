@@ -42,6 +42,9 @@ public:
    string TimedOutDir() const { return m_root + "\\timed_out"; }
    string QuarantinedDir() const { return m_root + "\\quarantined"; }
    string ShutdownDir() const { return m_root + "\\shutdown"; }
+   string ManagementReviewDir() const { return m_root + "\\management_review"; }
+   string ManagementReviewRequestDir() const { return ManagementReviewDir() + "\\requests"; }
+   string ManagementReviewResponseDir() const { return ManagementReviewDir() + "\\responses"; }
 
    bool Ensure() {
       // all in Common/Files
@@ -56,6 +59,9 @@ public:
       if(!FolderCreate(QuarantinedDir(), FILE_COMMON)) {}
       if(!FolderCreate(ShutdownDir(), FILE_COMMON)) {}
       if(!FolderCreate(LogDir(), FILE_COMMON)) {}
+      if(!FolderCreate(ManagementReviewDir(), FILE_COMMON)) {}
+      if(!FolderCreate(ManagementReviewRequestDir(), FILE_COMMON)) {}
+      if(!FolderCreate(ManagementReviewResponseDir(), FILE_COMMON)) {}
       if(!FolderCreate(m_root + "\\config", FILE_COMMON)) {}
       return true;
    }

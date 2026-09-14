@@ -33,8 +33,8 @@ if str(ROOT) not in sys.path:
 import ai_provider  # noqa: E402
 from ai_provider import (  # noqa: E402
     LocalOpenAICompatibleProvider,
+    OPENCODE_MUSE_FALLBACK_PROVIDER_ID,
     OPENCODE_PRIMARY_PROVIDER_ID,
-    OPENCODE_SECONDARY_PROVIDER_ID,
     OpenCodeResponsesProvider,
     ProviderCallError,
 )
@@ -470,16 +470,17 @@ class RoutedIncidentReplayTests(_ClockedTest):
 
         routed = _routed()
         muse = routed._muse.transport_double
-        secondary = routed._secondary.transport_double
+        # The leg that answers a Muse failure: GLM since 2026-09-14.
+        secondary = routed._muse_fallback.transport_double
         muse.answer = _PermissionDenied()
 
         first = _routed_call(routed)
-        self.assertEqual(first.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        self.assertEqual(first.provider_id, OPENCODE_MUSE_FALLBACK_PROVIDER_ID)
         self.assertEqual(len(muse.calls), 1)
 
         # Inside the cooldown Muse is skipped without a wire call.
         second = _routed_call(routed)
-        self.assertEqual(second.provider_id, OPENCODE_SECONDARY_PROVIDER_ID)
+        self.assertEqual(second.provider_id, OPENCODE_MUSE_FALLBACK_PROVIDER_ID)
         self.assertEqual(len(muse.calls), 1)
         self.assertEqual(len(secondary.calls), 2)
 

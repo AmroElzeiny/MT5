@@ -10,12 +10,35 @@
 #include "Risk.mqh"
 #include "Indicators.mqh"
 
+//--- Pure management-AI review timing.  All instants are absolute server/tester
+//--- seconds, so a state restored after a restart keeps exactly the remaining
+//--- cooldown.  The duration is the EA input InpPenaltyCooldownMin -- never the
+//--- model's diagnostic recommended_wait_minutes.
+long ManagementAiCooldownUntil(const long decided_at, const int cooldown_minutes) {
+   int minutes = cooldown_minutes;
+   if(minutes < 1) minutes = 1;
+   return decided_at + minutes * 60;
+}
+
+bool ManagementAiCooldownActive(const long now, const long cooldown_until) {
+   if(cooldown_until <= 0) return false;
+   return (now < cooldown_until);
+}
+
+bool ManagementAiReviewTimedOut(const long now, const long requested_at, const int timeout_seconds) {
+   int timeout = timeout_seconds;
+   if(timeout < 10) timeout = 10;
+   if(requested_at <= 0) return true;
+   return (now - requested_at > timeout);
+}
+
 class CPenaltyWatcher {
 private:
    CFileBus *m_bus;
    PenaltyState m_states[];
    string m_invalidation_policy_json;
    datetime m_invalidation_policy_loaded_at;
+   bool m_immediate_persist_requested;
 
    bool _ParseInvalidationMode(const string value,
                                ENUM_INVALIDATION_CONFIRMATION_MODE &mode) const {
@@ -89,6 +112,79 @@ private:
    bool _InCooldown(const PenaltyState &st){
       if(st.last_reduction_at == 0) return false;
       return (_NowServerOrTester() < (st.last_reduction_at + InpPenaltyCooldownMin*60));
+   }
+
+   //--- Management AI review: second approval layer for a frozen deterministic
+   //--- broker action.  The watcher stays the first authority; the review can
+   //--- only say APPROVE (execute that exact action) or DENY (execute nothing).
+   bool _ManagementAiReviewRequired() const {
+      if(!InpPenaltyAiReviewEnable) return false;
+      if(MQLInfoInteger(MQL_TESTER) != 0 && !InpPenaltyAiReviewInTester) return false;
+      return true;
+   }
+
+   string _ManagementAiRequestPath(const string request_id) const {
+      return m_bus.ManagementReviewRequestDir() + "\\" + request_id + ".json";
+   }
+
+   string _ManagementAiResponsePath(const string request_id) const {
+      return m_bus.ManagementReviewResponseDir() + "\\" + request_id + ".json";
+   }
+
+   void _LogManagementAiReview(const PenaltyState &st, const string stage, const string detail) const {
+      _RiskLog("[management_ai_review] stage=" + stage
+               + " position_id=" + IntegerToString(st.position_identifier)
+               + " symbol=" + st.symbol
+               + " action_id=" + st.action_id
+               + " requested_action=" + st.requested_action
+               + " requested_cut_fraction=" + DoubleToString(st.requested_cut_fraction, 4)
+               + " strikes=" + IntegerToString(st.strikes)
+               + " request_id=" + st.management_ai_request_id
+               + " review_seq=" + IntegerToString(st.management_ai_review_seq)
+               + " verdict=" + st.management_ai_verdict
+               + " cooldown_until=" + TimeToString(st.management_ai_cooldown_until, TIME_DATE|TIME_SECONDS)
+               + " " + detail);
+   }
+
+   bool _ManagementAiRequestBound(const PenaltyState &st) const {
+      return (StringLen(st.management_ai_request_id) > 0 &&
+              StringLen(st.action_id) > 0 &&
+              st.management_ai_action_id == st.action_id &&
+              st.management_ai_requested_action == st.requested_action &&
+              MathAbs(st.management_ai_requested_cut_fraction - st.requested_cut_fraction) <= 0.00000001);
+   }
+
+   bool _ManagementAiApprovalBound(const PenaltyState &st) const {
+      return (_ManagementAiRequestBound(st) && st.management_ai_verdict == "APPROVE");
+   }
+
+   void _ClearManagementAiBinding(PenaltyState &st) {
+      st.management_ai_request_id = "";
+      st.management_ai_action_id = "";
+      st.management_ai_request_fingerprint = "";
+      st.management_ai_requested_action = "";
+      st.management_ai_requested_cut_fraction = 0.0;
+      st.management_ai_verdict = "";
+      st.management_ai_reason_codes = "";
+      st.management_ai_reason = "";
+      st.management_ai_status_reason = "";
+      st.management_ai_requested_at = 0;
+      st.management_ai_resolved_at = 0;
+      st.management_ai_provider = "";
+      st.management_ai_model = "";
+      st.management_ai_response_fingerprint = "";
+   }
+
+   // A proposal that stops being pending before its verdict arrives withdraws
+   // its request if the gate has not claimed it yet, so no call is spent on it.
+   void _AbandonManagementAiRequest(const PenaltyState &st, const string reason) {
+      if(StringLen(st.management_ai_request_id) == 0) return;
+      string request_path = _ManagementAiRequestPath(st.management_ai_request_id);
+      bool removed = (m_bus.Exists(request_path) && m_bus.Delete(request_path));
+      string response_path = _ManagementAiResponsePath(st.management_ai_request_id);
+      if(m_bus.Exists(response_path)) m_bus.Delete(response_path);
+      _LogManagementAiReview(st, "request_abandoned",
+                             "reason=" + reason + " unclaimed_request_removed=" + (removed ? "true" : "false"));
    }
 
    double _CurPrice(const string symbol, const bool is_buy){
@@ -283,6 +379,8 @@ private:
 
    bool _ActionLifecyclePending(const PenaltyState &st) const {
       return (st.action_lifecycle_state == "DETECTED" ||
+              st.action_lifecycle_state == "AI_REVIEW_PENDING" ||
+              st.action_lifecycle_state == "AI_APPROVED" ||
               st.action_lifecycle_state == "ELIGIBLE" ||
               st.action_lifecycle_state == "DEFERRED_COOLDOWN" ||
               st.action_lifecycle_state == "SUBMISSION_ATTEMPTED" ||
@@ -311,6 +409,8 @@ private:
                             const string next_state,
                             const string reason) {
       string previous = st.action_lifecycle_state;
+      if(previous == "AI_REVIEW_PENDING" && (next_state == "SUPERSEDED" || next_state == "FAILED_TERMINAL"))
+         _AbandonManagementAiRequest(st, reason);
       st.action_lifecycle_state = next_state;
       if(next_state == "FAILED_TERMINAL" || next_state == "SUPERSEDED")
          st.action_terminal_reason = reason;
@@ -352,6 +452,13 @@ private:
       st.action_terminal_reason = "";
       st.action_executed = "none";
       _SetActionLifecycle(st, "DETECTED", reason);
+      if(_ManagementAiReviewRequired() && requested_action != "NO_BROKER_ACTION"){
+         // The proposal is frozen here: action, cut fraction and identity can no
+         // longer change for this action_id.  Exactly one review decides it.
+         _ClearManagementAiBinding(st);
+         _SetActionLifecycle(st, "AI_REVIEW_PENDING", "deterministic_proposal_frozen_awaiting_single_ai_review:" + reason);
+         return;
+      }
       _SetActionLifecycle(st, "ELIGIBLE", reason);
    }
 
@@ -380,6 +487,13 @@ private:
       double volume_step = SymbolInfoDouble(st.symbol, SYMBOL_VOLUME_STEP);
       double volume_tolerance = MathMax(1.0e-8, volume_step * 0.51);
       if(_PriorActionEffectVisible(st, current_volume, volume_tolerance)) return;
+      if(_ManagementAiReviewRequired() && !_ManagementAiApprovalBound(st)){
+         // Nothing reaches the broker without a bound APPROVE for this exact
+         // proposal.  A pre-upgrade state restored as ELIGIBLE is routed to review.
+         _ClearManagementAiBinding(st);
+         _SetActionLifecycle(st, "AI_REVIEW_PENDING", "execution_requires_bound_management_ai_approval");
+         return;
+      }
 
       datetime policy_cooldown_until = (st.last_reduction_at > 0
                                         ? st.last_reduction_at + InpPenaltyCooldownMin * 60 : 0);
@@ -478,6 +592,305 @@ private:
                           submitted && _ManagementRetcodeAccepted(retcode)
                           ? "broker_accepted_effect_not_yet_verified"
                           : "retryable_broker_or_runtime_failure");
+   }
+
+   string _ManagementAiRequestJson(const PenaltyState &st,
+                                   const ulong ticket,
+                                   const string comment,
+                                   const TradePlan &meta,
+                                   const bool has_meta,
+                                   const double px,
+                                   const double cur_r,
+                                   const int mins_open,
+                                   const double volume,
+                                   const double tp,
+                                   const bool structural_invalid,
+                                   const bool severe_structural_invalid,
+                                   const bool fvg_invalid,
+                                   const bool dr_invalid,
+                                   const bool thesis_raw,
+                                   const bool thesis_confirmed,
+                                   const string desired_state,
+                                   const string trigger_reason,
+                                   const int close_strikes) {
+      // Immutable entry thesis fields the per-tick meta parse does not carry.
+      // Read once per proposal, never per tick.
+      string meta_txt = "";
+      if(has_meta){
+         if(!(ticket > 0 && m_bus.ReadText(_TradeTicketPath(ticket), meta_txt)) && StringLen(comment) > 0)
+            m_bus.ReadText(_TradeKeyPath(comment), meta_txt);
+      }
+      string j = "{";
+      j += JsonKVStr("schema_version", MANAGEMENT_AI_REVIEW_SCHEMA_VERSION) + ",";
+      j += JsonKVStr("request_kind", "management_review") + ",";
+      j += JsonKVStr("request_id", st.management_ai_request_id) + ",";
+      j += JsonKVStr("request_fingerprint", st.management_ai_request_fingerprint) + ",";
+      j += JsonKVInt("review_seq", st.management_ai_review_seq) + ",";
+      j += JsonKVInt("requested_at", (int)st.management_ai_requested_at) + ",";
+      j += JsonKVStr("position_identifier", IntegerToString(st.position_identifier)) + ",";
+      j += JsonKVNum("ticket", (double)ticket, 0) + ",";
+      j += JsonKVStr("symbol", st.symbol) + ",";
+      j += JsonKVStr("action_id", st.action_id) + ",";
+      j += "\"proposal\":{" + JsonKVStr("requested_action", st.requested_action) + ","
+           + JsonKVNum("requested_cut_fraction", st.requested_cut_fraction, 8) + ","
+           + JsonKVStr("trigger_reason", trigger_reason) + ","
+           + JsonKVStr("desired_state", desired_state) + ","
+           + JsonKVInt("strikes", st.strikes) + ","
+           + JsonKVInt("close_strikes", close_strikes) + ","
+           + JsonKVStr("authority", "deterministic_penalty_watcher") + "},";
+      j += "\"position\":{" + JsonKVBool("is_buy", st.is_buy) + ","
+           + JsonKVNum("entry", st.entry, 8) + ","
+           + JsonKVNum("sl", st.sl, 8) + ","
+           + JsonKVNum("tp", tp, 8) + ","
+           + JsonKVNum("planned_tp1", (has_meta ? meta.tp1 : 0.0), 8) + ","
+           + JsonKVNum("planned_tp2", (has_meta ? meta.tp2 : 0.0), 8) + ","
+           + JsonKVNum("current_price", px, 8) + ","
+           + JsonKVNum("volume", volume, 8) + ","
+           + JsonKVNum("risk_distance", st.risk_dist, 8) + ","
+           + JsonKVNum("current_r", cur_r, 4) + ","
+           + JsonKVNum("mfe_r", st.mfe_r, 4) + ","
+           + JsonKVNum("mae_r", st.mae_r, 4) + ","
+           + JsonKVInt("minutes_open", mins_open) + "},";
+      j += "\"invalidation\":{" + JsonKVBool("structural_invalid", structural_invalid) + ","
+           + JsonKVBool("severe_structural_invalid", severe_structural_invalid) + ","
+           + JsonKVBool("fvg_invalid", fvg_invalid) + ","
+           + JsonKVBool("dealing_range_invalid", dr_invalid) + ","
+           + JsonKVBool("thesis_raw_breach", thesis_raw) + ","
+           + JsonKVBool("thesis_confirmed", thesis_confirmed) + ","
+           + JsonKVStr("confirmation_mode", st.confirmation_mode) + ","
+           + JsonKVNum("confirmation_trigger_level", st.confirmation_trigger_level, 8) + ","
+           + JsonKVInt("confirmed_time", (int)st.confirmed_time) + "},";
+      j += "\"thesis\":{" + JsonKVBool("trade_meta_available", has_meta) + ","
+           + JsonKVStr("setup_family", JsonGetString(meta_txt, "setup_family", "")) + ","
+           + JsonKVStr("setup_class", JsonGetString(meta_txt, "setup_class", "")) + ","
+           + JsonKVStr("entry_branch", JsonGetString(meta_txt, "entry_branch", "")) + ","
+           + JsonKVStr("target_source", JsonGetString(meta_txt, "target_source", "")) + ","
+           + JsonKVStr("po3_state", (has_meta ? meta.po3.po3_state : "")) + ","
+           + JsonKVStr("structure_type", (has_meta ? meta.po3.structure_type : "")) + ","
+           + JsonKVNum("fvg_lower", (has_meta ? meta.fvg.lower : 0.0), 8) + ","
+           + JsonKVNum("fvg_upper", (has_meta ? meta.fvg.upper : 0.0), 8) + ","
+           + JsonKVStr("fvg_mitigation_state", (has_meta ? meta.fvg.mitigation_state : "")) + ","
+           + JsonKVBool("fvg_structure_invalidated", (has_meta && meta.fvg.structure_invalidated)) + ","
+           + JsonKVNum("dealing_range_low", (has_meta ? meta.po3.dr_low : 0.0), 8) + ","
+           + JsonKVNum("dealing_range_high", (has_meta ? meta.po3.dr_high : 0.0), 8) + ","
+           + JsonKVNum("manipulation_low", (has_meta ? meta.po3.manip_low : 0.0), 8) + ","
+           + JsonKVNum("manipulation_high", (has_meta ? meta.po3.manip_high : 0.0), 8) + ","
+           + JsonKVNum("swing_low", (has_meta ? meta.po3.swing_low : 0.0), 8) + ","
+           + JsonKVNum("swing_high", (has_meta ? meta.po3.swing_high : 0.0), 8) + "},";
+      j += "\"state\":{" + JsonKVStr("current_state", st.current_state) + ","
+           + JsonKVStr("previous_state", st.previous_state) + ","
+           + JsonKVStr("transition_reason", st.transition_reason) + ","
+           + JsonKVInt("last_reduction_at", (int)st.last_reduction_at) + "}";
+      j += "}";
+      return j;
+   }
+
+   // Freeze the review binding and write the ONE request for this proposal.
+   void _StartManagementAiReview(PenaltyState &st,
+                                 const ulong ticket,
+                                 const string comment,
+                                 const TradePlan &meta,
+                                 const bool has_meta,
+                                 const double px,
+                                 const double cur_r,
+                                 const int mins_open,
+                                 const double volume,
+                                 const double tp,
+                                 const bool structural_invalid,
+                                 const bool severe_structural_invalid,
+                                 const bool fvg_invalid,
+                                 const bool dr_invalid,
+                                 const bool thesis_raw,
+                                 const bool thesis_confirmed,
+                                 const string desired_state,
+                                 const string transition_reason,
+                                 const int close_strikes,
+                                 const datetime now) {
+      if(_ActionAlreadyExecuted(st, st.action_id)){
+         _SetActionLifecycle(st, "SUPERSEDED", "management_action_already_executed");
+         return;
+      }
+      // While the post-reduction cooldown holds, the deterministic system could
+      // not execute anyway: asking the model now would spend a call on a verdict
+      // that must wait.
+      datetime reduction_cooldown_until = (st.last_reduction_at > 0
+                                           ? st.last_reduction_at + InpPenaltyCooldownMin * 60 : 0);
+      if(reduction_cooldown_until > now){
+         if(st.next_eligible_retry_time != reduction_cooldown_until){
+            st.next_eligible_retry_time = reduction_cooldown_until;
+            _LogManagementAiReview(st, "request_deferred", "reason=reduction_cooldown_active provider_call=false");
+         }
+         return;
+      }
+      if(st.next_eligible_retry_time > now) return;
+
+      string trigger = (StringLen(transition_reason) > 0 ? transition_reason : desired_state);
+      _ClearManagementAiBinding(st);
+      st.management_ai_review_seq++;
+      st.management_ai_schema_version = MANAGEMENT_AI_REVIEW_SCHEMA_VERSION;
+      st.management_ai_action_id = st.action_id;
+      st.management_ai_requested_action = st.requested_action;
+      st.management_ai_requested_cut_fraction = st.requested_cut_fraction;
+      st.management_ai_requested_at = now;
+      string action_hash = IntegerToString((long)PO3ContractFnv1a(st.action_id + "|" + st.requested_action + "|"
+                                                                  + DoubleToString(st.requested_cut_fraction, 8)));
+      st.management_ai_request_id = "mgmt_" + IntegerToString(st.position_identifier) + "_"
+                                    + IntegerToString(st.management_ai_review_seq) + "_" + action_hash;
+      st.management_ai_request_fingerprint = IntegerToString((long)PO3ContractFnv1a(
+         st.management_ai_request_id + "|" + IntegerToString(st.position_identifier) + "|" + st.action_id + "|"
+         + st.requested_action + "|" + DoubleToString(st.requested_cut_fraction, 8) + "|"
+         + IntegerToString(st.strikes) + "|" + IntegerToString((long)now) + "|" + trigger));
+      st.management_ai_verdict = "PENDING";
+      m_immediate_persist_requested = true;
+
+      string response_path = _ManagementAiResponsePath(st.management_ai_request_id);
+      if(m_bus.Exists(response_path)) m_bus.Delete(response_path);
+      string body = _ManagementAiRequestJson(st, ticket, comment, meta, has_meta, px, cur_r, mins_open, volume, tp,
+                                             structural_invalid, severe_structural_invalid, fvg_invalid, dr_invalid,
+                                             thesis_raw, thesis_confirmed, desired_state, trigger, close_strikes);
+      if(!m_bus.WriteText(_ManagementAiRequestPath(st.management_ai_request_id), body)){
+         // Nothing was published, so no provider call can exist for this id.
+         st.management_ai_request_id = "";
+         st.management_ai_verdict = "";
+         st.next_eligible_retry_time = now + MathMax(1, InpManagementActionRetryCooldownSec);
+         _LogManagementAiReview(st, "request_write_failed", "provider_call=false broker_action=none");
+         return;
+      }
+      _LogManagementAiReview(st, "request_written",
+                             "single_provider_call_for_proposal=true timeout_sec=" + IntegerToString(InpPenaltyAiReviewTimeoutSec)
+                             + " trigger=" + trigger
+                             + " current_r=" + DoubleToString(cur_r, 4)
+                             + " mfe_r=" + DoubleToString(st.mfe_r, 4)
+                             + " mae_r=" + DoubleToString(st.mae_r, 4)
+                             + " minutes_open=" + IntegerToString(mins_open));
+   }
+
+   void _ResolveManagementAiUnresolved(PenaltyState &st, const string reason, const datetime now) {
+      string request_path = _ManagementAiRequestPath(st.management_ai_request_id);
+      bool unclaimed_removed = (m_bus.Exists(request_path) && m_bus.Delete(request_path));
+      st.management_ai_verdict = "UNRESOLVED";
+      st.management_ai_status_reason = reason;
+      st.management_ai_resolved_at = now;
+      st.management_ai_cooldown_until = (datetime)ManagementAiCooldownUntil((long)now, InpPenaltyCooldownMin);
+      m_immediate_persist_requested = true;
+      _SetActionLifecycle(st, "AI_REVIEW_UNRESOLVED", "not_approved:" + reason);
+      _LogManagementAiReview(st, "unresolved_not_approved",
+                             "reason=" + reason + " broker_action=none strikes_unchanged=true"
+                             + " unclaimed_request_removed=" + (unclaimed_removed ? "true" : "false"));
+   }
+
+   // Only a bound, fresh, schema-valid RESOLVED envelope can yield a verdict.
+   bool _ValidateManagementAiResponse(PenaltyState &st,
+                                      const string txt,
+                                      const datetime now,
+                                      string &verdict,
+                                      string &reason) {
+      verdict = "";
+      reason = "";
+      string doc_reason = "";
+      if(!JsonValidateDocumentStrict(txt, doc_reason)){ reason = "response_malformed_json:" + doc_reason; return false; }
+      string value = "";
+      if(!JsonGetStringStrict(txt, "schema_version", value) || value != MANAGEMENT_AI_REVIEW_SCHEMA_VERSION){
+         reason = "response_schema_version_mismatch"; return false;
+      }
+      if(!JsonGetStringStrict(txt, "response_kind", value) || value != "management_review"){
+         reason = "response_kind_mismatch"; return false;
+      }
+      if(!JsonGetStringStrict(txt, "request_id", value) || value != st.management_ai_request_id){
+         reason = "response_request_id_mismatch"; return false;
+      }
+      string status = "";
+      if(!JsonGetStringStrict(txt, "status", status)){ reason = "response_status_missing"; return false; }
+      if(status == "ERROR"){
+         string category = "";
+         JsonGetStringStrict(txt, "error_category", category, true);
+         reason = "response_error_envelope:" + category;
+         return false;
+      }
+      if(status != "RESOLVED"){ reason = "response_status_invalid"; return false; }
+      if(!JsonGetStringStrict(txt, "request_fingerprint", value) || value != st.management_ai_request_fingerprint){
+         reason = "response_request_fingerprint_mismatch"; return false;
+      }
+      if(!JsonGetStringStrict(txt, "position_identifier", value) || value != IntegerToString(st.position_identifier)){
+         reason = "response_position_mismatch"; return false;
+      }
+      if(!JsonGetStringStrict(txt, "action_id", value) || value != st.action_id || st.management_ai_action_id != st.action_id){
+         reason = "response_action_id_mismatch"; return false;
+      }
+      if(!JsonGetStringStrict(txt, "requested_action", value) || value != st.requested_action){
+         reason = "response_requested_action_altered"; return false;
+      }
+      double number = 0.0;
+      if(!JsonGetNumberStrict(txt, "requested_cut_fraction", number) ||
+         MathAbs(number - st.requested_cut_fraction) > 0.000001){
+         reason = "response_cut_fraction_altered"; return false;
+      }
+      if(!JsonGetNumberStrict(txt, "requested_at", number) ||
+         (long)MathRound(number) != (long)st.management_ai_requested_at){
+         reason = "response_requested_at_mismatch"; return false;
+      }
+      if(ManagementAiReviewTimedOut((long)now, (long)st.management_ai_requested_at, InpPenaltyAiReviewTimeoutSec)){
+         reason = "response_stale"; return false;
+      }
+      if(!JsonGetStringStrict(txt, "verdict", value) || (value != "APPROVE" && value != "DENY")){
+         reason = "response_verdict_invalid"; return false;
+      }
+      string codes = "";
+      if(!JsonGetArrayStrict(txt, "reason_codes", codes) || StringLen(codes) < 4){
+         reason = "response_reason_codes_missing"; return false;
+      }
+      verdict = value;
+      st.management_ai_reason_codes = codes;
+      string text = "";
+      if(JsonGetStringStrict(txt, "reason", text, true)) st.management_ai_reason = text;
+      if(JsonGetStringStrict(txt, "provider_id", text, true)) st.management_ai_provider = text;
+      if(JsonGetStringStrict(txt, "model", text, true)) st.management_ai_model = text;
+      if(JsonGetStringStrict(txt, "response_fingerprint", text, true)) st.management_ai_response_fingerprint = text;
+      return true;
+   }
+
+   // Returns true only when a bound APPROVE made the frozen action ELIGIBLE.
+   bool _AwaitManagementAiReview(PenaltyState &st, const datetime now) {
+      string response_path = _ManagementAiResponsePath(st.management_ai_request_id);
+      if(!m_bus.Exists(response_path)){
+         if(ManagementAiReviewTimedOut((long)now, (long)st.management_ai_requested_at, InpPenaltyAiReviewTimeoutSec))
+            _ResolveManagementAiUnresolved(st, "management_ai_review_timeout", now);
+         return false;
+      }
+      string txt = "";
+      if(!m_bus.ReadText(response_path, txt)){
+         if(ManagementAiReviewTimedOut((long)now, (long)st.management_ai_requested_at, InpPenaltyAiReviewTimeoutSec))
+            _ResolveManagementAiUnresolved(st, "management_ai_response_unreadable", now);
+         return false;
+      }
+      m_bus.Delete(response_path);
+      string verdict = "";
+      string invalid_reason = "";
+      if(!_ValidateManagementAiResponse(st, txt, now, verdict, invalid_reason)){
+         _ResolveManagementAiUnresolved(st, invalid_reason, now);
+         return false;
+      }
+      st.management_ai_resolved_at = now;
+      m_immediate_persist_requested = true;
+      if(verdict == "APPROVE"){
+         st.management_ai_verdict = "APPROVE";
+         st.management_ai_status_reason = "bound_fresh_schema_valid_approve";
+         st.next_eligible_retry_time = 0;
+         _SetActionLifecycle(st, "AI_APPROVED", "management_ai_approved_exact_deterministic_action");
+         _LogManagementAiReview(st, "approved", "execute_original_action_now=true reason_codes=" + st.management_ai_reason_codes
+                                + " provider=" + st.management_ai_provider + " model=" + st.management_ai_model);
+         _SetActionLifecycle(st, "ELIGIBLE", "management_ai_approval_bound_to_action");
+         return true;
+      }
+      st.management_ai_verdict = "DENY";
+      st.management_ai_status_reason = "bound_fresh_schema_valid_deny";
+      st.management_ai_denied_at = now;
+      st.management_ai_cooldown_until = (datetime)ManagementAiCooldownUntil((long)now, InpPenaltyCooldownMin);
+      _SetActionLifecycle(st, "AI_DENIED", "management_ai_denied_no_broker_action");
+      _SetActionLifecycle(st, "AI_DENIAL_COOLDOWN", "no_penalty_execution_and_no_ai_call_until_cooldown_expiry");
+      _LogManagementAiReview(st, "denied", "broker_action=none strikes_unchanged=true reason_codes="
+                             + st.management_ai_reason_codes + " cooldown_minutes=" + IntegerToString(InpPenaltyCooldownMin));
+      return false;
    }
 
    string _TransitionActionId(const PenaltyState &st,
@@ -686,7 +1099,16 @@ private:
 public:
    CPenaltyWatcher(CFileBus &bus){
       m_bus=&bus;
+      m_immediate_persist_requested = false;
       ArrayResize(m_states, 0);
+   }
+
+   // Review bindings, verdicts and cooldowns must reach disk before the next
+   // periodic snapshot, or a restart could lose which proposal was already sent.
+   bool ConsumeImmediatePersistRequest(){
+      bool requested = m_immediate_persist_requested;
+      m_immediate_persist_requested = false;
+      return requested;
    }
 
    void RestoreStates(const PenaltyState &states[]){
@@ -763,6 +1185,7 @@ public:
          bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
          double entry = PositionGetDouble(POSITION_PRICE_OPEN);
          double sl = PositionGetDouble(POSITION_SL);
+         double tp = PositionGetDouble(POSITION_TP);
          double vol = PositionGetDouble(POSITION_VOLUME);
          datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
 
@@ -816,6 +1239,26 @@ public:
          if(st.risk_dist <= 0) st.risk_dist = risk_dist;
          if(StringLen(st.current_state) == 0) st.current_state = "HEALTHY";
          if(StringLen(st.management_version) == 0) st.management_version = MANAGEMENT_SCHEMA_VERSION;
+
+         // AI denial / unresolved-review cooldown.  At expiry the denied proposal
+         // is discarded; this same pass then evaluates the position afresh.
+         if(st.management_ai_cooldown_until > 0 &&
+            !ManagementAiCooldownActive((long)now, (long)st.management_ai_cooldown_until)){
+            string stale_action_id = st.action_id;
+            if(st.action_lifecycle_state == "AI_DENIAL_COOLDOWN" ||
+               st.action_lifecycle_state == "AI_REVIEW_UNRESOLVED"){
+               _LogManagementAiReview(st, "cooldown_expired",
+                                      "stale_proposal_discarded=true fresh_deterministic_evaluation=true");
+               st.action_id = "";
+               st.requested_action = "";
+               st.requested_cut_fraction = 0.0;
+               _SetActionLifecycle(st, "AI_COOLDOWN_EXPIRED", "denied_or_unresolved_proposal_discarded:" + stale_action_id);
+            }
+            st.management_ai_cooldown_until = 0;
+            m_immediate_persist_requested = true;
+         }
+         bool management_ai_cooldown_active = ManagementAiCooldownActive((long)now,
+                                                                         (long)st.management_ai_cooldown_until);
 
          double px = _CurPrice(sym, is_buy);
          if(is_buy){
@@ -972,7 +1415,11 @@ public:
          bool management_action_required = ((desired_state == "WARNING" || desired_state == "THESIS_INVALID") &&
                                             (trigger_cut || thesis_confirmed ||
                                              (desired_state == "THESIS_INVALID" && _ActionLifecyclePending(st))));
-         if(management_action_required){
+         if(management_action_required && management_ai_cooldown_active){
+            // Passive observation only: no punitive execution, no new proposal,
+            // no AI call.  Excursion, invalidation and state tracking above
+            // continue and are persisted below.
+         } else if(management_action_required){
             string action_id = (_ActionLifecyclePending(st) && !state_changed
                                 ? st.action_id
                                 : _TransitionActionId(st, desired_state, transition_reason, evidence_time));
@@ -1000,7 +1447,18 @@ public:
                                        (state_changed && st.action_id != action_id));
                if(need_new_action)
                   _QueueManagementAction(st, action_id, requested_action, cut_fraction, transition_reason);
-               if(_ActionLifecyclePending(st))
+               if(st.action_lifecycle_state == "AI_REVIEW_PENDING"){
+                  if(!_ManagementAiRequestBound(st))
+                     _StartManagementAiReview(st, ticket, comment, meta, has_meta, px, curR, mins_open, vol, tp,
+                                              structural_invalid, severe_structural_invalid, fvg_invalid, dr_invalid,
+                                              thesis_raw, thesis_confirmed, desired_state, transition_reason,
+                                              close_strikes, now);
+                  else
+                     _AwaitManagementAiReview(st, now);
+               }
+               // An APPROVE turns the frozen proposal ELIGIBLE above; it is
+               // submitted in this same pass with the original action and cut.
+               if(_ActionLifecyclePending(st) && st.action_lifecycle_state != "AI_REVIEW_PENDING")
                   _ProcessPendingAction(trade, st, ticket, vol, now);
             }
          } else if(_ActionLifecyclePending(st) && desired_state == st.current_state){

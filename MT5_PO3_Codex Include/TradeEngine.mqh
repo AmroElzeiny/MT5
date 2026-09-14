@@ -238,6 +238,12 @@ private:
    datetime m_last_positions_tick;
    datetime m_last_penalty_persist;
    datetime m_last_rollover_log;
+   // Pending limits removed by the rollover trading freeze, awaiting restore.
+   TradePlan m_rollover_suspended[];
+   datetime m_last_rollover_restore_log;
+   int m_total_rollover_pending_suspended;
+   int m_total_rollover_pending_restored;
+   int m_total_rollover_pending_dropped;
    string m_last_execution_reject_reason;
    // The class decided by the detector DURING the current attempt, and the spread
    // it measured.  _ClassifyExecutionFailure used to honour p.execution_failure_class
@@ -758,7 +764,10 @@ private:
       entry.score_bias = JsonGetNumber(line, "score_bias", 0.0);
       entry.sample_count = (int)JsonGetNumber(line, "sample_count", 0.0);
       entry.policy_id = JsonGetString(line, "policy_id", "");
-      return (entry.risk_multiplier >= 0.0 && entry.risk_multiplier <= 1.0);
+      // The session/weekday owner legitimately upscales ("watch_for_upgrade"
+      // ~1.05, "upgrade" 1.15).  Rejecting those lines used to invalidate the
+      // whole active policy and block every candidate.
+      return (entry.risk_multiplier >= 0.0 && entry.risk_multiplier <= SESSION_WEEKDAY_RISK_MULTIPLIER_MAX + 0.000001);
    }
 
    bool _LoadActivePolicyFiles() {
@@ -4415,6 +4424,10 @@ private:
                + " maintain_positions_seconds=" + DoubleToString((double)m_mp_us / 1000000.0, 3)
                + " maintain_positions_us_per_call="
                + DoubleToString(m_mp_calls > 0 ? (double)m_mp_us / (double)m_mp_calls : 0.0, 1));
+      _Journal("[final_summary] rollover_pending_suspended_total=" + IntegerToString(m_total_rollover_pending_suspended)
+               + " rollover_pending_restored_total=" + IntegerToString(m_total_rollover_pending_restored)
+               + " rollover_pending_dropped_total=" + IntegerToString(m_total_rollover_pending_dropped)
+               + " rollover_pending_awaiting_restore=" + IntegerToString(ArraySize(m_rollover_suspended)));
       _LogShadowTrackerSummary();
       _LogJournalDedupSummary();
    }
@@ -6206,7 +6219,7 @@ private:
       SessionWeekdayPolicyEntry entry = m_session_weekday_policy[idx];
       string action = (StringLen(entry.action) > 0 ? entry.action : "monitor");
       p.session_weekday_policy_action = action;
-      if(entry.risk_multiplier < 0.0 || entry.risk_multiplier > 1.0){
+      if(entry.risk_multiplier < 0.0 || entry.risk_multiplier > SESSION_WEEKDAY_RISK_MULTIPLIER_MAX + 0.000001){
          reason = "session_weekday_risk_multiplier_invalid";
          return false;
       }
@@ -16702,7 +16715,7 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       double max_adverse_drift = MathMax(planned_risk * max_drift_r, point * PO3EffectiveMinFvgWidthTicks());
       bool hard_drift_exceeded = (adverse_drift > max_adverse_drift);
 
-      double target_risk = risk_money;
+      double target_risk = 0.0;
       double rem = 0.0;
       if(InpMaxTotalRiskEnable){
          HasCapacityForNewTrade(0.0, rem);
@@ -16710,19 +16723,33 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
             _Journal("[portfolio_risk_block] reason=max_total_risk_reached open_risk_pct=unknown cap=" + DoubleToString(InpMaxTotalRiskMoney, 2));
             return _RejectPlacement(p, "portfolio risk capacity exhausted");
          }
-         target_risk = MathMin(target_risk, rem);
       }
-      if(p.subtype_risk_multiplier <= 0.0 || p.active_policy_risk_multiplier <= 0.0 || p.bucket_policy_risk_multiplier <= 0.0 ||
-         p.ai.suggested_risk_multiplier <= 0.0 ||
-         (p.execution_cost_risk_reduced && p.execution_cost_risk_multiplier <= 0.0))
-         return _RejectPlacement(p, "resolved_risk_multiplier_zero");
-      if(p.subtype_risk_multiplier > 1.0 || p.active_policy_risk_multiplier > 1.0 || p.bucket_policy_risk_multiplier > 1.0 ||
-         p.ai.suggested_risk_multiplier > 1.0 || p.execution_cost_risk_multiplier > 1.0)
-         return _RejectPlacement(p, "resolved_risk_multiplier_invalid");
-      double risk_mult = p.subtype_risk_multiplier * p.active_policy_risk_multiplier * p.bucket_policy_risk_multiplier * p.ai.suggested_risk_multiplier;
-      if(p.execution_cost_risk_reduced) risk_mult *= p.execution_cost_risk_multiplier;
-      if(risk_mult <= 0.0) return _RejectPlacement(p, "resolved_risk_multiplier_zero");
-      target_risk *= risk_mult;
+      // subtype_risk_multiplier already carries context x session/weekday.  A
+      // plan the session policy never touched stores 0 there, which that owner
+      // itself treats as "not applied" (neutral).
+      double session_weekday_mult = (p.session_weekday_risk_multiplier > 0.0 ? p.session_weekday_risk_multiplier : 1.0);
+      double risk_mult = 0.0;
+      string risk_scaling_reason = "";
+      if(!ResolveGovernedRiskMoney(risk_money, InpMaxTotalRiskEnable, rem,
+                                   AccountInfoDouble(ACCOUNT_EQUITY), InpMaxRiskPerTradePct,
+                                   p.subtype_risk_multiplier, session_weekday_mult,
+                                   p.active_policy_risk_multiplier, p.bucket_policy_risk_multiplier,
+                                   p.ai.suggested_risk_multiplier,
+                                   p.execution_cost_risk_reduced, p.execution_cost_risk_multiplier,
+                                   target_risk, risk_mult, risk_scaling_reason))
+         return _RejectPlacement(p, risk_scaling_reason);
+      _Journal("[risk_scaling] symbol=" + p.symbol
+               + " base_risk_money=" + DoubleToString(risk_money, 2)
+               + " subtype_context_session=" + DoubleToString(p.subtype_risk_multiplier, 4)
+               + " session_weekday=" + DoubleToString(session_weekday_mult, 4)
+               + " active_policy=" + DoubleToString(p.active_policy_risk_multiplier, 4)
+               + " bucket_policy=" + DoubleToString(p.bucket_policy_risk_multiplier, 4)
+               + " ai_suggested=" + DoubleToString(p.ai.suggested_risk_multiplier, 4)
+               + " execution_cost=" + (p.execution_cost_risk_reduced ? DoubleToString(p.execution_cost_risk_multiplier, 4) : "not_applied")
+               + " resolved_multiplier=" + DoubleToString(risk_mult, 4)
+               + " portfolio_remaining=" + (InpMaxTotalRiskEnable ? DoubleToString(rem, 2) : "disabled")
+               + " hard_max_risk_pct=" + DoubleToString(InpMaxRiskPerTradePct, 4)
+               + " target_risk_money=" + DoubleToString(target_risk, 2));
 
       string trade_key = _MakeTradeKey(p);
       double market_tol_r = MathMax(InpMarketEntryToleranceR, InpEntryZoneToleranceR);
@@ -17077,6 +17104,14 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       pending.planned_tp1 = pending.tp1;
       pending.planned_tp2 = pending.tp2;
       pending.planned_at = _NowServerOrLocal();
+      // The lifetime of this pending entry is fixed here, once.  A rollover
+      // restore re-places the order with exactly this expiry.
+      pending.pending_first_placed_at = pending.planned_at;
+      pending.pending_expires_at = expiry;
+      pending.rollover_suspended_at = 0;
+      pending.rollover_suspended_ticket = 0;
+      pending.rollover_suspended_volume = 0.0;
+      pending.rollover_restore_count = 0;
       pending.initial_volume = vol;
       _CaptureEntryRiskContext(pending, vol, pending_entry, pending.sl);
       pending.narrative_state = "pending_order";
@@ -17404,6 +17439,11 @@ public:
       m_last_positions_tick = 0;
       m_last_penalty_persist = 0;
       m_last_rollover_log = 0;
+      ArrayResize(m_rollover_suspended, 0);
+      m_last_rollover_restore_log = 0;
+      m_total_rollover_pending_suspended = 0;
+      m_total_rollover_pending_restored = 0;
+      m_total_rollover_pending_dropped = 0;
       m_last_execution_reject_reason = "";
       m_last_execution_failure_class = "";
       m_last_execution_spread = 0.0;
@@ -17723,6 +17763,14 @@ public:
          _CopyPlans(m_watchlist, tmp);
          _PrunePlanArray(m_watchlist, false);
       }
+      // Live only: a suspension record names a real broker order removed at a
+      // real rollover.  A tester run has no such order to restore.
+      if(!MQLInfoInteger(MQL_TESTER) && m_state.LoadPlans(m_state.RolloverSuspendedPendingPath(), tmp)) {
+         _CopyPlans(m_rollover_suspended, tmp);
+         if(ArraySize(m_rollover_suspended) > 0)
+            _Journal("[rollover_pending_restore] startup_records=" + IntegerToString(ArraySize(m_rollover_suspended))
+                     + " action=resumed_awaiting_restore");
+      }
       if(m_state.LoadPlans(m_state.PendingAiPath(), tmp)) {
          _CopyPlans(m_pending_ai, tmp);
          if(MQLInfoInteger(MQL_TESTER)){
@@ -17868,6 +17916,7 @@ public:
       _PersistPendingAiState();
       _PersistResearchQueues();
       _PersistPenaltyStates();
+      _PersistRolloverSuspendedPending();
    }
 
    void HandleTradeTransaction(const MqlTradeTransaction &trans) {
@@ -18014,7 +18063,7 @@ public:
       }
 
       if(PO3TradingFreezeActive(now, reason)){
-         bool acted = _DeleteManagedPendingOrders(m_trade, reason);
+         bool acted = _SuspendManagedPendingOrdersForRollover(reason);
          if(acted){
             _Journal("rollover protection deleted pending orders reason=" + reason);
             m_last_rollover_log = now;
@@ -18022,7 +18071,433 @@ public:
             _Journal("rollover trading freeze active reason=" + reason);
             m_last_rollover_log = now;
          }
+         return;
       }
+
+      _MaintainRolloverSuspendedPendingOrders(now);
+   }
+
+   // ---- Rollover suspension and restore of pending limits -------------------
+
+   void _PersistRolloverSuspendedPending() {
+      if(MQLInfoInteger(MQL_TESTER)) return;
+      m_state.SavePlans(m_state.RolloverSuspendedPendingPath(), m_rollover_suspended);
+   }
+
+   void _UpsertRolloverSuspended(const TradePlan &rec) {
+      int n = ArraySize(m_rollover_suspended);
+      for(int i=0; i<n; i++){
+         bool same_order = (m_rollover_suspended[i].rollover_suspended_ticket == rec.rollover_suspended_ticket);
+         bool same_trade = (StringLen(rec.trade_key) > 0 && m_rollover_suspended[i].trade_key == rec.trade_key);
+         if(same_order || same_trade){
+            m_rollover_suspended[i] = rec;
+            return;
+         }
+      }
+      ArrayResize(m_rollover_suspended, n + 1);
+      m_rollover_suspended[n] = rec;
+   }
+
+   bool _RolloverQuoteExclusionWindow(int &start_minute, int &end_minute) const {
+      start_minute = -1;
+      end_minute = -1;
+      if(!_ParseServerClockMinute(InpRolloverQuoteExclusionStartServerTime, start_minute)) return false;
+      if(!_ParseServerClockMinute(InpRolloverQuoteExclusionEndServerTime, end_minute)) return false;
+      return (start_minute != end_minute);
+   }
+
+   // The first instant at or after ``t`` where the exclusion window has ended.
+   datetime _RolloverQuoteWindowEndAfter(const datetime t, const int start_minute, const int end_minute) const {
+      long day_start = (long)t - ((long)t % 86400);
+      int minute = _ServerMinuteOfDay(t);
+      if(!_MinuteInsideDailyWindow(minute, start_minute, end_minute)){
+         // Before the window opens today: its end is the next occurrence after
+         // the start that follows ``t``.
+         long start_at = day_start + (long)start_minute * 60;
+         if(start_at < (long)t) start_at += 86400;
+         long end_at = start_at - ((long)start_at % 86400) + (long)end_minute * 60;
+         if(end_at <= start_at) end_at += 86400;
+         return (datetime)end_at;
+      }
+      long end_today = day_start + (long)end_minute * 60;
+      if(end_today <= (long)t) end_today += 86400;
+      return (datetime)end_today;
+   }
+
+   // Structural invalidation level of a pending entry: the lower of the source
+   // manipulation low and the swing low for a buy, the higher for a sell.
+   double _PendingStructuralInvalidationLevel(const TradePlan &p) const {
+      if(p.is_buy){
+         double source_manip_low = (p.source_manip_low > 0 ? p.source_manip_low : p.po3.manip_low);
+         if(source_manip_low > 0 && p.po3.swing_low > 0) return MathMin(source_manip_low, p.po3.swing_low);
+         if(source_manip_low > 0) return source_manip_low;
+         return p.po3.swing_low;
+      }
+      double source_manip_high = (p.source_manip_high > 0 ? p.source_manip_high : p.po3.manip_high);
+      if(source_manip_high > 0 && p.po3.swing_high > 0) return MathMax(source_manip_high, p.po3.swing_high);
+      if(source_manip_high > 0) return source_manip_high;
+      return p.po3.swing_high;
+   }
+
+   bool _SuspendManagedPendingOrdersForRollover(const string reason) {
+      bool acted = false;
+      for(int i=OrdersTotal()-1; i>=0; i--){
+         ulong ticket = OrderGetTicket(i);
+         if(!OrderMatchesMagic(ticket)) continue;
+         acted = true;
+         _SuspendPendingOrderForRollover(ticket, reason);
+      }
+      return acted;
+   }
+
+   // Removes one managed pending order for the rollover freeze.  When restore is
+   // enabled and the order is an identified limit whose first-placement lifetime
+   // is known, the live broker order is recorded for restore; otherwise it is
+   // simply deleted, exactly as before.
+   bool _SuspendPendingOrderForRollover(const ulong ticket, const string reason) {
+      if(ticket == 0 || !OrderSelect(ticket)) return false;
+      string sym = OrderGetString(ORDER_SYMBOL);
+      string comment = OrderGetString(ORDER_COMMENT);
+      ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      double order_entry = OrderGetDouble(ORDER_PRICE_OPEN);
+      double order_sl = OrderGetDouble(ORDER_SL);
+      double order_tp = OrderGetDouble(ORDER_TP);
+      double order_volume = OrderGetDouble(ORDER_VOLUME_CURRENT);
+      datetime order_expiry = (datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
+      datetime order_setup = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
+
+      TradePlan meta;
+      ZeroMemory(meta);
+      bool have_meta = _LoadTradeMeta(ticket, sym, comment, meta);
+      bool is_limit = (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_SELL_LIMIT);
+      string ineligible = "";
+      if(!InpRolloverRestorePendingOrders) ineligible = "restore_disabled";
+      else if(!have_meta) ineligible = "missing_trade_metadata";
+      else if(!is_limit) ineligible = "unsupported_order_type";
+      else if(meta.is_buy != (type == ORDER_TYPE_BUY_LIMIT)) ineligible = "order_direction_differs_from_metadata";
+      else if(order_entry <= 0.0 || order_sl <= 0.0 || order_tp <= 0.0 || order_volume <= 0.0)
+         ineligible = "order_prices_or_volume_unavailable";
+      if(StringLen(ineligible) == 0){
+         // Records written before this feature carry no first-placement fields;
+         // the original placement time and the broker expiry it set stand in.
+         if(meta.pending_first_placed_at <= 0)
+            meta.pending_first_placed_at = (meta.planned_at > 0 ? meta.planned_at : order_setup);
+         if(meta.pending_expires_at <= 0) meta.pending_expires_at = order_expiry;
+         if(meta.pending_first_placed_at <= 0 || meta.pending_expires_at <= 0)
+            ineligible = "first_placement_expiry_unknown";
+      }
+      bool eligible = (StringLen(ineligible) == 0);
+
+      bool deleted = m_trade.OrderDelete(ticket);
+      _Journal("[rollover_pending_suspend] symbol=" + sym
+               + " ticket=" + IntegerToString((long)ticket)
+               + " type=" + EnumToString(type)
+               + " entry=" + _FmtPrice(sym, order_entry)
+               + " sl=" + _FmtPrice(sym, order_sl)
+               + " tp=" + _FmtPrice(sym, order_tp)
+               + " volume=" + DoubleToString(order_volume, 2)
+               + " first_placed_at=" + (eligible ? TimeToString(meta.pending_first_placed_at, TIME_DATE|TIME_SECONDS) : "")
+               + " expires_at=" + (eligible ? TimeToString(meta.pending_expires_at, TIME_DATE|TIME_SECONDS) : "")
+               + " restore_eligible=" + (eligible ? "true" : "false")
+               + " ineligible_reason=" + ineligible
+               + " deleted=" + (deleted ? "true" : "false")
+               + " reason=" + reason);
+      if(!deleted) return false;
+      _TrackPendingOrderDelete(eligible ? "rollover_freeze_suspended" : "rollover_entry_freeze");
+      if(!eligible) return true;
+
+      // The live broker order is the authority for what gets re-placed.
+      meta.entry_est = order_entry;
+      meta.planned_entry = order_entry;
+      meta.sl = order_sl;
+      meta.planned_sl = order_sl;
+      meta.tp2 = order_tp;
+      meta.planned_tp2 = order_tp;
+      meta.result_order_ticket = ticket;
+      meta.rollover_suspended_at = _NowServerOrLocal();
+      meta.rollover_suspended_ticket = ticket;
+      meta.rollover_suspended_volume = order_volume;
+      meta.narrative_state = "rollover_suspended_pending";
+      _WriteTradeMeta(meta, ticket);
+      _UpsertRolloverSuspended(meta);
+      _PersistRolloverSuspendedPending();
+      m_total_rollover_pending_suspended++;
+      return true;
+   }
+
+   // Price validity across the suspension.  Returns 1 valid, 0 not yet provable
+   // (history not synchronized), -1 invalidated.  Every M1 bar whose open minute
+   // lies inside the rollover quote window is skipped: its quotes neither
+   // invalidate nor validate the setup.
+   int _RolloverSuspensionPriceVerdict(const TradePlan &rec,
+                                       const datetime now,
+                                       const datetime window_end,
+                                       const int ex_start,
+                                       const int ex_end,
+                                       int &bars_checked,
+                                       int &bars_excluded,
+                                       string &reason) {
+      bars_checked = 0;
+      bars_excluded = 0;
+      reason = "ok";
+      MqlRates rates[];
+      ArraySetAsSeries(rates, false);
+      datetime from = (datetime)((long)rec.rollover_suspended_at - ((long)rec.rollover_suspended_at % 60));
+      int copied = CopyRates(rec.symbol, PERIOD_M1, from, now, rates);
+      if(copied <= 0){
+         reason = "m1_history_unavailable";
+         return 0;
+      }
+      if(rates[copied - 1].time < window_end - 60){
+         reason = "m1_history_not_synchronized_past_rollover_window";
+         return 0;
+      }
+      double point = SymbolInfoDouble(rec.symbol, SYMBOL_POINT);
+      if(point <= 0) point = 0.00001;
+      double eps = MathMax(point * 2.0, MathAbs(rec.entry_est - rec.sl) * 0.02);
+      double structural = _PendingStructuralInvalidationLevel(rec);
+      double target = (rec.tp2 > 0 ? rec.tp2 : rec.po3.liquidity_target);
+      for(int i=0; i<copied; i++){
+         if(_MinuteInsideDailyWindow(_ServerMinuteOfDay(rates[i].time), ex_start, ex_end)){
+            bars_excluded++;
+            continue;
+         }
+         bars_checked++;
+         // M1 bars are bid-based; a sell is exposed to the ask.
+         double spread_px = (double)rates[i].spread * point;
+         double exposed_low = (rec.is_buy ? rates[i].low : rates[i].low + spread_px);
+         double exposed_high = (rec.is_buy ? rates[i].high : rates[i].high + spread_px);
+         string at = " bar=" + TimeToString(rates[i].time, TIME_DATE|TIME_MINUTES);
+         if(rec.is_buy){
+            if(exposed_low <= rec.sl){ reason = "stop_touched_during_suspension" + at; return -1; }
+            if(target > 0 && exposed_high >= (target - eps)){ reason = "target_reached_during_suspension" + at; return -1; }
+            if(structural > 0 && exposed_low < (structural - eps)){ reason = "structural_invalidation_low_during_suspension" + at; return -1; }
+         } else {
+            if(exposed_high >= rec.sl){ reason = "stop_touched_during_suspension" + at; return -1; }
+            if(target > 0 && exposed_low <= (target + eps)){ reason = "target_reached_during_suspension" + at; return -1; }
+            if(structural > 0 && exposed_high > (structural + eps)){ reason = "structural_invalidation_high_during_suspension" + at; return -1; }
+         }
+      }
+      return 1;
+   }
+
+   bool _ManagedExposureWithCommentExists(const string symbol, const string comment) {
+      if(StringLen(comment) <= 0) return false;
+      for(int i=OrdersTotal()-1; i>=0; i--){
+         ulong ticket = OrderGetTicket(i);
+         if(!OrderMatchesMagic(ticket)) continue;
+         if(OrderGetString(ORDER_SYMBOL) == symbol && OrderGetString(ORDER_COMMENT) == comment) return true;
+      }
+      for(int i=PositionsTotal()-1; i>=0; i--){
+         ulong ticket = PositionGetTicket(i);
+         if(!PositionMatchesMagic(ticket)) continue;
+         if(PositionGetString(POSITION_SYMBOL) == symbol && PositionGetString(POSITION_COMMENT) == comment) return true;
+      }
+      return false;
+   }
+
+   bool _RolloverRestoreRetcodeTransient(const uint retcode) const {
+      return (retcode == TRADE_RETCODE_MARKET_CLOSED ||
+              retcode == TRADE_RETCODE_PRICE_OFF ||
+              retcode == TRADE_RETCODE_REQUOTE ||
+              retcode == TRADE_RETCODE_PRICE_CHANGED ||
+              retcode == TRADE_RETCODE_TIMEOUT ||
+              retcode == TRADE_RETCODE_CONNECTION ||
+              retcode == TRADE_RETCODE_TOO_MANY_REQUESTS ||
+              retcode == TRADE_RETCODE_SERVER_DISABLES_AT ||
+              retcode == TRADE_RETCODE_CLIENT_DISABLES_AT);
+   }
+
+   // One suspended order.  Returns 1 restored, 0 keep waiting, -1 dropped.
+   int _TryRestoreRolloverSuspended(TradePlan &rec,
+                                    const datetime now,
+                                    const int ex_start,
+                                    const int ex_end,
+                                    string &reason,
+                                    ulong &new_ticket,
+                                    int &bars_checked,
+                                    int &bars_excluded) {
+      reason = "";
+      new_ticket = 0;
+      bars_checked = 0;
+      bars_excluded = 0;
+      if(!InpRolloverRestorePendingOrders){ reason = "restore_disabled"; return -1; }
+      if(rec.pending_expires_at <= 0 || rec.rollover_suspended_at <= 0){
+         reason = "first_placement_expiry_unknown";
+         return -1;
+      }
+      // Lifetime is measured from the FIRST placement; a restore never extends it.
+      if((long)now >= (long)rec.pending_expires_at - 60){
+         reason = "expired_since_first_placement";
+         return -1;
+      }
+      datetime window_end = _RolloverQuoteWindowEndAfter(rec.rollover_suspended_at, ex_start, ex_end);
+      if(now < window_end){ reason = "inside_rollover_quote_window"; return 0; }
+      string gate_reason = "";
+      if(PO3EntryBlockedByRolloverForSymbol(rec.symbol, now, gate_reason)){
+         reason = "rollover_entry_block:" + gate_reason;
+         return 0;
+      }
+      if(!_ApplyBrokerSessionEntryGate(rec, gate_reason)){
+         reason = "broker_session_gate:" + gate_reason;
+         return 0;
+      }
+      MqlTick tick;
+      if(!SymbolInfoTick(rec.symbol, tick) || tick.time <= 0 || tick.bid <= 0.0 || tick.ask <= 0.0){
+         reason = "missing_live_quote";
+         return 0;
+      }
+      // The deciding quote must itself come from after the rollover window.
+      if(tick.time < window_end){
+         reason = "no_quote_after_rollover_window";
+         return 0;
+      }
+      int verdict = _RolloverSuspensionPriceVerdict(rec, now, window_end, ex_start, ex_end,
+                                                    bars_checked, bars_excluded, gate_reason);
+      if(verdict != 1){
+         reason = gate_reason;
+         return verdict;
+      }
+      if(!_PendingOrderStillValidEx(rec, gate_reason)){
+         reason = "live_validity:" + gate_reason;
+         return (gate_reason == "missing_live_quote" ? 0 : -1);
+      }
+      string target_reason = "";
+      if(_PlanTargetAlreadyReached(rec, target_reason)){
+         reason = "live_" + target_reason;
+         return -1;
+      }
+      double entry = rec.entry_est;
+      double market_ref = (rec.is_buy ? tick.ask : tick.bid);
+      if((rec.is_buy && market_ref <= entry) || (!rec.is_buy && market_ref >= entry)){
+         reason = "live_price_beyond_limit_entry";
+         return 0;
+      }
+      if(MathAbs(market_ref - entry) < _BrokerBufferPrice(rec.symbol)){
+         reason = "live_price_within_broker_buffer";
+         return 0;
+      }
+      if(!_StopsDistanceOk(rec.symbol, rec.is_buy, entry, rec.sl, rec.tp2)){
+         reason = "broker_stop_or_freeze_distance";
+         return 0;
+      }
+      if(_ManagedExposureWithCommentExists(rec.symbol, rec.broker_comment)){
+         reason = "duplicate_exposure_exists";
+         return -1;
+      }
+      double vol = rec.rollover_suspended_volume;
+      double new_risk = _RiskMoneyForPosition(rec.symbol, rec.is_buy, vol, entry, rec.sl);
+      if(vol <= 0.0 || new_risk <= 0.0){
+         reason = "restore_risk_unavailable";
+         return -1;
+      }
+      if(!_ApplyFinalPortfolioRiskGovernance(rec, new_risk, gate_reason)){
+         reason = "portfolio_initial_risk_gate:" + gate_reason;
+         return -1;
+      }
+      if(!_CorrelatedExposureOk(rec, new_risk, gate_reason)){
+         reason = "correlated_exposure:" + gate_reason;
+         return -1;
+      }
+      if(!CanPlaceOrderHardSafety(rec, gate_reason)){
+         reason = "final_hard_safety:" + gate_reason;
+         return -1;
+      }
+      string fingerprint_changes = "";
+      if(!_ExecutionFingerprintWithinTolerance(rec, fingerprint_changes)){
+         reason = "execution_fingerprint_mismatch:" + fingerprint_changes;
+         return -1;
+      }
+
+      bool ok = (rec.is_buy
+                 ? m_trade.BuyLimit(vol, entry, rec.symbol, rec.sl, rec.tp2, ORDER_TIME_SPECIFIED, rec.pending_expires_at, rec.broker_comment)
+                 : m_trade.SellLimit(vol, entry, rec.symbol, rec.sl, rec.tp2, ORDER_TIME_SPECIFIED, rec.pending_expires_at, rec.broker_comment));
+      uint retcode = m_trade.ResultRetcode();
+      if(!ok || !_BrokerRetcodeAccepted(retcode)){
+         reason = "broker_rejected:" + _TradeRetcodeText();
+         return (_RolloverRestoreRetcodeTransient(retcode) ? 0 : -1);
+      }
+      new_ticket = m_trade.ResultOrder();
+      rec.broker_retcode = (long)retcode;
+      rec.broker_retcode_description = m_trade.ResultRetcodeDescription();
+      rec.broker_submission_attempted = true;
+      rec.broker_request_accepted = true;
+      rec.result_order_ticket = new_ticket;
+      rec.result_deal_ticket = 0;
+      rec.rollover_restore_count++;
+      rec.rollover_suspended_at = 0;
+      rec.narrative_state = "pending_order";
+      rec.execution_identity_verified = false;
+      rec.execution_identity_quarantined = false;
+      rec.execution_identity_reason = "pending_order_restored_after_rollover";
+      _SetExecutionAuthority(rec, "ORDER_ACCEPTED_PENDING", true, "pending_order_restored_after_rollover");
+      if(new_ticket == 0){
+         rec.narrative_state = "pending_order_identity_unavailable";
+         _QuarantineExecutionIdentity(rec, "missing_result_order_ticket_after_rollover_restore", 0, 0);
+         _SetExecutionAuthority(rec, "ORDER_ACCEPTED_IDENTITY_QUARANTINED", true,
+                                "pending_order_restored_missing_order_identity");
+      }
+      _WriteTradeMeta(rec, new_ticket);
+      reason = "ok";
+      return 1;
+   }
+
+   void _MaintainRolloverSuspendedPendingOrders(const datetime now) {
+      int n = ArraySize(m_rollover_suspended);
+      if(n <= 0) return;
+      int ex_start = -1, ex_end = -1;
+      bool window_ok = _RolloverQuoteExclusionWindow(ex_start, ex_end);
+      bool journal_waits = (m_last_rollover_restore_log <= 0 || (now - m_last_rollover_restore_log) >= 60);
+      bool changed = false;
+      for(int i=n-1; i>=0; i--){
+         TradePlan rec = m_rollover_suspended[i];
+         ulong old_ticket = rec.rollover_suspended_ticket;
+         datetime suspended_at = rec.rollover_suspended_at;
+         string reason = "";
+         ulong new_ticket = 0;
+         int bars_checked = 0, bars_excluded = 0;
+         int verdict = -1;
+         if(!window_ok) reason = "invalid_rollover_quote_exclusion_input";
+         else verdict = _TryRestoreRolloverSuspended(rec, now, ex_start, ex_end, reason,
+                                                     new_ticket, bars_checked, bars_excluded);
+         if(verdict == 0){
+            if(journal_waits)
+               _Journal("[rollover_pending_restore] symbol=" + rec.symbol
+                        + " old_ticket=" + IntegerToString((long)old_ticket)
+                        + " action=deferred reason=" + reason
+                        + " expires_at=" + TimeToString(rec.pending_expires_at, TIME_DATE|TIME_SECONDS));
+            continue;
+         }
+         if(verdict == 1) m_total_rollover_pending_restored++;
+         else {
+            m_total_rollover_pending_dropped++;
+            rec.narrative_state = "rollover_restore_dropped";
+            rec.invalidation_cause = reason;
+            _WriteTradeMeta(rec, old_ticket);
+         }
+         _Journal("[rollover_pending_restore] symbol=" + rec.symbol
+                  + " old_ticket=" + IntegerToString((long)old_ticket)
+                  + " new_ticket=" + IntegerToString((long)new_ticket)
+                  + " action=" + (verdict == 1 ? "restored" : "dropped")
+                  + " reason=" + reason
+                  + " entry=" + _FmtPrice(rec.symbol, rec.entry_est)
+                  + " sl=" + _FmtPrice(rec.symbol, rec.sl)
+                  + " tp=" + _FmtPrice(rec.symbol, rec.tp2)
+                  + " volume=" + DoubleToString(rec.rollover_suspended_volume, 2)
+                  + " first_placed_at=" + TimeToString(rec.pending_first_placed_at, TIME_DATE|TIME_SECONDS)
+                  + " expires_at=" + TimeToString(rec.pending_expires_at, TIME_DATE|TIME_SECONDS)
+                  + " suspended_at=" + TimeToString(suspended_at, TIME_DATE|TIME_SECONDS)
+                  + " quote_window=" + InpRolloverQuoteExclusionStartServerTime + "-" + InpRolloverQuoteExclusionEndServerTime
+                  + " bars_checked=" + IntegerToString(bars_checked)
+                  + " bars_excluded=" + IntegerToString(bars_excluded)
+                  + " restore_count=" + IntegerToString(rec.rollover_restore_count));
+         int last = ArraySize(m_rollover_suspended) - 1;
+         if(i != last) m_rollover_suspended[i] = m_rollover_suspended[last];
+         ArrayResize(m_rollover_suspended, last);
+         changed = true;
+      }
+      if(journal_waits) m_last_rollover_restore_log = now;
+      if(changed) _PersistRolloverSuspendedPending();
    }
 
    void AbortScan(const string reason) {
@@ -19747,6 +20222,13 @@ public:
 
          string rollover_reason = "";
          if(PO3EntryBlockedByRolloverForSymbol(sym, now, rollover_reason)){
+            string freeze_reason = "";
+            if(PO3TradingFreezeActive(now, freeze_reason)){
+               // The rollover freeze suspends the order for restore; the pre-close
+               // flatten below still deletes it outright.
+               _SuspendPendingOrderForRollover(ticket, rollover_reason);
+               continue;
+            }
             _Journal(sym + " deleting pending order ticket=" + IntegerToString((int)ticket)
                      + " reason=" + rollover_reason);
             if(m_trade.OrderDelete(ticket)) _TrackPendingOrderDelete("rollover_entry_freeze");
@@ -19949,6 +20431,9 @@ public:
       ulong pen0 = GetMicrosecondCount();
       m_penalty.Tick(m_trade);
       m_mp_penalty_us += (long)(GetMicrosecondCount() - pen0);
+      // A management AI request, verdict or cooldown was just decided: persist
+      // now so a restart cannot re-send an already published review.
+      if(m_penalty.ConsumeImmediatePersistRequest()) _PersistPenaltyStates();
       for(int state_i=PositionsTotal()-1; state_i>=0; state_i--){
          ulong state_ticket = PositionGetTicket(state_i);
          if(!PositionMatchesMagic(state_ticket)) continue;

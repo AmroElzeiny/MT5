@@ -2097,6 +2097,26 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
 
         return int(requested)
 
+    def _wire_chat_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        request_metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Last-step shaping of the chat-completions request body.
+
+        Identity for every transport except the OpenCode chat leg, which must
+        name a session on every call (HTTP 400 ``MissingSessionID`` otherwise),
+        including a deadline-free one where no ``extra_headers`` exist yet.
+        """
+
+        return kwargs
+
+    def _observe_chat_attempt(self, **_fields: Any) -> None:
+        """Per-HTTP-attempt accounting hook; a no-op unless a transport opts in."""
+
+        return None
+
     @staticmethod
     def _estimated_tokens(system_prompt: str, evidence: Mapping[str, Any]) -> int:
         text = system_prompt + "\n" + json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -2343,6 +2363,10 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                 attempt = 0
                 while attempt <= self.max_retries:
                     kwargs: dict[str, Any] = {}
+                    # Per-attempt accounting state for ``_observe_chat_attempt``.
+                    attempt_sent = False
+                    attempt_response: Any = None
+                    attempt_started = 0.0
                     # Serialized transports queue: time spent waiting for the
                     # semaphore is deadline time already spent.  Re-check here so
                     # a queued role call cannot start a request it cannot finish.
@@ -2412,6 +2436,7 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                                     "schema": exchange.schema,
                                 },
                             }
+                        kwargs = self._wire_chat_kwargs(kwargs, request_metadata=request_metadata)
                         # The SDK receives the *remaining* budget, never a fresh
                         # relative timer.  Without this, a configured 180s local
                         # timeout outlived a 165s Python response deadline and
@@ -2447,7 +2472,10 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             " sdk_max_retries=0"
                             f" remaining_ms={deadline.remaining_ms() if deadline is not None else -1}"
                         )
+                        attempt_started = time.perf_counter()
+                        attempt_sent = True
                         response = call_client.chat.completions.create(**kwargs)
+                        attempt_response = response
                         actual_model = _actual_model(response, model)
                         if not self._response_model_allowed(model, actual_model):
                             self._record_failure()
@@ -2486,6 +2514,22 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             f" transport_retries={transport_retries}"
                             f" schema_repairs={schema_retries}"
                         )
+                        self._observe_chat_attempt(
+                            outcome="ok",
+                            role=role,
+                            model=model,
+                            request_metadata=request_metadata,
+                            kwargs=kwargs,
+                            response=attempt_response,
+                            error=None,
+                            started=attempt_started,
+                            attempt=attempt,
+                            retry_counts={
+                                "transport_retries": transport_retries,
+                                "schema_retries": schema_retries,
+                                "admission_retries": admission_retries,
+                            },
+                        )
                         return ProviderResult(
                             parsed,
                             response,
@@ -2514,6 +2558,23 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             exchange.contract_hash,
                         )
                     except (ValueError, TypeError) as exc:
+                        if attempt_sent:
+                            self._observe_chat_attempt(
+                                outcome="schema_invalid" if attempt_response is not None else "transport_error",
+                                role=role,
+                                model=model,
+                                request_metadata=request_metadata,
+                                kwargs=kwargs,
+                                response=attempt_response,
+                                error=exc,
+                                started=attempt_started,
+                                attempt=attempt,
+                                retry_counts={
+                                    "transport_retries": transport_retries,
+                                    "schema_retries": schema_retries,
+                                    "admission_retries": admission_retries,
+                                },
+                            )
                         unsupported_parameter = self._unsupported_parameter(exc, kwargs)
                         if unsupported_parameter and unsupported_parameter not in unsupported:
                             unsupported.add(unsupported_parameter)
@@ -2541,9 +2602,45 @@ class LocalOpenAICompatibleProvider(_OpenAICompatibleProviderBase):
                             break
                         attempt += 1
                         continue
-                    except ProviderCallError:
+                    except ProviderCallError as exc:
+                        if attempt_sent:
+                            # Model-identity mismatch: the call was answered and
+                            # billed, the answer is simply not usable.
+                            self._observe_chat_attempt(
+                                outcome="schema_invalid" if attempt_response is not None else "transport_error",
+                                role=role,
+                                model=model,
+                                request_metadata=request_metadata,
+                                kwargs=kwargs,
+                                response=attempt_response,
+                                error=exc,
+                                started=attempt_started,
+                                attempt=attempt,
+                                retry_counts={
+                                    "transport_retries": transport_retries,
+                                    "schema_retries": schema_retries,
+                                    "admission_retries": admission_retries,
+                                },
+                            )
                         raise
                     except Exception as exc:
+                        if attempt_sent:
+                            self._observe_chat_attempt(
+                                outcome="transport_error",
+                                role=role,
+                                model=model,
+                                request_metadata=request_metadata,
+                                kwargs=kwargs,
+                                response=attempt_response,
+                                error=exc,
+                                started=attempt_started,
+                                attempt=attempt,
+                                retry_counts={
+                                    "transport_retries": transport_retries,
+                                    "schema_retries": schema_retries,
+                                    "admission_retries": admission_retries,
+                                },
+                            )
                         unsupported_parameter = self._unsupported_parameter(exc, kwargs)
                         if unsupported_parameter and unsupported_parameter not in unsupported:
                             unsupported.add(unsupported_parameter)
@@ -2877,12 +2974,17 @@ class OpenRouterProvider(LocalOpenAICompatibleProvider):
 # ---------------------------------------------------------------------------
 # OpenCode Go transports.
 #
-# One selection, three legs, and exactly one strict validation contract shared
+# One selection, four legs, and exactly one strict validation contract shared
 # with every other transport in this file:
 #
 #   ``OpenCodeResponsesProvider``  Muse Spark 1.3 Contributor (primary) and
-#                                  deepseek-v4.1-flash at effort=high (secondary),
-#                                  both on /zen/go/v1/responses
+#                                  Muse at effort=high (secondary, the important
+#                                  route's primary; was deepseek-v4.1-flash
+#                                  until 2026-09-14), both on
+#                                  /zen/go/v1/responses
+#   ``OpenCodeChatCompletionsProvider``
+#                                  glm-5.3-flash, the fallback after Muse, on
+#                                  /zen/go/v1/chat/completions (since 2026-09-14)
 #   ``OpenCodeRoutedProvider``     deterministic routing + one Luna fallback
 #   ``OpenCodeMessagesProvider``   /zen/go/v1/messages (Anthropic dialect) --
 #                                  a tested transport, NOT wired into the router
@@ -2984,6 +3086,14 @@ OPENCODE_SESSION_SCOPES = (
 # and every ``ProviderResult`` name the leg that actually answered.
 OPENCODE_PRIMARY_PROVIDER_ID = "opencode_go_responses"
 OPENCODE_SECONDARY_PROVIDER_ID = "opencode_go_responses_secondary"
+# The leg asked after a Muse failure on the normal route (replaced
+# deepseek-v4.1-flash in that position on 2026-09-14).  A different dialect, so a
+# different id: telemetry names the endpoint family that actually answered.
+OPENCODE_MUSE_FALLBACK_PROVIDER_ID = "opencode_go_chat_completions"
+# glm-5.3-flash publishes a 1,000,000-token context.  The chat loop's context
+# fitter compacts historical analogues only above this budget, so a budget equal
+# to the model's own context never trims evidence the /responses legs would send.
+OPENCODE_CHAT_CONTEXT_BUDGET_TOKENS = 1_000_000
 _OPENCODE_SESSION_FALLBACK = "po3-aigate"
 
 
@@ -3350,7 +3460,7 @@ class OpenCodeResponsesProvider(RemoteAPIProvider):
     """One OpenCode Go model over the ``/responses`` endpoint.
 
     Serves both routed OpenCode legs: Muse Spark 1.3 Contributor (the primary,
-    ``provider_id=opencode_go_responses``) and deepseek-v4.1-flash at
+    ``provider_id=opencode_go_responses``) and Muse again at
     ``reasoning.effort=high`` (the secondary,
     ``provider_id=opencode_go_responses_secondary``).
 
@@ -3503,7 +3613,7 @@ class OpenCodeMessagesProvider(LocalOpenAICompatibleProvider):
     """A model over the OpenCode Go Anthropic-compatible ``/messages``.
 
     Not wired into ``OpenCodeRoutedProvider``: since 2026-09-13 the secondary
-    OpenCode leg is deepseek-v4.1-flash on ``/responses`` (see the note above
+    OpenCode leg is on ``/responses`` (Muse since 2026-09-14; see the note above
     ``OpenCodeTransportError``), because this dialect offers neither a strict
     schema nor a reasoning-effort control.  Kept as a tested transport.
 
@@ -3641,6 +3751,247 @@ class OpenCodeMessagesProvider(LocalOpenAICompatibleProvider):
         return health
 
 
+class OpenCodeChatCompletionsProvider(LocalOpenAICompatibleProvider):
+    """One OpenCode Go model over ``/chat/completions`` -- the Muse fallback leg.
+
+    glm-5.3-flash is not servable on ``/responses``: measured 2026-09-14 with
+    this key, that endpoint answered HTTP 500 ``Internal server error`` to a
+    strict-schema request, while ``/chat/completions`` answered HTTP 200 with a
+    strict ``response_format`` json_schema, accepted ``reasoning_effort=high``,
+    and returned content that parsed as an instance of the schema.
+
+    Reuses the chat-completions request loop unchanged -- deadline contract,
+    separated admission/schema budgets, model-identity binding, strict JSON
+    extraction and schema validation are the identical code paths every other
+    chat transport runs.  What differs is confined to hooks:
+
+    * ``x-opencode-session`` on every call (HTTP 400 ``MissingSessionID``
+      otherwise), derived exactly as on the ``/responses`` legs.
+    * ``reasoning_effort`` as a top-level body key, with the reasoning reserve
+      added on top of the schema budget because ``max_tokens`` bounds reasoning
+      and content together.
+    * A malformed or schema-invalid answer is not re-asked of GLM
+      (``max_retries=0``): the routed provider hands it to Luna instead.
+    * An ambiguous transport failure is never resubmitted on a billed endpoint.
+    """
+
+    resubmit_ambiguous_transport_failures = False
+    # Per-HTTP-attempt accounting sink, same contract as the /responses legs.
+    attempt_observer: Callable[[Mapping[str, Any]], None] | None = None
+
+    _REASONING_EFFORTS_SENT = {"minimal", "low", "medium", "high", "xhigh", "max"}
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_sec: float,
+        max_output_tokens: int,
+        circuit_failure_threshold: int,
+        circuit_cooldown_sec: float,
+        log: Callable[[str], None],
+        reasoning_token_reserve: int = 24000,
+        context_budget_tokens: int = OPENCODE_CHAT_CONTEXT_BUDGET_TOKENS,
+        parallelism: int = 3,
+        admission_retry_enable: bool = True,
+        admission_max_retries: int = 3,
+        admission_backoff_initial_sec: float = 2.0,
+        admission_backoff_max_sec: float = 30.0,
+        client_factory: Callable[..., Any] | None = None,
+        provider_id: str = OPENCODE_MUSE_FALLBACK_PROVIDER_ID,
+        session_scope: str = OPENCODE_SESSION_SCOPE_PROMPT_PREFIX,
+    ) -> None:
+        super().__init__(
+            base_url=base_url,
+            api_key=api_key,
+            analyst_model=model,
+            critic_model=model,
+            adjudicator_model=model,
+            fallback_models=(),
+            healthcheck_path="/models",
+            timeout_sec=timeout_sec,
+            # 0 repairs: a bad answer goes to Luna, it is not re-asked here.
+            max_retries=0,
+            max_output_tokens=max_output_tokens,
+            temperature=None,
+            top_p=None,
+            seed=None,
+            enable_thinking=False,
+            # The whole decision contract is a strict json_schema.
+            require_json_schema=True,
+            parallelism=parallelism,
+            context_budget_tokens=context_budget_tokens,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_cooldown_sec=circuit_cooldown_sec,
+            log=log,
+            client_factory=client_factory,
+            provider_mode=PROVIDER_MODE_OPENCODE,
+            provider_id=str(provider_id or OPENCODE_MUSE_FALLBACK_PROVIDER_ID),
+            max_retries_ceiling=0,
+        )
+        self.reasoning_effort = str(reasoning_effort or "").strip().lower()
+        self.reasoning_token_reserve = max(0, int(reasoning_token_reserve))
+        scope = str(session_scope or "").strip().lower()
+        self.session_scope = (
+            scope if scope in OPENCODE_SESSION_SCOPES else OPENCODE_SESSION_SCOPE_PROMPT_PREFIX
+        )
+        self.admission_retry_enable = bool(admission_retry_enable)
+        self.admission_max_retries = max(0, int(admission_max_retries))
+        self.admission_backoff_initial_sec = max(0.0, float(admission_backoff_initial_sec))
+        self.admission_backoff_max_sec = max(
+            self.admission_backoff_initial_sec, float(admission_backoff_max_sec)
+        )
+
+    def _generation_settings(self, role: str) -> dict[str, Any]:
+        settings = super()._generation_settings(role)
+        settings["reasoning_effort"] = self.reasoning_effort
+        settings["reasoning_token_reserve"] = self.reasoning_token_reserve
+        return settings
+
+    def _response_model_allowed(self, requested_model: str, actual_model: str) -> bool:
+        # A routing defect upstream must not silently change which model decided.
+        return model_response_matches_request(requested_model, actual_model)
+
+    def _wire_extra_body(self) -> dict[str, Any]:
+        # ``auto``/``none``/empty omit the key rather than send an unsupported value.
+        if self.reasoning_effort in self._REASONING_EFFORTS_SENT:
+            return {"reasoning_effort": self.reasoning_effort}
+        return {}
+
+    def _wire_max_tokens(self, requested: int) -> int:
+        return int(requested) + self.reasoning_token_reserve
+
+    def _session_id(self, kwargs: Mapping[str, Any], request_metadata: Mapping[str, Any]) -> str:
+        if self.session_scope == OPENCODE_SESSION_SCOPE_REQUEST:
+            return _opencode_session_id(str(request_metadata.get("request_id") or ""))
+        response_format = kwargs.get("response_format")
+        json_schema = (
+            response_format.get("json_schema") if isinstance(response_format, Mapping) else None
+        )
+        json_schema = json_schema if isinstance(json_schema, Mapping) else {}
+        # Same derivation as the /responses legs: model + schema name + schema.
+        return _opencode_prefix_session_id(
+            {
+                "model": kwargs.get("model"),
+                "text": {
+                    "format": {
+                        "name": json_schema.get("name"),
+                        "schema": json_schema.get("schema"),
+                    }
+                },
+            }
+        )
+
+    def _wire_chat_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        request_metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        shaped = dict(kwargs)
+        headers = dict(shaped.get("extra_headers") or {})
+        if not headers.get(OPENCODE_SESSION_HEADER):
+            headers[OPENCODE_SESSION_HEADER] = self._session_id(shaped, request_metadata)
+        shaped["extra_headers"] = headers
+        return shaped
+
+    def _observe_chat_attempt(
+        self,
+        *,
+        outcome: str,
+        role: str,
+        model: str,
+        request_metadata: Mapping[str, Any],
+        kwargs: Mapping[str, Any] | None,
+        response: Any,
+        error: BaseException | None,
+        started: float,
+        attempt: int,
+        retry_counts: Mapping[str, int],
+    ) -> None:
+        observer = self.attempt_observer
+        if observer is None:
+            return
+        try:
+            from opencode_go_accounting import build_attempt_record
+
+            sent = dict(kwargs or {})
+            messages = sent.get("messages") if isinstance(sent.get("messages"), list) else []
+            response_format = sent.get("response_format")
+            json_schema = (
+                response_format.get("json_schema") if isinstance(response_format, Mapping) else None
+            )
+            json_schema = json_schema if isinstance(json_schema, Mapping) else {}
+            extra_body = sent.get("extra_body") if isinstance(sent.get("extra_body"), Mapping) else {}
+            # The attempt ledger fingerprints the Responses shape; the same facts
+            # are restated in that shape so a GLM row is as complete as a Muse row.
+            view = {
+                "model": sent.get("model"),
+                "instructions": (messages[0].get("content") if messages and isinstance(messages[0], Mapping) else None),
+                "input": (messages[1].get("content") if len(messages) > 1 and isinstance(messages[1], Mapping) else None),
+                "text": {
+                    "format": {
+                        "type": str(response_format.get("type") or "") if isinstance(response_format, Mapping) else "",
+                        "name": json_schema.get("name"),
+                        "strict": json_schema.get("strict"),
+                        "schema": json_schema.get("schema"),
+                    }
+                }
+                if json_schema
+                else {},
+                "reasoning": {"effort": extra_body.get("reasoning_effort")}
+                if extra_body.get("reasoning_effort")
+                else None,
+                "max_output_tokens": sent.get("max_tokens"),
+                "extra_headers": sent.get("extra_headers"),
+            }
+            observer(
+                build_attempt_record(
+                    outcome=outcome,
+                    provider_mode=self.provider_mode,
+                    provider_id=self.provider_id,
+                    endpoint=self.base_url + "/chat/completions",
+                    model=model,
+                    role=role,
+                    request_metadata=request_metadata,
+                    kwargs=view,
+                    response=response,
+                    error=error,
+                    latency_sec=max(0.0, time.perf_counter() - started) if started else 0.0,
+                    attempt_index=attempt,
+                    retry_counts=retry_counts,
+                )
+            )
+        except Exception:
+            return
+
+    def healthcheck(self, *, probe_structured: bool = False) -> ProviderHealth:
+        """Configuration health, not a billed call.
+
+        Breaker recovery re-runs this check, so it must not depend on a model
+        listing whose shape this dialect does not guarantee.  The real answer
+        comes from the call itself, which falls back to Luna when it fails.
+        """
+
+        model = self.model_for_role("analyst")
+        healthy = bool(self._api_key and model)
+        health = ProviderHealth(
+            healthy,
+            self.provider_mode,
+            self.provider_id,
+            self.endpoint_class,
+            model,
+            healthy,
+            healthy,
+            "" if healthy else "opencode_api_key_or_model_missing",
+        )
+        self._last_health = health
+        return health
+
+
 class OpenCodeRoutedProvider:
     """OpenCode Go with deterministic routing and an ordered fallback chain.
 
@@ -3650,16 +4001,17 @@ class OpenCodeRoutedProvider:
     that a leg already validated, or it raises.
 
     Routing (``OPENCODE_CALL_DIRECTING`` off is the default), where "secondary"
-    is deepseek-v4.1-flash at reasoning effort high:
+    is Muse at reasoning effort high (its own provider id) and "muse fallback" is
+    glm-5.3-flash on ``/chat/completions``:
 
-        directing off              -> Muse, then secondary, then Luna
-        directing on, normal       -> Muse, then secondary, then Luna
+        directing off              -> Muse, then muse fallback, then Luna
+        directing on, normal       -> Muse, then muse fallback, then Luna
         directing on, important    -> secondary, then Luna (never Muse)
         directing on, critical     -> Luna directly
 
     Each leg is asked at most once per call, and every hop must fit inside the
     same absolute deadline.  ``OPENCODE_SECONDARY_FALLBACK_ENABLE=false`` removes
-    the secondary stage from the normal route, restoring Muse -> Luna.
+    the intermediate stage from the normal route, restoring Muse -> Luna.
 
     Importance is classified by ``opencode_routing.classify_importance``: a pure
     function of signals the request already carries.  No extra model call is
@@ -3677,6 +4029,7 @@ class OpenCodeRoutedProvider:
         self,
         *,
         muse: Any,
+        muse_fallback: Any,
         secondary: Any,
         fallback: Any,
         policy: Any,
@@ -3685,6 +4038,8 @@ class OpenCodeRoutedProvider:
         secondary_fallback_enable: bool = True,
     ) -> None:
         self._muse = muse
+        # The intermediate stage after a Muse failure on the normal route.
+        self._muse_fallback = muse_fallback
         self._secondary = secondary
         self._fallback = fallback
         self._policy = policy
@@ -3794,8 +4149,15 @@ class OpenCodeRoutedProvider:
     ) -> dict[str, Any]:
         return self._default_leg().generation_identity(role, request_metadata)
 
+    def _all_legs(self) -> tuple[Any, ...]:
+        legs: list[Any] = []
+        for leg in (self._muse, self._muse_fallback, self._secondary, self._fallback):
+            if leg is not None and not any(leg is seen for seen in legs):
+                legs.append(leg)
+        return tuple(legs)
+
     def clear_configuration_circuit(self, key: str) -> None:
-        for leg in (self._muse, self._secondary, self._fallback):
+        for leg in self._all_legs():
             clear = getattr(leg, "clear_configuration_circuit", None)
             if callable(clear):
                 clear(key)
@@ -3803,7 +4165,7 @@ class OpenCodeRoutedProvider:
     def configuration_circuit_count(self) -> int:
         return sum(
             int(getattr(leg, "configuration_circuit_count", lambda: 0)())
-            for leg in (self._muse, self._secondary, self._fallback)
+            for leg in self._all_legs()
         )
 
     # Bound on the fallback detail.  The previous 200-character cut ended every
@@ -3852,13 +4214,14 @@ class OpenCodeRoutedProvider:
     def _fallback_legs_after(self, failed_leg: Any) -> tuple[Any, ...]:
         """Legs still to try, in order, after the routed leg ``failed_leg`` failed.
 
-        Only the Muse primary gets the secondary stage.  A failing secondary
-        primary (the important route) goes straight to Luna and never back to
-        Muse, and Luna is always the last leg.
+        Only the Muse primary gets the intermediate stage, and that stage is the
+        Muse fallback leg (glm-5.3-flash), not the secondary.  A failing
+        secondary primary (the important route) goes straight to Luna and never
+        back to Muse, and Luna is always the last leg.
         """
 
         if failed_leg is self._muse and self._secondary_fallback_enabled:
-            return (self._secondary, self._fallback)
+            return (self._muse_fallback, self._fallback)
         return (self._fallback,)
 
     def _fall_back(

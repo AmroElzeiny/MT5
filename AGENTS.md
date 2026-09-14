@@ -45,12 +45,12 @@ Use Deep only for material architecture/state/security/execution risk or repeate
 
 Normal defaults:
 - Standard supervisor: `opencode-go/minimax-m3`
-- Deep supervisor: `opencode-go/deepseek-v4.1-flash`
-- Explorer: `opencode-go/deepseek-v4.1-flash`
+- Deep supervisor: `opencode-go/muse-spark-1.3-contributor`
+- Explorer: `opencode-go/muse-spark-1.3-contributor`
 - Implementation: `opencode-go/qwen3.8-flash`
 - Test/debug: `opencode-go/qwen3.8-flash`
 - Logic review: `opencode-go/minimax-m3`
-- Adversarial review: `opencode-go/deepseek-v4.1-flash`
+- Adversarial review: `opencode-go/muse-spark-1.3-contributor`
 - Vision: only when actual image/screenshot verification is required.
 
 Do not use expensive models merely because a task is large, important, or cross-file.

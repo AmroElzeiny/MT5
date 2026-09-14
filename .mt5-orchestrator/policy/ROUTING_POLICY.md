@@ -36,7 +36,7 @@ Do not automatically invoke explorer, dedicated test worker, adversarial reviewe
 
 ## Deep
 
-Default supervisor: `opencode-go/deepseek-v4.1-flash`
+Default supervisor: `opencode-go/muse-spark-1.3-contributor`
 
 Use for material architecture/state/concurrency/security/execution risk, difficult cross-layer contracts, or repeated meaningful failure.
 
@@ -57,13 +57,13 @@ Deep tier does not justify expensive models.
 
 ## Role defaults
 
-- Explorer: `opencode-go/deepseek-v4.1-flash`
+- Explorer: `opencode-go/muse-spark-1.3-contributor`
 - Fast worker: `opencode-go/qwen3.8-flash`
 - Strong worker: `opencode-go/qwen3.8-flash`
 - Test/debug: `opencode-go/qwen3.8-flash`
 - Logic reviewer: `opencode-go/minimax-m3`
-- Adversarial reviewer: `opencode-go/deepseek-v4.1-flash`
-- Vision: `opencode-go/deepseek-v4-flash-vision-exp` only for actual visual acceptance
+- Adversarial reviewer: `opencode-go/muse-spark-1.3-contributor`
+- Vision: `opencode-go/muse-spark-1.3-contributor` only for actual visual acceptance
 
 ## Cost discipline
 
@@ -94,7 +94,7 @@ Normal work: one independent reviewer.
 
 High-risk work: two perspectives from different families where practical:
 - logic: MiniMax M3
-- adversarial: DeepSeek V4.1 Flash
+- adversarial: Muse Spark 1.3 Contributor
 
 ## Visual
 

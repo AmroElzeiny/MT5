@@ -13,8 +13,7 @@ $promptPath = (Resolve-Path $PromptFile).Path
 $normalModels = @(
     "opencode-go/minimax-m3",
     "opencode-go/qwen3.8-flash",
-    "opencode-go/deepseek-v4.1-flash",
-    "opencode-go/deepseek-v4-flash-vision-exp"
+    "opencode-go/muse-spark-1.3-contributor"
 )
 
 $modelRef = if ($Model.StartsWith("opencode-go/")) { $Model } else { "opencode-go/$Model" }

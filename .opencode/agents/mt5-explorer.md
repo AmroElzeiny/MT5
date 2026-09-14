@@ -1,7 +1,7 @@
 ---
 description: Read-heavy repository explorer for ownership, call graphs, duplicates, tests, contracts, and root-cause evidence.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow
