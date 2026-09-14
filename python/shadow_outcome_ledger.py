@@ -198,6 +198,246 @@ def read_shadow_events(path: str | Path) -> LedgerRead:
     return LedgerRead(rows=rows, unparseable=unparseable, legacy_rows=legacy, total_lines=total)
 
 
+def _parse_ledger_lines(
+    lines: Sequence[str],
+    first_line_number: int,
+    rows: list[dict[str, Any]],
+    unparseable: list[dict[str, Any]],
+) -> tuple[int, int]:
+    """The per-line rule of ``read_shadow_events``, shared so both readers agree.
+
+    Returns ``(legacy_rows, non_blank_lines)`` for the lines given.
+    """
+
+    legacy = 0
+    total = 0
+    for index, line in enumerate(lines, first_line_number):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        total += 1
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            unparseable.append({"line": index, "reason": f"json_decode_error:{exc.msg}"})
+            continue
+        if not isinstance(payload, Mapping):
+            unparseable.append({"line": index, "reason": "row_not_object"})
+            continue
+        row = dict(payload)
+        row["_line"] = index
+        event = str(row.get("event_type") or "")
+        if event in LEGACY_EVENT_TYPES:
+            legacy += 1
+            continue
+        rows.append(row)
+    return legacy, total
+
+
+class ShadowLedgerTail:
+    """Incremental reader of the append-only shadow event stream.
+
+    ``read_shadow_events`` decodes and parses the WHOLE file.  The gate used to
+    call it whenever the file's size or mtime changed -- which, because the EA
+    appends on every scan, decision and price station, was nearly every request.
+    The live ledger was 220 MB (UTF-16) / 31,190 events: 2.2 s and a 732 MB
+    allocation peak per reload on a fast desktop, far worse on a small VPS.
+
+    This reader keeps the rows it has already parsed and, on ``refresh``, reads
+    and parses only the bytes appended since.  Its result is identical to
+    ``read_shadow_events`` on the same bytes -- same rows, same ``_line``
+    numbers, same unparseable/legacy counts -- because:
+
+    * it commits only whole lines (up to the last "\\n"), and ``splitlines`` of
+      a text cut after "\\n" equals the concatenation of ``splitlines`` of the
+      pieces;
+    * an unterminated last line is parsed on every refresh but never committed,
+      exactly as the full reader sees it, until its newline arrives;
+    * a file that shrank, or whose first or last-consumed bytes changed, is
+      read again from the start.
+
+    Only UTF-16 with a BOM (what MQL writes) and UTF-8 are read incrementally.
+    Any other encoding falls back to ``read_shadow_events`` so the decoding rule
+    stays the full reader's.
+    """
+
+    HEAD_BYTES = 256
+    ANCHOR_BYTES = 256
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.full_reads = 0
+        self.last_bytes_read = 0
+        self._reset()
+
+    def _reset(self) -> None:
+        self._offset = 0
+        self._encoding = ""
+        self._start = 0
+        self._head = b""
+        self._anchor = b""
+        self._rows: list[dict[str, Any]] = []
+        self._unparseable: list[dict[str, Any]] = []
+        self._legacy = 0
+        self._total = 0
+        self._line_count = 0
+        self._tail = b""
+        self._fallback = False
+        self._fallback_signature: tuple[int, int] | None = None
+        self._fallback_read: LedgerRead | None = None
+
+    def _snapshot(self, tail_text: str) -> LedgerRead:
+        rows = list(self._rows)
+        unparseable = list(self._unparseable)
+        legacy = self._legacy
+        total = self._total
+        if tail_text:
+            tail_legacy, tail_total = _parse_ledger_lines(
+                tail_text.splitlines(), self._line_count + 1, rows, unparseable
+            )
+            legacy += tail_legacy
+            total += tail_total
+        return LedgerRead(rows=rows, unparseable=unparseable, legacy_rows=legacy, total_lines=total)
+
+    def _newline_code_unit(self) -> bytes:
+        if self._encoding == "utf-16-le":
+            return b"\n\x00"
+        if self._encoding == "utf-16-be":
+            return b"\x00\n"
+        return b"\n"
+
+    def _complete_end(self, data: bytes, begin: int) -> int:
+        """Absolute index just past the last whole newline in ``data[begin:]``.
+
+        Returns ``begin`` when there is none.  For UTF-16 only a newline code
+        unit aligned to ``begin`` counts: the two bytes of "\\n" can also occur
+        straddling two unrelated code units.
+        """
+
+        if self._encoding == "utf-8":
+            found = data.rfind(b"\n", begin)
+            return found + 1 if found >= 0 else begin
+        pattern = self._newline_code_unit()
+        end = len(data) - ((len(data) - begin) % 2)
+        while end - begin >= 2:
+            found = data.rfind(pattern, begin, end)
+            if found < 0:
+                return begin
+            if (found - begin) % 2 == 0:
+                return found + 2
+            end = found + 1
+        return begin
+
+    def _decode_tail(self) -> str:
+        if not self._tail:
+            return ""
+        data = self._tail
+        if self._encoding != "utf-8":
+            data = data[: len(data) - (len(data) % 2)]
+        try:
+            return data.decode(self._encoding)
+        except UnicodeDecodeError:
+            # A write still in progress can end mid-character; it is complete
+            # on a later refresh.  Nothing is committed from it meanwhile.
+            return ""
+
+    def _same_file(self, handle: Any, size: int) -> bool:
+        if size < self._offset:
+            return False
+        if self._head:
+            handle.seek(0)
+            if handle.read(len(self._head)) != self._head:
+                return False
+        if self._anchor:
+            handle.seek(self._offset - len(self._anchor))
+            if handle.read(len(self._anchor)) != self._anchor:
+                return False
+        return True
+
+    def _refresh_fallback(self, stat: os.stat_result) -> tuple[LedgerRead, bool]:
+        signature = (int(stat.st_mtime_ns), int(stat.st_size))
+        if self._fallback_read is not None and signature == self._fallback_signature:
+            return self._fallback_read, False
+        self.full_reads += 1
+        self.last_bytes_read = int(stat.st_size)
+        self._fallback_read = read_shadow_events(self.path)
+        self._fallback_signature = signature
+        return self._fallback_read, True
+
+    def refresh(self) -> tuple[LedgerRead, bool]:
+        """Return the current ledger view and whether it differs from the last one."""
+
+        self.last_bytes_read = 0
+        if not self.path.is_file():
+            changed = bool(self._rows or self._tail or self._fallback_read)
+            self._reset()
+            return LedgerRead(rows=[], unparseable=[], legacy_rows=0, total_lines=0), changed
+        stat = self.path.stat()
+        if self._fallback:
+            return self._refresh_fallback(stat)
+        size = int(stat.st_size)
+        changed = False
+        with self.path.open("rb") as handle:
+            if (self._offset or self._head) and not self._same_file(handle, size):
+                self._reset()
+                changed = True
+            if not self._encoding:
+                if size == 0:
+                    return self._snapshot(""), changed
+                handle.seek(0)
+                data = handle.read(size)
+                self.full_reads += 1
+                self.last_bytes_read = len(data)
+                if data.startswith(b"\xff\xfe"):
+                    self._encoding, self._start = "utf-16-le", 2
+                elif data.startswith(b"\xfe\xff"):
+                    self._encoding, self._start = "utf-16-be", 2
+                else:
+                    self._encoding = "utf-8"
+                    self._start = 3 if data.startswith(b"\xef\xbb\xbf") else 0
+                self._offset = self._start
+                self._head = data[: self.HEAD_BYTES]
+                begin = self._start
+                changed = True
+            else:
+                handle.seek(self._offset)
+                data = handle.read(max(0, size - self._offset))
+                self.last_bytes_read = len(data)
+                begin = 0
+                if len(self._head) < self.HEAD_BYTES and size > len(self._head):
+                    handle.seek(0)
+                    self._head = handle.read(min(size, self.HEAD_BYTES))
+        end = self._complete_end(data, begin)
+        if end > begin:
+            try:
+                # ``str(memoryview, encoding)`` decodes in place: the first load
+                # of a 220 MB ledger must not also copy it.
+                text = str(memoryview(data)[begin:end], self._encoding)
+            except UnicodeDecodeError:
+                if self._encoding == "utf-8":
+                    # The full reader would re-decode the whole file under
+                    # another encoding; do exactly that from now on.
+                    self._reset()
+                    self._fallback = True
+                    return self._refresh_fallback(stat)
+                raise
+            lines = text.splitlines()
+            del text
+            legacy, total = _parse_ledger_lines(lines, self._line_count + 1, self._rows, self._unparseable)
+            self._legacy += legacy
+            self._total += total
+            self._line_count += len(lines)
+            self._offset += end - begin
+            consumed = data[max(begin, end - self.ANCHOR_BYTES) : end]
+            self._anchor = (self._anchor + consumed)[-self.ANCHOR_BYTES :]
+            changed = True
+        tail = data[end:]
+        if tail != self._tail:
+            changed = True
+        self._tail = tail
+        return self._snapshot(self._decode_tail()), changed
+
+
 # --------------------------------------------------------------------------
 # Consolidation
 # --------------------------------------------------------------------------

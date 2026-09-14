@@ -1421,10 +1421,21 @@ private:
       return (datetime)StringToInteger(StringSubstr(entry, sep + 1));
    }
 
+   // Exactly _ShadowIndexEntryId(entry) == id, without allocating the substring.
+   // The identity sets hold ~9,000 entries and are probed several times for
+   // every candidate written, so a StringSubstr per entry per probe added up.
+   bool _ShadowIndexEntryIs(const string entry, const string id, const int id_len) const {
+      int sep = StringFind(entry, "|");
+      if(sep <= 0) return (entry == id);
+      if(sep != id_len) return false;
+      return (StringFind(entry, id) == 0);
+   }
+
    bool _ShadowIndexContains(const string &arr[], const string id) const {
-      if(StringLen(id) == 0) return false;
+      int id_len = StringLen(id);
+      if(id_len == 0) return false;
       for(int i=0; i<ArraySize(arr); i++){
-         if(_ShadowIndexEntryId(arr[i]) == id) return true;
+         if(_ShadowIndexEntryIs(arr[i], id, id_len)) return true;
       }
       return false;
    }
@@ -2269,7 +2280,16 @@ private:
          m_shadow_pending[i].cohort_complete = source.cohort_complete;
          changed = true;
       }
-      if(changed) m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
+      // Marked dirty, never rewritten here.  This runs once per candidate of
+      // every AI reply, and each call used to rewrite the WHOLE pending queue
+      // (704 plans / 68 MB measured) -- up to three full rewrites per reply,
+      // stalling the EA a median 16 s and up to 165 s after "AI advisory" on a
+      // desktop, minutes on a small VPS.  The queue is persisted once by
+      // _PersistResearchQueues() at scan end / shutdown, the same contract the
+      // observation and maintenance paths already follow, and the decision
+      // itself is already durable: the shadow_decision_recorded event above was
+      // appended to the immutable stream before this block.
+      if(changed) m_shadow_pending_dirty = true;
 
       // A decision on a plan whose prices moved after the original observation is
       // a genuinely different hypothesis.  Record it as a NEW child variant of the
@@ -2287,9 +2307,10 @@ private:
          revision.mql_final_allow = mql_final_allow;
          revision.python_decision_reasons = dec.reasons_json;
          revision.mql_decision_reasons = rejection_reason;
+         // _WriteShadowCandidateRecord() marks the queue dirty when it admits
+         // the revision; the queue is written at scan end, like every other
+         // admission.  The small identity index is still persisted now.
          _WriteShadowCandidateRecord(revision, decision_stage, rejection_reason);
-         _PersistShadowTrackerIndex();
-         m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);
       }
       _PersistShadowTrackerIndex();
    }

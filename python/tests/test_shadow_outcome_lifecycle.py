@@ -1953,8 +1953,39 @@ def assert_shadow_tracker_source(
     case.assertIn("ShadowQuarantinePath", state_store)
     case.assertIn("LoadTextLines", state_store)
     case.assertIn("SaveTextLines", state_store)
+    # Still atomic (tmp-then-move), now streamed in chunks: see the next block.
     save_lines = _function_body(state_store, "SaveTextLines")
-    case.assertIn("m_bus.WriteText", save_lines)
+    case.assertIn("m_bus.BeginAtomicText(rel_path)", save_lines)
+    case.assertIn("m_bus.CommitAtomicText(h, rel_path)", save_lines)
+
+    # Every state file is streamed, never assembled as one string first.  The
+    # pending shadow queue was 704 plans / 68 MB, and `out += PlanToJson(...)`
+    # re-copied the growing document on every append.
+    for saver in ("SavePlans", "SaveTextLines", "SavePenaltyStates", "SaveAiCacheEntries"):
+        body = _function_body(state_store, saver)
+        case.assertIn("m_bus.BeginAtomicText(rel_path)", body, f"{saver} must stream its file")
+        case.assertIn("_FlushChunkIfFull(h, chunk);", body, f"{saver} must write in bounded chunks")
+        case.assertIn("return m_bus.CommitAtomicText(h, rel_path);", body, f"{saver} must publish atomically")
+        case.assertNotIn("m_bus.WriteText(", body, f"{saver} assembled the whole file in memory again")
+        case.assertNotIn("out +=", body, f"{saver} concatenates the whole document again")
+    if file_bus:
+        commit = _function_body(file_bus, "CommitAtomicText")
+        case.assertIn('string tmp_path = rel_path + ".tmp";', commit)
+        case.assertIn("FileMove(tmp_path, FILE_COMMON, rel_path, FILE_COMMON)", commit)
+        case.assertIn('rel_path + ".tmp"', _function_body(file_bus, "BeginAtomicText"))
+
+    # An AI reply must not rewrite the pending queue.  _WriteShadowDecisionUpdate
+    # runs once per candidate of every reply and used to call SavePlans on the
+    # whole queue each time -- the EA stalled a median 16 s, max 165 s, after
+    # every "AI advisory" journal line.  It marks the queue dirty instead; the
+    # scan-end _PersistResearchQueues() writes it once.
+    decision_update = _function_body(trade_engine, "_WriteShadowDecisionUpdate")
+    case.assertNotIn(
+        "m_state.SavePlans(", decision_update, "an AI reply must never rewrite the pending shadow queue"
+    )
+    case.assertIn("if(changed) m_shadow_pending_dirty = true;", decision_update)
+    persist = _function_body(trade_engine, "_PersistResearchQueues")
+    case.assertIn("m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending)", persist)
 
     # Every v4 lifecycle field must round-trip through the state store, or a
     # restarted EA silently reverts to a pre-activation tracker.
@@ -2201,6 +2232,12 @@ MQL_MUTATIONS: tuple[tuple[str, str, str], ...] = (
         "if(m_shadow_pending_dirty &&",
         "if(true &&",
     ),
+    # --- AI reply latency (2026-09-14) -------------------------------------
+    (
+        "ai_reply_rewrites_the_pending_queue_again",
+        "if(changed) m_shadow_pending_dirty = true;",
+        "if(changed) m_state.SavePlans(m_state.ShadowPendingPath(), m_shadow_pending);",
+    ),
 )
 
 # Mutations that live in the other includes rather than in TradeEngine.mqh.
@@ -2285,6 +2322,32 @@ class ShadowTrackerFalsificationTests(unittest.TestCase):
                 bridge=BRIDGE,
                 file_bus=FILE_BUS,
             )
+
+    def test_the_streamed_save_assertion_fails_when_a_state_file_is_concatenated_again(self) -> None:
+        """Reverting any one saver to whole-document concatenation must be caught."""
+
+        for saver, record in (
+            ("SavePlans", "PlanToJson(arr[i])"),
+            ("SaveTextLines", "arr[i]"),
+            ("SavePenaltyStates", "PenaltyToJson(arr[i])"),
+            ("SaveAiCacheEntries", "AiCacheToJson(arr[i])"),
+        ):
+            with self.subTest(saver=saver):
+                body = _function_body(STATE_STORE, saver)
+                reverted_body = body.replace(
+                    f"chunk += {record};", f'out += {record} + "\\n";', 1
+                ).replace("return m_bus.CommitAtomicText(h, rel_path);", "return m_bus.WriteText(rel_path, out);", 1)
+                self.assertNotEqual(body, reverted_body, f"mutation anchor missing in {saver}")
+                with self.assertRaises(AssertionError):
+                    assert_shadow_tracker_source(
+                        self,
+                        trade_engine=TRADE_ENGINE,
+                        state_store=STATE_STORE.replace(body, reverted_body, 1),
+                        config=CONFIG,
+                        types=TYPES,
+                        bridge=BRIDGE,
+                        file_bus=FILE_BUS,
+                    )
 
     def test_the_append_only_assertion_fails_when_the_bus_stops_seeking_to_the_end(self) -> None:
         truncating = FILE_BUS.replace("FileSeek(h, 0, SEEK_END);", "// truncating write", 1)

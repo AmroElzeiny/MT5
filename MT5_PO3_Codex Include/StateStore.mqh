@@ -9,6 +9,9 @@
 #include "Config.mqh"
 #include "JsonLite.mqh"
 
+// Characters buffered before one FileWriteString() when streaming a state file.
+#define STATE_STORE_WRITE_CHUNK_CHARS 262144
+
 class CStateStore {
 private:
    CFileBus *m_bus;
@@ -2044,12 +2047,36 @@ public:
       return true;
    }
 
+   //--- Every Save* below streams its NDJSON through CFileBus' atomic chunk
+   //--- writer instead of building the whole file as one string first.
+   //---
+   //--- The shadow tracker queue alone held 704 plans of ~48,000 characters
+   //--- (68 MB on disk, UTF-16).  `out += PlanToJson(...)` on an unreserved
+   //--- string re-copied the growing document on every append -- quadratic in
+   //--- the file size -- and _WriteShadowDecisionUpdate() ran it once per
+   //--- candidate of every AI reply.  The journal measured the EA stalled a
+   //--- median 16 s / p90 55 s / max 165 s right after each "AI advisory" line
+   //--- on a desktop; on a small VPS that became minutes.  The bytes written
+   //--- are identical; only how they are assembled changed.
+   void _FlushChunkIfFull(const int handle, string &chunk) {
+      if(StringLen(chunk) < STATE_STORE_WRITE_CHUNK_CHARS) return;
+      m_bus.WriteAtomicChunk(handle, chunk);
+      chunk = "";
+      StringReserve(chunk, STATE_STORE_WRITE_CHUNK_CHARS + 131072);
+   }
+
    bool SavePlans(const string rel_path, const TradePlan &arr[]) {
-      string out="";
+      int h = m_bus.BeginAtomicText(rel_path);
+      if(h == INVALID_HANDLE) return false;
+      string chunk = "";
+      StringReserve(chunk, STATE_STORE_WRITE_CHUNK_CHARS + 131072);
       for(int i=0; i<ArraySize(arr); i++){
-         out += PlanToJson(arr[i]) + "\n";
+         chunk += PlanToJson(arr[i]);
+         chunk += "\n";
+         _FlushChunkIfFull(h, chunk);
       }
-      return m_bus.WriteText(rel_path, out);
+      m_bus.WriteAtomicChunk(h, chunk);
+      return m_bus.CommitAtomicText(h, rel_path);
    }
 
    //--- Plain line store for identity indexes.  Written through the same
@@ -2075,12 +2102,20 @@ public:
    }
 
    bool SaveTextLines(const string rel_path, const string &arr[]) {
-      string out="";
+      // Atomic: CFileBus::CommitAtomicText is WriteText's tmp-then-move, fed in
+      // chunks (the identity index is ~10,000 lines).
+      int h = m_bus.BeginAtomicText(rel_path);
+      if(h == INVALID_HANDLE) return false;
+      string chunk = "";
+      StringReserve(chunk, STATE_STORE_WRITE_CHUNK_CHARS + 131072);
       for(int i=0; i<ArraySize(arr); i++){
          if(StringLen(arr[i]) == 0) continue;
-         out += arr[i] + "\n";
+         chunk += arr[i];
+         chunk += "\n";
+         _FlushChunkIfFull(h, chunk);
       }
-      return m_bus.WriteText(rel_path, out);
+      m_bus.WriteAtomicChunk(h, chunk);
+      return m_bus.CommitAtomicText(h, rel_path);
    }
 
    bool LoadPenaltyStates(const string rel_path, PenaltyState &out_arr[]) {
@@ -2107,11 +2142,17 @@ public:
    }
 
    bool SavePenaltyStates(const string rel_path, const PenaltyState &arr[]) {
-      string out="";
+      int h = m_bus.BeginAtomicText(rel_path);
+      if(h == INVALID_HANDLE) return false;
+      string chunk = "";
+      StringReserve(chunk, STATE_STORE_WRITE_CHUNK_CHARS + 131072);
       for(int i=0; i<ArraySize(arr); i++){
-         out += PenaltyToJson(arr[i]) + "\n";
+         chunk += PenaltyToJson(arr[i]);
+         chunk += "\n";
+         _FlushChunkIfFull(h, chunk);
       }
-      return m_bus.WriteText(rel_path, out);
+      m_bus.WriteAtomicChunk(h, chunk);
+      return m_bus.CommitAtomicText(h, rel_path);
    }
 
    bool LoadAiCacheEntries(const string rel_path, AiCacheEntry &out_arr[]) {
@@ -2138,11 +2179,17 @@ public:
    }
 
    bool SaveAiCacheEntries(const string rel_path, const AiCacheEntry &arr[]) {
-      string out = "";
+      int h = m_bus.BeginAtomicText(rel_path);
+      if(h == INVALID_HANDLE) return false;
+      string chunk = "";
+      StringReserve(chunk, STATE_STORE_WRITE_CHUNK_CHARS + 131072);
       for(int i=0; i<ArraySize(arr); i++){
-         out += AiCacheToJson(arr[i]) + "\n";
+         chunk += AiCacheToJson(arr[i]);
+         chunk += "\n";
+         _FlushChunkIfFull(h, chunk);
       }
-      return m_bus.WriteText(rel_path, out);
+      m_bus.WriteAtomicChunk(h, chunk);
+      return m_bus.CommitAtomicText(h, rel_path);
    }
 };
 

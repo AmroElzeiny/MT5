@@ -24,15 +24,23 @@ request loop -- so it records each attempt exactly once, whatever happened next.
 
 Pricing source
 --------------
-https://opencode.ai/docs/go/ (page "Last updated Sep 11, 2026", retrieved
-2026-09-13).  Prices are USD per 1M tokens.  The page lists no cached-write
-price for either routed OpenCode model and says nothing about reasoning tokens.
+https://opencode.ai/docs/go/ (page "Last updated: Sep 13, 2026", retrieved
+2026-09-14).  Prices are USD per 1M tokens.  The page lists no cached-write
+price for Muse, DeepSeek or MiniMax, and says nothing about reasoning tokens.
 On the Responses wire ``usage.output_tokens`` already INCLUDES
 ``output_tokens_details.reasoning_tokens`` (true for all 2,516 OpenCode rows in
 the live ledger: reasoning <= output on every one), so reasoning is priced as
 part of output and is never added a second time.  Whether OpenCode's allowance
 meter follows the same rule is not published; that is exactly what the
 discrepancy report compares.
+
+The same page now defines DeepSeek's peak window verbatim: "Peak hours are
+01:00-04:00 and 06:00-10:00 UTC, Monday through Friday; all other hours,
+including weekends, are Off-Peak."  ``go_pricing_variant`` applies it, so the
+usage ledger can price a call at the rate that was actually in force.
+
+This table is the single source of OpenCode Go rates: ``openai_usage_logger``
+derives its rows from it, so the two cost surfaces cannot drift apart.
 """
 
 from __future__ import annotations
@@ -50,8 +58,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 PRICING_SOURCE_URL = "https://opencode.ai/docs/go/"
-PRICING_PAGE_LAST_UPDATED = "2026-09-11"
-PRICING_RETRIEVED_UTC = "2026-09-13"
+PRICING_PAGE_LAST_UPDATED = "2026-09-13"
+PRICING_RETRIEVED_UTC = "2026-09-14"
 ATTEMPT_LEDGER_VERSION = "20260913_opencode_go_attempt_ledger_v1"
 DEFAULT_ATTEMPT_LEDGER_NAME = "opencode_go_attempts.ndjson"
 
@@ -73,20 +81,60 @@ class GoModelPrice:
 
 
 # Model id -> pricing variant -> price.  DeepSeek V4.1 Flash publishes separate
-# off-peak and peak rows without defining the hours, so both are reported and
-# neither is silently chosen.
+# off-peak and peak rows; the attempt ledger reports both, and
+# ``go_pricing_variant`` names the one that applies at a given instant.
 OPENCODE_GO_PRICES: dict[str, dict[str, GoModelPrice]] = {
     "muse-spark-1.3-contributor": {
         "standard": GoModelPrice(0.10, 0.20, 0.002, None, 60.0),
     },
     "deepseek-v4.1-flash": {
-        "off_peak": GoModelPrice(0.15, 0.60, 0.003, None, 15.0),
-        "peak": GoModelPrice(0.30, 1.20, 0.006, None, 15.0),
+        "off_peak": GoModelPrice(0.15, 0.60, 0.003, None, 60.0),
+        "peak": GoModelPrice(0.30, 1.20, 0.006, None, 60.0),
+    },
+    # The call-directing leg (OPENCODE_CALL_DIRECTING).  The only routed model
+    # with a published cached-write rate, and that rate is ABOVE its input rate.
+    "qwen3.8-flash": {
+        "standard": GoModelPrice(0.15, 0.47, 0.016, 0.20, 30.0),
+    },
+    "minimax-m3": {
+        "standard": GoModelPrice(0.30, 1.20, 0.06, None, 60.0),
     },
 }
 
 # Published limit windows, as fractions of the monthly limit.
 GO_LIMIT_WINDOWS = {"5_hour": 0.20, "weekly": 0.50, "monthly": 1.00}
+
+# Published peak windows, UTC, [start_hour, end_hour), Monday..Friday only.
+GO_PEAK_HOURS_UTC: tuple[tuple[int, int], ...] = ((1, 4), (6, 10))
+
+
+def is_go_peak_time(when: datetime) -> bool:
+    """True inside the published OpenCode Go peak window."""
+
+    moment = when if when.tzinfo is not None else when.replace(tzinfo=timezone.utc)
+    moment = moment.astimezone(timezone.utc)
+    if moment.weekday() >= 5:
+        return False
+    return any(start <= moment.hour < end for start, end in GO_PEAK_HOURS_UTC)
+
+
+def go_pricing_variant(model: str, when: datetime | None) -> str | None:
+    """The published pricing variant in force for ``model`` at ``when``.
+
+    ``None`` when the model has no Go price, or when it is time-of-day priced
+    and no instant was supplied -- the caller must then not claim an exact rate.
+    """
+
+    variants = OPENCODE_GO_PRICES.get(str(model or ""))
+    if not variants:
+        return None
+    if "peak" in variants and "off_peak" in variants:
+        if when is None:
+            return None
+        return "peak" if is_go_peak_time(when) else "off_peak"
+    if len(variants) == 1:
+        return next(iter(variants))
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +377,9 @@ def build_attempt_record(
         "error_category": type(error).__name__ if error is not None else "",
         **categories,
         "expected_go_usage_usd": expected_go_usage_usd(model, categories)
+        if str(provider_mode or "") == "OPENCODE_API"
+        else None,
+        "applicable_go_pricing_variant": go_pricing_variant(model, datetime.now(timezone.utc))
         if str(provider_mode or "") == "OPENCODE_API"
         else None,
         "pricing_source": PRICING_SOURCE_URL if str(model or "") in OPENCODE_GO_PRICES else "",

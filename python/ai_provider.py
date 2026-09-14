@@ -3260,12 +3260,36 @@ class _OpenCodeMessagesClient:
         usage = payload.get("usage") if isinstance(payload.get("usage"), Mapping) else {}
         input_tokens = usage.get("input_tokens")
         output_tokens = usage.get("output_tokens")
+        # Anthropic-dialect usage reports cache reads and cache writes BESIDE
+        # ``input_tokens``, not inside it.  Dropping them priced every cached
+        # token of this leg at $0; folding them into the OpenAI-shaped block is
+        # what lets the usage ledger bill reads at the cached rate and writes at
+        # the published cached-write rate.  Absent fields change nothing.
+        prompt_details: dict[str, int] = {}
+        try:
+            cache_read = usage.get("cache_read_input_tokens")
+            cache_write = usage.get("cache_creation_input_tokens")
+            if input_tokens is not None and (cache_read is not None or cache_write is not None):
+                prompt_details = {
+                    "cached_tokens": int(cache_read or 0),
+                    "cache_write_tokens": int(cache_write or 0),
+                }
+                input_tokens = int(input_tokens) + prompt_details["cached_tokens"] + prompt_details["cache_write_tokens"]
+        except (TypeError, ValueError):
+            prompt_details = {}
         total = None
         try:
             if input_tokens is not None and output_tokens is not None:
                 total = int(input_tokens) + int(output_tokens)
         except (TypeError, ValueError):
             total = None
+        normalized_usage: dict[str, Any] = {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": total,
+        }
+        if prompt_details:
+            normalized_usage["prompt_tokens_details"] = prompt_details
         return {
             "id": str(payload.get("id") or ""),
             "model": str(payload.get("model") or body.get("model") or ""),
@@ -3276,11 +3300,7 @@ class _OpenCodeMessagesClient:
                     "message": {"role": "assistant", "content": content},
                 }
             ],
-            "usage": {
-                "prompt_tokens": input_tokens,
-                "completion_tokens": output_tokens,
-                "total_tokens": total,
-            },
+            "usage": normalized_usage,
             "opencode_stop_reason": finish_reason,
         }
 

@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import opencode_go_accounting as _go_accounting
+
 
 _LOCK = threading.Lock()
 _BUS_PATH: Optional[Path] = None
@@ -157,6 +159,45 @@ PRICE_PER_MILLION_BY_ENDPOINT: Dict[tuple, Dict[str, float]] = {
     ("~deepseek/deepseek-v4-flash-latest", "makora"): {"input": 0.090, "cached_input": 0.0196, "output": 0.195},
     ("~deepseek/deepseek-v4-flash-latest", "wafer"): {"input": 0.100, "cached_input": 0.0500, "output": 0.250},
 }
+
+
+def _go_rate_row(price: "_go_accounting.GoModelPrice") -> Dict[str, float]:
+    row = {
+        "input": price.input_per_million,
+        "cached_input": price.cached_read_per_million,
+        "output": price.output_per_million,
+    }
+    # Only a model that publishes a cached-write rate gets one; every other
+    # model bills a cache write at its input rate, exactly as before.
+    if price.cached_write_per_million is not None:
+        row["cache_write"] = price.cached_write_per_million
+    return row
+
+
+# OpenCode Go models, derived from ``opencode_go_accounting.OPENCODE_GO_PRICES``
+# rather than retyped here: that table is the published price list the attempt
+# ledger already prices from, and two hand-maintained copies would drift.
+#
+# Their absence from this table is what recorded every Muse call at $0.00
+# (2,499 ``muse-spark-1.3-contributor`` rows and 42 ``deepseek-v4.1-flash``
+# rows, all ``unpriced_model``, in the live ledger of 2026-09-14).
+#
+# A time-of-day priced model (DeepSeek peak/off-peak) gets its field-wise
+# maximum as the model row -- the upper bound used when the call instant is
+# unknown -- and its real per-window rates in
+# ``PRICE_PER_MILLION_BY_TIME_VARIANT``, chosen by the published peak hours.
+PRICE_PER_MILLION_BY_TIME_VARIANT: Dict[str, Dict[str, Dict[str, float]]] = {}
+for _go_model, _go_variants in _go_accounting.OPENCODE_GO_PRICES.items():
+    _go_rows = {name: _go_rate_row(price) for name, price in _go_variants.items()}
+    if len(_go_rows) == 1:
+        PRICE_PER_MILLION[_go_model] = next(iter(_go_rows.values()))
+        continue
+    PRICE_PER_MILLION_BY_TIME_VARIANT[_go_model] = _go_rows
+    PRICE_PER_MILLION[_go_model] = {
+        key: max(row[key] for row in _go_rows.values() if key in row)
+        for key in {k for row in _go_rows.values() for k in row}
+    }
+del _go_model, _go_variants, _go_rows
 
 
 # Transports that actually bill.  ``LOCAL_OPENAI_COMPATIBLE`` is self-hosted and
@@ -437,11 +478,16 @@ def _tier_multiplier(service_tier: str) -> tuple[float, bool]:
     return multiplier, True
 
 
-def _rates(model: str, routed_endpoint: str = "") -> tuple[Optional[Dict[str, float]], bool]:
+def _rates(
+    model: str,
+    routed_endpoint: str = "",
+    called_at: Optional[datetime] = None,
+) -> tuple[Optional[Dict[str, float]], bool]:
     """Return ``(rates, exact)`` for a model, preferring the endpoint that served it.
 
     ``exact`` is False when the per-endpoint rate was unavailable and the
-    model-level upper bound was substituted.
+    model-level upper bound was substituted, or when a time-of-day priced model
+    was priced without knowing when the call ran.
     """
 
     key = _canonical_model(model)
@@ -450,6 +496,11 @@ def _rates(model: str, routed_endpoint: str = "") -> tuple[Optional[Dict[str, fl
         exact = PRICE_PER_MILLION_BY_ENDPOINT.get((key, endpoint))
         if exact is not None:
             return exact, True
+    time_variants = PRICE_PER_MILLION_BY_TIME_VARIANT.get(key)
+    if time_variants:
+        variant = _go_accounting.go_pricing_variant(key, called_at)
+        if variant in time_variants:
+            return time_variants[variant], True
     fallback = PRICE_PER_MILLION.get(key)
     if fallback is None:
         return None, False
@@ -457,8 +508,9 @@ def _rates(model: str, routed_endpoint: str = "") -> tuple[Optional[Dict[str, fl
     # models) has exactly one rate, so its model-level row *is* exact.  A model
     # that does have per-endpoint rates but whose route we could not identify
     # is charged at the upper bound instead, so an unknown route over-reports
-    # rather than under-reports.
-    return fallback, not _model_has_endpoint_rates(key)
+    # rather than under-reports.  The same holds for a peak/off-peak model
+    # priced without a call instant.
+    return fallback, not (_model_has_endpoint_rates(key) or bool(time_variants))
 
 
 def _model_has_endpoint_rates(model: str) -> bool:
@@ -471,6 +523,7 @@ def _pricing_status(
     routed_endpoint: str = "",
     service_tier: str = "",
     provider_reported_cost: Optional[float] = None,
+    called_at: Optional[datetime] = None,
 ) -> str:
     """Separate "this transport is free" from "we have no price for this model".
 
@@ -488,7 +541,7 @@ def _pricing_status(
     # transport that told us the price is not a gap.
     if provider_reported_cost is not None:
         return PRICING_STATUS_PROVIDER_REPORTED
-    rates, exact = _rates(model, routed_endpoint)
+    rates, exact = _rates(model, routed_endpoint, called_at)
     if rates is None:
         return PRICING_STATUS_UNPRICED
     _multiplier, tier_known = _tier_multiplier(service_tier)
@@ -537,8 +590,10 @@ def _estimated_cost(
     output_tokens: int,
     routed_endpoint: str = "",
     service_tier: str = "",
+    cache_write_tokens: int = 0,
+    called_at: Optional[datetime] = None,
 ) -> float:
-    rates, _exact = _rates(model, routed_endpoint)
+    rates, _exact = _rates(model, routed_endpoint, called_at)
     if not rates:
         return 0.0
     input_multiplier = 1.0
@@ -549,10 +604,15 @@ def _estimated_cost(
         input_multiplier = surcharge["input"]
         output_multiplier = surcharge["output"]
     tier_multiplier, _tier_known = _tier_multiplier(service_tier)
-    billable_input = max(0, input_tokens - cached_input_tokens)
+    # A cache write is input that was not served from cache.  It used to sit
+    # inside ``billable_input`` at the input rate; it still does for every model
+    # without a published cached-write rate, so those totals are unchanged.
+    cache_written = max(0, min(int(cache_write_tokens or 0), input_tokens - cached_input_tokens))
+    billable_input = max(0, input_tokens - cached_input_tokens - cache_written)
     cost = (
         billable_input * rates["input"] * input_multiplier
         + cached_input_tokens * rates["cached_input"] * input_multiplier
+        + cache_written * rates.get("cache_write", rates["input"]) * input_multiplier
         + output_tokens * rates["output"] * output_multiplier
     ) / 1_000_000.0
     return round(cost * tier_multiplier, 8)
@@ -585,6 +645,8 @@ def price_call(
     routed_endpoint: str = "",
     service_tier: str = "",
     provider_reported_cost: Optional[float] = None,
+    cache_write_tokens: int = 0,
+    called_at: Optional[datetime] = None,
 ) -> tuple[Optional[float], str]:
     """Single public entry point for "what did this call cost".
 
@@ -593,10 +655,13 @@ def price_call(
     "unknown" -- the distinction this module exists to preserve.  Every cost
     surface in the repository must come through here rather than re-deriving
     rates, or the two surfaces drift.
+
+    ``called_at`` selects a time-of-day rate (OpenCode Go peak/off-peak).
+    Without it such a model is charged at its upper bound and says so.
     """
 
     status = _pricing_status(
-        model, provider_mode, routed_endpoint, service_tier, provider_reported_cost
+        model, provider_mode, routed_endpoint, service_tier, provider_reported_cost, called_at
     )
     if status not in PRICING_STATUSES_WITH_COST:
         return None, status
@@ -610,8 +675,23 @@ def price_call(
             int(output_tokens or 0),
             routed_endpoint,
             service_tier,
+            int(cache_write_tokens or 0),
+            called_at,
         ),
         status,
+    )
+
+
+def response_cache_write_tokens(response: Any) -> int:
+    """Input tokens the provider reports as WRITTEN to its prompt cache."""
+
+    return _cache_write_tokens(_usage_from_response(response))
+
+
+def _cache_write_tokens(usage: Dict[str, Any]) -> int:
+    return _int_value(
+        _get_nested(usage, "input_tokens_details", "cache_write_tokens")
+        or _get_nested(usage, "prompt_tokens_details", "cache_write_tokens")
     )
 
 
@@ -740,18 +820,24 @@ def log_ai_usage(
         error_type = type(error).__name__ if not isinstance(error, str) else "error"
         error_message = str(error)
 
+    cache_write_tokens = _cache_write_tokens(usage)
+
     routed_endpoint = _routed_endpoint(response)
     # The tier the response reports beats the tier we asked for; ``auto`` is
     # resolved server-side and only the response knows what it resolved to.
     effective_service_tier = _response_service_tier(response) or str(service_tier or "").strip()
     price_multiplier, _tier_known = _tier_multiplier(effective_service_tier)
     reported_cost = _provider_reported_cost(usage)
+    # The row is written when the call completes, so this is the instant a
+    # time-of-day tariff (OpenCode Go peak/off-peak) is read at.
+    now = datetime.now(timezone.utc)
     pricing_status = _pricing_status(
         str(model or ""),
         str(provider_mode or ""),
         routed_endpoint,
         effective_service_tier,
         reported_cost,
+        now,
     )
     if pricing_status == PRICING_STATUS_UNPRICED:
         _warn_unpriced_once(str(model or ""), str(provider_mode or ""), pricing_status)
@@ -769,7 +855,6 @@ def log_ai_usage(
             f"{model}@{routed_endpoint}", str(provider_mode or ""), pricing_status
         )
 
-    now = datetime.now(timezone.utc)
     row: Dict[str, Any] = {
         "ts_utc": now.isoformat(timespec="seconds"),
         "source": str(source or ""),
@@ -799,10 +884,20 @@ def log_ai_usage(
                 output_tokens,
                 routed_endpoint,
                 effective_service_tier,
+                cache_write_tokens,
+                now,
             )
             if pricing_status in PRICING_STATUSES_WITH_COST
             else 0.0
         ),
+        # NDJSON only, same column-stability reason as ``pricing_status``: which
+        # published time-of-day tariff priced the row (None when not applicable).
+        "pricing_variant": (
+            _go_accounting.go_pricing_variant(_canonical_model(str(model or "")), now)
+            if str(provider_mode or "").upper() == "OPENCODE_API"
+            else None
+        ),
+        "cache_write_input_tokens": cache_write_tokens,
         # Which tier actually billed, and the multiplier that was applied to the
         # standard rate.  NDJSON only, for the same column-stability reason as
         # ``pricing_status`` below: a flex call and a standard call of the same

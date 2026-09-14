@@ -21,6 +21,7 @@ import base64
 import json
 import math
 import os
+import re
 import shutil
 import socket
 import statistics
@@ -137,6 +138,7 @@ from ai_review_gate import (
 )
 from shadow_outcome_ledger import (
     SHADOW_LEDGER_SCHEMA_VERSION,
+    ShadowLedgerTail,
     EvidencePolicy as ShadowEvidencePolicy,
     compact_candidate_evidence as compact_shadow_candidate_evidence,
     consolidate_shadow_lifecycle,
@@ -175,6 +177,7 @@ from openai_usage_logger import (
     as_token_count,
     log_ai_usage,
     price_call,
+    response_cache_write_tokens,
     response_cached_input_tokens,
     response_reported_cost_usd,
     response_routed_endpoint,
@@ -1788,8 +1791,39 @@ def _shadow_ledger_path() -> Path | None:
     return lifecycle.root / "logs" / "shadow_candidates.jsonl"
 
 
+SHADOW_EVIDENCE_REFRESH_SEC_DEFAULT = 120.0
+
+
+def _shadow_evidence_refresh_sec() -> float:
+    """Minimum seconds between two consolidations of the shadow ledger.
+
+    ``AI_SHADOW_EVIDENCE_REFRESH_SEC``; 0 re-consolidates whenever new events
+    arrived.  The history is counterfactual context over hundreds of samples,
+    so an outcome that resolved in the last two minutes changing no request's
+    evidence is immaterial -- re-folding 31k events for every request is not.
+    """
+
+    raw = str(os.environ.get("AI_SHADOW_EVIDENCE_REFRESH_SEC", "") or "").strip()
+    if not raw:
+        return SHADOW_EVIDENCE_REFRESH_SEC_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        return SHADOW_EVIDENCE_REFRESH_SEC_DEFAULT
+    if not math.isfinite(value):
+        return SHADOW_EVIDENCE_REFRESH_SEC_DEFAULT
+    return max(0.0, min(value, 3600.0))
+
+
 def _shadow_outcome_records() -> list[Any]:
-    """Consolidated shadow variants, re-parsed only when the ledger changes.
+    """Consolidated shadow variants, read incrementally and refreshed on a floor.
+
+    The ledger is appended to by the EA on every scan, decision and price
+    station, so "re-parse when size or mtime changed" meant re-reading the whole
+    file (220 MB live) for nearly every request.  ``ShadowLedgerTail`` keeps the
+    parsed rows and reads only the bytes appended since its last refresh, and
+    the consolidation is redone at most every ``_shadow_evidence_refresh_sec``
+    seconds, and only when the tail actually brought something new.
 
     A parse failure is never fatal and never becomes a fabricated prior: the
     gate logs the condition and the decision proceeds with no shadow evidence,
@@ -1799,26 +1833,32 @@ def _shadow_outcome_records() -> list[Any]:
     path = _shadow_ledger_path()
     if path is None or not path.is_file():
         return []
-    try:
-        stat = path.stat()
-        signature = (str(path), int(stat.st_mtime_ns), int(stat.st_size))
-    except OSError:
-        return []
     with _SHADOW_LEDGER_LOCK:
-        if _SHADOW_LEDGER_CACHE.get("signature") == signature:
-            return _SHADOW_LEDGER_CACHE.get("records", [])
+        tail = _SHADOW_LEDGER_CACHE.get("tail")
+        if not isinstance(tail, ShadowLedgerTail) or tail.path != path:
+            tail = ShadowLedgerTail(path)
+            _SHADOW_LEDGER_CACHE.clear()
+            _SHADOW_LEDGER_CACHE["tail"] = tail
+        now = time.monotonic()
+        has_records = "records" in _SHADOW_LEDGER_CACHE
+        last_refresh = float(_SHADOW_LEDGER_CACHE.get("refreshed_at") or 0.0)
+        if has_records and now - last_refresh < _shadow_evidence_refresh_sec():
+            return _SHADOW_LEDGER_CACHE["records"]
+        _SHADOW_LEDGER_CACHE["refreshed_at"] = now
+        started = time.perf_counter()
         try:
-            read = read_shadow_events(path)
+            read, changed = tail.refresh()
+            if has_records and not changed:
+                return _SHADOW_LEDGER_CACHE["records"]
+            read_ms = int((time.perf_counter() - started) * 1000)
             consolidated = consolidate_shadow_lifecycle(read.rows)
         except Exception as exc:
             log(
                 "[shadow_evidence] state=UNAVAILABLE"
                 f" error={type(exc).__name__} path={path.name}"
             )
-            _SHADOW_LEDGER_CACHE["signature"] = signature
             _SHADOW_LEDGER_CACHE["records"] = []
             return []
-        _SHADOW_LEDGER_CACHE["signature"] = signature
         _SHADOW_LEDGER_CACHE["records"] = consolidated.variants
         log(
             "[shadow_evidence] state=LOADED"
@@ -1829,6 +1869,9 @@ def _shadow_outcome_records() -> list[Any]:
             f" opportunities={len(consolidated.opportunities)}"
             f" rejected_rows={len(consolidated.rejected)}"
             f" terminal_conflicts={len(consolidated.conflicts)}"
+            f" read_mode=incremental bytes_read={tail.last_bytes_read}"
+            f" full_reads={tail.full_reads} read_ms={read_ms}"
+            f" consolidate_ms={int((time.perf_counter() - started) * 1000) - read_ms}"
         )
         return consolidated.variants
 
@@ -6511,6 +6554,10 @@ def _write_ai_cost_report(
             # if one surface prices from the transport's own figure and the
             # other from the rate table, the two disagree about the same call.
             provider_reported_cost=response_reported_cost_usd(response),
+            cache_write_tokens=response_cache_write_tokens(response),
+            # Same instant rule as the usage ledger: a peak/off-peak tariff is
+            # read when the result is recorded.
+            called_at=datetime.now(timezone.utc),
         )
         row = {
             "timestamp": int(time.time()),
@@ -7133,11 +7180,213 @@ def _cached_decision_schema_miss_reason(
     return ""
 
 
+# The three keys every cache row begins with, in the order ``store`` writes
+# them.  Used only to INDEX a line cheaply; a line is never trusted from this
+# match -- it is strictly parsed when a lookup actually needs it.
+_DECISION_CACHE_ROW_KEYS = re.compile(
+    rb'\{"timestamp":-?\d+,"signature":"([^"\\]*)","base_signature":"([^"\\]*)"'
+)
+# Characters ``str.splitlines`` treats as line boundaries besides "\n".  The
+# pre-index reader split the whole file with ``splitlines``, so a row holding one
+# of these raw was torn into unparseable pieces and never matched; the index
+# must skip such a row too, or it would serve a decision the old reader could not.
+_DECISION_CACHE_FOREIGN_LINE_BREAKS = (
+    b"\r",
+    b"\x0b",
+    b"\x0c",
+    b"\x1c",
+    b"\x1d",
+    b"\x1e",
+    b"\xc2\x85",
+    b"\xe2\x80\xa8",
+    b"\xe2\x80\xa9",
+)
+
+
 class AIDecisionCache:
+    """Append-only setup-signature decision cache with an in-memory line index.
+
+    Before 2026-09-14 every ``lookup`` read the whole file and strictly parsed
+    it newest-first until a match -- on the usual miss, every row.  The live
+    file had grown to 154 MB / 3,119 rows, which measured 11.2 s per request on
+    a fast desktop, and every ``store`` read the whole file again and rewrote it
+    plus the new row with an fsync (0.9 s), after every AI reply.  On a weak VPS
+    both multiply.
+
+    Now the file is only ever appended to, and a byte-offset index of
+    ``signature`` / ``base_signature`` -> line is kept in memory and extended
+    from the bytes appended since the last read.  A lookup strictly parses only
+    the rows it actually needs, in the same newest-first order, so it returns
+    exactly what the full scan returned.  A file that shrank or whose indexed
+    bytes changed (the startup cache quarantine rewrites it) is re-indexed.
+    """
+
+    _INDEX_ANCHOR_BYTES = 256
+
     def __init__(self, path: Path, ttl_sec: int) -> None:
         self.path = path
         self.ttl_sec = ttl_sec
         self._lock = Lock()
+        self._reset_index_locked()
+
+    # -- index -------------------------------------------------------------
+
+    def _reset_index_locked(self) -> None:
+        self._indexed_bytes = 0
+        self._index_anchor = b""
+        self._signature_offsets: Dict[str, list[tuple[int, int]]] = {}
+        self._base_offsets: Dict[str, list[tuple[int, int]]] = {}
+        self._tail_offset = 0
+        self._tail_bytes = b""
+        self.index_rebuilds = 0
+
+    def _index_anchor_intact_locked(self, handle: Any) -> bool:
+        if not self._index_anchor:
+            return True
+        start = self._indexed_bytes - len(self._index_anchor)
+        handle.seek(start)
+        return handle.read(len(self._index_anchor)) == self._index_anchor
+
+    def _refresh_index_locked(self) -> None:
+        """Index the complete lines appended since the last refresh."""
+
+        try:
+            size = self.path.stat().st_size
+        except FileNotFoundError:
+            self._reset_index_locked()
+            return
+        with self.path.open("rb") as handle:
+            if self._indexed_bytes and (
+                size < self._indexed_bytes or not self._index_anchor_intact_locked(handle)
+            ):
+                rebuilds = self.index_rebuilds + 1
+                self._reset_index_locked()
+                self.index_rebuilds = rebuilds
+            if size <= self._indexed_bytes:
+                self._tail_offset, self._tail_bytes = self._indexed_bytes, b""
+                return
+            started = time.perf_counter()
+            full_build = self._indexed_bytes == 0
+            handle.seek(self._indexed_bytes)
+            data = handle.read(size - self._indexed_bytes)
+        end = data.rfind(b"\n")
+        base = self._indexed_bytes
+        if end >= 0:
+            position = 0
+            lines = 0
+            while position <= end:
+                newline = data.index(b"\n", position)
+                self._index_line_locked(base + position, data[position : newline + 1])
+                position = newline + 1
+                lines += 1
+            self._indexed_bytes = base + end + 1
+            anchor_part = data[max(0, end + 1 - self._INDEX_ANCHOR_BYTES) : end + 1]
+            self._index_anchor = (self._index_anchor + anchor_part)[-self._INDEX_ANCHOR_BYTES :]
+            if full_build:
+                log(
+                    "[ai_cache_index] state=BUILT"
+                    f" lines={lines} bytes={self._indexed_bytes}"
+                    f" signatures={len(self._signature_offsets)}"
+                    f" rebuilds={self.index_rebuilds}"
+                    f" elapsed_ms={int((time.perf_counter() - started) * 1000)}"
+                )
+        # An unterminated last line is a write still in progress (or a torn one).
+        # The old full reader still offered it to the scan, so it is parsed on
+        # demand but never committed to the index until its newline arrives.
+        self._tail_offset = self._indexed_bytes
+        self._tail_bytes = data[end + 1 :] if end >= 0 else data
+
+    def _index_line_locked(self, offset: int, raw: bytes) -> None:
+        body = raw[:-1] if raw.endswith(b"\n") else raw
+        if body.endswith(b"\r"):
+            body = body[:-1]  # universal newlines folded "\r\n" into one break
+        if offset == 0 and body.startswith(b"\xef\xbb\xbf"):
+            body = body[3:]
+        if not body.strip():
+            return
+        if any(mark in body for mark in _DECISION_CACHE_FOREIGN_LINE_BREAKS):
+            return
+        signature: Any = None
+        base_signature: Any = None
+        match = _DECISION_CACHE_ROW_KEYS.match(body)
+        if match is not None:
+            try:
+                signature = match.group(1).decode("utf-8")
+                base_signature = match.group(2).decode("utf-8")
+            except UnicodeDecodeError:
+                return
+        else:
+            try:
+                item = json.loads(body.decode("utf-8"))
+            except Exception:
+                return
+            if not isinstance(item, dict):
+                return
+            signature = item.get("signature")
+            base_signature = item.get("base_signature")
+        entry = (offset, len(raw))
+        if isinstance(signature, str):
+            self._signature_offsets.setdefault(signature, []).append(entry)
+        if isinstance(base_signature, str):
+            self._base_offsets.setdefault(base_signature, []).append(entry)
+
+    @staticmethod
+    def _parse_cache_line(raw: bytes) -> Dict[str, Any] | None:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        if any(mark in raw.rstrip(b"\r\n") for mark in _DECISION_CACHE_FOREIGN_LINE_BREAKS):
+            return None
+        if not text.strip():
+            return None
+        try:
+            item = strict_json_loads(text)
+        except Exception:
+            return None
+        return item if isinstance(item, dict) else None
+
+    def _lookup_candidates_locked(
+        self,
+        signature: str,
+        base_signature: str,
+        read_errors: list[BaseException],
+    ):
+        """Parsed rows the old newest-first scan would have acted on, in its order.
+
+        The scan returned at the newest valid row carrying ``signature``; rows it
+        passed on the way only fed ``base_seen``/``base_semantic_reason``, which
+        that return never reads.  So when such a row exists it is the only one
+        yielded; otherwise every valid ``base_signature`` row, newest first.
+        """
+
+        tail_item = self._parse_cache_line(self._tail_bytes) if self._tail_bytes.strip() else None
+        try:
+            with self.path.open("rb") as handle:
+
+                def rows(offsets: Sequence[tuple[int, int]], key: str, value: str):
+                    for offset, length in reversed(offsets):
+                        handle.seek(offset)
+                        raw = handle.read(length)
+                        if len(raw) != length:
+                            continue
+                        if offset == 0 and raw.startswith(b"\xef\xbb\xbf"):
+                            raw = raw[3:]
+                        item = self._parse_cache_line(raw)
+                        if item is not None and item.get(key) == value:
+                            yield item
+
+                if tail_item is not None and tail_item.get("signature") == signature:
+                    yield tail_item
+                    return
+                for item in rows(self._signature_offsets.get(signature, ()), "signature", signature):
+                    yield item
+                    return
+                if tail_item is not None and tail_item.get("base_signature") == base_signature:
+                    yield tail_item
+                yield from rows(self._base_offsets.get(base_signature, ()), "base_signature", base_signature)
+        except OSError as exc:
+            read_errors.append(exc)
 
     def _acquire_write_lock(self, timeout_sec: float = 15.0) -> Path:
         lock_path = self.path.with_suffix(self.path.suffix + ".lock")
@@ -7182,18 +7431,13 @@ class AIDecisionCache:
             if not self.path.exists():
                 return None, "miss"
             try:
-                lines = self.path.read_text(encoding="utf-8").splitlines()
+                self._refresh_index_locked()
             except Exception:
                 return None, "miss_read_error"
+            read_errors: list[BaseException] = []
             base_seen = False
             base_semantic_reason = ""
-            for line in reversed(lines):
-                if not line.strip():
-                    continue
-                try:
-                    item = strict_json_loads(line)
-                except Exception:
-                    continue
+            for item in self._lookup_candidates_locked(signature, base_signature, read_errors):
                 ts = int(item.get("timestamp") or 0)
                 if item.get("signature") == signature:
                     cached_semantic = item.get("semantic_state")
@@ -7365,6 +7609,12 @@ class AIDecisionCache:
                         )
                         if reasons:
                             base_semantic_reason = reasons[0]
+                    # Nothing an older row could add: base_seen is already true
+                    # and the first non-empty reason is kept.  Pure short-cut.
+                    if current_fields is None or base_semantic_reason:
+                        break
+            if read_errors:
+                return None, "miss_read_error"
             if base_semantic_reason:
                 return None, base_semantic_reason
             return None, "invalidated_material_field_changed" if base_seen else "miss"
@@ -7562,23 +7812,27 @@ class AIDecisionCache:
                         "adjudicator_output": dict(decision.adjudicator_output or {}),
                     },
                 }
-                row_line = json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
-                previous = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
-                temp_path = self.path.with_name(
-                    f".{self.path.name}.{os.getpid()}.{time.time_ns()}.tmp"
-                )
-                try:
-                    with temp_path.open("w", encoding="utf-8", newline="\n") as handle:
-                        handle.write(previous)
-                        handle.write(row_line)
-                        handle.flush()
-                        os.fsync(handle.fileno())
-                    os.replace(temp_path, self.path)
-                finally:
-                    try:
-                        temp_path.unlink()
-                    except FileNotFoundError:
-                        pass
+                row_bytes = (
+                    json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+                ).encode("utf-8")
+                # Append only the new row.  The old path re-read the entire file
+                # and rewrote it plus this row on every AI reply (154 MB live).
+                # A crash can now leave at most one torn LAST line; it is closed
+                # with a newline before the next row so it can never swallow a
+                # complete row, and the reader skips it exactly as it skipped
+                # any unparseable line before.
+                with self.path.open("a+b") as handle:
+                    handle.seek(0, os.SEEK_END)
+                    end = handle.tell()
+                    prefix = b""
+                    if end > 0:
+                        handle.seek(end - 1)
+                        if handle.read(1) != b"\n":
+                            prefix = b"\n"
+                    handle.seek(0, os.SEEK_END)
+                    handle.write(prefix + row_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
                 log(
                     "[cache_write]"
                     f" request_identity_hash={str(request_identity_hash)[:16]}"

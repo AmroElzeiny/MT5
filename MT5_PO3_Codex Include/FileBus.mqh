@@ -79,6 +79,31 @@ public:
       return moved;
    }
 
+   //--- Streamed atomic write.  WriteText() needs the whole document as ONE
+   //--- string, so a caller persisting thousands of records had to concatenate
+   //--- them first -- and an unreserved += over a multi-megabyte document copies
+   //--- the growing buffer on every append.  These three calls write the same
+   //--- bytes, in pieces, to the same ".tmp" path and publish them with the same
+   //--- delete-then-move, so a crash still never leaves a half-written file.
+   int BeginAtomicText(const string rel_path) {
+      return FileOpen(rel_path + ".tmp", FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+   }
+
+   void WriteAtomicChunk(const int handle, const string chunk) {
+      if(handle == INVALID_HANDLE) return;
+      FileWriteString(handle, chunk);
+   }
+
+   bool CommitAtomicText(const int handle, const string rel_path) {
+      if(handle == INVALID_HANDLE) return false;
+      FileClose(handle);
+      string tmp_path = rel_path + ".tmp";
+      if(FileIsExist(rel_path, FILE_COMMON)) FileDelete(rel_path, FILE_COMMON);
+      bool moved = FileMove(tmp_path, FILE_COMMON, rel_path, FILE_COMMON);
+      if(!moved) FileDelete(tmp_path, FILE_COMMON);
+      return moved;
+   }
+
    // Decode UTF-16LE/BE (with or without BOM) and UTF-8 (with or without BOM).
    bool DecodeTextBytes(const uchar &bytes[], const int count, string &out) const {
       out = "";
