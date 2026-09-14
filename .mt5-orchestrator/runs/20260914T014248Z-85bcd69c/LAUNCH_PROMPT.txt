@@ -1,0 +1,36 @@
+﻿RUN_ID: 20260914T014248Z-85bcd69c
+RUN_DIR: .mt5-orchestrator/runs/20260914T014248Z-85bcd69c
+FRONT_END: Claude
+TIER: Standard
+RuntimeMode: Offline
+TARGET_WALL_CLOCK_MINUTES: 90
+TARGET_MATERIAL_MODEL_INVOCATIONS: 8
+
+Execute the attached mission under the repository and orchestration policies.
+
+The front-end (Claude) owns architecture and final judgment.
+You own delegated execution between event-based checkpoints.
+
+Read:
+- CLAUDE.md
+- AGENTS.md when present
+- .mt5-orchestrator/policy/ROUTING_POLICY.md
+- .mt5-orchestrator/policy/BUDGET_POLICY.md
+- .mt5-orchestrator/policy/SUPERVISOR_REPORT_CONTRACT.md
+- .mt5-orchestrator/models/ROLE_MODEL_MAP.md
+- .mt5-orchestrator/models/LIVE_MODELS.md
+- .mt5-orchestrator/models/LIVE_MODELS_VERBOSE.txt
+
+Update PROGRESS.json at material role/work-package handoffs.
+
+Use the normal low-cost model set only.
+Do not loop past the mission budget to avoid escalation.
+
+Required final evidence:
+- .mt5-orchestrator/runs/20260914T014248Z-85bcd69c/SUPERVISOR_REPORT.json
+- .mt5-orchestrator/runs/20260914T014248Z-85bcd69c/SUPERVISOR_REPORT.md
+
+If front-end help is required:
+- .mt5-orchestrator/runs/20260914T014248Z-85bcd69c/ESCALATION.json
+
+Do not claim completion without evidence.

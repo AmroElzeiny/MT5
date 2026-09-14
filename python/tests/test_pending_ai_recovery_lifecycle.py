@@ -272,7 +272,7 @@ class PendingAiRecoveryMqlSourceTests(unittest.TestCase):
         config = _require(CONFIG, CONFIG_PATH)
         self.assertTrue(_config_default(config, "InpCounterfactualHorizonMinutes", 1440))
         self.assertTrue(_config_default(config, "InpPendingOrderExpiryMin", 480))
-        self.assertTrue(_config_default(config, "InpPendingAiTimeoutMin", 45))
+        self.assertTrue(_config_default(config, "InpPendingAiTimeoutMin", 68))
         preset = _require(PRESET, PRESET_PATH)
         self.assertIn("InpCounterfactualHorizonMinutes=480", preset)
         self.assertIn("InpPendingOrderExpiryMin=120", preset)

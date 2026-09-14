@@ -1,0 +1,3 @@
+﻿ M .mt5-orchestrator/current/MISSION.md
+ M .mt5-orchestrator/current/RUN.json
+?? .mt5-orchestrator/runs/20260914T014248Z-85bcd69c/

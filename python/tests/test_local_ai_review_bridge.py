@@ -1249,11 +1249,11 @@ class BridgeDeploymentSettingsTests(unittest.TestCase):
         self.assertEqual(values.get("LOCAL_AI_PARALLELISM"), "3")
         self.assertEqual(values.get("AI_LIVE_CANDIDATE_BUDGET"), "3")
         self.assertEqual(values.get("AI_ENABLE_SNAPSHOTS"), "false")
-        self.assertEqual(values.get("AI_MT5_TERMINAL_TIMEOUT_SEC"), "1800")
-        self.assertEqual(values.get("LOCAL_AI_TIMEOUT_SEC"), "1800")
-        self.assertEqual(values.get("LOCAL_AI_ANALYST_TIMEOUT_SEC"), "900")
-        self.assertEqual(values.get("LOCAL_AI_CRITIC_TIMEOUT_SEC"), "450")
-        self.assertEqual(values.get("LOCAL_AI_ADJUDICATOR_TIMEOUT_SEC"), "300")
+        self.assertEqual(values.get("AI_MT5_TERMINAL_TIMEOUT_SEC"), "4050")
+        self.assertEqual(values.get("LOCAL_AI_TIMEOUT_SEC"), "2700")
+        self.assertEqual(values.get("LOCAL_AI_ANALYST_TIMEOUT_SEC"), "1350")
+        self.assertEqual(values.get("LOCAL_AI_CRITIC_TIMEOUT_SEC"), "675")
+        self.assertEqual(values.get("LOCAL_AI_ADJUDICATOR_TIMEOUT_SEC"), "450")
         self.assertEqual(values.get("AI_RESPONSE_WRITE_MARGIN_SEC"), "15")
         self.assertEqual(
             endpoint_class(values.get("LOCAL_AI_BASE_URL", "")), "loopback"

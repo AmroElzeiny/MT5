@@ -3748,7 +3748,25 @@ private:
               (p.liquidity_target_blocked_by_obstacle || _ObstacleIsCrossedOpposing(p.obstacle_kind)));
    }
 
-   bool _HardSuppressionGate(const TradePlan &p, string &reason) const {
+   // ai_gate._candidate_hard_block_reason's narrower notion of a synthetic target:
+   // target_source, or the first non-empty of target_model / tp_model.  It does not
+   // include synthetic_rr_capped_*, which _PlanUsesSyntheticFallback does.
+   bool _PythonSeesSyntheticFallback(const TradePlan &p) const {
+      string model = (StringLen(p.target_model) > 0 ? p.target_model : p.tp_model);
+      return (StringFind(_NormToken(p.target_source), "synthetic_rr_fallback") >= 0 ||
+              StringFind(_NormToken(model), "synthetic_rr_fallback") >= 0);
+   }
+
+   // The verdict the request serialises as target_candidates.liquidity_target.available.
+   bool _LiquidityTargetFeasible(const TradePlan &p) const {
+      double liquidity_tp = 0.0;
+      double liquidity_rr = 0.0;
+      bool liquidity_rr_ok = false;
+      bool liquidity_within_max = false;
+      return PlanLiquidityTargetVerdict(p, liquidity_tp, liquidity_rr, liquidity_rr_ok, liquidity_within_max);
+   }
+
+   bool _HardSuppressionGate(const TradePlan &p, const string stage, string &reason) const {
       reason = "";
       string family_group = _FamilyGroup(p);
       string family = _NormToken(p.setup_family);
@@ -3794,8 +3812,18 @@ private:
             reason = "synthetic_fallback_crossed_obstacle_blocked";
             return false;
          }
+         // Before the request is built, arbitration only justifies asking the AI
+         // when a real liquidity route exists to arbitrate towards.  Python's hard
+         // pre-gate (ai_gate._candidate_hard_block_reason) refuses exactly those
+         // candidates before any provider call, so forwarding them buys nothing
+         // but a guaranteed rejection.  The waiver is withdrawn only where Python
+         // would refuse: never at a later stage, never for a target Python does
+         // not classify as synthetic.
+         bool arbitration_waiver = p.target_arbitration_required;
+         if(stage == "pre_ai_hard_gate" && _PythonSeesSyntheticFallback(p) && !_LiquidityTargetFeasible(p))
+            arbitration_waiver = false;
          if(InpRejectSyntheticFallbackAfterCrossedObstacle &&
-            !p.target_arbitration_required &&
+            !arbitration_waiver &&
             !_AiTargetArbitrationHasAuthority(p)){
             reason = "synthetic_fallback_crossed_obstacle_blocked";
             return false;
@@ -3869,11 +3897,16 @@ private:
             m_total_mpc_execution_blocks++;
          return false;
       }
-      if(!_HardSuppressionGate(p, reason)){
+      if(!_HardSuppressionGate(p, stage, reason)){
          string detail = "branch=" + p.entry_branch + " family=" + p.setup_family
                          + " session=" + p.po3.session_name + " killzone=" + (p.po3.in_killzone ? "true" : "false");
          if(reason == "suppressed_micro_bisi_sibi_edge")
             detail += " suppression_scope=micro_bisi_sibi_only";
+         if(reason == "synthetic_fallback_crossed_obstacle_blocked")
+            detail += " target_arbitration_required=" + (p.target_arbitration_required ? "true" : "false")
+                      + " liquidity_target_feasible=" + (_LiquidityTargetFeasible(p) ? "true" : "false")
+                      + " obstacle_kind=" + p.obstacle_kind
+                      + " tp_model=" + p.tp_model;
          _LogSetupReject(p.symbol, stage, reason, detail);
          return false;
       }
@@ -18949,6 +18982,9 @@ public:
          // label, so the reject table never counts it as an integrity failure.
          bool review_gate_reuse = (!strict_response_quality && dec.decision_source == AI_REVIEW_GATE_REUSE_SOURCE);
          if(review_gate_reuse) m_total_ai_review_gate_reuse++;
+         // Likewise a Python hard pre-gate refusal: deterministic, no provider call,
+         // non-trading in every respect, but not a degraded AI response.
+         bool python_hard_pre_gate = (!strict_response_quality && dec.decision_source == AI_PYTHON_HARD_PRE_GATE_SOURCE);
          bool strict_schema_ok = (dec.mandatory_fields_complete &&
                                   dec.decision_schema_version == AI_DECISION_SCHEMA_VERSION &&
                                   dec.hierarchical_prior_schema_version == HIERARCHICAL_PRIOR_SCHEMA_VERSION &&
@@ -19029,7 +19065,8 @@ public:
          if(!strict_schema_ok)
             reject_reason = (strict_response_quality ? "ai_quality_schema_incomplete"
                              : (review_gate_reuse ? "ai_review_reused_prior_non_approval"
-                                                  : "degraded_ai_response_non_trading"));
+                                : (python_hard_pre_gate ? LLM_QUALITY_REJECT_PYTHON_HARD_PRE_GATE
+                                                        : "degraded_ai_response_non_trading")));
          else if(!have_selected) reject_reason = "candidate_hash_mismatch";
          else if(dec.repeatability_required_live &&
                  (dec.repeatability_status != "REPEATABLE" || !dec.repeatability_trading_eligible))
@@ -19096,7 +19133,8 @@ public:
                   + " chosen=" + IntegerToString(dec.chosen_index)
                   + " candidate_hash_match=" + (have_selected ? "true" : "false")
                   + " assessment_group_ok=" + (assessment_group_ok ? "true" : "false")
-                  + " decision_source=" + dec.decision_source);
+                  + " decision_source=" + dec.decision_source
+                  + (python_hard_pre_gate ? " python_rejection_codes=" + dec.rejection_codes_json : ""));
 
          for(int shadow_idx=0; shadow_idx<ArraySize(decision_group); shadow_idx++){
             bool shadow_selected = (have_selected &&
@@ -19273,9 +19311,10 @@ public:
          } else {
             _RememberAiCooldown(group_symbol, group_signature, reject_reason);
             string reject_stage = (review_gate_reuse ? "ai_review_gate"
-                                   : ((reject_reason == "candidate_hash_mismatch" ||
-                                       reject_reason == "ai_quality_schema_incomplete" ||
-                                       reject_reason == "degraded_ai_response_non_trading") ? "decision_integrity" : "ai"));
+                                   : (python_hard_pre_gate ? "python_hard_pre_gate"
+                                      : ((reject_reason == "candidate_hash_mismatch" ||
+                                          reject_reason == "ai_quality_schema_incomplete" ||
+                                          reject_reason == "degraded_ai_response_non_trading") ? "decision_integrity" : "ai")));
             _LogSetupReject(group_symbol, reject_stage, reject_reason,
                             "llm_quality_score=" + DoubleToString(dec.llm_quality_score, 2)
                             + " required_llm_quality_score=" + DoubleToString(required_llm_quality_score, 2)

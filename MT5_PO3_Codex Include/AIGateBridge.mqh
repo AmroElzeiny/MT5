@@ -11,6 +11,38 @@
 // feasibility with the same function the sanitizer enforces it with.
 #include "ExecutionAdjustmentContract.mqh"
 
+//+------------------------------------------------------------------+
+//| Liquidity-target feasibility -- the one definition.               |
+//|                                                                   |
+//| The target menu serialises this verdict as                        |
+//| liquidity_target.available.  Python's hard pre-gate               |
+//| (_candidate_hard_block_reason) lets a synthetic target that       |
+//| crosses an opposing obstacle reach the AI only when that flag is  |
+//| true.  CTradeEngine::_HardSuppressionGate asks the same question  |
+//| before a request is built.  On 2026-09-14 it did not, and 3 of 5  |
+//| live requests were forwarded only to be refused by Python.        |
+//+------------------------------------------------------------------+
+bool PlanLiquidityTargetVerdict(const TradePlan &p,
+                                double &liquidity_tp,
+                                double &liquidity_rr,
+                                bool &liquidity_rr_ok,
+                                bool &liquidity_within_max) {
+   double risk_dist = MathAbs(p.entry_est - p.sl);
+   liquidity_tp = (p.liquidity_target_preserved > 0.0
+                   ? p.liquidity_target_preserved
+                   : p.po3.liquidity_target);
+   liquidity_rr = p.liquidity_rr;
+   if(liquidity_rr <= 0.0 && risk_dist > 0.0 && liquidity_tp > 0.0){
+      double reward = (p.is_buy ? liquidity_tp - p.entry_est : p.entry_est - liquidity_tp);
+      if(reward > 0.0) liquidity_rr = reward / risk_dist;
+   }
+   liquidity_rr_ok = (liquidity_rr + 0.0001 >= InpMinLiveRR2);
+   double liquidity_reward = (risk_dist > 0.0 ? liquidity_rr * risk_dist : 0.0);
+   double max_allowed = p.fallback_max_allowed_distance;
+   liquidity_within_max = RewardWithinMaxDistance(liquidity_reward, max_allowed, PlanTickSize(p.symbol));
+   return (liquidity_tp > 0.0 && liquidity_rr_ok && liquidity_within_max);
+}
+
 class CAIGateBridge {
 private:
    CFileBus *m_bus;
@@ -97,15 +129,17 @@ private:
 
    string _TargetCandidatesJson(const TradePlan &p) const {
       double risk_dist = MathAbs(p.entry_est - p.sl);
-      double liquidity_tp = (p.liquidity_target_preserved > 0.0 ? p.liquidity_target_preserved : p.po3.liquidity_target);
+      // The liquidity route is measured by PlanLiquidityTargetVerdict, the same
+      // function _HardSuppressionGate consults, so the flag this menu advertises
+      // and the gate that decides whether to send the request cannot disagree.
+      double liquidity_tp = 0.0;
+      double liquidity_rr = 0.0;
+      bool liquidity_rr_ok = false;
+      bool liquidity_within_max = false;
+      PlanLiquidityTargetVerdict(p, liquidity_tp, liquidity_rr, liquidity_rr_ok, liquidity_within_max);
       string liquidity_model = (StringLen(p.liquidity_target_model) > 0 ? p.liquidity_target_model :
                                 (StringLen(p.target_model) > 0 ? p.target_model :
                                  (StringLen(p.po3.liquidity_kind) > 0 ? p.po3.liquidity_kind : "liquidity_target")));
-      double liquidity_rr = p.liquidity_rr;
-      if(liquidity_rr <= 0.0 && risk_dist > 0.0 && liquidity_tp > 0.0){
-         double reward = (p.is_buy ? liquidity_tp - p.entry_est : p.entry_est - liquidity_tp);
-         if(reward > 0.0) liquidity_rr = reward / risk_dist;
-      }
       double capped_tp = p.capped_before_obstacle_tp;
       double capped_rr = p.capped_before_obstacle_rr;
       if(capped_rr <= 0.0 && risk_dist > 0.0 && capped_tp > 0.0){
@@ -156,10 +190,9 @@ private:
       double max_allowed = p.fallback_max_allowed_distance;
       double liquidity_reward = (risk_dist > 0.0 ? liquidity_rr * risk_dist : 0.0);
       double capped_reward    = (risk_dist > 0.0 ? capped_rr * risk_dist : 0.0);
-      bool liquidity_within_max = RewardWithinMaxDistance(liquidity_reward, max_allowed, tick_size);
       bool capped_within_max    = RewardWithinMaxDistance(capped_reward, max_allowed, tick_size);
-      bool liquidity_rr_ok = (liquidity_rr + 0.0001 >= InpMinLiveRR2);
       bool capped_rr_ok    = (capped_rr + 0.0001 >= InpMinLiveRR2);
+      // The same conjunction PlanLiquidityTargetVerdict returns.
       bool liquidity_feasible = (liquidity_tp > 0.0 && liquidity_rr_ok && liquidity_within_max);
       bool capped_feasible    = (capped_tp > 0.0 && capped_rr_ok && capped_within_max);
 
@@ -1920,8 +1953,13 @@ public:
          out.decision_state = "REJECT";
          out.mandatory_fields_complete = false;
          out.suggested_risk_multiplier = 0.0;
-         out.llm_quality_reject_reason = "degraded_ai_response_non_trading";
          out.decision_source = JsonGetString(txt, "decision_source", "degraded_non_trading");
+         // A Python hard pre-gate refusal never reached the provider, so there is
+         // no degraded AI response to report.  Every non-trading consequence above
+         // is identical; only the label differs.
+         out.llm_quality_reject_reason = (out.decision_source == AI_PYTHON_HARD_PRE_GATE_SOURCE
+                                          ? LLM_QUALITY_REJECT_PYTHON_HARD_PRE_GATE
+                                          : "degraded_ai_response_non_trading");
          out.reasons_json = JsonGetString(txt, "reasons", "degraded response cannot authorize trading");
          out.rejection_codes_json = JsonGetArray(txt, "rejection_codes", "[\"degraded_ai_response_non_trading\"]");
          if(StringLen(missing) > 0 || StringLen(invalid) > 0){

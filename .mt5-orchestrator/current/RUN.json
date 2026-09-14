@@ -1,8 +1,8 @@
 ﻿{
     "front_end":  "Claude",
-    "started_utc":  "2026-09-13T18:06:10.9568604Z",
+    "started_utc":  "2026-09-14T01:42:48.6517302Z",
     "mode":  "Offline",
-    "run_dir":  ".mt5-orchestrator/runs/20260913T180610Z-eee8a0a8",
-    "tier":  "Deep",
-    "run_id":  "20260913T180610Z-eee8a0a8"
+    "run_dir":  ".mt5-orchestrator/runs/20260914T014248Z-85bcd69c",
+    "tier":  "Standard",
+    "run_id":  "20260914T014248Z-85bcd69c"
 }

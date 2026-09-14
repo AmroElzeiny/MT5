@@ -12483,6 +12483,188 @@ def _validate_runtime_authority(bus: Path) -> tuple[bool, Dict[str, Any]]:
 # ---------- Main loop ----------
 
 _GATE_INSTANCE_LEASE: Dict[str, Any] | None = None
+# Set by the ``run`` command once its log file is configured, so a real daemon
+# journals its release and unit tests never write to a bus log.
+_GATE_INSTANCE_RELEASE_LOG: Any = None
+
+_GATE_INSTANCE_HOLDER_FILE = "ai_gate.instance.json"
+_WINDOWS_ERROR_ACCESS_DENIED = 5
+_WINDOWS_ERROR_INVALID_PARAMETER = 87
+_WINDOWS_ERROR_ALREADY_EXISTS = 183
+_WINDOWS_STILL_ACTIVE = 259
+_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def _gate_instance_holder_path(bus: Path) -> Path:
+    return bus / "locks" / _GATE_INSTANCE_HOLDER_FILE
+
+
+def _gate_holder_process_state(pid: Any) -> str:
+    """Return ``true``, ``false`` or ``unknown`` for whether ``pid`` is running.
+
+    The process is queried, never signalled: on Windows ``os.kill(pid, 0)`` is
+    not a probe, because signal 0 is CTRL_C_EVENT there.
+    """
+
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return "unknown"
+    if pid <= 0:
+        return "false"
+    if pid == os.getpid():
+        return "true"
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        get_exit_code.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        ctypes.set_last_error(0)
+        handle = open_process(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            if ctypes.get_last_error() == _WINDOWS_ERROR_INVALID_PARAMETER:
+                return "false"
+            return "unknown"
+        try:
+            exit_code = wintypes.DWORD(0)
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                return "unknown"
+            return "true" if exit_code.value == _WINDOWS_STILL_ACTIVE else "false"
+        finally:
+            close_handle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "false"
+    except PermissionError:
+        return "true"
+    except OSError:
+        return "unknown"
+    return "true"
+
+
+def _read_gate_instance_holder(path: Path) -> Dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _write_gate_instance_holder(path: Path, record: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(dict(record), sort_keys=True), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _record_gate_instance_holder(bus: Path, lease: Dict[str, Any]) -> None:
+    """Leave evidence of who holds the lease.
+
+    The OS lease alone cannot show, after the fact, whether two ``acquired=true``
+    lines were concurrent holders or one holder that exited before the next
+    started.  The record carries the answer.  It is evidence, not authority: a
+    failure to write it never blocks the lease.
+    """
+
+    import sys
+
+    holder_path = _gate_instance_holder_path(bus)
+    previous = _read_gate_instance_holder(holder_path)
+    record = {
+        "lease": lease.get("identity"),
+        "backend": lease.get("backend"),
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "executable": sys.executable,
+        "argv": list(sys.argv),
+        "hostname": socket.gethostname(),
+        "started_at": time.time(),
+        "released_at": None,
+    }
+    try:
+        _write_gate_instance_holder(holder_path, record)
+        written = True
+    except OSError:
+        written = False
+    lease.update(
+        holder_path=holder_path,
+        holder_record=record,
+        holder_record_written=written,
+        previous_holder=previous,
+        previous_holder_alive=(
+            _gate_holder_process_state(previous.get("pid")) if previous else "none"
+        ),
+    )
+
+
+def _mark_gate_instance_released(lease: Mapping[str, Any]) -> bool:
+    holder_path = lease.get("holder_path")
+    record = lease.get("holder_record") or {}
+    if not isinstance(holder_path, Path) or not record:
+        return False
+    current = _read_gate_instance_holder(holder_path)
+    if current.get("pid") != record.get("pid") or current.get("started_at") != record.get("started_at"):
+        return False
+    current["released_at"] = time.time()
+    try:
+        _write_gate_instance_holder(holder_path, current)
+    except OSError:
+        return False
+    return True
+
+
+def _gate_instance_acquire_evidence() -> str:
+    lease = _GATE_INSTANCE_LEASE or {}
+    record = lease.get("holder_record") or {}
+    previous = lease.get("previous_holder") or {}
+    if previous:
+        previous_released = "true" if previous.get("released_at") is not None else "false"
+    else:
+        previous_released = "none"
+    return (
+        f" ppid={record.get('ppid')}"
+        f" executable={json.dumps(str(record.get('executable') or ''))}"
+        f" holder_record_written={'true' if lease.get('holder_record_written') else 'false'}"
+        f" previous_holder_pid={previous.get('pid', 'none') if previous else 'none'}"
+        f" previous_holder_started_at={previous.get('started_at', 'none') if previous else 'none'}"
+        f" previous_holder_released={previous_released}"
+        f" previous_holder_alive={lease.get('previous_holder_alive', 'none')}"
+    )
+
+
+def _gate_instance_anomaly() -> str:
+    """A recorded holder that is still running and never released its lease.
+
+    Reported, never enforced: the OS lease is the authority, and a recorded pid
+    may have been reused by an unrelated process.
+    """
+
+    lease = _GATE_INSTANCE_LEASE or {}
+    previous = lease.get("previous_holder") or {}
+    if not previous or previous.get("released_at") is not None:
+        return ""
+    try:
+        previous_pid = int(previous.get("pid") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if previous_pid in (0, os.getpid()) or lease.get("previous_holder_alive") != "true":
+        return ""
+    return (
+        "[single_instance_anomaly] reason=previous_holder_alive_without_release"
+        f" previous_holder_pid={previous_pid}"
+        f" previous_holder_started_at={previous.get('started_at')}"
+        f" pid={os.getpid()} action=continue lease_authoritative=true pid_reuse_possible=true"
+    )
 
 
 def _release_gate_single_instance() -> None:
@@ -12494,16 +12676,28 @@ def _release_gate_single_instance() -> None:
     if not lease:
         return
     if lease.get("backend") == "windows_named_mutex":
-        try:
-            lease["kernel32"].CloseHandle(lease["handle"])
-        except Exception:
-            pass
+        for handle in lease.get("handles", ()):
+            try:
+                lease["kernel32"].CloseHandle(handle)
+            except Exception:
+                pass
     elif lease.get("backend") == "posix_flock":
         try:
             import fcntl
 
             fcntl.flock(lease["file"].fileno(), fcntl.LOCK_UN)
             lease["file"].close()
+        except Exception:
+            pass
+    record_updated = _mark_gate_instance_released(lease)
+    announce = _GATE_INSTANCE_RELEASE_LOG
+    if callable(announce):
+        try:
+            announce(
+                "[single_instance] released"
+                f" pid={os.getpid()} lease={lease.get('identity')}"
+                f" holder_record_updated={'true' if record_updated else 'false'}"
+            )
         except Exception:
             pass
 
@@ -12532,18 +12726,30 @@ def _acquire_gate_single_instance(bus: Path) -> tuple[bool, str]:
         close_handle = kernel32.CloseHandle
         close_handle.argtypes = [wintypes.HANDLE]
         close_handle.restype = wintypes.BOOL
-        mutex_name = f"Local\\PO3_AI_GATE_{identity}"
-        ctypes.set_last_error(0)
-        handle = create_mutex(None, False, mutex_name)
-        error_code = ctypes.get_last_error()
-        if not handle:
-            return False, f"windows_mutex_create_failed:{error_code}"
-        if error_code == 183:  # ERROR_ALREADY_EXISTS
-            close_handle(handle)
-            return False, f"existing_gate_for_bus:{identity}"
+        # Global\ spans every logon session, so a gate started from a scheduled
+        # task or a service is excluded too.  Local\ is still taken because a
+        # gate from a build that only knew Local\ must keep excluding this one.
+        mutex_names = [f"{namespace}\\PO3_AI_GATE_{identity}" for namespace in ("Global", "Local")]
+        handles: List[Any] = []
+        for mutex_name in mutex_names:
+            ctypes.set_last_error(0)
+            handle = create_mutex(None, False, mutex_name)
+            error_code = ctypes.get_last_error()
+            if not handle or error_code == _WINDOWS_ERROR_ALREADY_EXISTS:
+                if handle:
+                    close_handle(handle)
+                for held in handles:
+                    close_handle(held)
+                if handle:
+                    return False, f"existing_gate_for_bus:{identity}"
+                if error_code == _WINDOWS_ERROR_ACCESS_DENIED:
+                    return False, f"existing_gate_for_bus_access_denied:{identity}"
+                return False, f"windows_mutex_create_failed:{error_code}"
+            handles.append(handle)
         _GATE_INSTANCE_LEASE = {
             "backend": "windows_named_mutex",
-            "handle": handle,
+            "handles": handles,
+            "mutex_names": mutex_names,
             "kernel32": kernel32,
             "identity": identity,
         }
@@ -12563,6 +12769,7 @@ def _acquire_gate_single_instance(bus: Path) -> tuple[bool, str]:
             "file": lock_file,
             "identity": identity,
         }
+    _record_gate_instance_holder(bus, _GATE_INSTANCE_LEASE)
     atexit.register(_release_gate_single_instance)
     return True, identity
 
@@ -12683,7 +12890,13 @@ def main() -> None:
         log(
             "[single_instance] acquired=true"
             f" bus={bus} lease={lease_detail} pid={os.getpid()}"
+            + _gate_instance_acquire_evidence()
         )
+        anomaly = _gate_instance_anomaly()
+        if anomaly:
+            log(anomaly)
+        global _GATE_INSTANCE_RELEASE_LOG
+        _GATE_INSTANCE_RELEASE_LOG = log
 
     # Cohort inventory/migration must run before file-bus recovery. Recovery
     # walks every artifact in the bus, so on a contaminated bus (the incident

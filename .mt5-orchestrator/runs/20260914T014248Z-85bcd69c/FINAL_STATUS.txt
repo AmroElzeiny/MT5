@@ -1,0 +1,6 @@
+﻿ M .mt5-orchestrator/current/DIRECT_MODE.json
+ M .mt5-orchestrator/current/MISSION.md
+ M .mt5-orchestrator/current/RUN.json
+ M "MT5_PO3_Codex Include/AIGateBridge.mqh"
+ M "MT5_PO3_Codex Include/Config.mqh"
+?? .mt5-orchestrator/runs/20260914T014248Z-85bcd69c/

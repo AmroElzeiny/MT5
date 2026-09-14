@@ -351,7 +351,7 @@ class TesterWaitDeadlineTests(unittest.TestCase):
         self.assertNotIn("_WallElapsedMs(oldest_wall_request) > 15000", engine)
         self.assertIn("GetTickCount64()", engine)
         self.assertIn(
-            "input int InpAiWaitTimeoutRealMin = 30;",
+            "input int InpAiWaitTimeoutRealMin = 45;",
             " ".join(config.split()),
         )
         self.assertIn(

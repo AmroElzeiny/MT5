@@ -32,6 +32,12 @@ const string SETUP_TAXONOMY_VERSION = "20260716_setup_taxonomy_v1";
 const string AI_REVIEW_CONTEXT_VERSION = "20260914_ai_review_context_v1";
 // Python decision_source of a proven-unnecessary review (non-trading reuse).
 const string AI_REVIEW_GATE_REUSE_SOURCE = "ai_review_gate_reuse";
+// Python decision_source of a deterministic hard pre-gate refusal: the request
+// was rejected before any provider call, so no AI response exists to be degraded.
+const string AI_PYTHON_HARD_PRE_GATE_SOURCE = "hard_pre_gate";
+// EA reject reason for that refusal.  Non-trading exactly like a degraded reply,
+// but it is not an integrity failure and must not be counted as one.
+const string LLM_QUALITY_REJECT_PYTHON_HARD_PRE_GATE = "python_hard_pre_gate_reject";
 
 //--- Provider transport modes MT5 will bind a decision to.
 // Single definition shared by the response validator (AIGateBridge.mqh) and the
@@ -190,11 +196,11 @@ input bool  InpPauseScanWhilePendingAI = false;
 input int   InpMaxPendingAiRequests  = 8;
 input int   InpWatchlistMaxBars      = 600;
 input int   InpWatchlistMaxMinutes   = 2880;
-input int   InpPendingAiTimeoutMin   = 45;
+input int   InpPendingAiTimeoutMin   = 68;
 input bool  InpAiWaitInTester        = true;
 input int   InpAiWaitPollMs          = 250;
 input int   InpAiWaitSliceSeconds    = 75;
-input int   InpAiWaitTimeoutRealMin  = 30;
+input int   InpAiWaitTimeoutRealMin  = 45;
 input int   InpTesterPersistIntervalMin = 15;
 input bool  InpTesterRejectStaleAiResults = true;
 input int   InpTesterMaxAiResultAgeSimMinutes = 15;
