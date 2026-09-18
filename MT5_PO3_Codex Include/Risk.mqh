@@ -38,10 +38,12 @@ void _RiskLog(const string msg) {
 //+------------------------------------------------------------------+
 string g_po3_behavior_runtime_scope = "";
 string g_po3_behavior_window_last_log = "";
+string g_po3_behavior_stop_last_log = "";
 
 void PO3SetBehaviorRuntimeScope(const string scope_key) {
    g_po3_behavior_runtime_scope = scope_key;
    g_po3_behavior_window_last_log = "";
+   g_po3_behavior_stop_last_log = "";
 }
 
 struct VolumeNormalizationResult {
@@ -275,14 +277,73 @@ string _BehaviorStopKey() {
    return _DailyAnchorKey("behavior_stop_until");
 }
 
+//+------------------------------------------------------------------+
+//| The streak that already armed the breaker, and what it was.        |
+//|                                                                    |
+//| _BehaviorStopTriggered reads the newest closed trades from disk    |
+//| and counts the leading loss streak.  The stop then blocks every    |
+//| new entry, so no new trade can close to break that streak -- and   |
+//| when the cooldown expires the SAME historical losses arm it again. |
+//| Measured on the 2026-09-16 tester run (Core 01): 26 arming events  |
+//| exactly 90 minutes apart, every one behavioral_reason=             |
+//| consecutive_losses=4, balance frozen at 99348.65 for all of them,  |
+//| i.e. not one trade closed in between.  That is a permanent halt    |
+//| wearing a 90-minute cooldown's clothes, and it produced 139,192 of |
+//| the log's 231,961 lines.                                           |
+//|                                                                    |
+//| The anchor is the close time of the newest trade in the streak     |
+//| that armed the stop.  Re-arming then requires a trade closed AFTER |
+//| it: the breaker still fires on every NEW losing streak, and can no |
+//| longer re-fire on one it has already acted on.  The code/count are |
+//| stored so the active-stop line can name its own reason after a     |
+//| terminal restart instead of printing a bare timestamp.             |
+//+------------------------------------------------------------------+
+string _BehaviorStopAnchorKey() { return _DailyAnchorKey("behavior_stop_anchor"); }
+string _BehaviorStopCodeKey()   { return _DailyAnchorKey("behavior_stop_code"); }
+string _BehaviorStopCountKey()  { return _DailyAnchorKey("behavior_stop_count"); }
+
+#define PO3_BEHAVIOR_STOP_CODE_NONE       0
+#define PO3_BEHAVIOR_STOP_CODE_LOSSES     1
+#define PO3_BEHAVIOR_STOP_CODE_SLIPPAGE   2
+
 datetime _BehaviorStopUntil() {
    string key = _BehaviorStopKey();
    if(!GlobalVariableCheck(key)) return 0;
    return (datetime)GlobalVariableGet(key);
 }
 
+datetime _BehaviorStopAnchor() {
+   string key = _BehaviorStopAnchorKey();
+   if(!GlobalVariableCheck(key)) return 0;
+   return (datetime)GlobalVariableGet(key);
+}
+
+int _BehaviorStopCode() {
+   string key = _BehaviorStopCodeKey();
+   if(!GlobalVariableCheck(key)) return PO3_BEHAVIOR_STOP_CODE_NONE;
+   return (int)GlobalVariableGet(key);
+}
+
+int _BehaviorStopCount() {
+   string key = _BehaviorStopCountKey();
+   if(!GlobalVariableCheck(key)) return 0;
+   return (int)GlobalVariableGet(key);
+}
+
+string _BehaviorStopCodeName(const int code) {
+   if(code == PO3_BEHAVIOR_STOP_CODE_LOSSES) return "consecutive_losses";
+   if(code == PO3_BEHAVIOR_STOP_CODE_SLIPPAGE) return "bad_slippage_streak";
+   return "unknown";
+}
+
 void _StoreBehaviorStopUntil(const datetime until) {
    GlobalVariableSet(_BehaviorStopKey(), (double)until);
+}
+
+void _StoreBehaviorStopStreak(const datetime anchor, const int code, const int count) {
+   GlobalVariableSet(_BehaviorStopAnchorKey(), (double)anchor);
+   GlobalVariableSet(_BehaviorStopCodeKey(), (double)code);
+   GlobalVariableSet(_BehaviorStopCountKey(), (double)count);
 }
 
 bool _ReadCommonText(const string rel_path, string &out) {
@@ -365,8 +426,11 @@ void _LoadRecentBehaviorTrades(const int limit, datetime &times[], double &rs[],
    }
 }
 
-bool _BehaviorStopTriggered(string &reason) {
+bool _BehaviorStopTriggered(string &reason, datetime &streak_anchor, int &streak_code, int &streak_count) {
    reason = "";
+   streak_anchor = 0;
+   streak_code = PO3_BEHAVIOR_STOP_CODE_NONE;
+   streak_count = 0;
    int loss_limit = MathMax(0, InpStopAfterConsecutiveLosses);
    int slip_limit = MathMax(0, InpStopAfterBadSlippageCount);
    if(loss_limit <= 0 && slip_limit <= 0) return false;
@@ -382,6 +446,12 @@ bool _BehaviorStopTriggered(string &reason) {
    int n = ArraySize(times);
    if(n <= 0) return false;
 
+   // The newest close in the window identifies this streak.  A streak whose
+   // newest close is not newer than the one that already armed the breaker has
+   // been acted on, and re-arming on it would halt trading forever: the stop
+   // itself prevents the new close that would break the streak.
+   datetime acted_anchor = _BehaviorStopAnchor();
+
    if(loss_limit > 0){
       int consec_losses = 0;
       for(int i=0; i<n; i++){
@@ -389,6 +459,10 @@ bool _BehaviorStopTriggered(string &reason) {
          else break;
       }
       if(consec_losses >= loss_limit){
+         if(times[0] <= acted_anchor) return false;
+         streak_anchor = times[0];
+         streak_code = PO3_BEHAVIOR_STOP_CODE_LOSSES;
+         streak_count = consec_losses;
          reason = "consecutive_losses=" + IntegerToString(consec_losses);
          return true;
       }
@@ -401,6 +475,10 @@ bool _BehaviorStopTriggered(string &reason) {
          else if(slips[i] > 0.0) break;
       }
       if(bad_slips >= slip_limit){
+         if(times[0] <= acted_anchor) return false;
+         streak_anchor = times[0];
+         streak_code = PO3_BEHAVIOR_STOP_CODE_SLIPPAGE;
+         streak_count = bad_slips;
          reason = "bad_slippage_streak=" + IntegerToString(bad_slips)
                   + " floor_r=" + DoubleToString(InpBadSlippageRFloor, 2);
          return true;
@@ -707,10 +785,25 @@ bool EnforceGlobalStops(CTrade &trade) {
 
    datetime behavior_stop_until = _BehaviorStopUntil();
    if(behavior_stop_until > now){
-      _RiskLog("behavioral stop active until=" + TimeToString(behavior_stop_until, TIME_DATE|TIME_MINUTES));
+      // State, not an event: EnforceGlobalStops runs every timer tick, and the
+      // bare timestamp form of this line was 139,192 of one tester log's
+      // 231,961 lines while naming neither the trigger nor how long was left.
+      string stop_log = "[behavior_stop] state=active"
+                        + " reason=" + _BehaviorStopCodeName(_BehaviorStopCode())
+                        + " count=" + IntegerToString(_BehaviorStopCount())
+                        + " streak_anchor=" + TimeToString(_BehaviorStopAnchor(), TIME_DATE|TIME_MINUTES)
+                        + " until=" + TimeToString(behavior_stop_until, TIME_DATE|TIME_MINUTES)
+                        + " remaining_min=" + IntegerToString((int)((behavior_stop_until - now) / 60))
+                        + " cooldown_min=" + IntegerToString(MathMax(1, InpBehaviorStopCooldownMin))
+                        + " journal_mode=once_per_state_change";
+      if(stop_log != g_po3_behavior_stop_last_log){
+         _RiskLog(stop_log);
+         g_po3_behavior_stop_last_log = stop_log;
+      }
       _FlattenManagedExposure(trade);
       return true;
    }
+   g_po3_behavior_stop_last_log = "";
 
    datetime day_anchor = 0;
    double balance_anchor = 0.0, equity_anchor = 0.0;
@@ -739,10 +832,18 @@ bool EnforceGlobalStops(CTrade &trade) {
    }
 
    string behavior_reason = "";
-   bool hit_behavioral = _BehaviorStopTriggered(behavior_reason);
+   datetime behavior_streak_anchor = 0;
+   int behavior_streak_code = PO3_BEHAVIOR_STOP_CODE_NONE;
+   int behavior_streak_count = 0;
+   bool hit_behavioral = _BehaviorStopTriggered(behavior_reason, behavior_streak_anchor,
+                                                behavior_streak_code, behavior_streak_count);
    if(hit_behavioral){
       behavior_stop_until = now + MathMax(1, InpBehaviorStopCooldownMin) * 60;
       _StoreBehaviorStopUntil(behavior_stop_until);
+      // Record WHICH streak armed it, so the same historical losses cannot arm
+      // it again once the cooldown expires.
+      _StoreBehaviorStopStreak(behavior_streak_anchor, behavior_streak_code, behavior_streak_count);
+      g_po3_behavior_stop_last_log = "";
    }
 
    if(hit_absolute || hit_daily || hit_behavioral) {

@@ -2,7 +2,7 @@
 description: Fast implementation worker for narrow, well-specified code changes and mechanical refactors.
 
 mode: subagent
-model: opencode-go/qwen3.8-flash
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow

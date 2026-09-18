@@ -545,6 +545,10 @@ def _float_value(name: str, metadata: list[Any], ctx: BuildContext) -> float:
     state = ctx.policy.state_for(ctx.candidate_index)
     approve = state == DECISION_APPROVE
 
+    if name in structured_models.QUALITY_COMPONENT_NAMES:
+        # Contextual quality dimensions agree with the harness decision, so the
+        # authoritative weighted score never manufactures a contradiction.
+        return _clamp_number(ctx, metadata, ctx.policy.quality_score if approve else 2.5)
     risk_like = name.endswith("_risk") or name in ("invalidation_risk", "chop_risk")
     if risk_like:
         return _clamp_number(ctx, metadata, 0.15 if approve else 0.75)

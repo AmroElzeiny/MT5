@@ -644,13 +644,11 @@ input double InpTP1FibExtension      = 1.61;
 input double InpTP1PartialPct        = 0.2;
 
 // --- Deterministic setup floors ---
-input double InpSetupFloorReversal = 30.0;
-input double InpSetupFloorBreaker = 29.0;
-input double InpSetupFloorContinuation = 28.0;
+input double InpSetupFloorReversal = 171.0;
+input double InpSetupFloorBreaker = 170.0;
+input double InpSetupFloorContinuation = 169.0;
 input double InpSetupFloorSession = 28.0;
 input double InpSetupFloorRange = 28.0;
-input double InpSetupFloorTierBExtra = 0.5;
-input double InpSetupFloorTierCExtra = 99.0;
 
 // --- Family-specific gates ---
 input double InpAiScoreFullPO3 = 6.8;
@@ -660,10 +658,10 @@ input double InpAiScoreRange = 7.0;
 input double InpAiScoreFailedBreakout = 7.2;
 input bool   InpGlobalAiScoreAsHardFloor = false;
 
-input double InpSetupFloorFullPO3 = 30.0;
-input double InpSetupFloorMicroPO3 = 30.0;
-input double InpSetupFloorMicroBisiSibi = 29.0;
-input double InpSetupFloorContinuationFamily = 28.0;
+input double InpSetupFloorFullPO3 = 171.0;
+input double InpSetupFloorMicroPO3 = 149.0;
+input double InpSetupFloorMicroBisiSibi = 170.0;
+input double InpSetupFloorContinuationFamily = 169.0;
 input double InpSetupFloorRangeFamily = 28.0;
 input double InpSetupFloorFailedBreakout = 29.0;
 

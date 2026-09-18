@@ -285,6 +285,7 @@ from structured_models import (
     normalize_confidence_band,
     strict_structured_schema,
 )
+import score_verdict_authority as SVA
 
 # Provider selection is a three-way choice.  ``AI_PROVIDER_SELECT`` is the
 # authority; ``AI_USE_REMOTE_API`` remains readable so existing private .env
@@ -588,6 +589,8 @@ class AIGateRuntimeConfig:
     # unaffected -- they never fall back to Muse.  The key keeps its historical
     # name so existing deployments keep their setting.
     opencode_secondary_fallback_enable: bool
+    opencode_fallback_enable: bool
+
     # The Muse fallback leg (replaced deepseek-v4.1-flash in that position on
     # 2026-09-14).  glm-5.3-flash on ``/chat/completions``: ``/responses``
     # answered HTTP 500 for it, ``/chat/completions`` accepted a strict schema.
@@ -678,6 +681,10 @@ class AIGateRuntimeConfig:
         opencode_secondary_fallback_enable_raw = _env_bool(
             env, "OPENCODE_SECONDARY_FALLBACK_ENABLE", True, warnings, safe_default=True
         )
+        opencode_fallback_enable_raw = _env_bool(
+            env, "OPENCODE_FALLBACK_ENABLE", True, warnings, safe_default=True
+        )
+
         # Routing/caching key only -- it cannot change which leg answers, what is
         # sent, or how the answer is validated, so an invalid value is warned and
         # replaced by the documented default rather than failing the selection.
@@ -932,13 +939,15 @@ class AIGateRuntimeConfig:
                 provider_errors.append("OPENCODE_MUSE_FALLBACK_MODEL=missing")
             if endpoint_class(opencode_base_url) == "invalid":
                 provider_errors.append("OPENCODE_GO_BASE_URL=invalid")
-            # The OpenAI leg is not optional in this mode: every OpenCode route
-            # is defined as "OpenCode, then Luna", so a mode without the Luna
-            # credential is a mode whose declared fallback cannot exist.  It
-            # fails closed at configuration time rather than at the first
-            # transport error, when a live request would already be waiting.
-            if not str(env.get("OPENAI_API_KEY") or "").strip():
+            # The Luna leg is declared by OPENCODE_FALLBACK_ENABLE.  When it is
+            # on, a missing credential fails closed at configuration time rather
+            # than at the first transport error.  When it is off, the mode is
+            # OpenCode-only: a failed OpenCode chain is terminal, and the
+            # critical route (which exists only to reach Luna) cannot be enabled.
+            if opencode_fallback_enable_raw and not str(env.get("OPENAI_API_KEY") or "").strip():
                 provider_errors.append("OPENAI_API_KEY=missing_opencode_fallback")
+            if not opencode_fallback_enable_raw and opencode_routing_policy.call_directing:
+                provider_errors.append("OPENCODE_CALL_DIRECTING=requires_fallback")
 
         local_fallback_models: list[str] = []
         for item in _env_lookup(env, ("LOCAL_AI_FALLBACK_MODELS",), "").split(","):
@@ -1167,6 +1176,8 @@ class AIGateRuntimeConfig:
                 max_value=120000,
             ),
             opencode_secondary_fallback_enable=opencode_secondary_fallback_enable_raw,
+            opencode_fallback_enable=opencode_fallback_enable_raw,
+
             opencode_muse_fallback_model=opencode_muse_fallback_model,
             opencode_muse_fallback_reasoning_effort=opencode_muse_fallback_reasoning_effort,
             # max_tokens bounds reasoning and content together on
@@ -1591,8 +1602,9 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
         if not opencode_key:
             return UnavailableProvider("OPENCODE_GO_API_KEY=missing")
         fallback_key = os.environ.get("OPENAI_API_KEY", "").strip()
-        if not fallback_key:
+        if cfg.opencode_fallback_enable and not fallback_key:
             return UnavailableProvider("OPENAI_API_KEY=missing_opencode_fallback")
+
         common = dict(
             circuit_failure_threshold=cfg.provider_circuit_failure_threshold,
             circuit_cooldown_sec=cfg.provider_circuit_cooldown_sec,
@@ -1648,7 +1660,7 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
             # second implementation.  This is the same RemoteAPIProvider the
             # openai_remote selection builds below, with the model, effort and
             # service tier this mode's fallback contract specifies.
-            fallback=RemoteAPIProvider(
+            fallback=(RemoteAPIProvider(
                 api_key=fallback_key,
                 base_url=os.environ.get("OPENAI_BASE_URL", "").strip(),
                 primary_model=cfg.opencode_fallback_model,
@@ -1665,7 +1677,7 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
                 flex_unavailable_max_retries=cfg.flex_unavailable_max_retries,
                 flex_unavailable_cooldown_sec=cfg.flex_unavailable_cooldown_sec,
                 **common,
-            ),
+            ) if cfg.opencode_fallback_enable else None),
             policy=cfg.opencode_routing_policy,
             fallback_service_tier=cfg.opencode_fallback_service_tier,
             secondary_fallback_enable=cfg.opencode_secondary_fallback_enable,
@@ -1677,7 +1689,7 @@ def _build_ai_provider(config: AIGateRuntimeConfig | None = None) -> AIProvider:
         # results the usage ledger never sees -- and the router records one row
         # per logical call.  Nothing reads these records back into a decision.
         attempt_ledger = OpenCodeGoAttemptLedger(path_resolver=bus_attempt_ledger_path)
-        for leg in (routed._muse, routed._muse_fallback, routed._secondary, routed._fallback):
+        for leg in routed._all_legs():
             leg.attempt_observer = attempt_ledger
         routed.call_observer = attempt_ledger
         return routed
@@ -3476,6 +3488,7 @@ _LOCAL_ROLE_TIMEOUT_DEFAULTS: dict[str, float] = {
     "analyst": 900.0,
     "critic": 450.0,
     "adjudicator": 300.0,
+    "score_verdict_arbiter": 300.0,
 }
 
 
@@ -4061,21 +4074,16 @@ def _bind_python_owned_analyst_envelope(
         tp1 = chosen_tp1 if chosen_tp1 > 0.0 else float(candidate.get("tp1") or 0.0)
         tp2 = chosen_tp2 if chosen_tp2 > 0.0 else float(candidate.get("tp2") or 0.0)
         risk_distance = abs(entry - sl)
-        if "is_buy" in candidate:
-            is_buy = bool(candidate.get("is_buy"))
-        else:
-            direction = str(candidate.get("direction") or "").strip().lower()
-            if direction in {"buy", "long"}:
-                is_buy = True
-            elif direction in {"sell", "short"}:
-                is_buy = False
-            elif request_is_buy is not None:
-                is_buy = bool(request_is_buy)
-            else:
-                # A valid structural stop is below entry for buys and above it
-                # for sells.  This is only a compatibility fallback for direct
-                # unit fixtures; production requests always supply is_buy.
-                is_buy = sl < entry
+        # The request-level is_buy is plans[0].is_buy: it describes candidate 0
+        # only.  A request may group buy and sell candidates, so it must never
+        # stand in for another candidate's direction.
+        is_buy = _frozen_candidate_is_buy(
+            candidate,
+            entry=entry,
+            sl=sl,
+            tp2=float(candidate.get("tp2") or 0.0),
+            request_is_buy=request_is_buy if index == 0 else None,
+        )
 
         if not all(math.isfinite(value) for value in (entry, sl, tp1, tp2)):
             raise ValueError(
@@ -4084,6 +4092,10 @@ def _bind_python_owned_analyst_envelope(
         if entry <= 0.0 or sl <= 0.0 or risk_distance <= 0.0:
             raise ValueError(
                 f"deterministic_rr_risk_invalid:candidate_index={index}"
+            )
+        if is_buy is None:
+            raise ValueError(
+                f"deterministic_candidate_direction_unresolved:candidate_index={index}"
             )
         if (is_buy and sl >= entry) or (not is_buy and sl <= entry):
             raise ValueError(
@@ -4407,6 +4419,19 @@ def _score_setup_ai(
     # free-form path vocabulary and the duplicated bulk sections below.
     evidence_catalog = build_evidence_catalog(model_payload)
     model_payload = _compact_model_evidence_payload(model_payload, evidence_catalog)
+    # The analyst judges the CURRENT trade only.  Pattern performance history
+    # (priors, shadow outcomes, analogues) reaches the decision through the
+    # Python-owned required score, never by biasing the analyst's reading.  The
+    # canonical envelope and catalog stay complete for every other consumer.
+    analyst_model_payload, analyst_withheld_ids = SVA.withhold_historical_performance_for_analyst(
+        model_payload
+    )
+    if analyst_withheld_ids:
+        log(
+            "[analyst_evidence_scope] historical_performance_withheld=true"
+            f" request_id={str(payload.get('id') or '')}"
+            f" withheld_catalog_ids={len(analyst_withheld_ids)}"
+        )
     request_identity_hash = str(payload.get("request_identity_hash") or "")
     # One absolute deadline for the whole remaining lifecycle: provider call,
     # validation, envelope construction, and the atomic response write.  It is
@@ -4432,6 +4457,8 @@ THE SETUP FAMILIES AND THEIR THESES. Each candidate carries a setup_taxonomy_enu
 
 WHY THIS MATTERS. These decisions move real capital in a live account that a person depends on for their income. That does not mean you should find reasons to approve; it means the opposite. The cost is asymmetric: a setup you decline costs nothing but a missed opportunity, and another one appears within hours, while a setup you wave through on thin or contradicted evidence costs money that has to be earned back. There is no quota and no expectation that any given batch contains a trade. Approving nothing across an entire session is a normal and correct outcome when the evidence does not support a trade. Your value to this trader is precision and honesty about what the evidence does and does not show, never encouragement, optimism, or the appearance of usefulness. Be the reviewer who protects the account.
 
+QUALITY DIMENSIONS. For every candidate fill quality_components with eight independent 0.0-10.0 judgements, each formed from the evidence for that dimension alone and before you settle the verdict: thesis_coherence (does the setup's own thesis hold together against the supplied market state), sequence_quality (completeness, order and cleanliness of the family's approval event sequence), context_regime_fit (fit between this setup type and the regime, higher-timeframe context and session), entry_location_timing (quality of the entry location inside the FVG, breaker or zone and of its timing), liquidity_target_path (reachability of the supplied feasible target and the obstructions on the way to it), invalidation_quality (structural soundness of the stop and of what would prove the idea wrong), execution_robustness (resilience to spread, cost, slippage and trigger-timing variation), evidence_coherence (internal consistency and completeness of the structured evidence). Every dimension is material: each one feeds a Python-computed quality score that independently affects whether the candidate may trade. The weighting and any eligibility cutoff are Python-owned and deliberately not disclosed; do not guess, target or reverse-engineer them. Score each dimension on its own evidence. Never raise dimensions to support an APPROVE and never lower them to support a REJECT or ABSTAIN; a candidate may legitimately carry strong dimensions with a negative verdict, or weak dimensions with a positive one, and Python resolves such disagreements separately. A dimension above 8.0 should be rare and needs exceptional, cited evidence. llm_quality_score is your own overall estimate, recorded for diagnostics only; it has no authority.
+
 For each candidate return candidate_index and verdict equal to decision_state. Fill thesis_supported, material_contradictions, missing_required_evidence, historical_evidence_state, major_risks, evidence_ref_ids, confidence_band, and summary. Historical evidence state must be SUPPORTIVE, MIXED, ADVERSE, or INSUFFICIENT_SAMPLE. confidence_band must be exactly {" or ".join(CONFIDENCE_BANDS)}. Do not request or reveal hidden chain-of-thought; provide only concise auditable conclusions.
 
 Evidence citation is by integer id only. {analyst_catalog_description(AI_CONFIG.provider_wire_projection)} Every candidate row also contains allowed_evidence_ref_ids: for that candidate, both evidence_ref_ids and veto.evidence_ref_ids may contain only distinct integers copied from that exact list. A candidate may cite its own items and global items; citing another candidate's item is invalid. Never invent an id, never return a path string, and never construct a canonical path yourself: Python owns all canonical paths, value hashes, and authority labels.
@@ -4440,7 +4467,7 @@ Return analytical content only. Python exclusively owns and injects every intern
 
 Structured MT5 fields are primary evidence; chart snapshots are supporting evidence. Missing or failed chart captures are not a rejection when runtime.require_snapshots is false. The field opposing_clearance_score is favorable when high and means a nearby obstruction when low.
 
-Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is mixed, timing/follow-through is unclear, data is incomplete, a prior is statistically weak, target choice is unstable, or the assessed plan may not survive execution. ABSTAIN is never a reduced-risk approval.
+Use decision_state exactly APPROVE, REJECT, or ABSTAIN. ABSTAIN when evidence is mixed, timing/follow-through is unclear, data is incomplete, target choice is unstable, or the assessed plan may not survive execution. ABSTAIN is never a reduced-risk approval.
 
 DECISION STATE CONTRACT. Python validates this per candidate and discards the entire response, including every other candidate, if any one candidate breaks any rule below. Emit each candidate in exactly one of these three shapes and never blend them.
 APPROVE requires verdict=APPROVE, raw_allow=true, thesis_supported=true, veto.enabled=false, veto.code="", veto.evidence_ref_ids=[], veto.reason="", and suggested_risk_multiplier strictly greater than 0.0 and at most 1.0.
@@ -4449,17 +4476,17 @@ ABSTAIN requires verdict=ABSTAIN, raw_allow=false, veto.enabled=false, veto.code
 suggested_risk_multiplier is a position-size hint that only an APPROVE may spend. It is not a confidence score, not a conviction score, and not a quality score. On ABSTAIN it must be the number 0.0 and on REJECT it must be the number 0.0: never 0.9, never 0.95, never 1.0, and never omitted. An ABSTAIN carrying a non-zero suggested_risk_multiplier is the most frequent cause of a discarded response; check every ABSTAIN candidate for this before answering.
 verdict and decision_state must be the identical string on the same candidate. veto.enabled=true is permitted only on a REJECT; a veto attached to an APPROVE or an ABSTAIN is invalid. When veto.enabled=false all three of veto.code, veto.evidence_ref_ids, and veto.reason must be empty.
 
-Score semantics are strict. rule_score is supplied deterministic evidence and must not be returned. llm_quality_score is your 0..10 technical-quality assessment. llm_self_reported_confidence is your uncertainty report, not a probability. Do not return calibrated probability, expected R, blended scores, or transport identity. Never fabricate probability or expected R.
+Score semantics are strict. rule_score is supplied deterministic evidence and must not be returned. llm_quality_score is your own diagnostic 0..10 overall estimate; the authoritative quality score is computed by Python from quality_components. llm_self_reported_confidence is your uncertainty report, not a probability. Do not return calibrated probability, expected R, blended scores, or transport identity. Never fabricate probability or expected R.
 
-Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_ref_ids must list the exact evidence_catalog ids that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, empty evidence_ref_ids, and empty reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. Set suggested_risk_multiplier strictly per the decision state contract above, and never substitute a non-zero size hint where that contract requires exactly 0.0. Each candidate.bucket_prior contains separate global, asset_class, symbol, family, branch, session, killzone, family_symbol, and family_session priors. Use a hierarchy row only when its available field is true. cross_asset_fallback_blocked is authoritative: when prior_applicability is INSUFFICIENT_SAMPLE_FOR_ASSET_CLASS, Gold/metals global or family history is not evidence for FX, indices, energy, or any other asset class and must not support a rejection, abstention, score penalty, or veto. Use the persisted shrunk_estimate, shrinkage_weight, uncertainty, clean sample size, and hierarchy path. Never let a tiny narrow prior override a supported broad parent. Priors are contextual evidence only; a negative supported same-asset hierarchy requires exceptional current evidence and an explicit bucket_prior_override_justification.
+Fill every veto/risk/expectancy field. follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and final_trade_expectancy_score are explicitly uncalibrated diagnostic estimates. They have no direct positive or negative trade authority and crossing a numeric threshold is not a veto. Your negative authority is limited to an identifiable qualitative contradiction, anomaly, missing-data failure, or integrity failure supported by exact structured evidence fields. When veto.enabled=true, veto.code must be exactly one of: ai_veto_missing_mandatory_evidence, ai_veto_structural_contradiction, ai_veto_sequence_contradiction, ai_veto_target_arbitration_incoherent, ai_veto_execution_plan_mismatch, ai_veto_prior_override_unsupported, ai_veto_data_integrity_failure. veto.evidence_ref_ids must list the exact evidence_catalog ids that prove the veto and veto.reason must explain the contradiction concisely. A REJECT requires this evidence-backed veto. Use ABSTAIN, not an invented numeric cutoff, when evidence is merely weak or uncertain. When veto.enabled=false, return empty code, empty evidence_ref_ids, and empty reason. You do not own calibrated probability, empirical expected R, exact entry/SL/TP construction, broker feasibility, final risk size, portfolio authority, or final execution. Set suggested_risk_multiplier strictly per the decision state contract above, and never substitute a non-zero size hint where that contract requires exactly 0.0. Historical performance statistics for patterns (win rates, expectancy, hierarchical priors, analogue and shadow outcomes) are deliberately withheld from this role so the audit stays on the current trade; they influence the system elsewhere. Do not speculate about how a pattern has performed historically and do not become stricter or looser because of an assumed track record. Return historical_evidence_state=INSUFFICIENT_SAMPLE, bucket_prior_override_justification as an empty string, and never use ai_veto_prior_override_unsupported.
 
 Target arbitration rule: when target_choice_menu.arbitration_required is true, do not assume the provisional tp2 is final. Compare keep_current_target, liquidity_target, partial_before_obstacle_then_liquidity, capped_before_obstacle, synthetic_rr_fallback, synthetic_rr_capped_to_max_distance, and reject by filling target_comparison for all choices with usable, reason, risk, and expected_role. target_semantics is authoritative about label meanings: keep_current is the selectable incumbent route, current_underlying_source is the source of that route's price, family_target_policy is a strategy preference, and liquidity_objective_model describes an alternative. These labels are not aliases and differing values are not an integrity conflict. keep_current_target is the target the deterministic engine already selected; when it is marked feasible and no alternative is clearly better, answer chosen_target_model=keep_current with its exact tp2 rather than moving to a different route. You may recommend only an identity and exact price already constructed and marked feasible by the deterministic engine; Python and MQL remain the authority that sanitize and apply it. Never invent or modify target prices. Never choose a target candidate whose feasible_for_tp2=false or whose infeasible_reason is non-empty. Do not choose synthetic_rr_fallback just because an obstacle exists. If configured synthetic_rr_fallback is infeasible because it exceeds max distance, use synthetic_rr_capped_to_max_distance only if it is marked feasible and still passes min RR. If liquidity RR is strong and the blocker is minor or moderate, prefer liquidity_target or partial_before_obstacle_then_liquidity. If TP1 before obstacle is possible and liquidity TP2 remains valid, prefer partial_before_obstacle_then_liquidity. If the blocker is major but capped RR is valid, prefer capped_before_obstacle. Choose raw synthetic_rr_fallback only if liquidity, partial, capped, and capped synthetic choices are all worse and raw synthetic is marked feasible. If choosing any synthetic fallback, provide specific why_not_liquidity_target, why_not_partial_before_obstacle, why_not_capped_before_obstacle, and target_decision_reason. Use target_choice_menu.blocker_features as evidence; do not classify crossed_opposing_imbalance or any obstacle as major/killer by name alone, and never use 7.0 as a default severity. Missing blocker evidence means blocker_class=unknown and blocker_severity=-1 unless you can infer from explicit numeric facts. Fill target_arbitration with arbitration_required, chosen_target_model, chosen_tp1/tp2, chosen_rr1/rr2, rejected_target_models, blocker severity/class/kind, blocker_is_trade_killer, all why_not fields, target_comparison, and target_decision_reason. If no arbitration is required, use arbitration_required=false, chosen_target_model=current_plan, blocker_severity=-1, blocker_class=unknown, and chosen_tp2=plan.tp2.
 
 The deterministic setup taxonomy is evidence, not a model output. UNKNOWN_UNCLASSIFIED is never eligible for assessment or trading.
 
-FIELD BOUNDS. Every bound below is enforced and one violation anywhere discards the whole response. Numeric ranges: llm_quality_score, structure_quality_score, entry_timing_score, and final_trade_expectancy_score are numbers from 0.0 to 10.0; llm_self_reported_confidence, follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and suggested_risk_multiplier are numbers from 0.0 to 1.0; blocker_severity is from -1.0 to 10.0 and is exactly -1 when blocker evidence is absent; candidate_index is a non-negative integer. Maximum text lengths in characters: summary 240, the per-candidate reasons 240, the top-level reasons 240, veto.reason 160, why_not_liquidity_target 160, why_not_partial_before_obstacle 160, why_not_capped_before_obstacle 160, why_not_synthetic_fallback 160, target_decision_reason 160, bucket_prior_override_justification 180, narrative_state 48, blocker_kind 64, blocker_class 24. Aim near 200 characters on summary and reasons so neither can overflow. Maximum list lengths in items: evidence_ref_ids 16 and it must never be empty, material_contradictions 12, missing_required_evidence 12, major_risks 12, veto.evidence_ref_ids 12, rejection_codes 8, invalidation_risks 8, missing_confirmations 8, rejected_target_models 6. historical_evidence_state must be exactly one of {" or ".join(HISTORICAL_EVIDENCE_STATES)}. Return every field on every candidate: a null, an omitted field, or a field not defined in the schema is invalid. Emit plain ASCII, no NaN, and no Infinity.
+FIELD BOUNDS. Every bound below is enforced and one violation anywhere discards the whole response. Numeric ranges: llm_quality_score, structure_quality_score, entry_timing_score, final_trade_expectancy_score, and each of the eight quality_components fields (thesis_coherence, sequence_quality, context_regime_fit, entry_location_timing, liquidity_target_path, invalidation_quality, execution_robustness, evidence_coherence) are numbers from 0.0 to 10.0, and quality_components must contain exactly those eight fields; llm_self_reported_confidence, follow_through_probability, invalidation_risk, chop_risk, cost_risk, symbol_bucket_risk, session_bucket_risk, post_entry_failure_risk, and suggested_risk_multiplier are numbers from 0.0 to 1.0; blocker_severity is from -1.0 to 10.0 and is exactly -1 when blocker evidence is absent; candidate_index is a non-negative integer. Maximum text lengths in characters: summary 240, the per-candidate reasons 240, the top-level reasons 240, veto.reason 160, why_not_liquidity_target 160, why_not_partial_before_obstacle 160, why_not_capped_before_obstacle 160, why_not_synthetic_fallback 160, target_decision_reason 160, bucket_prior_override_justification 180, narrative_state 48, blocker_kind 64, blocker_class 24. Aim near 200 characters on summary and reasons so neither can overflow. Maximum list lengths in items: evidence_ref_ids 16 and it must never be empty, material_contradictions 12, missing_required_evidence 12, major_risks 12, veto.evidence_ref_ids 12, rejection_codes 8, invalidation_risks 8, missing_confirmations 8, rejected_target_models 6. historical_evidence_state must be exactly one of {" or ".join(HISTORICAL_EVIDENCE_STATES)}. Return every field on every candidate: a null, an omitted field, or a field not defined in the schema is invalid. Emit plain ASCII, no NaN, and no Infinity.
 
-Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and selected_candidate_index identifying one item. Assessment order may differ from request order; Python normalizes it by candidate_index. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score is not compressed or capped. Scores above 8 should be rare but must be returned unchanged. Keep text concise ASCII and make the response content strict JSON only. Deliver that JSON exactly as the transport section of this request requires: when the request asks for a downloadable file, the JSON must be written into that attached file rather than typed as chat text."""
+Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_quality={DECISION_QUALITY_FULL_STRUCTURED} as a compatibility alias, one complete candidate_assessments item for every input candidate, and selected_candidate_index identifying one item. Assessment order may differ from request order; Python normalizes it by candidate_index. A selected candidate may be REJECT or ABSTAIN; do not silently select a different candidate to rescue an invalid one. Raw llm_quality_score and quality_components are not compressed or capped; values above 8 should be rare but must be returned unchanged. Keep text concise ASCII and make the response content strict JSON only. Deliver that JSON exactly as the transport section of this request requires: when the request asks for a downloadable file, the JSON must be written into that attached file rather than typed as chat text."""
     snapshot_status = ", ".join(snapshot_notes) if snapshot_notes else "none"
     errors: list[str] = []
     # A single provider call owns its same-provider model fallback and bounded
@@ -4473,7 +4500,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 provider_result = provider.generate_structured(
                     role="analyst",
                     system_prompt=system_msg,
-                    evidence=project_evidence_for_wire(model_payload, AI_CONFIG.provider_wire_projection),
+                    evidence=project_evidence_for_wire(analyst_model_payload, AI_CONFIG.provider_wire_projection),
                     response_schema=ModelAIGateOutput,
                     request_metadata={
                         "request_id": request_id,
@@ -4675,7 +4702,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     repaired_result = provider.generate_structured(
                         role="analyst",
                         system_prompt=repair_prompt,
-                        evidence=project_evidence_for_wire(model_payload, AI_CONFIG.provider_wire_projection),
+                        evidence=project_evidence_for_wire(analyst_model_payload, AI_CONFIG.provider_wire_projection),
                         response_schema=ModelAIGateOutput,
                         request_metadata={
                             "request_id": request_id,
@@ -4846,7 +4873,7 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             repaired_result = provider.generate_structured(
                                 role="analyst",
                                 system_prompt=repair_prompt,
-                                evidence=project_evidence_for_wire(model_payload, AI_CONFIG.provider_wire_projection),
+                                evidence=project_evidence_for_wire(analyst_model_payload, AI_CONFIG.provider_wire_projection),
                                 response_schema=ModelAIGateOutput,
                                 request_metadata={
                                     "request_id": request_id,
@@ -5241,6 +5268,12 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     canonical["selected_target_price"] = chosen_tp2 if chosen_tp2 > 0.0 else float(canonical["selected_target_price"])
                     canonical["tp1"] = chosen_tp1 if chosen_tp1 > 0.0 else float(candidate.get("tp1") or canonical["tp1"])
                     canonical["tp2"] = chosen_tp2 if chosen_tp2 > 0.0 else float(candidate.get("tp2") or canonical["tp2"])
+                    # Python-owned authoritative score from the eight independent
+                    # contextual components.  Missing or out-of-range components
+                    # raise, and the whole response fails closed.
+                    canonical["authoritative_ai_quality_score"] = SVA.compute_authoritative_quality_score(
+                        canonical.get("quality_components")
+                    )
                     quality = float(canonical["llm_quality_score"])
                     blended = max(0.0, min(10.0, 0.72 * rule_value + 0.28 * quality))
                     agreement = max(0.0, min(1.0, 1.0 - abs(rule_value - quality) / 6.0))
@@ -5271,6 +5304,28 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                 selected = next(a for a in assessments if str(a["candidate_hash"]) == selected_hash)
                 selected_index = int(selected["candidate_index"])
                 state = str(selected["decision_state"]).upper()
+                # Required pattern score is resolved independently of the
+                # analyst (who never sees it), then the verdict/score pair is
+                # classified.  Only a contradiction can reach the arbiter.
+                score_threshold, score_identity = _resolve_score_threshold(payload, selected_index)
+                score_matrix = SVA.classify_score_verdict(
+                    state,
+                    float(selected["authoritative_ai_quality_score"]),
+                    score_threshold.required_threshold,
+                )
+                log(
+                    "[score_verdict_matrix]"
+                    f" request_id={request_id}"
+                    f" candidate_index={selected_index}"
+                    f" analyst_verdict={score_matrix.analyst_verdict}"
+                    f" authoritative_score={score_matrix.authoritative_score:.4f}"
+                    f" model_estimated_score={float(selected.get('llm_quality_score') or 0.0):.4f}"
+                    f" required={score_matrix.required_score:.4f}"
+                    f" score_passed={str(score_matrix.score_passed).lower()}"
+                    f" case={score_matrix.case}"
+                    f" contradiction={str(score_matrix.contradiction).lower()}"
+                    f" conflict_type={score_matrix.conflict_type or 'none'}"
+                )
                 multiplier_resolution = resolve_multiplier(
                     selected.get("suggested_risk_multiplier"),
                     present="suggested_risk_multiplier" in selected,
@@ -5433,6 +5488,10 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                             decision.allow or decision.python_final_allow or decision.raw_allow
                         ),
                         "live_workload": bool(_is_live_payload(payload)),
+                        # Matrix cases B/E: the verdict and the score already
+                        # agree on no-trade, so adjudication cannot change it.
+                        "analyst_non_approve_score_gate_failed": score_matrix.case
+                        in {SVA.CASE_B_REJECT_SCORE_FAIL, SVA.CASE_E_ABSTAIN_SCORE_FAIL},
                     },
                     near_deterministic_boundary=False,
                     event_logger=log,
@@ -5569,6 +5628,44 @@ Return decision_quality_tier={DECISION_QUALITY_FULL_STRUCTURED}, response_qualit
                     )
                     if resolver_code not in decision.rejection_codes:
                         decision.rejection_codes.append(resolver_code)
+                _apply_score_verdict_authority(
+                    payload=payload,
+                    provider=provider,
+                    decision=decision,
+                    selected=selected,
+                    matrix=score_matrix,
+                    threshold=score_threshold,
+                    identity=score_identity,
+                    consensus=consensus,
+                    evidence=model_payload,
+                    evidence_catalog=evidence_catalog,
+                    request_metadata={
+                        **_provider_request_metadata(payload, provider, deadline=request_deadline),
+                        "timeout_sec": _provider_role_timeout_sec(
+                            provider,
+                            SVA.ARBITER_ROLE,
+                            _provider_request_metadata(payload, provider)["timeout_sec"],
+                        ),
+                        "request_id": request_id,
+                        "request_identity_hash": request_identity_hash,
+                        "symbol": symbol,
+                        "workload_mode": _payload_workload_mode(payload),
+                        "deadline": request_deadline,
+                        WIRE_PROJECTION_METADATA_KEY: AI_CONFIG.provider_wire_projection,
+                        "non_trading_shadow": bool(
+                            non_authoritative_shadow
+                            or _as_dict(payload.get("shadow_repeat")).get("trading_authority") is False
+                        ),
+                    },
+                    service_tier=service_tier,
+                    flex_used=flex_used,
+                )
+                frozen_request.assert_unchanged(
+                    payload,
+                    stage="after_score_verdict_authority",
+                    provider_call_attempted=True,
+                    http_request_sent=True,
+                )
                 decision.decision_source = "ai_consensus_full_structured"
                 try:
                     if not non_authoritative_shadow:
@@ -5787,6 +5884,10 @@ class Decision:
     analyst_output: Dict[str, Any] | None = None
     critic_output: Dict[str, Any] | None = None
     adjudicator_output: Dict[str, Any] | None = None
+    # AI-side score/verdict authority record (authoritative score, pattern
+    # threshold, decision-matrix case, arbiter resolution).  Python-owned.
+    score_authority: Dict[str, Any] | None = None
+    score_verdict_arbiter_output: Dict[str, Any] | None = None
 
     @property
     def response_quality(self) -> str:
@@ -7068,6 +7169,15 @@ def _cached_decision_schema_miss_reason(
 ) -> str:
     if str(dec_raw.get("decision_schema_version") or "") != AI_DECISION_SCHEMA_VERSION:
         return "cache_miss_due_to_schema_version"
+    # A decision made before the score/verdict authority (or under another
+    # version of it) never carried authoritative components, a frozen pattern
+    # threshold or an arbiter resolution; it is re-evaluated, not replayed.
+    score_authority = dec_raw.get("score_authority")
+    if (
+        not isinstance(score_authority, dict)
+        or score_authority.get("score_authority_contract_version") != SVA.SCORE_AUTHORITY_CONTRACT_VERSION
+    ):
+        return "cache_miss_due_to_schema_version"
     tier = str(dec_raw.get("decision_quality_tier") or "")
     if tier not in {
         DECISION_QUALITY_FULL_STRUCTURED,
@@ -7674,6 +7784,8 @@ class AIDecisionCache:
                         analyst_output=dict(dec_raw.get("analyst_output") or {}),
                         critic_output=dict(dec_raw.get("critic_output") or {}),
                         adjudicator_output=dict(dec_raw.get("adjudicator_output") or {}),
+                        score_authority=dict(dec_raw.get("score_authority") or {}),
+                        score_verdict_arbiter_output=dict(dec_raw.get("score_verdict_arbiter_output") or {}),
                     )
                     return dec, "hit"
                 if item.get("base_signature") == base_signature:
@@ -7889,6 +8001,11 @@ class AIDecisionCache:
                         "analyst_output": dict(decision.analyst_output or {}),
                         "critic_output": dict(decision.critic_output or {}),
                         "adjudicator_output": dict(decision.adjudicator_output or {}),
+                        # The frozen score/verdict resolution travels with the
+                        # decision, so a cache hit never re-resolves the threshold
+                        # and never buys a second arbiter call.
+                        "score_authority": dict(decision.score_authority or {}),
+                        "score_verdict_arbiter_output": dict(decision.score_verdict_arbiter_output or {}),
                     },
                 }
                 row_bytes = (
@@ -7940,13 +8057,64 @@ def _missing_critical_runtime_inputs(payload: Dict[str, Any]) -> list[str]:
     return missing
 
 
+def _frozen_candidate_is_buy(
+    candidate: Mapping[str, Any],
+    *,
+    entry: float,
+    sl: float,
+    tp2: float,
+    request_is_buy: bool | None,
+) -> bool | None:
+    """Direction of one frozen MQL candidate, or ``None`` when unresolvable.
+
+    ``AIGateBridge.BuildRequestJson`` writes the request-level ``is_buy`` from
+    ``plans[0]``, so it describes candidate 0 only; callers pass it for that
+    candidate and ``None`` for every other.  Authority order: the candidate's
+    own ``is_buy``, its own ``direction``, the request direction (candidate 0
+    only), then the candidate's own frozen geometry -- accepted only when the
+    stop and the final target sit on opposite sides of entry.  Contradictory
+    or missing geometry returns ``None`` so the caller fails closed.
+    """
+
+    if candidate.get("is_buy") is not None:
+        return _boolish(candidate.get("is_buy"), False)
+    direction = str(candidate.get("direction") or "").strip().lower()
+    if direction in {"buy", "long"}:
+        return True
+    if direction in {"sell", "short"}:
+        return False
+    if request_is_buy is not None:
+        return bool(request_is_buy)
+    if entry > 0.0 and sl > 0.0 and sl != entry:
+        stop_side_is_buy = sl < entry
+        if tp2 > 0.0 and tp2 != entry and (tp2 > entry) != stop_side_is_buy:
+            return None
+        return stop_side_is_buy
+    return None
+
+
 def _entry_stop_target_values(item: Dict[str, Any], payload: Dict[str, Any]) -> tuple[float, float, float, bool]:
     plan = _as_dict(payload.get("plan"))
     merged = {**plan, **item}
     entry = _floatish(_get_any(merged, ["entry_est", "entry"], 0.0), 0.0)
     sl = _floatish(_get_any(merged, ["sl", "stop_loss", "stop"], 0.0), 0.0)
     tp2 = _floatish(_get_any(merged, ["tp2", "tp", "final_tp"], 0.0), 0.0)
-    is_buy = _boolish(_get_any(merged, ["is_buy"], payload.get("is_buy")), False)
+    # The payload plan is plans[0]; a candidate without an index is that plan.
+    primary = int(_floatish(item.get("candidate_index"), 0.0)) == 0
+    resolved = _frozen_candidate_is_buy(
+        merged,
+        entry=entry,
+        sl=sl,
+        tp2=tp2,
+        request_is_buy=(
+            _boolish(payload.get("is_buy"), False)
+            if primary and payload.get("is_buy") is not None
+            else None
+        ),
+    )
+    # Unresolvable geometry keeps the stop side, so the target-side check in
+    # every caller rejects it; it can never pass as a valid plan.
+    is_buy = resolved if resolved is not None else sl < entry
     return entry, sl, tp2, is_buy
 
 
@@ -9002,8 +9170,372 @@ def effective_llm_quality_score_threshold(payload: Dict[str, Any], chosen_index:
     return max(0.0, min(10.0, threshold)), source
 
 
+# ---------- AI-side score/verdict authority ----------
+
+
+def _score_authority_logs_dir() -> Path:
+    if FILE_BUS_LIFECYCLE is not None:
+        return FILE_BUS_LIFECYCLE.root / "logs"
+    return Path(__file__).resolve().parent / "logs"
+
+
+def _score_authority_telemetry_path() -> Path | None:
+    override = os.getenv("AI_SCORE_VERDICT_TELEMETRY_PATH", "").strip()
+    return Path(override) if override else _score_authority_logs_dir() / "score_verdict_telemetry.jsonl"
+
+
+def _score_authority_outcomes_path() -> Path | None:
+    override = os.getenv("AI_SCORE_VERDICT_OUTCOMES_PATH", "").strip()
+    return Path(override) if override else _score_authority_logs_dir() / "completed_ai_trades.jsonl"
+
+
+def _score_arbiter_memo_path() -> Path | None:
+    override = os.getenv("AI_SCORE_VERDICT_ARBITER_MEMO_PATH", "").strip()
+    return Path(override) if override else _score_authority_logs_dir() / "score_verdict_arbiter_memo.jsonl"
+
+
+SCORE_THRESHOLD_POLICY = SVA.AdaptiveThresholdPolicy.from_env()
+SCORE_PATTERN_STATISTICS = SVA.PatternStatisticsSource(
+    _score_authority_telemetry_path,
+    _score_authority_outcomes_path,
+    SCORE_THRESHOLD_POLICY,
+)
+SCORE_ARBITER_MEMO = SVA.ScoreVerdictArbiterMemo(_score_arbiter_memo_path)
+
+
+def _score_arbiter_approve_risk_multiplier() -> float:
+    """Neutral size hint for an arbiter-created approval.
+
+    The analyst's own hint is 0.0 on REJECT/ABSTAIN by contract.  Risk scaling
+    stays a separate authority, so the arbiter never derives size from the
+    score; the configured neutral value is handed to the deterministic sizing.
+    """
+
+    try:
+        value = float(os.getenv("AI_SCORE_ARBITER_APPROVE_RISK_MULTIPLIER", "1.0"))
+    except (TypeError, ValueError):
+        value = 1.0
+    if not math.isfinite(value):
+        value = 1.0
+    return max(0.01, min(1.0, value))
+
+
+def _score_pattern_identity(payload: Dict[str, Any], chosen_index: int | None) -> Dict[str, str]:
+    family, setup_class, branch = _threshold_identity(payload, chosen_index)
+    cands = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    cand = _candidate_with_index(cands, chosen_index) if chosen_index is not None else {}
+    taxonomy = str((cand or {}).get("setup_taxonomy_enum") or "").strip().upper()
+    return {
+        "setup_family": family,
+        "setup_class": setup_class,
+        "entry_branch": branch,
+        "setup_taxonomy_enum": taxonomy,
+        "pattern_key": taxonomy or (family.upper() if family else "UNKNOWN"),
+    }
+
+
+def _resolve_score_threshold(
+    payload: Dict[str, Any],
+    chosen_index: int | None,
+) -> tuple[SVA.ThresholdResolution, Dict[str, str]]:
+    """Pattern base threshold (configured) + conservative adaptive adjustment."""
+
+    identity = _score_pattern_identity(payload, chosen_index)
+    base, base_source = effective_llm_quality_score_threshold(payload, chosen_index)
+    try:
+        stats = SCORE_PATTERN_STATISTICS.statistics_for(identity["pattern_key"])
+    except Exception as exc:
+        # No statistics means no adaptation: the base threshold still gates.
+        log(
+            "[score_threshold] statistics_unavailable"
+            f" pattern={identity['pattern_key']} error={type(exc).__name__}"
+        )
+        stats = None
+    resolution = SVA.resolve_required_pattern_score(
+        pattern_key=identity["pattern_key"],
+        base_threshold=base,
+        base_source=base_source,
+        stats=stats,
+        policy=SCORE_THRESHOLD_POLICY,
+    )
+    log(
+        "[score_threshold]"
+        f" request_id={str(payload.get('id') or '')}"
+        f" pattern={resolution.pattern_key} base={resolution.base_threshold:.4f}"
+        f" required={resolution.required_threshold:.4f} adjustment={resolution.adjustment:+.4f}"
+        f" samples={int(resolution.statistics.get('sample_size') or 0)}"
+        f" shrinkage_weight={resolution.shrinkage_weight:.4f}"
+        f" source={resolution.source} version={resolution.version}"
+    )
+    return resolution, identity
+
+
+def _demote_for_score_authority(decision: Decision, code: str) -> None:
+    decision.allow = False
+    decision.python_final_allow = False
+    decision.suggested_risk_multiplier = 0.0
+    if decision.decision_state == DECISION_APPROVE:
+        # No assessment-level veto is invented: the selected-assessment
+        # synchronizer canonicalizes a vetoless non-approval to ABSTAIN.
+        decision.decision_state = DECISION_REJECT
+    if decision.rejection_codes is None:
+        decision.rejection_codes = []
+    if code not in decision.rejection_codes:
+        decision.rejection_codes.append(code)
+
+
+def _flip_to_score_arbiter_approval(decision: Decision, selected: Dict[str, Any]) -> None:
+    """Arbiter APPROVE over an analyst REJECT/ABSTAIN (cases D and F).
+
+    The original analyst output is preserved verbatim in
+    ``decision.analyst_output`` and ``decision.score_authority``; the selected
+    authoritative assessment carries the resolved AI-side verdict so the
+    shared Python/MQL assessment contract stays self-consistent.
+    """
+
+    multiplier = _score_arbiter_approve_risk_multiplier()
+    selected.update(
+        {
+            "verdict": DECISION_APPROVE,
+            "decision_state": DECISION_APPROVE,
+            "raw_allow": True,
+            "thesis_supported": True,
+            "veto": {"enabled": False, "code": "", "evidence_fields": [], "reason": ""},
+            "suggested_risk_multiplier": multiplier,
+            "rejection_codes": [],
+            "score_authority_resolution": "score_verdict_arbiter_approve",
+        }
+    )
+    decision.allow = True
+    decision.raw_allow = True
+    decision.model_raw_allow = True
+    decision.python_final_allow = True
+    decision.decision_state = DECISION_APPROVE
+    decision.suggested_risk_multiplier = multiplier
+    decision.veto_enabled = False
+    decision.veto_code = ""
+    decision.veto_evidence_fields = []
+    decision.veto_reason = ""
+    decision.rejection_codes = []
+
+
+def _apply_score_verdict_authority(
+    *,
+    payload: Dict[str, Any],
+    provider: AIProvider,
+    decision: Decision,
+    selected: Dict[str, Any],
+    matrix: SVA.ScoreVerdictMatrix,
+    threshold: SVA.ThresholdResolution,
+    identity: Mapping[str, Any],
+    consensus: Any,
+    evidence: Mapping[str, Any],
+    evidence_catalog: Any,
+    request_metadata: Dict[str, Any],
+    service_tier: str = "",
+    flex_used: bool = False,
+) -> None:
+    """Decision matrix A-F.  Only C, D and F may call the arbiter."""
+
+    critic = dict(getattr(consensus, "critic", None) or {})
+    adjudicator = dict(getattr(consensus, "adjudicator", None) or {})
+    critic_verdict = str(critic.get("verdict") or "").upper()
+    adjudicator_verdict = str(adjudicator.get("verdict") or "").upper()
+    qualitative_blocks = SVA.qualitative_gate_blocks(critic_verdict, adjudicator_verdict)
+    consensus_state = str(getattr(consensus, "decision_state", "") or "").upper()
+    consensus_allow = bool(getattr(consensus, "python_allow", False))
+    analyst_snapshot = dict(decision.analyst_output or selected)
+    record: Dict[str, Any] = {
+        "score_authority_contract_version": SVA.SCORE_AUTHORITY_CONTRACT_VERSION,
+        "authority": "authoritative_ai_side_eligibility",
+        "quality_component_weights_version": SVA.QUALITY_COMPONENT_WEIGHTS_VERSION,
+        "quality_component_weights": dict(SVA.QUALITY_COMPONENT_WEIGHTS),
+        **dict(identity),
+        "analyst_verdict": matrix.analyst_verdict,
+        "quality_components": dict(analyst_snapshot.get("quality_components") or {}),
+        "authoritative_ai_quality_score": matrix.authoritative_score,
+        "model_estimated_quality_score": float(analyst_snapshot.get("llm_quality_score") or 0.0),
+        "model_estimated_quality_score_authority": "diagnostic_only",
+        "required_pattern_score": threshold.required_threshold,
+        "base_threshold": threshold.base_threshold,
+        "base_threshold_source": threshold.base_source,
+        "threshold_adjustment": threshold.adjustment,
+        "threshold_source": threshold.source,
+        "threshold_version": threshold.version,
+        "threshold_policy_hash": threshold.policy_hash,
+        "threshold_shrinkage_weight": threshold.shrinkage_weight,
+        "threshold_statistics": dict(threshold.statistics),
+        "score_passed": matrix.score_passed,
+        "matrix_case": matrix.case,
+        "contradiction": matrix.contradiction,
+        "conflict_type": matrix.conflict_type,
+        "critic_verdict": critic_verdict,
+        "adjudicator_verdict": adjudicator_verdict,
+        "consensus_state": consensus_state,
+        "consensus_allow": consensus_allow,
+        "qualitative_gate_blocks": qualitative_blocks,
+        "arbiter_invoked": False,
+        "arbiter_memo_hit": False,
+        "arbiter_skipped_reason": "",
+        "arbiter_output": {},
+        "arbiter_fingerprint": "",
+        "analyst_rejection_codes": list(analyst_snapshot.get("rejection_codes") or []),
+    }
+    ai_allow = False
+    if matrix.case == SVA.CASE_A_APPROVE_SCORE_PASS:
+        record["arbiter_skipped_reason"] = "no_contradiction_verdict_and_score_agree"
+        ai_allow = consensus_allow
+        final_verdict = DECISION_APPROVE if ai_allow else (consensus_state or DECISION_REJECT)
+    elif matrix.case in {SVA.CASE_B_REJECT_SCORE_FAIL, SVA.CASE_E_ABSTAIN_SCORE_FAIL}:
+        record["arbiter_skipped_reason"] = "no_contradiction_verdict_and_score_agree"
+        final_verdict = DECISION_REJECT if matrix.case == SVA.CASE_B_REJECT_SCORE_FAIL else DECISION_ABSTAIN
+        _demote_for_score_authority(decision, "ai_score_below_pattern_threshold")
+    else:
+        # C: the analyst approved, so the qualitative panel must also approve.
+        # D/F: the analyst verdict is what is contested; the critic (and any
+        # adjudicator) remains an independent AND on an arbiter approval.
+        consensus_permits = consensus_allow if matrix.case == SVA.CASE_C_APPROVE_SCORE_FAIL else not qualitative_blocks
+        if (
+            not consensus_permits
+            and _is_live_payload(payload)
+            and bool(AI_CONFIG.panel_shortcircuit_enable)
+        ):
+            record["arbiter_skipped_reason"] = "qualitative_gate_blocks_outcome_invariant"
+            final_verdict = DECISION_REJECT
+            _demote_for_score_authority(decision, "ai_score_verdict_contradiction_qualitative_block")
+        else:
+            outcome = SVA.run_score_verdict_arbiter(
+                provider=provider,
+                evidence=evidence,
+                evidence_catalog=evidence_catalog,
+                analyst_assessment=analyst_snapshot,
+                matrix=matrix,
+                threshold=threshold,
+                critic=critic,
+                adjudicator=adjudicator,
+                setup_identity=identity,
+                request_metadata=request_metadata,
+                memo=SCORE_ARBITER_MEMO,
+                event_logger=log,
+            )
+            record.update(
+                {
+                    "arbiter_invoked": True,
+                    "arbiter_memo_hit": bool(outcome.memo_hit),
+                    "arbiter_output": dict(outcome.decision),
+                    "arbiter_fingerprint": outcome.fingerprint,
+                }
+            )
+            decision.score_verdict_arbiter_output = dict(outcome.decision)
+            result = outcome.provider_result
+            if result is not None:
+                decision.role_latencies = dict(decision.role_latencies or {})
+                decision.role_latencies[SVA.ARBITER_ROLE] = result.latency_sec
+                decision.provider_retry_counts = dict(decision.provider_retry_counts or {})
+                decision.provider_retry_counts[f"{SVA.ARBITER_ROLE}_transport"] = result.transport_retry_count
+                decision.provider_retry_counts[f"{SVA.ARBITER_ROLE}_schema"] = result.schema_retry_count
+                decision.provider_usage = dict(decision.provider_usage or {})
+                decision.provider_usage[SVA.ARBITER_ROLE] = {
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    "total_tokens": result.total_tokens,
+                    "tokens_per_second": result.tokens_per_second,
+                }
+                try:
+                    log_ai_usage(
+                        source="ai_gate",
+                        operation="trade_gate.provider_neutral_score_verdict_arbiter",
+                        model=result.actual_model,
+                        response=result.raw_response,
+                        request_id=str(request_metadata.get("request_id") or ""),
+                        reasoning_effort=(
+                            AI_CONFIG.reasoning_effort
+                            if result.provider_mode == PROVIDER_MODE_REMOTE
+                            else _opencode_leg_reasoning_effort(result.provider_id)
+                            if result.provider_mode == PROVIDER_MODE_OPENCODE
+                            else ""
+                        ),
+                        max_output_tokens=(
+                            AI_CONFIG.opencode_max_output_tokens
+                            if result.provider_mode == PROVIDER_MODE_OPENCODE
+                            else AI_CONFIG.max_output_tokens
+                        ),
+                        provider_mode=result.provider_mode,
+                        provider_id=result.provider_id,
+                        endpoint_class=result.endpoint_class,
+                        model_fingerprint=result.model_fingerprint,
+                        tokens_per_second=result.tokens_per_second,
+                        estimated_context_tokens=result.estimated_context_tokens,
+                        service_tier=service_tier,
+                        extra={
+                            "symbol": str(payload.get("symbol") or ""),
+                            "role": SVA.ARBITER_ROLE,
+                            "service_tier": service_tier,
+                            "flex_used": flex_used,
+                        },
+                    )
+                except Exception as exc:
+                    log(f"[score_verdict_arbiter] usage_log_failed error={type(exc).__name__}")
+            arbiter_verdict = str(outcome.decision.get("final_verdict") or "")
+            if arbiter_verdict == DECISION_APPROVE and consensus_permits:
+                final_verdict = DECISION_APPROVE
+                ai_allow = True
+                if matrix.case != SVA.CASE_C_APPROVE_SCORE_FAIL:
+                    _flip_to_score_arbiter_approval(decision, selected)
+            else:
+                final_verdict = DECISION_REJECT
+                _demote_for_score_authority(
+                    decision,
+                    "score_verdict_arbiter_reject"
+                    if arbiter_verdict == DECISION_REJECT
+                    else "score_verdict_arbiter_approve_blocked_by_qualitative_gate",
+                )
+    record["final_ai_verdict"] = final_verdict
+    record["ai_side_allow"] = bool(ai_allow and decision.allow)
+    # final_resolver_reason stays the consensus resolver's own enumerated
+    # reason; the matrix case and final AI verdict live in score_authority.
+    decision.score_authority = record
+    log(
+        "[score_verdict_authority]"
+        f" request_id={str(request_metadata.get('request_id') or '')}"
+        f" pattern={record.get('pattern_key')} analyst_verdict={matrix.analyst_verdict}"
+        f" authoritative_score={matrix.authoritative_score:.4f}"
+        f" model_estimated_score={record['model_estimated_quality_score']:.4f}"
+        f" required={threshold.required_threshold:.4f} score_passed={str(matrix.score_passed).lower()}"
+        f" case={matrix.case} contradiction={str(matrix.contradiction).lower()}"
+        f" critic={critic_verdict or 'none'} adjudicator={adjudicator_verdict or 'none'}"
+        f" arbiter_invoked={str(record['arbiter_invoked']).lower()}"
+        f" arbiter_memo_hit={str(record['arbiter_memo_hit']).lower()}"
+        f" arbiter_skipped_reason={record['arbiter_skipped_reason'] or 'none'}"
+        f" final_ai_verdict={final_verdict} ai_side_allow={str(record['ai_side_allow']).lower()}"
+        " authority=authoritative_ai_side_only"
+    )
+
+
+def _write_score_verdict_telemetry(payload: Dict[str, Any], decision: Decision) -> None:
+    record = decision.score_authority if isinstance(decision.score_authority, dict) else {}
+    if not record:
+        return
+    row = SVA.build_telemetry_row(
+        request_id=str(payload.get("id") or ""),
+        symbol=str(payload.get("symbol") or ""),
+        candidate_hash=str(decision.selected_candidate_hash or ""),
+        score_authority=record,
+        python_final_allow=bool(decision.allow and decision.python_final_allow),
+        decision_state=str(decision.decision_state or ""),
+        decision_source=str(decision.decision_source or ""),
+        decided_at=int(payload.get("request_created_sim_time") or payload.get("setup_snapshot_time") or 0) or None,
+    )
+    written = SVA.append_telemetry_row(_score_authority_telemetry_path(), row)
+    log(
+        "[score_verdict_telemetry]"
+        f" request_id={row['request_id']} written={str(written).lower()}"
+        f" case={row['matrix_case']} contradiction={str(bool(row['contradiction'])).lower()}"
+        f" arbiter_invoked={str(row['arbiter_invoked']).lower()}"
+    )
+
+
 def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision, chosen_index: int | None = None) -> Decision:
-    threshold, source = effective_llm_quality_score_threshold(payload, chosen_index)
     family, setup_class, branch = _threshold_identity(payload, chosen_index)
     repeatability = _repeatability_authority_for(
         str(decision.model_version or AI_CONFIG.model),
@@ -9013,9 +9545,33 @@ def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision,
         model_fingerprint=decision.model_fingerprint,
         generation_settings_hash=decision.generation_settings_hash,
     )
-    # Preserve configured values for longitudinal diagnostics. They are not
-    # calibrated and therefore cannot independently approve or reject.
-    passed = float(decision.llm_quality_score) >= threshold
+    record = decision.score_authority if isinstance(decision.score_authority, dict) else {}
+    authoritative = record.get("score_authority_contract_version") == SVA.SCORE_AUTHORITY_CONTRACT_VERSION
+    if authoritative:
+        # The required pattern score and the verdict/score resolution were
+        # frozen when the decision was made; a cache hit or a replay never
+        # re-resolves them against a later threshold.
+        threshold = float(record.get("required_pattern_score") or 0.0)
+        source = str(record.get("threshold_source") or "")
+        passed = bool(record.get("score_passed"))
+        authority = "authoritative_ai_side_gate"
+        score_for_log = float(record.get("authoritative_ai_quality_score") or 0.0)
+        if decision.allow and str(record.get("final_ai_verdict") or "") != DECISION_APPROVE:
+            _demote_for_score_authority(decision, "score_authority_final_verdict_not_approve")
+            decision = _synchronize_selected_assessment_contract(payload, decision)
+    else:
+        threshold, source = effective_llm_quality_score_threshold(payload, chosen_index)
+        passed = float(decision.llm_quality_score) >= threshold
+        authority = "diagnostic_only"
+        score_for_log = float(decision.llm_quality_score)
+        if decision.allow and decision.decision_quality_tier in {
+            DECISION_QUALITY_FULL_STRUCTURED,
+            DECISION_QUALITY_CACHE_FULL_STRUCTURED,
+        }:
+            # A tradeable AI decision without the score authority record was
+            # produced outside the authoritative path: fail closed.
+            _demote_for_score_authority(decision, "score_authority_missing")
+            decision = _synchronize_selected_assessment_contract(payload, decision)
     decision.llm_quality_score_threshold = threshold
     decision.llm_quality_threshold_source = source
     decision.global_llm_quality_as_hard_floor = _boolish(_runtime_inputs(payload).get("global_llm_quality_as_hard_floor"), False)
@@ -9024,20 +9580,20 @@ def _apply_family_ai_threshold_gate(payload: Dict[str, Any], decision: Decision,
         decision.reasons["llm_quality_score_threshold_diagnostic"] = threshold
         decision.reasons["llm_quality_threshold_source"] = source
         decision.reasons["llm_quality_threshold_passed_diagnostic"] = passed
-        decision.reasons["llm_quality_threshold_authority"] = "diagnostic_only"
+        decision.reasons["llm_quality_threshold_authority"] = authority
     elif not decision.llm_quality_reject_reason:
         decision.reasons = {
             "previous_reasons": str(decision.reasons or ""),
             "llm_quality_score_threshold_diagnostic": threshold,
             "llm_quality_threshold_source": source,
             "llm_quality_threshold_passed_diagnostic": passed,
-            "llm_quality_threshold_authority": "diagnostic_only",
+            "llm_quality_threshold_authority": authority,
         }
     log(
         f"[ai_gate] family_threshold family={family or 'unknown'} class={setup_class or 'unknown'} "
-        f"branch={branch or 'unknown'} llm_quality_score={float(decision.llm_quality_score):.2f} threshold={threshold:.2f} "
+        f"branch={branch or 'unknown'} score={score_for_log:.2f} threshold={threshold:.2f} "
         f"source={source} pass={str(passed).lower()} "
-        f"repeatability_status={repeatability.get('status')} authority=diagnostic_only"
+        f"repeatability_status={repeatability.get('status')} authority={authority}"
     )
     return decision
 
@@ -9479,6 +10035,9 @@ def _ai_review_python_identity() -> Dict[str, str]:
         "provider_decision_context_version": PROVIDER_DECISION_CONTEXT_VERSION,
         "provider_wire_projection": str(AI_CONFIG.provider_wire_projection),
         "review_gate_version": REVIEW_GATE_VERSION,
+        # A prior review made under another score/verdict authority contract
+        # never carried authoritative components or arbitration; do not reuse it.
+        "score_authority_contract_version": SVA.SCORE_AUTHORITY_CONTRACT_VERSION,
     }
 
 
@@ -10074,6 +10633,9 @@ def _score_setup_impl(
             f"[ai_cache] store_skipped request_id={str(payload.get('id') or '')} "
             "reason=repeatability_non_authoritative_live_decision"
         )
+    # Learning telemetry for every freshly evaluated trade (never for a cache
+    # replay of an earlier decision, which would double-count it).
+    _write_score_verdict_telemetry(payload, final_decision)
     _record_ai_review_decision(review_verdict, payload, final_decision)
     if frozen_request is not None:
         frozen_request.assert_unchanged(
@@ -11648,6 +12210,12 @@ def process_one(
         "analyst_output": dict(dec.analyst_output or {}),
         "critic_output": dict(dec.critic_output or {}),
         "adjudicator_output": dict(dec.adjudicator_output or {}),
+        # Python-owned AI-side eligibility record: authoritative weighted score,
+        # pattern threshold, decision-matrix case, arbiter resolution.  MQL keeps
+        # final execution authority; llm_quality_score stays the model's
+        # diagnostic estimate exactly as the shared authority manifest states.
+        "score_authority": dict(dec.score_authority or {}),
+        "score_verdict_arbiter_output": dict(dec.score_verdict_arbiter_output or {}),
         "bucket_prior_hash": request_contract["prior_artifact_hash"],
         "calibration_artifact_id": "",
         "request_fingerprint": request_contract["request_fingerprint"],

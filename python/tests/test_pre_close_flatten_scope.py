@@ -200,5 +200,70 @@ class PreCloseEntryBlockScopeTests(unittest.TestCase):
         self.assertIn("PO3TradingFreezeActive(now, reason)", body)
 
 
+class BrokerSessionFlattenSwitchTests(unittest.TestCase):
+    """The broker-session close-out is a second flatten path.
+
+    It used to ignore InpPreCloseFlattenEnable, so switching the flatten off
+    still closed every managed position InpSymbolFlattenBeforeCloseMin minutes
+    before each broker session close, on every instrument class.
+    """
+
+    def setUp(self) -> None:
+        self.risk = _read("Risk.mqh")
+        self.engine = _read("TradeEngine.mqh")
+        self.body = _function_body(self.engine, "_MaintainBrokerSymbolSessionProtection")
+
+    def test_the_flatten_switch_gates_the_broker_session_close_out(self):
+        self.assertIn("if(!InpPreCloseFlattenEnable) return;", self.body)
+        switch = self.body.index("InpPreCloseFlattenEnable")
+        for action in ("OrderDelete(", "PositionClose("):
+            self.assertLess(
+                switch, self.body.index(action), f"{action} is reachable before the switch"
+            )
+
+    def test_the_broker_session_close_out_honours_the_pre_close_scope(self):
+        checks = [
+            m.start()
+            for m in re.finditer(
+                r"PO3SymbolInPreCloseFlattenScope\(symbol, classification\)", self.body
+            )
+        ]
+        self.assertEqual(len(checks), 2, "orders and positions must both consult the scope")
+        self.assertLess(checks[0], self.body.index("OrderDelete("))
+        self.assertLess(checks[1], self.body.index("PositionClose("))
+
+    def test_every_flatten_path_touches_only_this_eas_magic_number(self):
+        """Manual trades and other EAs must survive every close-out."""
+
+        for body, pairs in (
+            (
+                self.body,
+                (
+                    ("OrderMatchesMagic(order_ticket)", "OrderDelete("),
+                    ("PositionMatchesMagic(position_ticket)", "PositionClose("),
+                ),
+            ),
+            (
+                _function_body(self.risk, "_FlattenManagedExposureScoped"),
+                (("PositionMatchesMagic(ticket)", "PositionClose("),),
+            ),
+            (
+                _function_body(self.risk, "_DeleteManagedPendingOrdersScoped"),
+                (("OrderMatchesMagic(ticket)", "OrderDelete("),),
+            ),
+        ):
+            for guard, action in pairs:
+                self.assertIn(guard, body)
+                self.assertLess(body.index(guard), body.index(action))
+
+        for name, field in (
+            ("PositionMatchesMagic", "POSITION_MAGIC"),
+            ("OrderMatchesMagic", "ORDER_MAGIC"),
+        ):
+            self.assertIn(
+                f"{field}) == InpMagicNumber", _function_body(self.risk, name)
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

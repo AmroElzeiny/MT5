@@ -221,10 +221,122 @@ class VetoDecision(StrictStructuredModel):
     reason: str = Field(max_length=160)
 
 
+# ---------------------------------------------------------------------------
+# Contextual quality dimensions (score/verdict authority)
+# ---------------------------------------------------------------------------
+# The analyst judges each dimension independently; Python (never the model)
+# turns them into ``authoritative_ai_quality_score`` with fixed weights owned by
+# ``score_verdict_authority``.  The order here is the order the provider emits
+# them, deliberately BEFORE the verdict fields of the assessment.
+QUALITY_COMPONENT_NAMES: tuple[str, ...] = (
+    "thesis_coherence",
+    "sequence_quality",
+    "context_regime_fit",
+    "entry_location_timing",
+    "liquidity_target_path",
+    "invalidation_quality",
+    "execution_robustness",
+    "evidence_coherence",
+)
+
+
+class ModelQualityComponents(StrictStructuredModel):
+    thesis_coherence: float = Field(ge=0.0, le=10.0)
+    sequence_quality: float = Field(ge=0.0, le=10.0)
+    context_regime_fit: float = Field(ge=0.0, le=10.0)
+    entry_location_timing: float = Field(ge=0.0, le=10.0)
+    liquidity_target_path: float = Field(ge=0.0, le=10.0)
+    invalidation_quality: float = Field(ge=0.0, le=10.0)
+    execution_robustness: float = Field(ge=0.0, le=10.0)
+    evidence_coherence: float = Field(ge=0.0, le=10.0)
+
+
+SCORE_VERDICT_FINAL_VERDICTS: tuple[str, ...] = ("APPROVE", "REJECT")
+SCORE_VERDICT_AUTHORITIES: tuple[str, ...] = ("SCORE", "VERDICT")
+SCORE_ASSESSMENTS: tuple[str, ...] = ("ACCURATE", "OVERSTATED", "UNDERSTATED")
+VERDICT_ASSESSMENTS: tuple[str, ...] = ("ACCURATE", "TOO_PERMISSIVE", "TOO_STRICT")
+SCORE_VERDICT_CONFLICT_TYPES: tuple[str, ...] = (
+    "APPROVE_BELOW_THRESHOLD",
+    "REJECT_ABOVE_THRESHOLD",
+    "ABSTAIN_ABOVE_THRESHOLD",
+)
+SCORE_VERDICT_ARBITER_REASON_CODES: tuple[str, ...] = (
+    "THESIS_SUPPORTED_BY_EVIDENCE",
+    "THESIS_CONTRADICTED_BY_EVIDENCE",
+    "SEQUENCE_COMPLETE",
+    "SEQUENCE_INCOMPLETE",
+    "CONTEXT_REGIME_ALIGNED",
+    "CONTEXT_REGIME_MISALIGNED",
+    "ENTRY_LOCATION_SOUND",
+    "ENTRY_LOCATION_POOR",
+    "TARGET_PATH_CLEAR",
+    "TARGET_PATH_OBSTRUCTED",
+    "INVALIDATION_STRUCTURAL",
+    "INVALIDATION_WEAK",
+    "EXECUTION_ROBUST",
+    "EXECUTION_FRAGILE",
+    "COMPONENT_SCORES_OVERSTATED",
+    "COMPONENT_SCORES_UNDERSTATED",
+    "VERDICT_IGNORED_MATERIAL_WEAKNESS",
+    "VERDICT_OVERWEIGHTED_MINOR_RISK",
+    "CRITIC_OBJECTION_MATERIAL",
+    "CRITIC_OBJECTION_IMMATERIAL",
+    "EVIDENCE_INSUFFICIENT",
+)
+ScoreVerdictArbiterReasonCode = Literal[
+    "THESIS_SUPPORTED_BY_EVIDENCE",
+    "THESIS_CONTRADICTED_BY_EVIDENCE",
+    "SEQUENCE_COMPLETE",
+    "SEQUENCE_INCOMPLETE",
+    "CONTEXT_REGIME_ALIGNED",
+    "CONTEXT_REGIME_MISALIGNED",
+    "ENTRY_LOCATION_SOUND",
+    "ENTRY_LOCATION_POOR",
+    "TARGET_PATH_CLEAR",
+    "TARGET_PATH_OBSTRUCTED",
+    "INVALIDATION_STRUCTURAL",
+    "INVALIDATION_WEAK",
+    "EXECUTION_ROBUST",
+    "EXECUTION_FRAGILE",
+    "COMPONENT_SCORES_OVERSTATED",
+    "COMPONENT_SCORES_UNDERSTATED",
+    "VERDICT_IGNORED_MATERIAL_WEAKNESS",
+    "VERDICT_OVERWEIGHTED_MINOR_RISK",
+    "CRITIC_OBJECTION_MATERIAL",
+    "CRITIC_OBJECTION_IMMATERIAL",
+    "EVIDENCE_INSUFFICIENT",
+]
+
+
+class ModelScoreVerdictArbiterDecision(StrictStructuredModel):
+    """SCORE_VERDICT_ARBITER output: resolves one score/verdict contradiction.
+
+    It never produces a replacement score.  Reasoning fields come first so the
+    verdict is emitted last; Python binds identity and checks coherence.
+    """
+
+    candidate_index: int = Field(ge=0)
+    conflict_type: Literal[
+        "APPROVE_BELOW_THRESHOLD",
+        "REJECT_ABOVE_THRESHOLD",
+        "ABSTAIN_ABOVE_THRESHOLD",
+    ]
+    reason_codes: list[ScoreVerdictArbiterReasonCode] = Field(min_length=1, max_length=6)
+    evidence_ref_ids: list[int] = Field(min_length=1, max_length=16)
+    summary: str = Field(min_length=1, max_length=240)
+    score_assessment: Literal["ACCURATE", "OVERSTATED", "UNDERSTATED"]
+    verdict_assessment: Literal["ACCURATE", "TOO_PERMISSIVE", "TOO_STRICT"]
+    more_accurate_authority: Literal["SCORE", "VERDICT"]
+    final_verdict: Literal["APPROVE", "REJECT"]
+
+
 class ModelCandidateAssessment(StrictStructuredModel):
     """Analytical output only; Python owns all transport and plan identity."""
 
     candidate_index: int = Field(ge=0)
+    # Independent contextual judgements, emitted before any verdict field.
+    quality_components: ModelQualityComponents
+    # The model's own overall estimate: diagnostic only, never authoritative.
     llm_quality_score: float = Field(ge=0.0, le=10.0)
     llm_self_reported_confidence: float = Field(ge=0.0, le=1.0)
     verdict: AnalystDecisionState
@@ -292,6 +404,8 @@ class CandidateAssessment(StrictStructuredModel):
     setup_taxonomy_enum: str = Field(min_length=1, max_length=80)
     taxonomy_mapping_source: str = Field(min_length=1, max_length=80)
     rule_score: float = Field(ge=0.0, le=10.0)
+    quality_components: ModelQualityComponents | None = None
+    authoritative_ai_quality_score: float | None = Field(default=None, ge=0.0, le=10.0)
     llm_quality_score: float = Field(ge=0.0, le=10.0)
     blended_legacy_score: float = Field(ge=0.0, le=10.0)
     legacy_agreement_confidence: float = Field(ge=0.0, le=1.0)
@@ -560,5 +674,6 @@ def all_authoritative_structured_models() -> tuple[type[BaseModel], ...]:
         ModelAIGateOutput,
         ModelCriticDecision,
         ModelAdjudicatorDecision,
+        ModelScoreVerdictArbiterDecision,
         StructuredCapabilityProbe,
     )

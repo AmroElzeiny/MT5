@@ -1585,6 +1585,8 @@ public:
           j += JsonKVStr("fvg_id", c.fvg_id) + ",";
            j += JsonKVStr("candidate_id", c.candidate_id) + ",";
            j += JsonKVStr("candidate_hash", c.candidate_hash) + ",";
+           // The request-level is_buy is plans[0] only; a group may mix directions.
+           j += JsonKVBool("is_buy", c.is_buy) + ",";
            j += JsonKVStr("setup_taxonomy_version", c.setup_taxonomy_version) + ",";
            j += JsonKVStr("setup_taxonomy_enum", c.setup_taxonomy_enum) + ",";
            j += JsonKVStr("taxonomy_mapping_source", c.taxonomy_mapping_source) + ",";

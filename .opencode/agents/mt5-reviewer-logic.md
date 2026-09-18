@@ -1,6 +1,6 @@
 ---
 description: Independent logic reviewer for correctness, contracts, state, compatibility and hidden regressions.
-model: opencode-go/minimax-m3
+model: opencode-go/muse-spark-1.3-contributor
 
 mode: subagent
 permission:

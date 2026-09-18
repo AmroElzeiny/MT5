@@ -11,8 +11,6 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $promptPath = (Resolve-Path $PromptFile).Path
 
 $normalModels = @(
-    "opencode-go/minimax-m3",
-    "opencode-go/qwen3.8-flash",
     "opencode-go/muse-spark-1.3-contributor"
 )
 

@@ -92,9 +92,6 @@ FEATURE_SPECS: List[Dict[str, str]] = [dict(item) for item in EMPIRICAL_PRE_ENTR
 DECISION_MAKER_EDIT_SCOPE: Dict[str, Any] = {
     "runtime_policy_files": {
         "active_policy.json": [
-            "soft_setup_floor",
-            "hard_setup_floor",
-            "setup_floor_penalty_mult",
             "ote_softness_frac",
             "default_risk_multiplier",
             "runner_sequence_floor",
@@ -2320,8 +2317,6 @@ def _change_rate_check(previous: Optional[Dict[str, Any]], current: Dict[str, An
         return {"passed": True, "changed_fields": [], "change_count": 0}
     changed_fields: List[str] = []
     for field in (
-        "soft_setup_floor",
-        "hard_setup_floor",
         "runner_sequence_floor",
         "runner_liquidity_rr_floor",
         "runner_cost_r_ceiling",
@@ -2343,8 +2338,6 @@ def _change_rate_check(previous: Optional[Dict[str, Any]], current: Dict[str, An
 
 
 def _active_policy_step_floor(field: str) -> float:
-    if field in {"soft_setup_floor", "hard_setup_floor"}:
-        return 1.0
     if field in {"runner_sequence_floor", "runner_alignment_floor", "runner_adverse_ceiling"}:
         return 0.20
     if field in {"runner_liquidity_rr_floor", "runner_cost_r_ceiling", "runner_ev_floor"}:
@@ -2367,9 +2360,6 @@ def _step_toward(previous: float, target: float, field: str) -> float:
 
 def _apply_gradual_active_policy(previous: Optional[Dict[str, Any]], current: Dict[str, Any]) -> Dict[str, Any]:
     fields = [
-        "soft_setup_floor",
-        "hard_setup_floor",
-        "setup_floor_penalty_mult",
         "ote_softness_frac",
         "default_risk_multiplier",
         "runner_sequence_floor",
@@ -2497,7 +2487,6 @@ def _derive_active_policy(
         "legacy_setup_score_authority": False,
         "calibrated_probability_authority": False,
         "expected_net_r_authority": False,
-        "setup_floor_penalty_mult": 0.75,
         "ote_softness_frac": 0.08,
         "default_risk_multiplier": round(_clamp(0.9 + overall["avg_r"] * 0.10, 0.75, 1.0), 4),
         "runner_sequence_floor": round(runner_sequence_floor, 4),

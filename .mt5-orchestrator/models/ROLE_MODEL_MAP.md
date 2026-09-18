@@ -4,16 +4,16 @@ The live local OpenCode Go catalog is authoritative.
 
 ## Normal defaults
 
-- Standard supervisor: `opencode-go/minimax-m3`
+- Standard supervisor: `opencode-go/muse-spark-1.3-contributor`
 - Deep supervisor: `opencode-go/muse-spark-1.3-contributor`
 - Explorer / read-heavy mapper: `opencode-go/muse-spark-1.3-contributor`
-- Fast worker: `opencode-go/qwen3.8-flash`
-- Strong worker: `opencode-go/qwen3.8-flash`
-- Test/debug worker: `opencode-go/qwen3.8-flash`
-- Logic reviewer: `opencode-go/minimax-m3`
+- Fast worker: `opencode-go/muse-spark-1.3-contributor`
+- Strong worker: `opencode-go/muse-spark-1.3-contributor`
+- Test/debug worker: `opencode-go/muse-spark-1.3-contributor`
+- Logic reviewer: `opencode-go/muse-spark-1.3-contributor`
 - Adversarial reviewer: `opencode-go/muse-spark-1.3-contributor`
 - Direct read: `opencode-go/muse-spark-1.3-contributor`
-- Direct write: `opencode-go/qwen3.8-flash`
+- Direct write: `opencode-go/muse-spark-1.3-contributor`
 - Vision reviewer: `opencode-go/muse-spark-1.3-contributor`
 
 ## Intent

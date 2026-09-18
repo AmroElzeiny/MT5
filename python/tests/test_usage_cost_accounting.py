@@ -620,7 +620,9 @@ class SinglePricingSourceTests(unittest.TestCase):
 
         source = (ROOT / "ai_gate.py").read_text(encoding="utf-8", errors="ignore")
         sites = _call_argument_blocks(source, "log_ai_usage(")
-        self.assertEqual(len(sites), 4, "call sites moved; re-check this test")
+        # analyst, analyst evidence repair, analyst mapping repair, critic +
+        # adjudicator loop, and the SCORE_VERDICT_ARBITER (score authority).
+        self.assertEqual(len(sites), 5, "call sites moved; re-check this test")
         for index, block in enumerate(sites):
             with self.subTest(site=index):
                 self.assertIn(

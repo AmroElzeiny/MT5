@@ -1,7 +1,7 @@
 ---
 description: Economical supervisor. Decomposes front-end missions, delegates implementation, verifies evidence, and escalates only when required.
 mode: primary
-model: opencode-go/minimax-m3
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow

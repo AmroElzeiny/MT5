@@ -1,7 +1,7 @@
 ---
 description: Generic scoped writer used by the dynamic model runner with a selected normal-cost model.
 mode: all
-model: opencode-go/qwen3.8-flash
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow

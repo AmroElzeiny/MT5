@@ -1,0 +1,71 @@
+﻿ M .mt5-orchestrator/current/DIRECT_MODE.json
+ M .mt5-orchestrator/current/MISSION.md
+ M .mt5-orchestrator/current/RUN.json
+ M .mt5-orchestrator/models/LIVE_MODELS.md
+ M "MT5_PO3_Codex Experts/PO3_AIGate_ScannerEA.ex5"
+ M "MT5_PO3_Codex Experts/PO3_AIGate_ScannerEA.mq5"
+ M "MT5_PO3_Codex Include/AIGateBridge.mqh"
+ M "MT5_PO3_Codex Include/Config.mqh"
+ M "MT5_PO3_Codex Include/Risk.mqh"
+ M "MT5_PO3_Codex Include/TradeEngine.mqh"
+ M "MT5_PO3_Codex Include/Types.mqh"
+ M python/__pycache__/ai_gate.cpython-311.pyc
+ M python/__pycache__/ai_provider.cpython-311.pyc
+ M python/__pycache__/ai_provider.cpython-312.pyc
+ M python/__pycache__/ai_review_gate.cpython-311.pyc
+ M python/__pycache__/ai_review_gate.cpython-312.pyc
+ M python/__pycache__/decision_pipeline.cpython-311.pyc
+ M python/__pycache__/decision_pipeline.cpython-312.pyc
+ M python/__pycache__/expectancy_report.cpython-311.pyc
+ M python/__pycache__/expectancy_report.cpython-312.pyc
+ M python/__pycache__/structured_models.cpython-311.pyc
+ M python/__pycache__/structured_models.cpython-312.pyc
+ M python/ai_gate.py
+ M python/ai_provider.py
+ M python/ai_review_gate.py
+ M python/data/ai_repeatability_artifact.json
+ M python/data/ai_review_state.json
+ M python/data/ai_trade_memory.sqlite3
+ M python/data/artifact_compatibility_report_latest.json
+ M python/data/startup_policy_manifest_latest.json
+ M python/data/unknown_setup_taxonomy.jsonl
+ M python/decision_pipeline.py
+ M python/expectancy_report.py
+ M python/logs/ai_cost_report.jsonl
+ M python/structured_models.py
+ M python/tests/__pycache__/test_authoritative_response_contract.cpython-311-pytest-9.1.1.pyc
+ M python/tests/__pycache__/test_decision_integrity.cpython-311-pytest-9.1.1.pyc
+ M python/tests/__pycache__/test_decision_integrity.cpython-311.pyc
+ M python/tests/__pycache__/test_pre_close_flatten_scope.cpython-311-pytest-9.1.1.pyc
+ M python/tests/__pycache__/test_usage_cost_accounting.cpython-311-pytest-9.1.1.pyc
+ M python/tests/test_authoritative_response_contract.py
+ M python/tests/test_decision_integrity.py
+ M python/tests/test_pre_close_flatten_scope.py
+ M python/tests/test_usage_cost_accounting.py
+ M python/tools/__pycache__/harness_local_provider.cpython-311.pyc
+ M python/tools/__pycache__/verify_v_next_controls.cpython-311.pyc
+ M python/tools/harness_local_provider.py
+ M python/tools/verify_v_next_controls.py
+ M scalp_v2_full.set
+?? .mt5-orchestrator/runs/20260915T222949Z-893df871/
+?? .mt5-orchestrator/runs/20260915T_muse_xhigh_sl_tp_replay/
+?? .mt5-orchestrator/runs/20260916T143638Z-7d4de7b8/
+?? deterministic_edge_only.set
+?? python/__pycache__/score_verdict_authority.cpython-311.pyc
+?? python/__pycache__/score_verdict_authority.cpython-312.pyc
+?? python/score_verdict_authority.py
+?? python/tests/__pycache__/test_behavior_stop_rearm_contract.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_candidate_direction_authority.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_instance_ownership_lease.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_score_verdict_arbiter_fallback.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_score_verdict_authority.cpython-311-pytest-9.1.1.pyc
+?? python/tests/__pycache__/test_score_verdict_authority.cpython-311.pyc
+?? python/tests/__pycache__/test_setup_floor_exact_contract.cpython-311-pytest-9.1.1.pyc
+?? python/tests/test_behavior_stop_rearm_contract.py
+?? python/tests/test_candidate_direction_authority.py
+?? python/tests/test_instance_ownership_lease.py
+?? python/tests/test_score_verdict_arbiter_fallback.py
+?? python/tests/test_score_verdict_authority.py
+?? python/tests/test_setup_floor_exact_contract.py
+?? scalp_v3.set
+?? swing_v3.set

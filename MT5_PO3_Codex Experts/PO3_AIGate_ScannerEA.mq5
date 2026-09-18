@@ -276,6 +276,13 @@ void _EndScan() {
 }
 
 void OnTimer() {
+   // One live instance per account + magic number owns that magic's trades.  A
+   // lost lease means another instance now owns them, so stop before this one
+   // opens, closes or penalises anything.  See CTradeEngine::_ClaimInstanceOwnership.
+   if(!g_engine.MaintainInstanceOwnership()){
+      ExpertRemove();
+      return;
+   }
    if(_TesterLiveAiWaitMode() && !g_tester_live_wait_duration_warning_logged &&
       g_tester_start_sim_time > 0 && InpTesterLiveWaitDebugMaxDurationHours > 0 &&
       TimeCurrent() - g_tester_start_sim_time >

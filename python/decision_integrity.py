@@ -1014,13 +1014,24 @@ def mql_integrity_hash(value: str) -> str:
 
 
 def _mql_canonical_price(value: Any, candidate: Mapping[str, Any]) -> str:
+    # Must reproduce TradeEngine.mqh _CanonicalPrice on IEEE doubles, not on
+    # exact decimals: MQL verifies the fingerprint, so its rounding is the
+    # authority.  A half-tick price such as 0.574785 divides to
+    # 57478.49999999999 in double arithmetic; MathRound takes it down, while
+    # exact-decimal half-up took it up and broke assessed_execution_fingerprint.
     digits = max(0, int(candidate.get("symbol_digits") or 5))
-    tick = Decimal(str(candidate.get("symbol_tick_size") or 0))
-    if tick <= 0:
-        tick = Decimal(1).scaleb(-digits)
-    price = Decimal(str(float(value or 0.0)))
-    rounded = (price / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * tick
-    return f"{rounded:.{digits}f}"
+    tick = float(candidate.get("symbol_tick_size") or 0.0)
+    if tick <= 0.0:
+        tick = 10.0 ** -digits
+    quotient = float(value or 0.0) / tick
+    magnitude = abs(quotient)
+    whole = math.floor(magnitude)
+    steps = whole + 1.0 if magnitude - whole >= 0.5 else whole  # MathRound: half away from zero
+    rounded = math.copysign(steps, quotient) * tick
+    text = f"{rounded:.{digits}f}"
+    if text.startswith("-") and float(text) == 0.0:
+        text = text[1:]
+    return text
 
 
 def assessed_execution_fingerprint(

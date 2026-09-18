@@ -1,0 +1,25 @@
+﻿{
+    "run_id": "20260915T222949Z-893df871",
+    "active_role": "supervisor",
+    "active_model": "opencode-go/qwen3.8-flash",
+    "updated_at_utc": "2026-09-16T01:35:00Z",
+    "completed_work_packages": ["WP1"],
+    "status": "WP1 done",
+    "current_action": "WP1 verified: _FamilySetupFloor adds floor_input + unmapped DBL_MAX (lines 5440-5462), _DeterministicSetupScoreFloor exact floor only (13061-13066), _ApplyPreAiSetupFloor exact gate (6276-6297), _DeterministicExecutionGate uses same floor (13265-13270), pre-AI chokepoint in _QueueCandidateGroup before _PrepareDecisionIdentity (13862-13894), policy loader ignores 3 legacy keys and journals once (804-815), Types.mqh struct fields deleted, Config.mqh floor defaults updated, TierExtra inputs deleted.",
+    "current_work_package": "WP2",
+    "requirements": [
+        {"id": "R1", "status": "PASS", "summary": "_ApplyPreAiSetupFloor rewritten as exact floor gate (TradeEngine.mqh 6276-6297)"},
+        {"id": "R2", "status": "PASS", "summary": "_DeterministicSetupScoreFloor returns exact floor; stale/tier modifiers removed (13061-13066); Config TierExtra inputs deleted"},
+        {"id": "R3", "status": "PASS", "summary": "_DeterministicExecutionGate uses exact floor; soft-penalty relaxation deleted (13265-13270)"},
+        {"id": "R4", "status": "PASS", "summary": "_FamilySetupFloor full family map with session taxonomy check; unmapped -> DBL_MAX (5440-5462)"},
+        {"id": "R5", "status": "PASS", "summary": "Pre-AI chokepoint in _QueueCandidateGroup before _PrepareDecisionIdentity (13862-13894)"},
+        {"id": "R6", "status": "IN_PROGRESS", "summary": "MQL side complete; Python side pending WP2"},
+        {"id": "R7", "status": "PASS", "summary": "Config.mqh floor defaults match deterministic.set (646-666)"},
+        {"id": "R8", "status": "pending", "summary": "New scalp_v3.set pending WP3"},
+        {"id": "R9", "status": "pending", "summary": "New swing_v3.set pending WP3"},
+        {"id": "R10", "status": "pending", "summary": "Focused test pending WP4"},
+        {"id": "R11", "status": "pending", "summary": "Final verification pending WP4"}
+    ],
+    "baseline_commit": "e32f603814d9fe6093fe370c57ba586c0083e9da",
+    "baseline_branch": "main"
+}

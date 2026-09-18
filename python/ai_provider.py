@@ -3992,6 +3992,14 @@ class OpenCodeChatCompletionsProvider(LocalOpenAICompatibleProvider):
         return health
 
 
+# Request-metadata key carrying a caller-owned acceptance check for one logical
+# call.  The router removes it before any leg sees the metadata, runs it on each
+# leg's already schema-validated result, and treats a raise exactly like that
+# leg failing -- so an answer that is well-formed but semantically unusable for
+# the caller walks the same fallback chain as a transport or schema failure.
+ROUTED_RESULT_VALIDATOR_METADATA_KEY = "_routed_result_validator"
+
+
 class OpenCodeRoutedProvider:
     """OpenCode Go with deterministic routing and an ordered fallback chain.
 
@@ -4024,6 +4032,9 @@ class OpenCodeRoutedProvider:
     truthfully reports the leg that answered, and a cache row written by one leg
     is correctly not replayed under another leg's identity.
     """
+
+    # Callers may put a callable under ROUTED_RESULT_VALIDATOR_METADATA_KEY.
+    supports_result_validator = True
 
     def __init__(
         self,
@@ -4083,6 +4094,11 @@ class OpenCodeRoutedProvider:
         """``(leg, is_opencode_leg)`` for a classified importance."""
 
         if importance == IMPORTANCE_CRITICAL:
+            # Without a Luna leg (OPENCODE_FALLBACK_ENABLE=false) there is no
+            # stronger route; configuration refuses directing in that mode, so
+            # this is defensive and keeps the call on OpenCode.
+            if self._fallback is None:
+                return self._muse, True
             return self._fallback, False
         if importance == IMPORTANCE_IMPORTANT:
             return self._secondary, True
@@ -4091,6 +4107,8 @@ class OpenCodeRoutedProvider:
             # levels, and written this way so it stays unreachable: if a fourth
             # level is ever added, an unmapped request takes the STRONGEST route
             # rather than falling through to the cheapest one by accident.
+            if self._fallback is None:
+                return self._muse, True
             return self._fallback, False
         return self._muse, True
 
@@ -4109,6 +4127,8 @@ class OpenCodeRoutedProvider:
 
     def healthcheck(self, *, probe_structured: bool = False) -> ProviderHealth:
         primary = self._default_leg().healthcheck(probe_structured=False)
+        if self._fallback is None:
+            return primary
         fallback = self._fallback.healthcheck(probe_structured=False)
         reasons = [
             f"{name}:{health.reason}"
@@ -4138,7 +4158,7 @@ class OpenCodeRoutedProvider:
         identity["opencode_legs"] = {
             "normal": self._muse.model_for_role(role),
             "important": self._secondary.model_for_role(role),
-            "critical": self._fallback.model_for_role(role),
+            "critical": (self._fallback or self._muse).model_for_role(role),
         }
         return identity
 
@@ -4211,6 +4231,58 @@ class OpenCodeRoutedProvider:
     def _http_status_field(status: int | None) -> str:
         return f" http_status={status}" if status else ""
 
+    @staticmethod
+    def _split_result_validator(
+        request_metadata: Mapping[str, Any],
+    ) -> tuple[Mapping[str, Any], Callable[[ProviderResult], None] | None]:
+        """Remove the caller's acceptance check so no leg ever receives a callable."""
+
+        if ROUTED_RESULT_VALIDATOR_METADATA_KEY not in request_metadata:
+            return request_metadata, None
+        metadata = dict(request_metadata)
+        validator = metadata.pop(ROUTED_RESULT_VALIDATOR_METADATA_KEY)
+        if not callable(validator):
+            raise ValueError("routed_result_validator_not_callable")
+        return metadata, validator
+
+    def _generate_accepted(
+        self,
+        leg: Any,
+        *,
+        result_validator: Callable[[ProviderResult], None] | None,
+        request_id: str,
+        role: str,
+        system_prompt: str,
+        evidence: Mapping[str, Any],
+        response_schema: type,
+        request_metadata: Mapping[str, Any],
+    ) -> ProviderResult:
+        """One leg's answer, accepted only if the caller's check also passes."""
+
+        result = leg.generate_structured(
+            role=role,
+            system_prompt=system_prompt,
+            evidence=evidence,
+            response_schema=response_schema,
+            request_metadata=request_metadata,
+        )
+        if result_validator is not None:
+            try:
+                result_validator(result)
+            except Exception as exc:
+                category, detail, _status = self._failure_fields(exc)
+                self._log(
+                    "[opencode_result_rejected]"
+                    f" request_id={request_id}"
+                    f" role={role}"
+                    f" provider={result.provider_id}"
+                    f" model={result.actual_model}"
+                    f" error_category={category}"
+                    f" reason={detail}"
+                )
+                raise
+        return result
+
     def _fallback_legs_after(self, failed_leg: Any) -> tuple[Any, ...]:
         """Legs still to try, in order, after the routed leg ``failed_leg`` failed.
 
@@ -4220,9 +4292,10 @@ class OpenCodeRoutedProvider:
         back to Muse, and Luna is always the last leg.
         """
 
+        tail = (self._fallback,) if self._fallback is not None else ()
         if failed_leg is self._muse and self._secondary_fallback_enabled:
-            return (self._muse_fallback, self._fallback)
-        return (self._fallback,)
+            return (self._muse_fallback, *tail)
+        return tail
 
     def _fall_back(
         self,
@@ -4237,6 +4310,7 @@ class OpenCodeRoutedProvider:
         importance: str,
         request_id: str,
         started: float,
+        result_validator: Callable[[ProviderResult], None] | None = None,
     ) -> ProviderResult:
         """Walk the fallback chain after an OpenCode leg failed.
 
@@ -4248,7 +4322,19 @@ class OpenCodeRoutedProvider:
         """
 
         hops = self._fallback_legs_after(failed_leg)
-        chain = ">".join(leg.model_for_role(role) for leg in (failed_leg, *hops))
+        if not hops:
+            # OpenCode-only mode: no declared fallback leg, so the failure is
+            # terminal and propagates unchanged (fail closed).
+            self._log(
+                "[opencode_fallback]"
+                f" request_id={request_id}"
+                f" importance={importance}"
+                f" from={failed_leg.provider_id}"
+                f" from_model={failed_leg.model_for_role(role)}"
+                " action=none reason=no_fallback_leg_configured"
+            )
+            raise failure
+        chain =">".join(leg.model_for_role(role) for leg in (failed_leg, *hops))
         deadline = request_metadata.get("deadline")
         for stage, next_leg in enumerate(hops, start=1):
             category, detail, status = self._failure_fields(failure)
@@ -4303,7 +4389,10 @@ class OpenCodeRoutedProvider:
                 if isinstance(legs, list):
                     legs.append(next_leg.provider_id)
             try:
-                result = next_leg.generate_structured(
+                result = self._generate_accepted(
+                    next_leg,
+                    result_validator=result_validator,
+                    request_id=request_id,
                     role=role,
                     system_prompt=system_prompt,
                     evidence=evidence,
@@ -4338,6 +4427,7 @@ class OpenCodeRoutedProvider:
         response_schema: type,
         request_metadata: Mapping[str, Any],
     ) -> ProviderResult:
+        request_metadata, result_validator = self._split_result_validator(request_metadata)
         decision = self.classify(request_metadata, evidence)
         leg, is_opencode = self._leg_for(decision.importance)
         request_id = str(request_metadata.get("request_id") or "")
@@ -4354,6 +4444,7 @@ class OpenCodeRoutedProvider:
                 evidence=evidence,
                 response_schema=response_schema,
                 request_metadata=request_metadata,
+                result_validator=result_validator,
             )
         legs_invoked: list[str] = [leg.provider_id]
         observed_metadata = dict(request_metadata)
@@ -4374,6 +4465,7 @@ class OpenCodeRoutedProvider:
                 evidence=evidence,
                 response_schema=response_schema,
                 request_metadata=observed_metadata,
+                result_validator=result_validator,
             )
             outcome, final_provider = "ok", result.provider_id
             return result
@@ -4408,6 +4500,7 @@ class OpenCodeRoutedProvider:
         evidence: Mapping[str, Any],
         response_schema: type,
         request_metadata: Mapping[str, Any],
+        result_validator: Callable[[ProviderResult], None] | None = None,
     ) -> ProviderResult:
         self._log(
             "[opencode_routing]"
@@ -4424,7 +4517,10 @@ class OpenCodeRoutedProvider:
             request_metadata if is_opencode else self._fallback_metadata(request_metadata)
         )
         try:
-            result = leg.generate_structured(
+            result = self._generate_accepted(
+                leg,
+                result_validator=result_validator,
+                request_id=request_id,
                 role=role,
                 system_prompt=system_prompt,
                 evidence=evidence,
@@ -4459,6 +4555,7 @@ class OpenCodeRoutedProvider:
                 importance=decision.importance,
                 request_id=request_id,
                 started=started,
+                result_validator=result_validator,
             )
         self._log(
             "[opencode_call_completed]"

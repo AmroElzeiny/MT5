@@ -2,7 +2,7 @@
 description: Strong-role worker for multi-file implementation, state/serialization flows, and non-trivial refactors. Uses the same cost-efficient model by default.
 
 mode: subagent
-model: opencode-go/qwen3.8-flash
+model: opencode-go/muse-spark-1.3-contributor
 permission:
   read:
     "*": allow

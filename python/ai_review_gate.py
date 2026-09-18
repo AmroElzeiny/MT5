@@ -1054,7 +1054,12 @@ class ReviewGate:
             candidate = by_index.get(index) if index is not None else None
             if candidate is None or _text(assessment.get("candidate_id")) != candidate.candidate_id:
                 return False, "candidate_assessment_identity_unbound"
-            quality = _finite_float(assessment.get("llm_quality_score"))
+            # The authoritative weighted score is what gates eligibility, so a
+            # "decisive non-approval" is measured on it; the model's own
+            # estimate is used only for assessments recorded before it existed.
+            quality = _finite_float(
+                assessment.get("authoritative_ai_quality_score", assessment.get("llm_quality_score"))
+            )
             threshold = _finite_float(family_threshold(candidate.candidate_index))
             state = _text(assessment.get("decision_state")).upper()
             if quality is None or threshold is None or state not in ("APPROVE", "REJECT", "ABSTAIN"):

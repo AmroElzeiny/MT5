@@ -1903,7 +1903,14 @@ def _expect_threshold_case(
         candidate={"setup_family": family, "setup_class": setup_class or family, "entry_branch": branch},
     )
     decision = _threshold_decision(payload, score)
-    _assert(decision.allow, f"{name}: diagnostic family score must not reject")
+    # Score/verdict authority: a tradeable decision that did not come through
+    # the authoritative path (no frozen score-authority record) fails closed.
+    # The model's own llm_quality_score stays a diagnostic comparison only.
+    _assert(not decision.allow, f"{name}: decision without a score authority record must not trade")
+    _assert(
+        "score_authority_missing" in (decision.rejection_codes or []),
+        f"{name}: missing score authority must be named",
+    )
     _assert(decision.llm_quality_threshold_source == source, f"{name}: source {decision.llm_quality_threshold_source} != {source}")
     _assert(
         decision.llm_quality_threshold_passed is should_pass_threshold,
@@ -1911,12 +1918,34 @@ def _expect_threshold_case(
     )
     _assert(
         "llm_quality_score_below_family_threshold" not in (decision.rejection_codes or []),
-        f"{name}: diagnostic threshold must not create a trading rejection",
+        f"{name}: the model's own estimate must not create a trading rejection",
     )
     _assert(
         isinstance(decision.reasons, dict)
         and decision.reasons.get("llm_quality_threshold_authority") == "diagnostic_only",
         f"{name}: diagnostic authority marker missing",
+    )
+
+
+def _expect_authoritative_threshold_case() -> None:
+    payload = _payload(candidate={"setup_family": "micro_continuation_fvg", "entry_branch": "continuation_reentry"})
+    decision = _full_structured_decision(payload, llm_quality_score=5.0)
+    decision.score_authority = {
+        "score_authority_contract_version": ai_gate.SVA.SCORE_AUTHORITY_CONTRACT_VERSION,
+        "required_pattern_score": 7.3,
+        "threshold_source": "llm_quality_score_continuation+adaptive_insufficient_sample",
+        "score_passed": True,
+        "authoritative_ai_quality_score": 7.6,
+        "final_ai_verdict": "APPROVE",
+    }
+    gated = ai_gate._apply_family_ai_threshold_gate(payload, decision, 0)
+    _assert(gated.allow, "authoritative APPROVE must survive the threshold gate")
+    _assert(gated.llm_quality_score_threshold == 7.3, "frozen required pattern score must be used")
+    _assert(gated.llm_quality_threshold_passed is True, "frozen score pass must be used, not the model estimate")
+    _assert(
+        isinstance(gated.reasons, dict)
+        and gated.reasons.get("llm_quality_threshold_authority") == "authoritative_ai_side_gate",
+        "authoritative threshold marker missing",
     )
 
 
@@ -1944,6 +1973,7 @@ def test_family_ai_thresholds() -> None:
         "llm_quality_score_full_po3+global_floor",
         runtime_overrides={"min_llm_quality_score_trend": 7.5, "llm_quality_score_full_po3": 6.8, "global_llm_quality_as_hard_floor": True},
     )
+    _expect_authoritative_threshold_case()
 
 
 def test_ledger_fixture() -> None:

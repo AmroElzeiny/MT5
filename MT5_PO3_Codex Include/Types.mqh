@@ -451,9 +451,7 @@ struct ActivePolicySnapshot {
    bool     evidence_passed;
    bool     walk_forward_passed;
    bool     change_rate_passed;
-   double   soft_setup_floor;
-   double   hard_setup_floor;
-   double   setup_floor_penalty_mult;
+   // Setup-score floors are owned by the Config.mqh family inputs, never by the active policy.
    double   ote_softness_frac;
    double   default_risk_multiplier;
    double   runner_sequence_floor;

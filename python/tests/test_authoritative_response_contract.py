@@ -1206,8 +1206,14 @@ class AssetClassPriorIsolationTests(unittest.TestCase):
 class EndToEndAuthoritativeResponseTests(unittest.TestCase):
     """A mocked provider returning analysis only must reach FULL_STRUCTURED."""
 
-    def test_python_owned_bucket_prior_reaches_analyst_evidence(self) -> None:
-        """The canonical envelope must not drop the prior during its rebuild."""
+    def test_python_owned_bucket_prior_survives_rebuild_but_is_withheld_from_analyst(self) -> None:
+        """The canonical envelope must not drop the prior during its rebuild.
+
+        Since the score/verdict authority, pattern history reaches the decision
+        only through the Python-owned required score: the analyst's evidence
+        must not carry it, while the canonical envelope (seen by the critic and
+        Python) still does.
+        """
 
         candidates = [candidate(0, "A"), candidate(1, "B")]
 
@@ -1215,10 +1221,15 @@ class EndToEndAuthoritativeResponseTests(unittest.TestCase):
             def __init__(self, rows: list[dict]) -> None:
                 super().__init__(rows)
                 self.analyst_evidence: dict = {}
+                self.critic_evidence: dict = {}
 
             def generate_structured(self, **kwargs: object):
                 if kwargs.get("role") == "analyst":
                     self.analyst_evidence = copy.deepcopy(
+                        kwargs.get("evidence") or {}
+                    )
+                if kwargs.get("role") == "critic":
+                    self.critic_evidence = copy.deepcopy(
                         kwargs.get("evidence") or {}
                     )
                 return super().generate_structured(**kwargs)
@@ -1249,7 +1260,12 @@ class EndToEndAuthoritativeResponseTests(unittest.TestCase):
         rows = provider.analyst_evidence["entry_and_invalidation"]["candidates"]
         self.assertEqual(len(rows), 2)
         for row in rows:
-            self.assertEqual(row["bucket_prior"], expected_prior)
+            self.assertNotIn("bucket_prior", row)
+            self.assertNotIn("shadow_historical_evidence", row)
+        self.assertNotIn("historical_analogues", provider.analyst_evidence)
+        # The prior survived the canonical rebuild: the critic's candidate row,
+        # built from the same envelope, still carries it byte for byte.
+        self.assertEqual(provider.critic_evidence["candidate"]["bucket_prior"], expected_prior)
 
     def test_multi_candidate_response_stays_full_structured(self) -> None:
         candidates = [candidate(0, "A"), candidate(1, "B")]

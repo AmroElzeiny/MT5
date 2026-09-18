@@ -235,9 +235,19 @@ private:
    string m_total_target_validation_reasons[];
    int m_total_target_validation_counts[];
 
+   // Ownership lease: exactly one live instance per account + magic number.
+   // Every position/order filter, the runtime-state scope and the terminal
+   // global variables are keyed by InpMagicNumber, so two instances sharing a
+   // magic are one owner with two managers.  See _ClaimInstanceOwnership.
+   string   m_owner_lease_key;
+   double   m_owner_lease_token;
+   bool     m_owner_lease_held;
+   datetime m_owner_lease_last_heartbeat;
+   bool     m_live_state_restored;
    datetime m_last_positions_tick;
    datetime m_last_penalty_persist;
    datetime m_last_rollover_log;
+   datetime m_last_broker_session_scope_log;
    // Pending limits removed by the rollover trading freeze, awaiting restore.
    TradePlan m_rollover_suspended[];
    datetime m_last_rollover_restore_log;
@@ -791,15 +801,18 @@ private:
          m_active_policy.evidence_passed = JsonGetBool(txt, "evidence_passed", false);
          m_active_policy.walk_forward_passed = JsonGetBool(txt, "walk_forward_passed", false);
          m_active_policy.change_rate_passed = JsonGetBool(txt, "change_rate_passed", false);
-         m_active_policy.soft_setup_floor = JsonGetNumber(txt, "soft_setup_floor", 0.0);
-         m_active_policy.hard_setup_floor = JsonGetNumber(txt, "hard_setup_floor", 0.0);
-         if(JsonHasKey(txt, "setup_floor_penalty_mult")){
-            if(!JsonGetNumberStrict(txt, "setup_floor_penalty_mult", m_active_policy.setup_floor_penalty_mult) ||
-               m_active_policy.setup_floor_penalty_mult < 0.0 || m_active_policy.setup_floor_penalty_mult > 1.0){
-               m_active_policy_schema_valid = false;
-               _Journal("[policy_schema] valid=false section=active reason=setup_floor_penalty_mult_invalid");
-            }
-         } else m_active_policy.setup_floor_penalty_mult = 1.0;
+         // Setup-score floors are owned exclusively by the deterministic
+         // Config.mqh family inputs.  Legacy active-policy floor keys are
+         // ignored (schema stays valid); journal once per load which ones
+         // appeared so a stale producer becomes visible instead of silently
+         // moving a floor.
+         string ignored_floor_fields = "";
+         if(JsonHasKey(txt, "soft_setup_floor")) ignored_floor_fields = "soft_setup_floor";
+         if(JsonHasKey(txt, "hard_setup_floor")) ignored_floor_fields += (StringLen(ignored_floor_fields) > 0 ? "," : "") + "hard_setup_floor";
+         if(JsonHasKey(txt, "setup_floor_penalty_mult")) ignored_floor_fields += (StringLen(ignored_floor_fields) > 0 ? "," : "") + "setup_floor_penalty_mult";
+         if(StringLen(ignored_floor_fields) > 0){
+            _Journal("[policy_schema] section=active ignored_fields=" + ignored_floor_fields + " reason=setup_floor_input_authority");
+         }
          m_active_policy.ote_softness_frac = JsonGetNumber(txt, "ote_softness_frac", InpOteSoftnessFrac);
          bool default_multiplier_present = JsonGetNumberStrict(txt, "default_risk_multiplier", m_active_policy.default_risk_multiplier);
          if(!default_multiplier_present || m_active_policy.default_risk_multiplier < 0.0 || m_active_policy.default_risk_multiplier > 1.0){
@@ -5418,21 +5431,34 @@ private:
       return (StringFind(family, "micro_") == 0);
    }
 
-   double _FamilySetupFloor(const TradePlan &p) const {
-      if(_NormToken(p.entry_branch) == "session_reentry") return InpSetupFloorSession;
-      string family = (StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p));
-      if(family == "full_po3_reversal" || family == "full_po3_continuation") return InpSetupFloorFullPO3;
-      if(family == "micro_po3_reversal") return InpSetupFloorMicroPO3;
-      if(family == "micro_continuation_fvg") return InpSetupFloorContinuationFamily;
-      if(family == "micro_failed_breakout_reclaim") return InpSetupFloorFailedBreakout;
-      if(family == "micro_range_reentry") return InpSetupFloorRangeFamily;
-      if(family == "micro_bisi_sibi_edge") return InpSetupFloorMicroBisiSibi;
+   // Exact per-family setup-score floor.  The configured family number IS the
+   // floor: nothing here raises or lowers it, and no entry branch may bypass
+   // the family lookup (a session_reentry branch whose taxonomy resolves to
+   // FULL_PO3_CONTINUATION must get the full-PO3 floor, not the session one).
+   // Unknown/empty family fails closed with DBL_MAX so every candidate is
+   // rejected until the family is mapped.  floor_input names the authority.
+   double _FamilySetupFloor(const TradePlan &p, string &floor_input) const {
+      floor_input = "";
+      string family = _NormToken(StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p));
+      if(family == "full_po3_reversal" || family == "full_po3_continuation"){ floor_input = "InpSetupFloorFullPO3"; return InpSetupFloorFullPO3; }
+      if(family == "micro_po3_reversal"){ floor_input = "InpSetupFloorMicroPO3"; return InpSetupFloorMicroPO3; }
+      if(family == "micro_continuation_fvg"){ floor_input = "InpSetupFloorContinuationFamily"; return InpSetupFloorContinuationFamily; }
+      if(family == "micro_failed_breakout_reclaim"){ floor_input = "InpSetupFloorFailedBreakout"; return InpSetupFloorFailedBreakout; }
+      if(family == "micro_bisi_sibi_edge"){ floor_input = "InpSetupFloorMicroBisiSibi"; return InpSetupFloorMicroBisiSibi; }
+      if(family == "micro_range_reentry"){
+         if(p.setup_taxonomy == MICRO_SESSION_REENTRY){ floor_input = "InpSetupFloorSession"; return InpSetupFloorSession; }
+         floor_input = "InpSetupFloorRangeFamily"; return InpSetupFloorRangeFamily;
+      }
+      // Legacy family-name fallback only: every taxonomy family is matched
+      // above, so these groups can never shadow a taxonomy floor.
       string group = _FamilyGroup(family);
-      if(group == "reversal") return InpSetupFloorReversal;
-      if(group == "continuation") return InpSetupFloorContinuation;
-      if(group == "edge") return InpSetupFloorBreaker;
-      if(group == "range") return InpSetupFloorRange;
-      return InpSetupFloorRange;
+      if(group == "reversal"){ floor_input = "InpSetupFloorReversal"; return InpSetupFloorReversal; }
+      if(group == "continuation"){ floor_input = "InpSetupFloorContinuation"; return InpSetupFloorContinuation; }
+      if(group == "edge" || group == "breaker"){ floor_input = "InpSetupFloorBreaker"; return InpSetupFloorBreaker; }
+      if(group == "range" || group == "session"){ floor_input = "InpSetupFloorRange"; return InpSetupFloorRange; }
+      if(group == "failed_breakout"){ floor_input = "InpSetupFloorFailedBreakout"; return InpSetupFloorFailedBreakout; }
+      floor_input = "unmapped_family";
+      return DBL_MAX;
    }
 
    double _FamilyLlmQualityFloor(const TradePlan &p) const {
@@ -6242,45 +6268,31 @@ private:
       return true;
    }
 
+   // Exact pre-AI floor gate: setup_score < floor rejects, >= floor passes.
+   // No soft/hard derivation, no score mutation, no InpAiStrict dependence
+   // and no active-policy override (the deterministic family floor is the
+   // single authority).  setup_floor_penalty stays 0.0 and
+   // setup_floor_action is "pass" or "reject" (schema kept stable).
    bool _ApplyPreAiSetupFloor(TradePlan &p, string &reason) {
       reason = "";
-      _LoadActivePolicyIfNeeded();
-      double default_floor = _DeterministicSetupScoreFloor(p);
-      double soft_floor = (m_active_policy.soft_setup_floor > 0.0 ? m_active_policy.soft_setup_floor : MathMax(24.0, default_floor - 5.0));
-      double hard_floor = (m_active_policy.hard_setup_floor > 0.0 ? m_active_policy.hard_setup_floor : MathMax(18.0, soft_floor - 6.0));
-      double mult = (m_active_policy.setup_floor_penalty_mult > 0.0 ? m_active_policy.setup_floor_penalty_mult : 0.75);
-
-      p.setup_floor_score = soft_floor;
+      string floor_input = "";
+      double floor = _DeterministicSetupScoreFloor(p, floor_input);
+      p.setup_floor_score = floor;
       p.setup_floor_penalty = 0.0;
-      p.setup_floor_action = "pass";
-
-      if(p.setup_score < hard_floor){
+      if(p.setup_score < floor){
          p.setup_floor_action = "reject";
-         // Report the floor that actually bound.  Leaving soft_floor here made the
-         // reject line unreadable: the score was compared against hard_floor but the
-         // log showed the (higher) soft floor beside it.
-         p.setup_floor_score = hard_floor;
-         reason = "pre_ai_floor_hard";
+         reason = (floor_input == "unmapped_family" ? "setup_floor_family_unmapped" : "setup_score_below_floor");
          _Journal("[setup_floor_gate] symbol=" + p.symbol
                   + " branch=" + p.entry_branch
                   + " family=" + p.setup_family
+                  + " taxonomy=" + p.setup_taxonomy_enum
                   + " setup_score=" + DoubleToString(p.setup_score, 2)
-                  + " hard_floor=" + DoubleToString(hard_floor, 2)
-                  + " soft_floor=" + DoubleToString(soft_floor, 2)
-                  + " default_floor=" + DoubleToString(default_floor, 2)
-                  + " floor_source=" + (m_active_policy.hard_setup_floor > 0.0 ? "active_policy" : "deterministic_default")
-                  + " action=reject_hard");
+                  + " floor=" + DoubleToString(floor, 2)
+                  + " floor_input=" + floor_input
+                  + " action=reject");
          return false;
       }
-      if(p.setup_score < soft_floor){
-         p.setup_floor_penalty = (soft_floor - p.setup_score) * mult;
-         p.setup_score -= p.setup_floor_penalty;
-         p.setup_floor_action = (InpAiStrict ? "strict_reject" : "soft_penalty");
-         if(InpAiStrict){
-            reason = "pre_ai_floor_strict";
-            return false;
-         }
-      }
+      p.setup_floor_action = "pass";
       return true;
    }
 
@@ -8922,9 +8934,32 @@ private:
       return total;
    }
 
+   // Broker-session close-out.  This is a flatten, so the flatten switch owns
+   // it: before this guard InpPreCloseFlattenEnable=false stopped only the
+   // server-clock sweep, and this path still closed every managed position
+   // InpSymbolFlattenBeforeCloseMin before each broker session close.  It also
+   // honours the same instrument scope as the server-clock sweep.  Ownership is
+   // this EA's magic number plus its own trade metadata, so manual trades and
+   // other EAs are never touched.
+   void _JournalBrokerSessionScopeRetained(const string symbol, const long ticket,
+                                           const string kind, const string classification) {
+      _Journal("[pre_close_scope_retained] symbol=" + symbol
+               + " ticket=" + IntegerToString(ticket)
+               + " kind=" + kind
+               + " source=broker_session_close"
+               + " scope=" + (InpPreCloseFlattenForexOnly ? "forex_pairs_only" : "all_instruments")
+               + " symbol_class=" + classification
+               + " action=out_of_pre_close_scope");
+   }
+
    void _MaintainBrokerSymbolSessionProtection() {
       if(!InpUseBrokerSymbolSessions) return;
+      if(!InpPreCloseFlattenEnable) return;
       datetime now = _NowServerOrLocal();
+      // Runs every tick through the window; a retained position is journalled at
+      // most once a minute instead of once per tick.
+      bool scope_log_due = (m_last_broker_session_scope_log <= 0 || (now - m_last_broker_session_scope_log) >= 60);
+      bool scope_logged = false;
 
       for(int i=OrdersTotal()-1; i>=0; i--){
          ulong order_ticket = OrderGetTicket(i);
@@ -8935,6 +8970,14 @@ private:
          if(!QueryBrokerSymbolSessionSchedule(symbol, now, session_open, session_close,
                                               no_entry_from, flatten_from, next_tradable, schedule_reason)) continue;
          if(flatten_from <= 0 || now < flatten_from || now >= session_close) continue;
+         string classification = "";
+         if(!PO3SymbolInPreCloseFlattenScope(symbol, classification)){
+            if(scope_log_due){
+               _JournalBrokerSessionScopeRetained(symbol, (long)order_ticket, "pending_order", classification);
+               scope_logged = true;
+            }
+            continue;
+         }
          TradePlan meta;
          string comment = OrderGetString(ORDER_COMMENT);
          if(!_LoadTradeMeta(order_ticket, symbol, comment, meta)) continue;
@@ -8967,6 +9010,14 @@ private:
          if(!QueryBrokerSymbolSessionSchedule(symbol, now, session_open, session_close,
                                               no_entry_from, flatten_from, next_tradable, schedule_reason)) continue;
          if(flatten_from <= 0 || now < flatten_from || now >= session_close) continue;
+         string classification = "";
+         if(!PO3SymbolInPreCloseFlattenScope(symbol, classification)){
+            if(scope_log_due){
+               _JournalBrokerSessionScopeRetained(symbol, (long)position_ticket, "position", classification);
+               scope_logged = true;
+            }
+            continue;
+         }
          TradePlan meta;
          string comment = PositionGetString(POSITION_COMMENT);
          string identity_reason = "";
@@ -9005,6 +9056,7 @@ private:
                   + " success=" + (closed ? "true" : "false")
                   + " retcode=" + IntegerToString(meta.broker_flatten_last_retcode));
       }
+      if(scope_logged) m_last_broker_session_scope_log = now;
    }
 
    bool _SymbolEligible(const string symbol) {
@@ -13002,16 +13054,14 @@ private:
       return reward / risk;
    }
 
-   double _DeterministicSetupScoreFloor(const TradePlan &p) const {
-      if(_IsFvgEntryNonTradable(p.fvg_execution_class)) return DBL_MAX;
-      double floor = _FamilySetupFloor(p);
-      if(floor <= 0.0) floor = InpSetupFloorRange;
-      if(p.fvg_execution_class == "stale_fvg") floor = MathMax(InpSetupFloorRange, InpSetupFloorReversal) + 4.0;
-
-      if(!InpRequireConfirmedPO3ForExecution){
-         if(p.po3.context_tier == "B") floor += InpSetupFloorTierBExtra;
-         else if(p.po3.context_tier == "C") floor += InpSetupFloorTierCExtra;
-      }
+   // Returns the exact family floor, unmodified.  No stale-fvg cross-family
+   // override and no context-tier extras: a configured floor may never move.
+   // floor_input carries the authority for the returned value
+   // ("InpSetupFloor...", "unmapped_family" or "fvg_non_tradable").
+   double _DeterministicSetupScoreFloor(const TradePlan &p, string &floor_input) const {
+      floor_input = "";
+      double floor = _FamilySetupFloor(p, floor_input);
+      if(_IsFvgEntryNonTradable(p.fvg_execution_class)){ floor_input = "fvg_non_tradable"; return DBL_MAX; }
       return floor;
    }
 
@@ -13212,10 +13262,8 @@ private:
          reason = "net_reward_after_cost_r_too_low";
          return false;
       }
-      double floor = _DeterministicSetupScoreFloor(p);
-      if(!execution_stage && p.setup_floor_action == "soft_penalty" && !InpAiStrict){
-         floor = MathMax(18.0, p.setup_floor_score - 6.0);
-      }
+      string floor_input = "";
+      double floor = _DeterministicSetupScoreFloor(p, floor_input);
       if(p.setup_score < floor){
          reason = "setup_score=" + DoubleToString(p.setup_score, 2) + "<" + DoubleToString(floor, 2);
          return false;
@@ -13806,6 +13854,44 @@ private:
          return false;
       }
       count = ArraySize(cands);
+      // PRE-AI SETUP-FLOOR CHOKEPOINT.  Single authoritative exact-floor gate
+      // for the whole group.  It must precede _PrepareDecisionIdentity, the
+      // tester-bootstrap dispatch, the tester-cache lookup and every
+      // m_ai.SendRequestCandidates call below, so no sub-floor candidate can
+      // ever reach the AI path.  setup_score is never mutated here.
+      {
+         int kept = 0;
+         for(int i=0; i<count; i++){
+            string cand_floor_input = "";
+            double cand_floor = _DeterministicSetupScoreFloor(cands[i], cand_floor_input);
+            if(cands[i].setup_score >= cand_floor){
+               if(kept != i) cands[kept] = cands[i];
+               kept++;
+               continue;
+            }
+            string cand_reason = (cand_floor_input == "unmapped_family" ? "setup_floor_family_unmapped" : "setup_score_below_floor");
+            _Journal("[setup_floor_gate] stage=pre_ai_queue symbol=" + cands[i].symbol
+                     + " branch=" + cands[i].entry_branch
+                     + " family=" + cands[i].setup_family
+                     + " taxonomy=" + cands[i].setup_taxonomy_enum
+                     + " setup_score=" + DoubleToString(cands[i].setup_score, 2)
+                     + " floor=" + DoubleToString(cand_floor, 2)
+                     + " floor_input=" + cand_floor_input
+                     + " action=reject");
+            _LogSetupReject(cands[i].symbol, "setup_floor", cand_reason,
+                            "stage=pre_ai_queue candidate=" + IntegerToString(cands[i].candidate_index)
+                            + " floor_input=" + cand_floor_input);
+         }
+         if(kept <= 0){
+            _Journal("[setup_floor_gate] stage=pre_ai_queue action=group_dropped candidate_count=0");
+            ArrayResize(cands, 0);
+            return false;
+         }
+         if(kept != count){
+            ArrayResize(cands, kept);
+            count = kept;
+         }
+      }
       for(int i=0; i<count; i++){
          cands[i].candidate_index = i;
          cands[i].candidate_count = count;
@@ -17436,9 +17522,15 @@ public:
 #endif
 
    CTradeEngine(): m_ai(m_bus), m_state(m_bus), m_penalty(m_bus) {
+      m_owner_lease_key = "";
+      m_owner_lease_token = 0.0;
+      m_owner_lease_held = false;
+      m_owner_lease_last_heartbeat = 0;
+      m_live_state_restored = false;
       m_last_positions_tick = 0;
       m_last_penalty_persist = 0;
       m_last_rollover_log = 0;
+      m_last_broker_session_scope_log = 0;
       ArrayResize(m_rollover_suspended, 0);
       m_last_rollover_restore_log = 0;
       m_total_rollover_pending_suspended = 0;
@@ -17469,8 +17561,133 @@ public:
       return m_ai.RuntimeHash();
    }
 
+   int _OwnerLeaseStaleSeconds() const {
+      return MathMax(600, 20 * MathMax(1, InpTimerTickSeconds));
+   }
+
+   string _OwnerLeaseHeartbeatKey() const {
+      return m_owner_lease_key + "_hb";
+   }
+
+   // Two EA instances with different presets must each own only the trades they
+   // opened.  Ownership here is the magic number: every position/order filter,
+   // the runtime-state directory and the terminal global variables are keyed by
+   // InpMagicNumber.  Two live instances sharing one magic therefore reattach,
+   // manage and penalise each other's trades while overwriting one shared state
+   // directory.  Refuse that at startup instead of running it silently.
+   //
+   // The lease is a temporary terminal global variable (cleared when the
+   // terminal closes) claimed by compare-and-swap, plus a wall-clock heartbeat so
+   // an instance that died without OnDeinit is taken over once it goes stale.
+   bool _ClaimInstanceOwnership(string &reason) {
+      m_owner_lease_held = false;
+      if(MQLInfoInteger(MQL_TESTER)){
+         reason = "tester_agent_isolated";
+         return true;
+      }
+      m_owner_lease_key = "PO3_AI_OWNER_" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN))
+                          + "_" + IntegerToString((long)InpMagicNumber);
+      string hb_key = _OwnerLeaseHeartbeatKey();
+      // The token names the chart.  A chart runs one EA at a time, so a lease
+      // still carrying this chart's token belongs to a predecessor on this same
+      // chart that no longer runs -- replaced by an input change, or aborted
+      // mid-OnInit (terminal code -1) before OnDeinit could release it.  That
+      // lease is reclaimed at once instead of blocking the chart for the whole
+      // stale window.
+      m_owner_lease_token = (double)(1 + (long)(((ulong)ChartID() * 2654435761) % 2000000000));
+      int stale_seconds = _OwnerLeaseStaleSeconds();
+      for(int attempt = 0; attempt < 5; attempt++){
+         if(!GlobalVariableCheck(m_owner_lease_key)) GlobalVariableTemp(m_owner_lease_key);
+         if(!GlobalVariableCheck(m_owner_lease_key)){
+            reason = "owner_lease_variable_unavailable";
+            return false;
+         }
+         double holder = GlobalVariableGet(m_owner_lease_key);
+         bool same_chart_predecessor = (holder != 0.0 && holder == m_owner_lease_token);
+         datetime now = TimeLocal();
+         bool takeover = same_chart_predecessor;
+         long holder_age = -1;
+         if(holder != 0.0 && !same_chart_predecessor){
+            datetime last = (GlobalVariableCheck(hb_key) ? (datetime)GlobalVariableGet(hb_key) : 0);
+            holder_age = (last > 0 ? (long)(now - last) : -1);
+            if(last > 0 && holder_age < stale_seconds){
+               reason = "magic_number_owned_by_another_live_instance";
+               Print("[PO3_AIGate] [startup_reject] reason=", reason,
+                     " account=", IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)),
+                     " magic=", IntegerToString((long)InpMagicNumber),
+                     " chart_symbol=", _Symbol,
+                     " holder_heartbeat_age_sec=", IntegerToString(holder_age),
+                     " stale_after_sec=", IntegerToString(stale_seconds),
+                     " fix=give_each_attached_instance_its_own_InpMagicNumber");
+               return false;
+            }
+            takeover = true;
+         }
+         // Heartbeat first: a concurrent claimant then sees a fresh lease and
+         // refuses instead of treating a just-won lease as stale.
+         GlobalVariableSet(hb_key, (double)now);
+         if(!GlobalVariableSetOnCondition(m_owner_lease_key, m_owner_lease_token, holder)) continue;
+         m_owner_lease_held = true;
+         m_owner_lease_last_heartbeat = now;
+         reason = (takeover ? "stale_lease_taken_over" : "lease_claimed");
+         _Journal("[instance_ownership] action=claimed key=" + m_owner_lease_key
+                  + " magic=" + IntegerToString((long)InpMagicNumber)
+                  + " chart_symbol=" + _Symbol
+                  + " preset=" + InpStrategyPreset
+                  + " takeover=" + (takeover ? "true" : "false")
+                  + " previous_heartbeat_age_sec=" + IntegerToString(holder_age)
+                  + " stale_after_sec=" + IntegerToString(stale_seconds));
+         return true;
+      }
+      reason = "owner_lease_contended";
+      Print("[PO3_AIGate] [startup_reject] reason=", reason, " key=", m_owner_lease_key);
+      return false;
+   }
+
+   // Called every timer tick.  False means this instance no longer owns its
+   // magic number and must stop before acting on any trade.
+   bool MaintainInstanceOwnership() {
+      if(MQLInfoInteger(MQL_TESTER)) return true;
+      if(!m_owner_lease_held) return false;
+      double holder = (GlobalVariableCheck(m_owner_lease_key) ? GlobalVariableGet(m_owner_lease_key) : 0.0);
+      if(holder != m_owner_lease_token){
+         bool reclaimed = false;
+         if(holder == 0.0){
+            // The variable was deleted externally and nobody has claimed it yet.
+            if(!GlobalVariableCheck(m_owner_lease_key)) GlobalVariableTemp(m_owner_lease_key);
+            reclaimed = GlobalVariableSetOnCondition(m_owner_lease_key, m_owner_lease_token, 0.0);
+         }
+         if(!reclaimed){
+            m_owner_lease_held = false;
+            _Journal("[instance_ownership] action=lost key=" + m_owner_lease_key
+                     + " own_token=" + DoubleToString(m_owner_lease_token, 0)
+                     + " holder_token=" + DoubleToString(holder, 0)
+                     + " next=expert_remove_without_persisting_state");
+            return false;
+         }
+         _Journal("[instance_ownership] action=reclaimed key=" + m_owner_lease_key
+                  + " reason=owner_lease_variable_missing");
+      }
+      datetime now = TimeLocal();
+      if(now != m_owner_lease_last_heartbeat){
+         GlobalVariableSet(_OwnerLeaseHeartbeatKey(), (double)now);
+         m_owner_lease_last_heartbeat = now;
+      }
+      return true;
+   }
+
+   void _ReleaseInstanceOwnership() {
+      if(MQLInfoInteger(MQL_TESTER) || !m_owner_lease_held) return;
+      m_owner_lease_held = false;
+      // Compare-and-swap back to free: never clears a successor's lease.
+      bool released = GlobalVariableSetOnCondition(m_owner_lease_key, 0.0, m_owner_lease_token);
+      _Journal("[instance_ownership] action=released key=" + m_owner_lease_key
+               + " released=" + (released ? "true" : "false"));
+   }
+
    bool Init() {
       MathSrand((int)TimeLocal());
+      m_live_state_restored = false;
       m_bus = CFileBus(InpBusRoot);
       m_bus.Ensure();
       string replay_identity_reason = "";
@@ -17539,6 +17756,13 @@ public:
       // Give it this run's identity so it cannot inherit another run's losing
       // streak.  See PO3SetBehaviorRuntimeScope in Risk.mqh.
       PO3SetBehaviorRuntimeScope(m_state.RuntimeScope());
+      // Before any runtime state is read or any trade is reattached: a second
+      // live instance on the same account + magic would adopt this magic's
+      // trades and share its state directory.
+      string owner_lease_reason = "";
+      if(!_ClaimInstanceOwnership(owner_lease_reason)){
+         return false;
+      }
 #ifdef PO3_TEST_ORDER_ADAPTER
       // Bind here rather than from the EA so the harness EA can reuse the
       // production EA verbatim instead of maintaining a forked copy of the
@@ -17821,6 +18045,7 @@ public:
       PenaltyState penalty_tmp[];
       if(m_state.LoadPenaltyStates(m_state.PenaltyPath(), penalty_tmp)) { m_penalty.RestoreStates(penalty_tmp); }
       _RecoverManagedExposureOnInit();
+      m_live_state_restored = true;
       _Journal("ENGINE_VERSION=" + ENGINE_VERSION
                + " input_schema=" + ENGINE_INPUT_SCHEMA
                + " htf=" + IntegerToString((int)PO3EffectiveHTF())
@@ -17867,6 +18092,18 @@ public:
 
    void Deinit() {
       bool tester_runtime = (bool)MQLInfoInteger(MQL_TESTER);
+      // An instance refused at startup, displaced by another owner, or stopped
+      // before its state was restored holds empty or foreign state.  Saving it
+      // would overwrite the owning instance's watchlist, pending AI groups and
+      // penalty states in the shared runtime-state directory.
+      if(!tester_runtime && (!m_owner_lease_held || !m_live_state_restored)){
+         _Journal("[instance_ownership] action=deinit_without_persisting"
+                  + " owner_lease_held=" + (m_owner_lease_held ? "true" : "false")
+                  + " live_state_restored=" + (m_live_state_restored ? "true" : "false")
+                  + " magic=" + IntegerToString((long)InpMagicNumber));
+         _ReleaseInstanceOwnership();
+         return;
+      }
       if(tester_runtime){
          // Tester semantics are deliberately non-resumable: the simulated clock
          // and the frozen request snapshot do not survive the run, so a pending
@@ -17917,9 +18154,15 @@ public:
       _PersistResearchQueues();
       _PersistPenaltyStates();
       _PersistRolloverSuspendedPending();
+      // Released only after every write above, so a successor cannot load this
+      // magic's state while it is still being saved.
+      _ReleaseInstanceOwnership();
    }
 
    void HandleTradeTransaction(const MqlTradeTransaction &trans) {
+      // A displaced instance must not write another owner's trade ledger in the
+      // seconds before its next timer tick removes it.
+      if(!MQLInfoInteger(MQL_TESTER) && !m_owner_lease_held) return;
       if(trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
       // Any added deal changes the population the broker-cost estimate is computed
       // from: entry deals carry commission, exit deals carry commission, swap and
@@ -19134,7 +19377,7 @@ public:
                    StringFind(reject_reason, "synthetic_target") >= 0 || StringFind(reject_reason, "structural_stop") >= 0 ||
                    StringFind(reject_reason, "fvg_too_small") >= 0 || StringFind(reject_reason, "broker_distance") >= 0)
                    reject_stage = "plan_price";
-                else if(StringFind(reject_reason, "pre_ai_floor") >= 0 || StringFind(reject_reason, "setup_score") >= 0)
+                else if(StringFind(reject_reason, "setup_score") >= 0 || StringFind(reject_reason, "setup_floor") >= 0)
                    reject_stage = "setup_floor";
                 else if(StringFind(reject_reason, "live_po3") >= 0 || StringFind(reject_reason, "po3") >= 0 ||
                         StringFind(reject_reason, "structure_not") >= 0 || StringFind(reject_reason, "displacement") >= 0)

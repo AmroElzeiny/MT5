@@ -95,6 +95,28 @@ def _analyst_reject_makes_adjudication_pointless(
     return str(analyst_state or "").upper() == DECISION_REJECT
 
 
+def _score_gate_makes_adjudication_pointless(
+    analyst_state: str,
+    request_metadata: Mapping[str, Any],
+) -> bool:
+    """True when a non-approving analyst verdict also fails the score gate.
+
+    Decision-matrix cases B (REJECT + score below the pattern threshold) and E
+    (ABSTAIN + score below it) are agreements, resolved to no-trade without a
+    SCORE_VERDICT_ARBITER call.  The adjudicator cannot create an approval from
+    a non-approving analyst, so for these cases it can only add cost.  Same
+    live-only and enable switches as the other skip rules.
+    """
+
+    if not bool(request_metadata.get("adjudication_skip_enable")):
+        return False
+    if not bool(request_metadata.get("live_workload")):
+        return False
+    if str(analyst_state or "").upper() == DECISION_APPROVE:
+        return False
+    return bool(request_metadata.get("analyst_non_approve_score_gate_failed"))
+
+
 def _dump(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         return dict(value.model_dump())
@@ -447,9 +469,20 @@ def run_qualitative_consensus(
     reject_invariant = requires_adjudication and _analyst_reject_makes_adjudication_pointless(
         analyst_state, request_metadata
     )
-    skip_adjudication = requires_adjudication and (
-        reject_invariant or _adjudication_is_pointless(request_metadata)
+    score_gate_invariant = requires_adjudication and _score_gate_makes_adjudication_pointless(
+        analyst_state, request_metadata
     )
+    skip_adjudication = requires_adjudication and (
+        reject_invariant
+        or score_gate_invariant
+        or _adjudication_is_pointless(request_metadata)
+    )
+    if reject_invariant:
+        skip_rule = "analyst_reject_outcome_invariant"
+    elif score_gate_invariant:
+        skip_rule = "analyst_non_approve_below_score_threshold"
+    else:
+        skip_rule = "hopeless_abstain_below_floor"
     if skip_adjudication and event_logger is not None:
         event_logger(
             "[adjudication_skipped]"
@@ -459,7 +492,7 @@ def run_qualitative_consensus(
             f" critic_verdict={critic_verdict}"
             f" expectancy={float(request_metadata.get('analyst_expectancy_score') or 0.0):.4f}"
             f" floor={float(request_metadata.get('adjudication_skip_floor') or 0.0):.4f}"
-            f" rule={'analyst_reject_outcome_invariant' if reject_invariant else 'hopeless_abstain_below_floor'}"
+            f" rule={skip_rule}"
             " role_skipped=adjudicator critic_ran=true outcome_changed=false"
         )
 
@@ -483,7 +516,11 @@ def run_qualitative_consensus(
             return ConsensusResult(
                 DECISION_ABSTAIN,
                 False,
-                "analyst_abstain_below_adjudication_floor",
+                (
+                    "analyst_abstain_below_score_threshold"
+                    if score_gate_invariant
+                    else "analyst_abstain_below_adjudication_floor"
+                ),
                 critic,
                 {},
                 critic_result,

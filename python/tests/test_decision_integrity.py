@@ -28,6 +28,7 @@ from decision_integrity import (
     validate_candidate_assessment,
     validate_decision_envelope,
 )
+from structured_models import QUALITY_COMPONENT_NAMES
 from tools.verify_broker_fill_capture import CAPTURE_ORIGIN, verify_capture
 
 
@@ -181,6 +182,13 @@ def assessment(cand: dict, *, quality: float = 8.0, state: str = "APPROVE") -> d
         "setup_taxonomy_enum": cand["setup_taxonomy_enum"],
         "taxonomy_mapping_source": cand["taxonomy_mapping_source"],
         "rule_score": 7.2,
+        # Independent contextual judgements.  An approving fixture judges every
+        # dimension at ``quality``; a non-approving one judges them low, so the
+        # verdict and the authoritative score agree unless a test says otherwise.
+        "quality_components": {
+            name: (quality if approve else min(quality, 3.0))
+            for name in QUALITY_COMPONENT_NAMES
+        },
         "llm_quality_score": quality,
         "blended_legacy_score": 1.0,
         "legacy_agreement_confidence": 0.1,
@@ -318,6 +326,29 @@ def broker_fixture() -> tuple[dict, dict, dict, list[dict]]:
 
 
 class DecisionIntegrityTests(unittest.TestCase):
+    def test_assessed_fingerprint_rounds_half_tick_prices_like_mql(self) -> None:
+        """Live NZDUSD approval (2026-09-16 16:20) was rejected by MQL with
+        execution_fingerprint_mismatch: expected 5828C283D2EAB737, received
+        4DC677D454EA1CF8.  0.574785 / 1e-05 is 57478.49999999999 in doubles, so
+        MQL MathRound gives 0.57478 while exact-decimal half-up gave 0.57479."""
+        from decision_integrity import _mql_canonical_price
+
+        fx = {"symbol_digits": 5, "symbol_tick_size": 1e-05}
+        self.assertEqual(_mql_canonical_price(0.574785, fx), "0.57478")
+        self.assertEqual(_mql_canonical_price(0.5760135, fx), "0.57601")
+        self.assertEqual(_mql_canonical_price(0.57326, fx), "0.57326")
+        self.assertEqual(_mql_canonical_price(21457.13, {"symbol_digits": 2, "symbol_tick_size": 0.25}), "21457.25")
+        cand = dict(fx, request_execution_fingerprint="2FD20D358AC2F4C9", candidate_hash="7F68A47094513C0C")
+        assessment = {
+            "selected_target_identity": "keep_current",
+            "entry": 0.574785,
+            "sl": 0.57326,
+            "tp1": 0.5760135,
+            "tp2": 0.57654,
+            "selected_target_price": 0.57654,
+        }
+        self.assertEqual(assessed_execution_fingerprint(cand, assessment), "5828C283D2EAB737")
+
     def test_sparse_live_cohort_preserves_original_mql_indexes(self) -> None:
         rows = [candidate(0, "A"), candidate(2, "C"), candidate(3, "D")]
         frozen = normalize_and_freeze_candidates(rows)
@@ -594,8 +625,22 @@ class DecisionIntegrityTests(unittest.TestCase):
             "prompt_contract_version": AI_PROMPT_CONTRACT_VERSION,
             "chosen_target_model": "liquidity_target",
             "target_comparison": comparison,
+            # Current cache contract: every stored decision carries its frozen
+            # score/verdict authority record.
+            "score_authority": {
+                "score_authority_contract_version": ai_gate.SVA.SCORE_AUTHORITY_CONTRACT_VERSION,
+                "final_ai_verdict": item["decision_state"],
+            },
         }
         self.assertEqual(ai_gate._cached_decision_schema_miss_reason(cached), "")
+        # A decision stored before (or under another version of) the score
+        # authority is re-evaluated, never replayed.
+        legacy = dict(cached)
+        legacy.pop("score_authority")
+        self.assertEqual(
+            ai_gate._cached_decision_schema_miss_reason(legacy),
+            "cache_miss_due_to_schema_version",
+        )
         cached["candidate_assessments"][0].pop("cost_risk")
         self.assertEqual(
             ai_gate._cached_decision_schema_miss_reason(cached),

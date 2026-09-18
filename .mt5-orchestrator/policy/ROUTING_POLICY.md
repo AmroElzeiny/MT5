@@ -9,7 +9,7 @@ Routing is cost-first, speed-aware, capability-gated and evidence-driven.
 
 ## Standard
 
-Default supervisor: `opencode-go/minimax-m3`
+Default supervisor: `opencode-go/muse-spark-1.3-contributor`
 
 Use for:
 - normal repository work;
@@ -58,10 +58,10 @@ Deep tier does not justify expensive models.
 ## Role defaults
 
 - Explorer: `opencode-go/muse-spark-1.3-contributor`
-- Fast worker: `opencode-go/qwen3.8-flash`
-- Strong worker: `opencode-go/qwen3.8-flash`
-- Test/debug: `opencode-go/qwen3.8-flash`
-- Logic reviewer: `opencode-go/minimax-m3`
+- Fast worker: `opencode-go/muse-spark-1.3-contributor`
+- Strong worker: `opencode-go/muse-spark-1.3-contributor`
+- Test/debug: `opencode-go/muse-spark-1.3-contributor`
+- Logic reviewer: `opencode-go/muse-spark-1.3-contributor`
 - Adversarial reviewer: `opencode-go/muse-spark-1.3-contributor`
 - Vision: `opencode-go/muse-spark-1.3-contributor` only for actual visual acceptance
 
