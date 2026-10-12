@@ -3584,11 +3584,22 @@ private:
       return false;
    }
 
-   string _NormToken(string value) const {
-      value = _TrimCopy(value);
-      StringToLower(value);
-      return value;
-   }
+    string _NormToken(string value) const {
+       value = _TrimCopy(value);
+       StringToLower(value);
+       return value;
+    }
+
+    // Strip the "_rrcap" price-overlay marker for identity comparisons. The cap
+    // changes the target PRICE, never the route: a capped label and its base name
+    // the same structural choice, so exact string equality would report a
+    // SEMANTIC_PLAN_CHANGED on an identical route. Single owner for the marker
+    // spelling (also appended in _EnforceTargetRRCap / _ReapplyRRCapMarker).
+    string _StripRRCapMarker(const string value) const {
+       string v = _NormToken(value);
+       StringReplace(v, "_rrcap", "");
+       return v;
+    }
 
    string _ExclusiveModelName() const {
       return "breaker_retest_virgin_strong_origin";
@@ -3762,20 +3773,39 @@ private:
               StringFind(v, "synthetic_rr_capped") >= 0);
    }
 
-   bool _TokenIsCappedTarget(const string value) const {
-      string v = _NormToken(value);
-      return (v == "capped_before_obstacle" ||
-              v == "ai_selected_capped_before_obstacle" ||
-              StringFind(v, "capped_before") >= 0 ||
-              StringFind(v, "cap_before") >= 0);
-   }
+    bool _TokenIsCappedTarget(const string value) const {
+       string v = _NormToken(value);
+       return (v == "capped_before_obstacle" ||
+               v == "ai_selected_capped_before_obstacle" ||
+               StringFind(v, "capped_before") >= 0 ||
+               StringFind(v, "cap_before") >= 0);
+    }
 
-   bool _TokenIsPartialThenLiquidity(const string value) const {
-      string v = _NormToken(value);
-      return (v == "partial_before_obstacle_then_liquidity" ||
-              v == "partial_then_liquidity" ||
-              v == "ai_selected_partial_then_liquidity");
-   }
+    bool _TokenIsLiquidityTarget(const string value) const {
+       string v = _NormToken(value);
+       // Substring match, mirroring Python _target_model_aliases ("liquidity" in m).
+       // The exact-match form used to be enough because no suffix was ever appended;
+       // the "_rrcap" price-overlay marker would otherwise silently drop a capped
+       // liquidity route out of its family in the max-distance exemption below.
+       // A marker is not a different route.
+       if(StringFind(v, "liquidity") >= 0) return true;
+       return (v == "liquidity_target" ||
+               v == "ai_selected_liquidity_target");
+    }
+
+    bool _TokenIsPartialThenLiquidity(const string value) const {
+       string v = _NormToken(value);
+       // R1: substring match, mirroring Python _target_model_aliases ("partial_before_obstacle"
+       // in m or "partial_then_liquidity" in m). The exact-match form used to be enough because
+       // no suffix was ever appended; the "_rrcap" price-overlay marker would otherwise silently
+       // drop a capped partial route out of its family in _NormalizeTargetLabels, validation and
+       // arbitration classification. A marker is not a different route.
+       if(StringFind(v, "partial_before_obstacle") >= 0) return true;
+       if(StringFind(v, "partial_then_liquidity") >= 0) return true;
+       return (v == "partial_before_obstacle_then_liquidity" ||
+               v == "partial_then_liquidity" ||
+               v == "ai_selected_partial_then_liquidity");
+    }
 
    bool _PlanUsesSyntheticFallback(const TradePlan &p) const {
       return (_TokenIsSyntheticFallback(p.ai_chosen_target_model) ||
@@ -5049,8 +5079,10 @@ private:
       if(p.source_t_sweep != p.assessed_source_t_sweep) _AppendChangedComponent(changed_components, "source_t_sweep");
       if(p.source_t_disp != p.assessed_source_t_disp) _AppendChangedComponent(changed_components, "source_t_disp");
       if(p.source_t_bos != p.assessed_source_t_bos) _AppendChangedComponent(changed_components, "source_t_bos");
-      if(p.target_source != p.assessed_target_source) _AppendChangedComponent(changed_components, "target_source");
-      if(p.target_model != p.assessed_target_model) _AppendChangedComponent(changed_components, "target_model");
+      // Same stripped-base comparison as _EvaluateSemanticPlanMatch: the "_rrcap"
+      // price overlay is not a route change in either identity partition.
+      if(_StripRRCapMarker(p.target_source) != _StripRRCapMarker(p.assessed_target_source)) _AppendChangedComponent(changed_components, "target_source");
+      if(_StripRRCapMarker(p.target_model) != _StripRRCapMarker(p.assessed_target_model)) _AppendChangedComponent(changed_components, "target_model");
       // Same partition as _EvaluateSemanticPlanMatch: the base obstacle identity is
       // immutable, the live crossing state and the derived timeframe label are not.
       // This branch only runs for a plan that was never locked, but it is the same
@@ -5440,7 +5472,8 @@ private:
    double _FamilySetupFloor(const TradePlan &p, string &floor_input) const {
       floor_input = "";
       string family = _NormToken(StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p));
-      if(family == "full_po3_reversal" || family == "full_po3_continuation"){ floor_input = "InpSetupFloorFullPO3"; return InpSetupFloorFullPO3; }
+      if(family == "full_po3_reversal"){ floor_input = "InpSetupFloorFullPO3Reversal"; return InpSetupFloorFullPO3Reversal; }
+      if(family == "full_po3_continuation"){ floor_input = "InpSetupFloorFullPO3"; return InpSetupFloorFullPO3; }
       if(family == "micro_po3_reversal"){ floor_input = "InpSetupFloorMicroPO3"; return InpSetupFloorMicroPO3; }
       if(family == "micro_continuation_fvg"){ floor_input = "InpSetupFloorContinuationFamily"; return InpSetupFloorContinuationFamily; }
       if(family == "micro_failed_breakout_reclaim"){ floor_input = "InpSetupFloorFailedBreakout"; return InpSetupFloorFailedBreakout; }
@@ -5459,6 +5492,34 @@ private:
       if(group == "failed_breakout"){ floor_input = "InpSetupFloorFailedBreakout"; return InpSetupFloorFailedBreakout; }
       floor_input = "unmapped_family";
       return DBL_MAX;
+   }
+
+   // Exact per-family setup-score ceiling.  Mirrors _FamilySetupFloor's family
+   // mapping one-to-one.  0 (the default) means no ceiling; a positive ceiling
+   // rejects any setup whose score is strictly ABOVE it.  Legacy/unmapped
+   // families return 0: the floor already fails them closed.  Nothing may
+   // move a ceiling, and the ceiling never moves the floor.
+   double _FamilySetupCeiling(const TradePlan &p, string &ceiling_input) const {
+      ceiling_input = "";
+      string family = _NormToken(StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p));
+      if(family == "full_po3_reversal"){ ceiling_input = "InpSetupCeilingFullPO3Reversal"; return InpSetupCeilingFullPO3Reversal; }
+      if(family == "full_po3_continuation"){ ceiling_input = "InpSetupCeilingFullPO3Continuation"; return InpSetupCeilingFullPO3Continuation; }
+      if(family == "micro_po3_reversal"){ ceiling_input = "InpSetupCeilingMicroPO3"; return InpSetupCeilingMicroPO3; }
+      if(family == "micro_continuation_fvg"){ ceiling_input = "InpSetupCeilingContinuationFamily"; return InpSetupCeilingContinuationFamily; }
+      if(family == "micro_failed_breakout_reclaim"){ ceiling_input = "InpSetupCeilingFailedBreakout"; return InpSetupCeilingFailedBreakout; }
+      if(family == "micro_bisi_sibi_edge"){ ceiling_input = "InpSetupCeilingMicroBisiSibi"; return InpSetupCeilingMicroBisiSibi; }
+      if(family == "micro_range_reentry"){
+         if(p.setup_taxonomy == MICRO_SESSION_REENTRY){ ceiling_input = "InpSetupCeilingSession"; return InpSetupCeilingSession; }
+         ceiling_input = "InpSetupCeilingRangeFamily"; return InpSetupCeilingRangeFamily;
+      }
+      ceiling_input = "no_family_ceiling";
+      return 0.0;
+   }
+
+   // True when a positive family ceiling is set and the score is above it.
+   bool _SetupScoreAboveCeiling(const TradePlan &p, double &ceiling, string &ceiling_input) const {
+      ceiling = _FamilySetupCeiling(p, ceiling_input);
+      return (ceiling > 0.0 && p.setup_score > ceiling);
    }
 
    double _FamilyLlmQualityFloor(const TradePlan &p) const {
@@ -5667,10 +5728,25 @@ private:
       return m_po3.SessionCodeAt(t);
    }
 
-   string _KillzoneCodeForEntryTime(const datetime entry_time) const {
-      datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
-      return m_po3.KillzoneCodeAt(t);
-   }
+    string _KillzoneCodeForEntryTime(const datetime entry_time) const {
+       datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
+       return m_po3.KillzoneCodeAt(t);
+    }
+
+    //--- [session_window] diagnostic: one line per resolved session evaluation.
+    //--- Rate limit copies the capped-counter precedent of
+    //--- _LogAssessmentIdentityMismatch / _ReportMaskedRouteObstacle (static
+    //--- int counter, first N evaluations print, later ones suppressed so a
+    //--- scan cycle with hundreds of plans cannot flood the journal).  Not per
+    //--- tick: the only caller is _ApplyEntryTimeCommentIdentity (live fill /
+    //--- pending placement), i.e. once per plan at entry time.
+    void _LogSessionWindowOnce(const datetime entry_time) const {
+       static int logged = 0;
+       if(logged >= 200) return;
+       logged++;
+       datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
+       _Journal("[session_window] " + m_po3.SessionWindowDiagAt(t));
+    }
 
    // Session context for the Python AI review gate.  server_time is the same
    // instant BuildRequestJson publishes as request_created_sim_time, and the
@@ -5716,12 +5792,13 @@ private:
       return _BrokerCommentForPlanAtEntryTime(p, entry_time);
    }
 
-   void _ApplyEntryTimeCommentIdentity(TradePlan &p, const datetime entry_time) const {
-      datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
-      p.session_code = _SessionCodeForEntryTime(t);
-      p.killzone_code = _KillzoneCodeForEntryTime(t);
-      p.broker_comment = _BrokerCommentForPlanAtEntryTime(p, t);
-   }
+    void _ApplyEntryTimeCommentIdentity(TradePlan &p, const datetime entry_time) const {
+       datetime t = (entry_time > 0 ? entry_time : _NowServerOrLocal());
+       p.session_code = _SessionCodeForEntryTime(t);
+       p.killzone_code = _KillzoneCodeForEntryTime(t);
+       p.broker_comment = _BrokerCommentForPlanAtEntryTime(p, t);
+       _LogSessionWindowOnce(t);
+    }
 
    void _InitializeNarrativeFields(TradePlan &p) {
       if(!p.risk_multipliers_initialized){
@@ -5936,33 +6013,95 @@ private:
       return _ClampRange(score, 0.0, 10.0);
    }
 
-   double _HtfAlignmentScore(const TradePlan &p) const {
-      double score = 4.0;
-      int want = (p.is_buy ? 1 : -1);
-      if(p.po3.daily_bias_dir == want) score += 1.8;
-      else if(p.po3.daily_bias_dir == -want) score -= 1.6;
-      if(p.po3.h4_bias_dir == want) score += 1.6;
-      else if(p.po3.h4_bias_dir == -want) score -= 1.2;
-      if(p.po3.h1_bias_dir == want) score += 1.2;
-      else if(p.po3.h1_bias_dir == -want) score -= 1.0;
-      if(p.po3.htf_mss || p.po3.htf_choch) score += 1.1;
-      if((p.is_buy && p.trend_slope_pct > 0) || (!p.is_buy && p.trend_slope_pct < 0)) score += 0.9;
-      else if(MathAbs(p.trend_slope_pct) > 0.00015) score -= 1.1;
-      if(p.adx_value >= InpAdxMin) score += 0.6;
-      return _ClampRange(score, 0.0, 10.0);
-   }
+    // R5: HTF alignment is a smooth monotone-positive function of the underlying
+    // measurements, not a fixed-step ladder. Every contribution is graded by the
+    // strength of its measurement: timeframe votes carry conviction weights
+    // (daily > H4 > H1), the slope term scales with the signed slope magnitude
+    // around the old 0.00015 decision point (now a half-scale, never a cliff),
+    // the ADX term scales with the signed distance above/below InpAdxMin, the
+    // structure term scales with displacement strength, the volume term with the
+    // plan's own displacement-volume impulse, and the session term with the
+    // session volume ratio. Range 0-10; the clamp binds only when every input
+    // is jointly extreme.
+    double _HtfAlignmentScore(const TradePlan &p, string &terms_out) const {
+       int want = (p.is_buy ? 1 : -1);
+       double vote_daily = 0.0, vote_h4 = 0.0, vote_h1 = 0.0;
+       if(p.po3.daily_bias_dir == want) vote_daily = 1.1;
+       else if(p.po3.daily_bias_dir == -want) vote_daily = -1.1;
+       if(p.po3.h4_bias_dir == want) vote_h4 = 0.8;
+       else if(p.po3.h4_bias_dir == -want) vote_h4 = -0.8;
+       if(p.po3.h1_bias_dir == want) vote_h1 = 0.6;
+       else if(p.po3.h1_bias_dir == -want) vote_h1 = -0.6;
+       double vote = vote_daily + vote_h4 + vote_h1;
+       double signed_slope = p.trend_slope_pct * want;
+       double slope_term = 1.2 * signed_slope / (MathAbs(signed_slope) + 0.00015);
+       double adx_gap = p.adx_value - InpAdxMin;
+       double adx_term = 0.8 * adx_gap / (MathAbs(adx_gap) + 8.0);
+       double confirm_term = 0.0;
+       if(p.po3.htf_mss || p.po3.htf_choch)
+          confirm_term = 0.4 + 0.4 * _Clamp01(p.po3.displacement_score / 10.0);
+       double vol_term = 0.5 * _Clamp01((p.fvg.volume_impulse_score - 2.0) / 8.0);
+       double sess_term = 0.5 * _Clamp01(p.session_vol_ratio / 0.7);
+       double score = 5.0 + vote + slope_term + adx_term + confirm_term + vol_term + sess_term;
+       terms_out = "base=5.00"
+                   + ",vote=" + DoubleToString(vote, 4)
+                   + ",slope=" + DoubleToString(slope_term, 4)
+                   + ",adx=" + DoubleToString(adx_term, 4)
+                   + ",confirm=" + DoubleToString(confirm_term, 4)
+                   + ",vol=" + DoubleToString(vol_term, 4)
+                   + ",sess=" + DoubleToString(sess_term, 4);
+       return _ClampRange(score, 0.0, 10.0);
+    }
 
-   double _AdverseContextScore(const TradePlan &p) const {
-      double score = 0.0;
-      if(p.po3.session_name == "OFF_HOURS") score += 1.4;
-      score += MathMin(2.5, p.news_risk * 2.5);
-      if(StringFind(p.obstacle_kind, "htf_opposing_imbalance") >= 0) score += 1.8;
-      else if(StringLen(p.obstacle_kind) > 0) score += 0.7;
-      if(p.vwap_dist_atr > InpVwapMaxDistAtr) score += MathMin(2.0, (p.vwap_dist_atr - InpVwapMaxDistAtr) * 0.9);
-      if(p.expansion_score > InpExpansionRatioMax) score += 1.5;
-      if(p.session_vol_ratio > 0 && p.session_vol_ratio < InpSessionVolMinAdrFrac) score += 0.9;
-      return _ClampRange(score, 0.0, 10.0);
-   }
+    double _HtfAlignmentScore(const TradePlan &p) const {
+       string terms = "";
+       return _HtfAlignmentScore(p, terms);
+    }
+
+    // R5: adverse context is a smooth monotone function of the underlying
+    // measurements -- graded, not stepped. Higher means MORE adverse (worse),
+    // i.e. direction "negative" per python/governance_contracts.py:105, which is
+    // also what _RunnerFiltersPass (adverse ceiling) and the heuristic
+    // (win_rate -= adverse*0.016) assume. The obstacle term uses the NUMERIC
+    // obstacle severity via _EffectiveObstacleSeverity (stored value wins; the
+    // kind alone scores a fail-closed lower bound), scaled by proximity in R:
+    // a severe near obstacle counts fully, a mild or distant one decays. News,
+    // vwap excess, expansion excess, session-volume shortfall and off-hours keep
+    // their old magnitudes but every boolean cliff is now a graded ramp except
+    // OFF_HOURS itself (presence is the measurement). Range 0-10.
+    double _AdverseContextScore(const TradePlan &p, string &terms_out) const {
+       double sev = _EffectiveObstacleSeverity(p.obstacle_kind, p.obstacle_severity);
+       double prox = MathExp(-MathMax(p.obstacle_distance_r, 0.0) / 2.0);
+       double obstacle_term = 2.2 * (sev / 10.0) * prox;
+       double news_term = 2.5 * MathMin(1.0, MathMax(p.news_risk, 0.0));
+       double vwap_term = 0.0;
+       double vwap_excess = p.vwap_dist_atr - InpVwapMaxDistAtr;
+       if(vwap_excess > 0.0)
+          vwap_term = 2.0 * vwap_excess / (vwap_excess + 0.5);
+       double expansion_term = 0.0;
+       double expansion_excess = p.expansion_score - InpExpansionRatioMax;
+       if(expansion_excess > 0.0)
+          expansion_term = 1.5 * expansion_excess / (expansion_excess + 1.5);
+       double vol_term = 0.0;
+       if(p.session_vol_ratio > 0.0 && p.session_vol_ratio < InpSessionVolMinAdrFrac)
+          vol_term = 0.9 * (InpSessionVolMinAdrFrac - p.session_vol_ratio) / InpSessionVolMinAdrFrac;
+       double offhours_term = (p.po3.session_name == "OFF_HOURS" ? 1.4 : 0.0);
+       double score = obstacle_term + news_term + vwap_term + expansion_term + vol_term + offhours_term;
+       terms_out = "obstacle=" + DoubleToString(obstacle_term, 4)
+                   + ",news=" + DoubleToString(news_term, 4)
+                   + ",vwap=" + DoubleToString(vwap_term, 4)
+                   + ",expansion=" + DoubleToString(expansion_term, 4)
+                   + ",vol=" + DoubleToString(vol_term, 4)
+                   + ",offhours=" + DoubleToString(offhours_term, 4)
+                   + ",sev=" + DoubleToString(sev, 2)
+                   + ",dist_r=" + DoubleToString(p.obstacle_distance_r, 4);
+       return _ClampRange(score, 0.0, 10.0);
+    }
+
+    double _AdverseContextScore(const TradePlan &p) const {
+       string terms = "";
+       return _AdverseContextScore(p, terms);
+    }
 
    bool _IsRunnerTrade(const TradePlan &p) const {
       if(p.target_source == "liquidity_target") return true;
@@ -6081,12 +6220,46 @@ private:
       else if(final_dist > initial_dist + (p.stop_floor_distance * 0.05))
          p.stop_floor_reason = "raised_to_stop_floor";
 
-      double quality = 7.0;
-      if(p.stop_floor_reason == "broker_min_distance") quality -= 1.4;
-      else if(p.stop_floor_reason == "spread_noise_floor") quality -= 1.1;
-      else if(p.stop_floor_reason == "microstructure_distortion") quality -= 1.6;
-      if(final_dist > 0.0 && p.stop_floor_distance > 0.0) quality += MathMin(1.5, (final_dist / p.stop_floor_distance) - 1.0);
+      // R5: stop quality is a smooth monotone-positive function of the measured
+      // clearances, not a base with fixed subtractions plus a saturating bonus.
+      // The old bonus MathMin(1.5, margin-1) pinned at +1.5 for every stop wider
+      // than 2.5x the floor -- which is ~89% of plans -- collapsing the score
+      // onto 8.5. Log clearance terms never saturate: a wider stop always scores
+      // higher, a stop at/below its floor always scores lower. The three floor
+      // penalties keep their old maximum magnitudes (1.4/1.1/1.6) but are graded
+      // by proximity: 0 at the band edge (continuous with the structural case),
+      // full only when the initial stop sits exactly on the floor. The score has
+      // no trading authority anywhere (no gate reads it; Python uses it for
+      // reporting averages only), so re-centering changes no execution decision.
+      double width_ratio = ((final_dist > 0.0 && p.stop_floor_distance > 0.0)
+                            ? final_dist / p.stop_floor_distance : 1.0);
+      double noise_ratio = ((final_dist > 0.0 && p.stop_noise_band > 0.0)
+                            ? final_dist / p.stop_noise_band : 1.0);
+      double width_term = 1.1 * MathLog(MathMax(width_ratio, 0.05));
+      double noise_term = 0.5 * MathLog(MathMax(noise_ratio, 0.05));
+      double broker_band = p.broker_min_stop_distance * 1.02;
+      double pen_broker = ((broker_band > 0.0 && initial_dist < broker_band)
+                           ? 1.4 * (broker_band - initial_dist) / broker_band : 0.0);
+      double noise_band_lim = p.stop_noise_band * 1.02;
+      double pen_noise = ((noise_band_lim > 0.0 && initial_dist < noise_band_lim)
+                          ? 1.1 * (noise_band_lim - initial_dist) / noise_band_lim : 0.0);
+      double pen_distort = 0.0;
+      if(distortion_band > 0.0 && initial_dist < distortion_band)
+         pen_distort = 1.6 * (1.0 - initial_dist / distortion_band);
+      double quality = 5.0 + width_term + noise_term - pen_broker - pen_noise - pen_distort;
       p.stop_quality_score = _ClampRange(quality, 0.0, 10.0);
+      // Build-time audit truth for [score_breakdown]: the initial distance is a
+      // transient parameter here, so the formatted terms travel on the plan.
+      p.stop_score_terms = "base=5.00"
+                           + ",width=" + DoubleToString(width_term, 4)
+                           + ",noise=" + DoubleToString(noise_term, 4)
+                           + ",pen_broker=" + DoubleToString(pen_broker, 4)
+                           + ",pen_noise=" + DoubleToString(pen_noise, 4)
+                           + ",pen_distort=" + DoubleToString(pen_distort, 4)
+                           + ",margin=" + DoubleToString(width_ratio, 4)
+                           + ",noise_mult=" + DoubleToString(noise_ratio, 4)
+                           + ",atr=" + DoubleToString(ltf_atr, 8)
+                           + ",reason=" + p.stop_floor_reason;
    }
 
    double _HeuristicWinRateDiagnostic(const TradePlan &p) const {
@@ -6133,8 +6306,24 @@ private:
       p.usd_exposure_key = _UsdExposureKey(p);
       p.liquidity_rr = _LiquidityRR(p);
       p.sequence_quality = _SequenceQuality(p);
-      p.htf_alignment_score = _HtfAlignmentScore(p);
-      p.adverse_context_score = _AdverseContextScore(p);
+      string htf_terms = "", adv_terms = "";
+      p.htf_alignment_score = _HtfAlignmentScore(p, htf_terms);
+      p.adverse_context_score = _AdverseContextScore(p, adv_terms);
+      // R5 transparency: one journal line per plan with every input term and the
+      // resulting score. Emitted here -- the single choke point where all three
+      // scores are final -- via _JournalOnChange (per-symbol key), so repeats of
+      // an unchanged plan state are counted and suppressed, never once-per-tick.
+      // Stop terms are build-time truth stashed by _ApplyStopAudit (the initial
+      // distance is transient there); plans that never ran the audit (e.g. state
+      // files written before R5) report stop_terms=unavailable explicitly.
+      _JournalOnChange("score_breakdown|" + p.symbol,
+               "[score_breakdown] symbol=" + p.symbol
+               + " stop_quality=" + DoubleToString(p.stop_quality_score, 4)
+               + " terms=" + (StringLen(p.stop_score_terms) > 0 ? p.stop_score_terms : "unavailable")
+               + "; htf_alignment=" + DoubleToString(p.htf_alignment_score, 4)
+               + " terms=" + htf_terms
+               + "; adverse_context=" + DoubleToString(p.adverse_context_score, 4)
+               + " terms=" + adv_terms);
       p.runner_trade = _IsRunnerTrade(p);
       if(p.ote_softness_frac <= 0.0){
          p.ote_softness_frac = (m_active_policy.ote_softness_frac > 0.0 ? m_active_policy.ote_softness_frac : InpOteSoftnessFrac);
@@ -6289,6 +6478,21 @@ private:
                   + " setup_score=" + DoubleToString(p.setup_score, 2)
                   + " floor=" + DoubleToString(floor, 2)
                   + " floor_input=" + floor_input
+                  + " action=reject");
+         return false;
+      }
+      double ceiling = 0.0;
+      string ceiling_input = "";
+      if(_SetupScoreAboveCeiling(p, ceiling, ceiling_input)){
+         p.setup_floor_action = "reject";
+         reason = "setup_score_above_ceiling";
+         _Journal("[setup_ceiling_gate] symbol=" + p.symbol
+                  + " branch=" + p.entry_branch
+                  + " family=" + p.setup_family
+                  + " taxonomy=" + p.setup_taxonomy_enum
+                  + " setup_score=" + DoubleToString(p.setup_score, 2)
+                  + " ceiling=" + DoubleToString(ceiling, 2)
+                  + " ceiling_input=" + ceiling_input
                   + " action=reject");
          return false;
       }
@@ -7993,13 +8197,85 @@ private:
    }
 
    void _RememberConsumedSweep(const TradePlan &p) {
+      if(!_RememberConsumedSweepMemory(p)) return;
+      _Journal(p.symbol + " sweep marked consumed after filled entry sweep="
+               + TimeToString(p.po3.t_sweep, TIME_DATE|TIME_MINUTES));
+      _PersistConsumedSweeps();
+   }
+
+   // R6: consumed-sweep memory survives restarts.  Keys live in the per-runtime-
+   // scope directory (account+magic, same owner as watchlist/penalty files) as
+   // plain lines via the existing identity-index store.  The set is append-only:
+   // it is never pruned, so nothing inside the history lookback can be lost.
+   bool _RememberConsumedSweepMemory(const TradePlan &p) {
       string key = _SweepKey(p);
-      if(StringLen(key) == 0 || _HasStringValue(m_consumed_sweep_keys, key)) return;
+      if(StringLen(key) == 0 || _HasStringValue(m_consumed_sweep_keys, key)) return false;
       int n = ArraySize(m_consumed_sweep_keys);
       ArrayResize(m_consumed_sweep_keys, n + 1);
       m_consumed_sweep_keys[n] = key;
-      _Journal(p.symbol + " sweep marked consumed after filled entry sweep="
-               + TimeToString(p.po3.t_sweep, TIME_DATE|TIME_MINUTES));
+      return true;
+   }
+
+   void _PersistConsumedSweeps() {
+      if(StringLen(m_state.RuntimeScope()) == 0 || m_state.RuntimeScope() == "uninitialized") return;
+      m_state.SaveTextLines(m_state.ConsumedSweepsPath(), m_consumed_sweep_keys);
+   }
+
+   void _LoadConsumedSweepsOnInit() {
+      // Append-only: no ArrayResize-to-zero here.  Init memory starts empty and
+      // every line below is deduplicated, so reload can never drop a key.
+      string lines[];
+      if(!m_state.LoadTextLines(m_state.ConsumedSweepsPath(), lines)){
+         _Journal("[consumed_sweeps] action=init_empty scope=" + m_state.RuntimeScope()
+                  + " reason=no_persisted_file");
+         return;
+      }
+      for(int i=0; i<ArraySize(lines); i++){
+         if(StringLen(lines[i]) == 0 || StringFind(lines[i], "|") < 0) continue;
+         if(_HasStringValue(m_consumed_sweep_keys, lines[i])) continue;
+         int n = ArraySize(m_consumed_sweep_keys);
+         ArrayResize(m_consumed_sweep_keys, n + 1);
+         m_consumed_sweep_keys[n] = lines[i];
+      }
+      _Journal("[consumed_sweeps] action=init_loaded scope=" + m_state.RuntimeScope()
+               + " keys=" + IntegerToString(ArraySize(m_consumed_sweep_keys)));
+   }
+
+   void _SeedConsumedSweepsFromHistory() {
+      // R6(b): this magic's entry deals in account history (lookback 15 days, so
+      // >= the required 14) resolved to their trade meta
+      // (trade_position_id_<id>.json).  Open managed positions are already seeded
+      // by _RecoverManagedExposureOnInit.  Append-only: never prunes.
+      datetime now = _NowServerOrLocal();
+      if(now <= 0) return;
+      datetime from = now - 15 * 86400;
+      if(!HistorySelect(from, now + 60)){
+         _Journal("[consumed_sweeps] action=history_seed_skipped reason=history_select_failed");
+         return;
+      }
+      int seeded = 0;
+      int deals = HistoryDealsTotal();
+      for(int i=0; i<deals; i++){
+         ulong deal_ticket = HistoryDealGetTicket(i);
+         if(deal_ticket == 0) continue;
+         if((long)HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != (long)InpMagicNumber) continue;
+         ENUM_DEAL_ENTRY entry_kind = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+         if(entry_kind != DEAL_ENTRY_IN && entry_kind != DEAL_ENTRY_INOUT) continue;
+         long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+         if(position_id <= 0) continue;
+         string meta_json = "";
+         if(!_ReadText(_TradePositionIdentifierPath(position_id), meta_json)) continue;
+         if(StringLen(meta_json) == 0) continue;
+         TradePlan meta;
+         ZeroMemory(meta);
+         if(!m_state.ParseTradePlanJson(meta_json, meta)) continue;
+         if(_RememberConsumedSweepMemory(meta)) seeded++;
+      }
+      if(seeded > 0) _PersistConsumedSweeps();
+      _Journal("[consumed_sweeps] action=history_seeded scope=" + m_state.RuntimeScope()
+               + " deals_scanned=" + IntegerToString(deals)
+               + " seeded=" + IntegerToString(seeded)
+               + " total_keys=" + IntegerToString(ArraySize(m_consumed_sweep_keys)));
    }
 
    bool _SameSweep(const TradePlan &a, const TradePlan &b) const {
@@ -9962,19 +10238,28 @@ private:
       if(!_PlanUsesSyntheticFallback(p)) return true;
       double risk = MathAbs(p.entry_est - p.sl);
       if(risk <= 0.0 || p.entry_est <= 0.0 || p.sl <= 0.0) return false;
-      double effective_rr = _EffectiveFallbackRR();
-      if(InpMaxPlanRR2 > 0.0) effective_rr = MathMin(effective_rr, InpMaxPlanRR2);
+       double effective_rr = _EffectiveFallbackRR();
+       if(InpMaxPlanRR2 > 0.0) effective_rr = MathMin(effective_rr, InpMaxPlanRR2);
+       // R1(b): same cap on the recomputed synthetic rr (numbers carry it).
+       if(_TargetRRCapEnabled() && effective_rr > InpTargetRRCap){
+          effective_rr = InpTargetRRCap;
+          _Journal("[target_rr_cap] symbol=" + p.symbol
+                   + " stage=fallback_recalc"
+                   + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                   + " to_rr=" + DoubleToString(effective_rr, 6)
+                   + " action=clamped");
+       }
       double old_entry = p.entry_est;
       double old_tp = p.tp2;
       double old_rr = _ExecutionRR2(p);
       double new_tp = _TpFromReward(p, risk * effective_rr);
       double new_rr = _TargetRR(p, new_tp);
-      p.tp2 = new_tp;
-      p.fallback_tp = new_tp;
-      p.fallback_rr = new_rr;
-      p.fallback_source = "synthetic_rr_fallback";
-      p.tp_model = "synthetic_rr_fallback";
-      p.target_model = "synthetic_rr_fallback";
+       p.tp2 = new_tp;
+       p.fallback_tp = new_tp;
+       p.fallback_rr = new_rr;
+       p.fallback_source = "synthetic_rr_fallback";
+       p.tp_model = "synthetic_rr_fallback";
+       p.target_model = "synthetic_rr_fallback";
       if(StringFind(_NormToken(p.target_source), "ai_selected") >= 0 || StringLen(p.ai_chosen_target_model) > 0)
          p.target_source = "ai_selected_synthetic_rr_fallback";
       else
@@ -10014,15 +10299,15 @@ private:
                + " new_rr=" + DoubleToString(_ExecutionRR2(p), 6)
                + " feasible=" + ((p.fallback_feasible_for_tp2 || p.synthetic_capped_to_max_distance_feasible) ? "true" : "false")
                + " reason=" + (p.fallback_feasible_for_tp2 ? "ok" : p.fallback_infeasible_reason));
-      _Journal("[fallback_recalc] reason=" + reason
-               + " old_entry=" + _FmtPrice(p.symbol, old_entry)
-               + " new_entry=" + _FmtPrice(p.symbol, p.entry_est)
-               + " old_tp=" + _FmtPrice(p.symbol, old_tp)
-               + " new_tp=" + _FmtPrice(p.symbol, p.tp2)
-               + " old_rr=" + DoubleToString(old_rr, 6)
-               + " new_rr=" + DoubleToString(_ExecutionRR2(p), 6)
-               + " effective_fallback_rr=" + DoubleToString(effective_rr, 6));
-      return (p.tp2 > 0.0 && _ExecutionRR2(p) > 0.0);
+       _Journal("[fallback_recalc] reason=" + reason
+                + " old_entry=" + _FmtPrice(p.symbol, old_entry)
+                + " new_entry=" + _FmtPrice(p.symbol, p.entry_est)
+                + " old_tp=" + _FmtPrice(p.symbol, old_tp)
+                + " new_tp=" + _FmtPrice(p.symbol, p.tp2)
+                + " old_rr=" + DoubleToString(old_rr, 6)
+                + " new_rr=" + DoubleToString(_ExecutionRR2(p), 6)
+                + " effective_fallback_rr=" + DoubleToString(effective_rr, 6));
+       return (p.tp2 > 0.0 && _ExecutionRR2(p) > 0.0);
    }
 
    double _ObstacleSeverity(const string obstacle_kind, const double obstacle_r) const {
@@ -10101,10 +10386,31 @@ private:
       if(p.po3.liquidity_target <= 0.0 || !_IsRewardSideLevel(p.is_buy, p.entry_est, p.po3.liquidity_target))
          return;
 
-      p.liquidity_target_preserved = p.po3.liquidity_target;
-      p.liquidity_target_model = (StringLen(p.target_model) > 0 ? p.target_model :
-                                  (StringLen(p.po3.liquidity_kind) > 0 ? p.po3.liquidity_kind : "liquidity_target"));
-      p.liquidity_rr = _TargetRR(p, p.liquidity_target_preserved);
+       p.liquidity_target_preserved = p.po3.liquidity_target;
+       p.liquidity_target_model = (StringLen(p.target_model) > 0 ? p.target_model :
+                                   (StringLen(p.po3.liquidity_kind) > 0 ? p.po3.liquidity_kind : "liquidity_target"));
+       // R1(a): the preserved route is what the AI menu, the ranking and stored
+       // arbitration all carry, so it must already be capped: obstacles beyond the
+       // capped price no longer apply to it (the search below runs on the capped
+       // price) and the menu never offers an over-cap level. Kind stays canonical.
+       {
+          bool liq_clamped = false;
+          double capped_liq = _ClampTargetPriceToRRCap(p.is_buy, p.entry_est,
+                                                       p.liquidity_target_preserved,
+                                                       stop_dist, liq_clamped);
+          if(liq_clamped){
+             double liq_from_rr = (stop_dist > 0.0
+                                   ? MathAbs(p.liquidity_target_preserved - p.entry_est) / stop_dist : 0.0);
+             p.liquidity_target_preserved = capped_liq;
+             _Journal("[target_rr_cap] symbol=" + p.symbol
+                      + " stage=seed_arbitration_candidates"
+                      + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                      + " from_rr=" + DoubleToString(liq_from_rr, 6)
+                      + " to_rr=" + DoubleToString(InpTargetRRCap, 6)
+                      + " action=clamped");
+          }
+       }
+       p.liquidity_rr = _TargetRR(p, p.liquidity_target_preserved);
       p.liquidity_target_valid_structurally = (p.liquidity_rr > 0.0);
 
       string obstacle_kind = "";
@@ -10182,25 +10488,50 @@ private:
       return false;
    }
 
-   void _NormalizeTargetLabels(TradePlan &p) {
-      if(_TokenIsPartialThenLiquidity(p.ai_chosen_target_model) ||
+    // R1: re-apply the "_rrcap" price-overlay marker after a branch canonicalized it
+    // away. Called at EVERY exit of _NormalizeTargetLabels (the family branches return
+    // early, so end-of-function code alone would never run for them).
+   void _ReapplyRRCapMarker(TradePlan &p, const bool rrcap_marked) {
+       if(!rrcap_marked) return;
+       if(StringFind(p.tp_model, "_rrcap") < 0) p.tp_model += "_rrcap";
+       if(StringLen(p.target_model) == 0) p.target_model = p.tp_model;
+       else if(StringFind(p.target_model, "_rrcap") < 0) p.target_model += "_rrcap";
+    }
+
+    void _NormalizeTargetLabels(TradePlan &p) {
+       // R1: "_rrcap" is a price overlay, not a different route. Remember it across
+       // canonicalization so a capped label keeps its marker after the branches below map
+       // every family back to its canonical form. Without this a capped partial/synthetic/
+       // capped label would flap between marked and canonical on every pass (selection,
+       // arbitration, sanitizer, validation each normalize), and assessed-vs-live identity
+       // would never settle. Detection uses the same substrings Python's
+       // _target_model_aliases already tolerates, so both sides classify a marked label
+       // into its base family. target_source is deliberately left to the per-branch logic
+       // (same precedent as the generic "_capped" guard in _BuildPlanPrices, which only
+       // marks tp_model/target_model), so the ai_selected_* exemption checks keep working.
+       bool rrcap_marked = (StringFind(_NormToken(p.ai_chosen_target_model), "_rrcap") >= 0 ||
+                            StringFind(_NormToken(p.tp_model), "_rrcap") >= 0 ||
+                            StringFind(_NormToken(p.target_model), "_rrcap") >= 0);
+       if(_TokenIsPartialThenLiquidity(p.ai_chosen_target_model) ||
          _TokenIsPartialThenLiquidity(p.target_source) ||
          _TokenIsPartialThenLiquidity(p.tp_model) ||
          _TokenIsPartialThenLiquidity(p.target_model)){
-         p.target_source = "ai_selected_partial_then_liquidity";
-         p.target_model = "partial_before_obstacle_then_liquidity";
-         p.tp_model = "partial_then_liquidity";
-         return;
-      }
+          p.target_source = "ai_selected_partial_then_liquidity";
+          p.target_model = "partial_before_obstacle_then_liquidity";
+          p.tp_model = "partial_then_liquidity";
+          _ReapplyRRCapMarker(p, rrcap_marked);
+          return;
+       }
       if(StringFind(_NormToken(p.ai_chosen_target_model), "synthetic_rr_capped") >= 0 ||
          StringFind(_NormToken(p.target_source), "synthetic_rr_capped") >= 0 ||
          StringFind(_NormToken(p.tp_model), "synthetic_rr_capped") >= 0 ||
          StringFind(_NormToken(p.target_model), "synthetic_rr_capped") >= 0){
-         p.target_source = "ai_selected_synthetic_rr_capped_to_max_distance";
-         p.target_model = "synthetic_rr_capped_to_max_distance";
-         p.tp_model = "synthetic_rr_capped_to_max_distance";
-         return;
-      }
+          p.target_source = "ai_selected_synthetic_rr_capped_to_max_distance";
+          p.target_model = "synthetic_rr_capped_to_max_distance";
+          p.tp_model = "synthetic_rr_capped_to_max_distance";
+          _ReapplyRRCapMarker(p, rrcap_marked);
+          return;
+       }
       if(_TokenIsSyntheticFallback(p.ai_chosen_target_model) ||
          _TokenIsSyntheticFallback(p.target_source) ||
          _TokenIsSyntheticFallback(p.tp_model) ||
@@ -10209,10 +10540,11 @@ private:
             p.target_source = "ai_selected_synthetic_rr_fallback";
          else if(StringLen(p.target_source) == 0)
             p.target_source = "synthetic_rr_fallback";
-         p.target_model = "synthetic_rr_fallback";
-         p.tp_model = "synthetic_rr_fallback";
-         return;
-      }
+          p.target_model = "synthetic_rr_fallback";
+          p.tp_model = "synthetic_rr_fallback";
+          _ReapplyRRCapMarker(p, rrcap_marked);
+          return;
+       }
       if(_TokenIsCappedTarget(p.ai_chosen_target_model) ||
          _TokenIsCappedTarget(p.target_source) ||
          _TokenIsCappedTarget(p.tp_model) ||
@@ -10221,11 +10553,12 @@ private:
             p.target_source = "ai_selected_capped_before_obstacle";
          else if(StringLen(p.target_source) == 0)
             p.target_source = "capped_before_obstacle";
-         if(StringLen(p.target_model) == 0 || _TokenIsCappedTarget(p.target_model))
-            p.target_model = (StringLen(p.capped_before_obstacle_source) > 0 ? p.capped_before_obstacle_source : "cap_before_opposing_imbalance");
-         p.tp_model = "capped_before_obstacle";
-         return;
-      }
+          if(StringLen(p.target_model) == 0 || _TokenIsCappedTarget(p.target_model))
+             p.target_model = (StringLen(p.capped_before_obstacle_source) > 0 ? p.capped_before_obstacle_source : "cap_before_opposing_imbalance");
+          p.tp_model = "capped_before_obstacle";
+          _ReapplyRRCapMarker(p, rrcap_marked);
+          return;
+       }
       string source = _NormToken(p.target_source);
       string model = _NormToken(p.target_model);
       string tp_model = _NormToken(p.tp_model);
@@ -10237,15 +10570,18 @@ private:
             p.target_source = "ai_selected_liquidity_target";
          else if(StringLen(p.target_source) == 0)
             p.target_source = "liquidity_target";
-         if(StringLen(p.target_model) == 0)
-            p.target_model = (StringLen(p.liquidity_target_model) > 0 ? p.liquidity_target_model : "next_liquidity_session_range");
-         p.tp_model = "liquidity_target";
-         return;
-      }
-      if(StringLen(p.tp_model) == 0 && StringLen(p.target_source) > 0) p.tp_model = p.target_source;
-      if(StringLen(p.target_source) == 0 && StringLen(p.tp_model) > 0) p.target_source = p.tp_model;
-      if(StringLen(p.target_model) == 0 && StringLen(p.target_source) > 0) p.target_model = p.target_source;
-   }
+          if(StringLen(p.target_model) == 0)
+             p.target_model = (StringLen(p.liquidity_target_model) > 0 ? p.liquidity_target_model : "next_liquidity_session_range");
+          p.tp_model = "liquidity_target";
+          _ReapplyRRCapMarker(p, rrcap_marked);
+          return;
+       }
+        if(StringLen(p.tp_model) == 0 && StringLen(p.target_source) > 0) p.tp_model = p.target_source;
+        if(StringLen(p.target_source) == 0 && StringLen(p.tp_model) > 0) p.target_source = p.tp_model;
+        if(StringLen(p.target_model) == 0 && StringLen(p.target_source) > 0) p.target_model = p.target_source;
+        // R1: re-apply the price-overlay marker the branches above canonicalized away.
+        _ReapplyRRCapMarker(p, rrcap_marked);
+     }
 
    string _EffectiveTargetModel(const TradePlan &p) const {
       if(StringLen(p.ai_chosen_target_model) > 0) return _NormToken(p.ai_chosen_target_model);
@@ -10456,16 +10792,18 @@ private:
       p.execution_attempts_suppressed        = 0;
       p.execution_retry_not_before           = 0;
 
-      // A plan whose frozen first leg is already under its own frozen geometry floor
-      // can never pass _BuildPlanPrices, so it will sit on the watchlist until the
-      // rebuild kills it as a "structural invalidation" that never happened.  AUDUSD
-      // on 2026-09-06 waited 12 bars to be rejected for a leg of 0.00136 against a
-      // floor of 0.00151 that it already failed the moment it was frozen.  Reported,
-      // not acted on: which of the two values is the wrong one is not yet established,
-      // and guessing would either force a trade or discard a real approval.
-      double locked_leg   = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1);
-      double locked_floor = p.assessed_stop_distance * 0.65;
-      if(p.assessed_tp1 > 0.0 && locked_floor > 0.0 && locked_leg > 0.0 && locked_leg < locked_floor)
+       // A plan whose frozen first leg is already under its own frozen geometry floor
+       // can never pass _BuildPlanPrices, so it will sit on the watchlist until the
+       // rebuild kills it as a "structural invalidation" that never happened.  AUDUSD
+       // on 2026-09-06 waited 12 bars to be rejected for a leg of 0.00136 against a
+       // floor of 0.00151 that it already failed the moment it was frozen.  Reported,
+       // not acted on: which of the two values is the wrong one is not yet established,
+       // and guessing would either force a trade or discard a real approval.
+       // R2: skipped in half-target mode -- the defined 0.50 leg is intentionally below
+       // the 0.65 geometry floor, which does not apply to it.
+       double locked_leg   = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1);
+       double locked_floor = p.assessed_stop_distance * 0.65;
+       if(!InpTP1AtHalfTarget && p.assessed_tp1 > 0.0 && locked_floor > 0.0 && locked_leg > 0.0 && locked_leg < locked_floor)
          _Journal("[assessed_leg_below_floor] symbol=" + p.symbol
                   + " assessed_tp1=" + _FmtPrice(p.symbol, p.assessed_tp1)
                   + " assessed_leg_reward=" + _FmtPrice(p.symbol, locked_leg)
@@ -10660,39 +10998,69 @@ private:
          // target, never widens or invents one, and when the cap would drop the trade
          // under the contract's own minimum RR the plan is genuinely no longer
          // feasible and still fails closed.
-         double max_dist = _MaxPlanTargetDistance(p, p.entry_est, live_risk);
-         if(max_dist > 0.0 && !RewardWithinMaxDistance(reward, max_dist, _PlanTickSize(p.symbol))){
-            double capped_rr = max_dist / live_risk;
-            _Journal("[deterministic_rr_target_cap] symbol=" + p.symbol
-                     + " approved_rr=" + DoubleToString(approved_rr, 6)
-                     + " live_risk=" + _FmtPrice(p.symbol, live_risk)
-                     + " assessed_risk=" + _FmtPrice(p.symbol, p.assessed_stop_distance)
-                     + " requested_reward=" + _FmtPrice(p.symbol, reward)
-                     + " max_target_distance=" + _FmtPrice(p.symbol, max_dist)
-                     + " capped_rr=" + DoubleToString(capped_rr, 6)
+           double max_dist = _MaxPlanTargetDistance(p, p.entry_est, live_risk);
+          // R1: the mandated synthetic recomputation obeys the RR cap too -- same hazard
+          // class as the max-distance walk-through documented below. The cap folds into
+          // the one canonical ceiling this branch enforces (stricter wins); a disabled
+          // cap leaves max_dist untouched. max_target_distance= below therefore names the
+          // EFFECTIVE ceiling, with rr_cap_binds saying which bound won.
+          bool contract_rrcap_binds = false;
+          if(_TargetRRCapEnabled()){
+             double rr_cap_reward = live_risk * InpTargetRRCap;
+             if(rr_cap_reward > 0.0 && rr_cap_reward < max_dist){
+                max_dist = rr_cap_reward;
+                contract_rrcap_binds = true;
+             }
+          }
+          if(max_dist > 0.0 && !RewardWithinMaxDistance(reward, max_dist, _PlanTickSize(p.symbol))){
+             double capped_rr = max_dist / live_risk;
+             _Journal("[deterministic_rr_target_cap] symbol=" + p.symbol
+                      + " approved_rr=" + DoubleToString(approved_rr, 6)
+                      + " live_risk=" + _FmtPrice(p.symbol, live_risk)
+                      + " assessed_risk=" + _FmtPrice(p.symbol, p.assessed_stop_distance)
+                      + " requested_reward=" + _FmtPrice(p.symbol, reward)
+                      + " max_target_distance=" + _FmtPrice(p.symbol, max_dist)
+                      + " rr_cap_binds=" + (contract_rrcap_binds ? "true" : "false")
+                      + " capped_rr=" + DoubleToString(capped_rr, 6)
                      + " min_resulting_rr=" + DoubleToString(c.min_resulting_rr, 6)
                      + " action=" + (capped_rr + 0.0001 < c.min_resulting_rr
                                      ? "reject_capped_rr_below_contract_minimum"
                                      : "cap_reward_to_max_distance"));
-            if(capped_rr + 0.0001 < c.min_resulting_rr){
-               reason = "ai_chosen_target_exceeds_max_distance";
-               failure_class = EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE;
-               return false;
-            }
-            reward = max_dist;
-         }
-         p.tp2 = (p.is_buy ? p.entry_est + reward : p.entry_est - reward);
-         double tp1_ratio = 0.0;
-         double assessed_reward = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp2);
-         if(assessed_reward > 0.0)
-            tp1_ratio = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1) / assessed_reward;
-         if(tp1_ratio <= 0.0 || tp1_ratio >= 1.0) tp1_ratio = 0.70;
-         p.tp1 = (p.is_buy ? p.entry_est + reward * tp1_ratio : p.entry_est - reward * tp1_ratio);
-      } else {
-         // Structural target: the price is a property of the market.
-         p.tp2 = p.assessed_selected_target_price;
-         p.tp1 = p.assessed_tp1;
-      }
+             if(capped_rr + 0.0001 < c.min_resulting_rr){
+                reason = "ai_chosen_target_exceeds_max_distance";
+                failure_class = EXEC_FAIL_TARGET_NO_LONGER_FEASIBLE;
+                return false;
+             }
+             reward = max_dist;
+          }
+          p.tp2 = (p.is_buy ? p.entry_est + reward : p.entry_est - reward);
+          // R4: a plan approved with no first leg (assessed_tp1 <= 0) restores that
+          // state -- never invent a leg from the ratio fallback below, which would
+          // rewrite approved identity into a partial the AI never saw.
+          double tp1_ratio = 0.0;
+          if(p.assessed_tp1 <= 0.0){
+             p.tp1 = 0.0;
+             p.tp1_suppressed = true;
+          } else {
+             double assessed_reward = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp2);
+             if(assessed_reward > 0.0)
+                tp1_ratio = _RewardToTarget(p.is_buy, p.assessed_entry, p.assessed_tp1) / assessed_reward;
+             // R2: plans approved under half-target mode carry a 0.50 ratio; the fallback for
+             // an unusable ratio follows the active mode (0.50 vs 0.70). Mode off => 0.70,
+             // byte-identical to before.
+             if(tp1_ratio <= 0.0 || tp1_ratio >= 1.0) tp1_ratio = (InpTP1AtHalfTarget ? 0.50 : 0.70);
+             p.tp1 = (p.is_buy ? p.entry_est + reward * tp1_ratio : p.entry_est - reward * tp1_ratio);
+             p.tp1_suppressed = false;
+          }
+       } else {
+          // Structural target: the price is a property of the market.
+          p.tp2 = p.assessed_selected_target_price;
+          p.tp1 = p.assessed_tp1;
+          // R4: an approved no-first-leg plan restores suppressed; anything else
+          // restores unsuppressed.  Pre-R4 approvals always carried tp1 > 0, so
+          // this derivation cannot misread a legacy approval.
+          p.tp1_suppressed = (p.assessed_tp1 <= 0.0);
+       }
 
       p.ai_chosen_tp1  = p.tp1;
       p.ai_chosen_tp2  = p.tp2;
@@ -10775,8 +11143,8 @@ private:
       if(p.source_t_sweep != p.assessed_source_t_sweep) _AppendChangedComponent(out.immutable_fields_changed, "source_t_sweep");
       if(p.source_t_disp != p.assessed_source_t_disp) _AppendChangedComponent(out.immutable_fields_changed, "source_t_disp");
       if(p.source_t_bos != p.assessed_source_t_bos) _AppendChangedComponent(out.immutable_fields_changed, "source_t_bos");
-      if(c.target_source_preserved && p.target_source != p.assessed_target_source) _AppendChangedComponent(out.immutable_fields_changed, "target_source");
-      if(c.target_model_preserved && p.target_model != p.assessed_target_model) _AppendChangedComponent(out.immutable_fields_changed, "target_model");
+      if(c.target_source_preserved && _StripRRCapMarker(p.target_source) != _StripRRCapMarker(p.assessed_target_source)) _AppendChangedComponent(out.immutable_fields_changed, "target_source");
+      if(c.target_model_preserved && _StripRRCapMarker(p.target_model) != _StripRRCapMarker(p.assessed_target_model)) _AppendChangedComponent(out.immutable_fields_changed, "target_model");
       // The obstacle's IDENTITY is immutable; its live crossing state is not.
       // obstacle_price -- the primitive the kind is derived from -- has always been
       // compared with a tolerance and classified as authorized.  The derived label
@@ -10976,11 +11344,18 @@ private:
                reject_reason = (partial_then_liquidity ? "ai_partial_target_valid_but_runner_invalid" : "ai_chosen_target_rr_too_low");
                reject_detail = "reward=" + _FmtPrice(plan.symbol, reward) + " min_target_distance=" + _FmtPrice(plan.symbol, min_dist);
             } else {
-               double max_dist = _MaxPlanTargetDistance(plan, plan.entry_est, risk);
-               bool liquidity_or_runner_allowed = (partial_then_liquidity ||
-                                                   plan.runner_trade ||
-                                                   plan.tp_model == "liquidity_target" ||
-                                                   plan.target_source == "ai_selected_liquidity_target");
+                double max_dist = _MaxPlanTargetDistance(plan, plan.entry_est, risk);
+                // Token-tolerant: a capped liquidity plan carries tp_model
+                // "liquidity_target_rrcap" (and possibly target_source/target_model
+                // with the same overlay), which exact equality would miss, wrongly
+                // rejecting the route the RR-cap guard deliberately preserved.
+                bool liquidity_final = (_TokenIsLiquidityTarget(chosen) ||
+                                        _TokenIsLiquidityTarget(plan.target_source) ||
+                                        _TokenIsLiquidityTarget(plan.tp_model) ||
+                                        _TokenIsLiquidityTarget(plan.target_model));
+                bool liquidity_or_runner_allowed = (partial_then_liquidity ||
+                                                    plan.runner_trade ||
+                                                    liquidity_final);
                if(max_dist > 0.0 && reward > max_dist && !liquidity_or_runner_allowed){
                   max_distance_pass = false;
                   reject_reason = "ai_chosen_target_exceeds_max_distance";
@@ -11260,8 +11635,16 @@ private:
       if(!p.target_arbitration_required && StringLen(dec.chosen_target_model) == 0)
          return true;
 
-      bool arbitration_was_required = p.target_arbitration_required;
-      string chosen_model = _NormToken(dec.chosen_target_model);
+       bool arbitration_was_required = p.target_arbitration_required;
+       string chosen_model = _NormToken(dec.chosen_target_model);
+       // R1: the "_rrcap" marker is a price overlay, not a different route. Classify the
+       // stripped base so a capped choice routes exactly like its canonical form; the
+       // marker is propagated to the applied labels below and preserved by normalization.
+       string chosen_base = chosen_model;
+       {
+          int rrcap_at = StringFind(chosen_base, "_rrcap");
+          if(rrcap_at >= 0) chosen_base = StringSubstr(chosen_base, 0, rrcap_at);
+       }
       if(StringLen(chosen_model) == 0){
          reason = (arbitration_was_required ? "invalid_ai_target_arbitration_response" : "target_arbitration_missing");
          if(arbitration_was_required)
@@ -11303,21 +11686,21 @@ private:
       string applied_target_model = dec.chosen_target_model;
       string applied_tp_model = dec.chosen_target_model;
 
-      bool chose_liquidity = (chosen_model == "liquidity_target" ||
-                              chosen_model == "real_liquidity" ||
-                              chosen_model == "real_liquidity_target" ||
-                              (StringLen(p.liquidity_target_model) > 0 && chosen_model == _NormToken(p.liquidity_target_model)));
-      bool chose_partial_liquidity = (chosen_model == "partial_before_obstacle_then_liquidity" ||
-                                      chosen_model == "partial_then_liquidity");
-      bool chose_capped = (StringFind(chosen_model, "capped") >= 0 ||
-                           chosen_model == "partial_before_obstacle" ||
-                           chosen_model == "capped_before_obstacle");
-      bool chose_synthetic_capped = (chosen_model == "synthetic_rr_capped_to_max_distance" ||
-                                     chosen_model == "ai_selected_synthetic_rr_capped_to_max_distance");
-      bool chose_fallback = (chosen_model == "synthetic_rr_fallback" ||
-                             chosen_model == "fallback" ||
-                             chosen_model == "synthetic" ||
-                             chose_synthetic_capped);
+       bool chose_liquidity = (chosen_base == "liquidity_target" ||
+                               chosen_base == "real_liquidity" ||
+                               chosen_base == "real_liquidity_target" ||
+                               (StringLen(p.liquidity_target_model) > 0 && (chosen_base == _NormToken(p.liquidity_target_model) || chosen_model == _NormToken(p.liquidity_target_model))));
+       bool chose_partial_liquidity = (chosen_base == "partial_before_obstacle_then_liquidity" ||
+                                       chosen_base == "partial_then_liquidity");
+       bool chose_capped = (StringFind(chosen_base, "capped") >= 0 ||
+                            chosen_base == "partial_before_obstacle" ||
+                            chosen_base == "capped_before_obstacle");
+       bool chose_synthetic_capped = (chosen_base == "synthetic_rr_capped_to_max_distance" ||
+                                      chosen_base == "ai_selected_synthetic_rr_capped_to_max_distance");
+       bool chose_fallback = (chosen_base == "synthetic_rr_fallback" ||
+                              chosen_base == "fallback" ||
+                              chosen_base == "synthetic" ||
+                              chose_synthetic_capped);
       if(!arbitration_was_required && chose_fallback && _ObstacleIsCrossedOpposing(p.obstacle_kind)){
          reason = "invalid_target_arbitration_required_flag";
          _Journal("[target_arbitration] required=false chosen=" + chosen_model
@@ -11395,15 +11778,27 @@ private:
             applied_target_model = "synthetic_rr_fallback";
             applied_tp_model = "synthetic_rr_fallback";
          }
-      } else if(chosen_model == "current" || chosen_model == "current_plan" || chosen_model == "keep_current"){
-         chosen_tp = p.tp2;
-         applied_source = (StringLen(p.target_source) > 0 ? p.target_source : p.tp_model);
-         applied_target_model = (StringLen(p.target_model) > 0 ? p.target_model : applied_source);
-         applied_tp_model = (StringLen(p.tp_model) > 0 ? p.tp_model : applied_source);
-      } else {
-         reason = "invalid_ai_target_arbitration_response";
-         return false;
-      }
+       } else if(chosen_model == "current" || chosen_model == "current_plan" || chosen_model == "keep_current"){
+          chosen_tp = p.tp2;
+          applied_source = (StringLen(p.target_source) > 0 ? p.target_source : p.tp_model);
+          applied_target_model = (StringLen(p.target_model) > 0 ? p.target_model : applied_source);
+          applied_tp_model = (StringLen(p.tp_model) > 0 ? p.tp_model : applied_source);
+       } else {
+          reason = "invalid_ai_target_arbitration_response";
+          return false;
+       }
+
+       // R1: propagate the RR-cap price overlay from the model's choice to the applied
+       // labels (classification above used the stripped base, so behavior without a
+       // marker is byte-identical). keep_current reuses the plan's own labels, which
+       // already went through selection-time capping, so it needs nothing here.
+       bool choice_rrcap = (StringFind(chosen_model, "_rrcap") >= 0);
+       bool choice_keep_current = (chosen_base == "current" || chosen_base == "current_plan" || chosen_base == "keep_current");
+       if(choice_rrcap && !choice_keep_current){
+          if(StringFind(applied_source, "_rrcap") < 0) applied_source += "_rrcap";
+          if(StringFind(applied_target_model, "_rrcap") < 0) applied_target_model += "_rrcap";
+          if(StringFind(applied_tp_model, "_rrcap") < 0) applied_tp_model += "_rrcap";
+       }
 
       double rr = _TargetRR(p, chosen_tp);
       if(chosen_tp <= 0.0 || rr <= 0.0){
@@ -11495,13 +11890,40 @@ private:
                   + " engine_obstacle_kind=" + (StringLen(p.obstacle_kind) > 0 ? p.obstacle_kind : "none")
                   + " model_target_blocker_kind=" + dec.target_blocker_kind
                   + " owner=deterministic action=model_label_kept_diagnostic_only");
-      if(chosen_tp1 > 0.0){
-         p.tp1 = chosen_tp1;
-         // The AI arbitrated this first leg; the generic R-multiple builder downstream
-         // must not silently move it.
-         p.tp1_from_target_model = true;
+       // R4: suppress the first leg when the arbitrated final RR2 is below
+       // InpTP1MinRR.  Checked here -- not only in _BuildPlanPrices -- because this
+       // function builds its own leg and finalizes it below; a spread-floor failure
+       // must not kill a plan whose economics call for no first leg at all.  The
+       // model's leg is dropped by engine authority (same as the half-target
+       // model_tp1_ignored rule); the mirror is zeroed so it cannot disagree.
+       bool tp1_suppressed_arb = _ApplyTP1Suppression(p, "ai_target_arbitration");
+       if(chosen_tp1 > 0.0 && !InpTP1AtHalfTarget && !tp1_suppressed_arb){
+          p.tp1 = chosen_tp1;
+          // The AI arbitrated this first leg; the generic R-multiple builder downstream
+          // must not silently move it.
+          p.tp1_from_target_model = true;
+       }
+       if(InpTP1AtHalfTarget && !tp1_suppressed_arb){
+          // R2: the engine owns the first leg. The model's leg is journaled and ignored,
+          // then replaced by exactly half of the arbitrated TP2 via the one definition
+          // (_SetHalfTargetFirstLeg); a leg below the live spread floor fails closed here.
+          if(chosen_tp1 > 0.0)
+             _Journal("[target_arbitration] model_tp1_ignored_half_target_mode=true"
+                      + " model_tp1=" + _FmtPrice(p.symbol, chosen_tp1)
+                      + " chosen=" + p.target_model);
+          string arb_half_reason = "";
+          if(!_SetHalfTargetFirstLeg(p, MathAbs(p.entry_est - p.sl), "ai_target_arbitration", arb_half_reason)){
+             reason = arb_half_reason;
+             return false;
+          }
+          p.ai_chosen_tp1 = p.tp1;
+       }
+      // R4: a suppressed plan skips first-leg validation (there is no leg); the
+      // _FinalizeFirstLeg suppressed early-pass would also accept it, but skipping
+      // states the intent at the call site.
+      if(!tp1_suppressed_arb){
+         if(!_FinalizeFirstLeg(p, false, reason)) return false;
       }
-      if(!_FinalizeFirstLeg(p, false, reason)) return false;
       p.target_arbitration_required = false;
       _NormalizeTargetLabels(p);
       _PersistNormalizedTargetArbitration(p, dec);
@@ -11590,11 +12012,18 @@ private:
       return _CurrentSpreadPrice(p.symbol) * InpMinTP1SpreadMult;
    }
 
-   // Not const: _CurrentSpreadPrice queries live symbol state.  Both callers
-   // (_SelectObstacleAwareTarget and _BuildPlanPrices) are non-const anyway.
-   double _MinTp1Reward(const TradePlan &p, const double stop_dist) {
-      return MathMax(_MinTp1GeometryReward(p, stop_dist), _MinTp1SpreadReward(p));
-   }
+    // Not const: _CurrentSpreadPrice queries live symbol state.  Both callers
+    // (_SelectObstacleAwareTarget and _BuildPlanPrices) are non-const anyway.
+    // R2: in half-target mode the first leg is DEFINED (0.5 * TP2), not searched, so the
+    // geometry half (is this leg a meaningful fraction of risk?) does not apply -- only the
+    // live spread half (can the broker place it?) binds. This stays the ONE composed floor:
+    // ranking, price building and the AI payload all read p.min_tp1_reward from here, so no
+    // caller can enforce a different number. The MathMax line below is intentionally kept
+    // verbatim for the non-half path.
+    double _MinTp1Reward(const TradePlan &p, const double stop_dist) {
+       if(InpTP1AtHalfTarget) return _MinTp1SpreadReward(p);
+       return MathMax(_MinTp1GeometryReward(p, stop_dist), _MinTp1SpreadReward(p));
+    }
 
    //+---------------------------------------------------------------+
    //| The first leg the floor is asking ABOUT, for the geometry half.  |
@@ -11625,14 +12054,42 @@ private:
       return live_leg_reward;
    }
 
-   bool _FinalizeFirstLeg(TradePlan &p, const bool allow_generic_adjustment, string &reason) {
-      double risk = MathAbs(p.entry_est-p.sl);
-      double target_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
-      double leg = _RewardToTarget(p.is_buy, p.entry_est, p.tp1);
-      double geometry_floor = _MinTp1GeometryReward(p, risk);
-      double spread_floor = _MinTp1SpreadReward(p);
-      double epsilon = MathMax(risk, 0.00000001)*0.00000001;
-      if(allow_generic_adjustment && !p.assessed_plan_locked && !p.tp1_from_target_model){
+     bool _FinalizeFirstLeg(TradePlan &p, const bool allow_generic_adjustment, string &reason) {
+        // R4: a suppressed plan has no leg to validate -- tp1 == 0.0 with the flag
+        // latched is the complete valid state.  A flag/price mismatch fails closed:
+        // a leg that exists must go through the checks below like any other.
+        if(p.tp1_suppressed){
+           if(p.tp1 > 0.0){ reason = "target_model_tp1_suppression_inconsistent"; return false; }
+           reason = "ok";
+           return true;
+        }
+        double risk = MathAbs(p.entry_est-p.sl);
+       double target_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
+       double leg = _RewardToTarget(p.is_buy, p.entry_est, p.tp1);
+       double geometry_floor = _MinTp1GeometryReward(p, risk);
+       double spread_floor = _MinTp1SpreadReward(p);
+       double epsilon = MathMax(risk, 0.00000001)*0.00000001;
+       // R2: the leg is defined (0.5 * TP2), not searched -- no generic adjustment and no
+       // geometry floor. Wrong-side, beyond-target and the live spread floor still bind,
+       // and a spread failure keeps the existing reason. Locked plans are validated here,
+       // never rewritten (callers set their legs before this point).
+       if(InpTP1AtHalfTarget){
+          if(risk <= 0.0 || leg <= 0.0){ reason = "target_model_tp1_wrong_side_of_entry"; return false; }
+          if(leg >= target_reward){ reason = "target_model_tp1_beyond_target"; return false; }
+          if(spread_floor > 0.0 && leg + epsilon < spread_floor){
+             reason = "target_model_tp1_below_min_reward";
+             _Journal("[first_leg_validation] valid=false symbol=" + p.symbol
+                      + " leg_reward=" + _FmtPrice(p.symbol, leg)
+                      + " half_target_mode=true"
+                      + " spread_floor=" + _FmtPrice(p.symbol, spread_floor)
+                      + " approved_plan=" + (allow_generic_adjustment ? "false" : "true")
+                      + " action=reject_without_rewriting_approval");
+             return false;
+          }
+          reason = "ok";
+          return true;
+       }
+       if(allow_generic_adjustment && !p.assessed_plan_locked && !p.tp1_from_target_model){
          // Target sanitization can replace TP2 after the generic TP1 builder.
          // Reconcile the two legs before freezing/serializing the candidate.
          // Previously a 0.70*old-TP2 cap undid the 0.65R floor; the sanitizer
@@ -11733,23 +12190,45 @@ private:
       return (c.crosses_obstacle || c.truncated_by_obstacle);
    }
 
-   // Ordering contract:
-   //   1. eligible routes beat ineligible ones;
-   //   2. a route crossing a MAJOR obstacle ranks below every non-crossing route no
-   //      matter how much more RR it offers -- crossing is a demotion, not a tie-break;
-   //   3. once an obstacle is in play and neither route crosses a *major* one, the
-   //      obstacle has already been priced into each route's reward, so the higher RR
-   //      wins.  Without this a 0.57R route that stops in front of a minor imbalance
-   //      would beat a 3.07R partial route purely because it was collected first;
-   //   4. otherwise keep collection order, which is priority order.  Rule 4 is what
-   //      keeps the pre-existing choice identical whenever no obstacle is involved.
-   bool _TargetRankBetter(const TargetRankCandidate &a, const TargetRankCandidate &b) const {
-      bool ea = _TargetRankEligible(a);
-      bool eb = _TargetRankEligible(b);
-      if(ea != eb) return ea;
-      bool ca = _TargetRankCrossesMajor(a);
-      bool cb = _TargetRankCrossesMajor(b);
-      if(ca != cb) return (!ca);
+    // Ordering contract:
+    //   1. eligible routes beat ineligible ones;
+    //   2. (pre-R1) a route crossing a MAJOR obstacle ranks below every non-crossing
+    //      route no matter how much more RR it offers -- crossing is a demotion, not
+    //      a tie-break.  With InpPreferTargetBeforeObstacle the demotion covers EVERY
+    //      crossing route: the TP sits BEFORE the level whenever a before-level route
+    //      meets the floor, and crossing survives only as a last resort;
+    //   2b. (R1, gated) among routes that stop before the level, a clean route (no
+    //      obstacle involved at all) outranks a truncated one; the floor already binds
+    //      both via eligibility, so this tier never ships a below-floor TP;
+    //   3. once an obstacle is in play and neither route crosses a *major* one, the
+    //      obstacle has already been priced into each route's reward, so the higher RR
+    //      wins.  Without this a 0.57R route that stops in front of a minor imbalance
+    //      would beat a 3.07R partial route purely because it was collected first;
+    //   4. otherwise keep collection order, which is priority order.  Rule 4 is what
+    //      keeps the pre-existing choice identical whenever no obstacle is involved.
+    //   With InpPreferTargetBeforeObstacle=false rules 2-4 run exactly as before.
+    bool _TargetRankBetter(const TargetRankCandidate &a, const TargetRankCandidate &b) const {
+       bool ea = _TargetRankEligible(a);
+       bool eb = _TargetRankEligible(b);
+       if(ea != eb) return ea;
+       if(InpPreferTargetBeforeObstacle){
+          // R1: before the level beats through the level at equal eligibility
+          // (eligibility already encodes the minimum RR -- a truncated route that
+          // does not reach the floor is ineligible and loses at rule 1, so it can
+          // never outrank a crossing route on this tier).
+          if(a.crosses_obstacle != b.crosses_obstacle) return (!a.crosses_obstacle);
+          if(!a.crosses_obstacle && !b.crosses_obstacle){
+             if(a.truncated_by_obstacle != b.truncated_by_obstacle) return (!a.truncated_by_obstacle);
+          } else if(a.crosses_obstacle && b.crosses_obstacle){
+             bool ca = _TargetRankCrossesMajor(a);
+             bool cb = _TargetRankCrossesMajor(b);
+             if(ca != cb) return (!ca);
+          }
+       } else {
+          bool ca = _TargetRankCrossesMajor(a);
+          bool cb = _TargetRankCrossesMajor(b);
+          if(ca != cb) return (!ca);
+       }
       if(_TargetRankObstacleInvolved(a) || _TargetRankObstacleInvolved(b)){
          if(MathAbs(a.rr - b.rr) > _RREps()) return (a.rr > b.rr);
       }
@@ -11772,21 +12251,123 @@ private:
       return false;
    }
 
-   // Best eligible route that passes THROUGH an obstacle.  Only consulted once every
-   // clean route has been ruled out and the alternative is a synthetic that crosses the
-   // same obstacle: at that point the crossing risk is already being taken, so the
-   // decision is purely which crossing route pays more.  A killer-severity crossing is
-   // never a candidate -- that is a "do not trade" signal, not a target choice.
-   int _PickBestCrossingRoute(const TargetRankCandidate &list[]) const {
+    // Best eligible route that passes THROUGH an obstacle.  Only consulted once every
+    // clean route has been ruled out and the alternative is a synthetic that crosses the
+    // same obstacle: at that point the crossing risk is already being taken, so the
+    // decision is purely which crossing route pays more.  A killer-severity crossing is
+    // never a candidate -- that is a "do not trade" signal, not a target choice.
+    // R1: this stays the LAST resort.  With InpPreferTargetBeforeObstacle the callers
+    // only reach it when no before-level route meets the floor; the killer exclusion
+    // below stays binding in both modes.
+    int _PickBestCrossingRoute(const TargetRankCandidate &list[]) const {
       int best = -1;
       for(int i=0; i<ArraySize(list); i++){
          if(!_TargetRankEligible(list[i])) continue;
-         if(!list[i].crosses_obstacle) continue;
-         if(list[i].obstacle_severity >= InpBlockerKillSeverity) continue;
-         if(best < 0 || list[i].rr > list[best].rr) best = i;
-      }
-      return best;
-   }
+          if(!list[i].crosses_obstacle) continue;
+          if(list[i].obstacle_severity >= InpBlockerKillSeverity) continue;
+          if(best < 0 || list[i].rr > list[best].rr) best = i;
+       }
+       return best;
+    }
+
+    // R1: best eligible route that stops BEFORE any level (clean or truncated).
+    // Only consulted when InpPreferTargetBeforeObstacle is true; when false the
+    // pre-R1 selection path runs untouched.
+    int _PickBestBeforeObstacleRoute(const TargetRankCandidate &list[]) const {
+       int best = -1;
+       for(int i=0; i<ArraySize(list); i++){
+          if(!_TargetRankEligible(list[i])) continue;
+          if(list[i].crosses_obstacle) continue;
+          if(best < 0 || _TargetRankBetter(list[i], list[best])) best = i;
+       }
+       return best;
+    }
+
+    // R1: whether any floor-meeting before-level route exists. Gated twin of
+    // _RankedListHasCleanRoute: the original counts a minor crossing as "clean",
+    // which would let a through-level route pass as the before-level choice.
+    bool _RankedListHasBeforeObstacleRoute(const TargetRankCandidate &list[]) const {
+       for(int i=0; i<ArraySize(list); i++){
+          if(_TargetRankEligible(list[i]) && !list[i].crosses_obstacle) return true;
+       }
+       return false;
+    }
+
+    // R1: best floor-meeting RR on each side of the level, for the
+    // [target_before_obstacle] audit line. Ineligible routes (below the floor)
+    // never populate either side, so the line proves what the floor admitted.
+    double _BestRankedCrossingRR(const TargetRankCandidate &list[]) const {
+       double best = 0.0;
+       for(int i=0; i<ArraySize(list); i++){
+          if(!_TargetRankEligible(list[i])) continue;
+          if(!list[i].crosses_obstacle) continue;
+          if(list[i].rr > best) best = list[i].rr;
+       }
+       return best;
+    }
+
+    double _BestRankedTruncatedRR(const TargetRankCandidate &list[]) const {
+       double best = 0.0;
+       for(int i=0; i<ArraySize(list); i++){
+          if(!_TargetRankEligible(list[i])) continue;
+          if(list[i].crosses_obstacle) continue;
+          if(!list[i].truncated_by_obstacle) continue;
+          if(list[i].rr > best) best = list[i].rr;
+       }
+       return best;
+    }
+
+    // R1: one audit line for the before-vs-through decision. Callers gate on
+    // InpPreferTargetBeforeObstacle; emission itself rides _JournalOnChange, so a
+    // repeated identical decision is deduped per symbol instead of spamming once
+    // per tick, and the line obeys the existing journal-level convention.
+    // action is truncated (TP placed without crossing a level), crossed_last_resort
+    // (a through-level route won because no before-level route reached the floor)
+    // or rejected (killer severity / no floor-meeting route).
+    void _JournalTargetBeforeObstacle(const TradePlan &p, const TargetRankCandidate &list[],
+                                      const double min_rr, const string obstacle_kind,
+                                      const double severity, const double crossing_rr,
+                                      const double truncated_rr, const string action) {
+       string obstacle = obstacle_kind;
+       double sev = severity;
+       if(StringLen(obstacle) == 0){
+          // Prefer attribution from a floor-meeting route; fall back to any route
+          // so a rejection (nothing eligible) still names the blocker that
+          // decided it.
+          for(int i=0; i<ArraySize(list); i++){
+             if(_TargetRankEligible(list[i]) && list[i].crosses_obstacle){
+                obstacle = list[i].obstacle_kind; sev = list[i].obstacle_severity; break;
+             }
+          }
+          if(StringLen(obstacle) == 0){
+             for(int i=0; i<ArraySize(list); i++){
+                if(_TargetRankEligible(list[i]) && list[i].truncated_by_obstacle){
+                   obstacle = list[i].obstacle_kind; sev = list[i].obstacle_severity; break;
+                }
+             }
+          }
+          if(StringLen(obstacle) == 0){
+             for(int i=0; i<ArraySize(list); i++){
+                if(list[i].crosses_obstacle || list[i].truncated_by_obstacle){
+                   if(StringLen(list[i].obstacle_kind) > 0){
+                      obstacle = list[i].obstacle_kind; sev = list[i].obstacle_severity; break;
+                   }
+                }
+             }
+          }
+       }
+       // No obstacle on any route: the R1 preference did not bind, so there is no
+       // before-vs-through decision to audit.
+       if(StringLen(obstacle) == 0) return;
+       _JournalOnChange("target_before_obstacle|" + p.symbol,
+                        "[target_before_obstacle] symbol=" + p.symbol
+                        + " obstacle=" + obstacle
+                        + " severity=" + DoubleToString(sev, 2)
+                        + " crossing_rr=" + DoubleToString(crossing_rr, 4)
+                        + " truncated_rr=" + DoubleToString(truncated_rr, 4)
+                        + " min_rr=" + DoubleToString(min_rr, 4)
+                        + " action=" + action);
+    }
 
    void _LogTargetRank(const TradePlan &p, const TargetRankCandidate &list[], const int chosen_index) const {
       // One line per route per candidate: the single largest producer in the journal
@@ -11883,10 +12464,24 @@ private:
       TargetRankCandidate ranked[];
       ArrayResize(ranked, 0);
 
-      for(int i=0; i<ArraySize(targets); i++){
-         double candidate_target = targets[i].price;
-         if(!_IsRewardSideLevel(p.is_buy, p.entry_est, candidate_target)) continue;
-         structural_target_exists = true;
+       for(int i=0; i<ArraySize(targets); i++){
+          double candidate_target = targets[i].price;
+          if(!_IsRewardSideLevel(p.is_buy, p.entry_est, candidate_target)) continue;
+          // R1(a): clamp BEFORE the obstacle search, so obstacles beyond the capped price
+          // no longer apply to this route and every ranked/AI/stored carrier downstream
+          // holds the capped price. Never rejected for RR-cap distance -- only clamped.
+          // Kinds stay canonical here (the route's source identity); the clamp itself is
+          // journaled, and any post-application clamp is marked by _EnforceTargetRRCap.
+          bool rrcap_clamped = false;
+          candidate_target = _ClampTargetPriceToRRCap(p.is_buy, p.entry_est, candidate_target,
+                                                      stop_dist, rrcap_clamped);
+          if(rrcap_clamped && _JournalDetailEnabled(2))
+             _Journal("[target_rr_cap] symbol=" + p.symbol
+                      + " stage=select_candidate"
+                      + " kind=" + targets[i].kind
+                      + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                      + " action=clamped");
+          structural_target_exists = true;
 
          string obstacle_kind = "";
          double obstacle_price = 0.0;
@@ -11920,20 +12515,30 @@ private:
             rr < InpObstacleMinStopMult)
             reject = "htf_opposing_imbalance_too_near";
 
-         // The clamped route stops in front of the obstacle, so it never crosses.
-         _RankAddTarget(ranked, (truncated ? "capped_before_" + obstacle_kind : targets[i].kind),
-                        effective_target, 0.0, 0.0, true, rr, false, severity, obstacle_kind, obstacle_price,
-                        ok_rr, ok_dist, truncated, reject);
+          // The clamped route stops in front of the obstacle, so it never crosses.
+          _RankAddTarget(ranked, (truncated ? "capped_before_" + obstacle_kind : targets[i].kind),
+                         effective_target, 0.0, 0.0, true, rr, false, severity, obstacle_kind, obstacle_price,
+                         ok_rr, ok_dist, truncated, reject);
 
-         // PLAN A step 4 / PLAN B step 2: when the obstacle is the only reason the
-         // structural objective failed, offer partial-then-liquidity as a first-class
-         // route rather than dropping to a synthetic that ignores that same obstacle.
-         if(truncated){
+          // PLAN A step 4 / PLAN B step 2: when the obstacle is the only reason the
+          // structural objective failed, offer the same runner taken in full through
+          // the obstacle as a comparable route rather than dropping to a synthetic
+          // that ignores that same obstacle, plus partial-then-liquidity as a
+          // first-class route when the engine does not own the first leg.
+          // R2: in half-target mode the first leg is engine-defined (0.5 * TP2), so a
+          // partial route must NOT be offered -- ranking it on its partial leg would let
+          // it win on the strength of a leg that never ships (the engine overwrites it),
+          // the exact advertised-vs-placed divergence this codebase keeps fixing. Only
+          // the partial add is gated on !InpTP1AtHalfTarget; the through-obstacle add
+          // below (same runner) stays outside that gate, so the TP2 choice is
+          // unaffected in half mode and only the fictional first leg is retired.
+          if(truncated){
             double full_reward = _RewardToTarget(p.is_buy, p.entry_est, candidate_target);
             double full_rr = (stop_dist > 0 ? full_reward / stop_dist : 0.0);
             if(full_reward > 0.0){
                bool p_ok_rr = _RRMeetsFloor(full_rr, min_rr);
                bool p_ok_dist = (min_target_dist <= 0 || full_reward >= min_target_dist);
+               if(!InpTP1AtHalfTarget){
                // Both flags above describe the RUNNER.  The first leg -- the whole point
                // of this route -- has its own economics and must clear the same minimum
                // TP1 reward the execution layer enforces, otherwise the route is asking
@@ -11965,10 +12570,16 @@ private:
                            + " obstacle=" + obstacle_kind
                            + " severity=" + DoubleToString(severity, 2)
                            + " action=route_ineligible");
-               _RankAddTarget(ranked, "partial_before_obstacle_then_liquidity", candidate_target,
-                              effective_target, partial_rr, p_ok_leg, full_rr, true, severity,
-                              obstacle_kind, obstacle_price,
-                              p_ok_rr, p_ok_dist, true, p_reject);
+                 _RankAddTarget(ranked, "partial_before_obstacle_then_liquidity", candidate_target,
+                                effective_target, partial_rr, p_ok_leg, full_rr, true, severity,
+                                obstacle_kind, obstacle_price,
+                                p_ok_rr, p_ok_dist, true, p_reject);
+               } // !InpTP1AtHalfTarget: half mode retires only the fictional first leg.
+
+                // Through-obstacle route: deliberately OUTSIDE the half gate above. The
+                // same runner taken in full must stay comparable in half mode, otherwise
+                // half mode silently loses the structural route and the TP2 choice degrades
+                // to capped-before-obstacle vs synthetic with no full-liquidity option.
 
                // The obstacle must bind the same way for EVERY route.  The synthetic
                // fallback below is measured straight through this obstacle and therefore
@@ -11987,17 +12598,28 @@ private:
                   through_reject = "through_obstacle_below_floor";
                _RankAddTarget(ranked, targets[i].kind, candidate_target,
                               0.0, 0.0, true, full_rr, true, severity,
-                              obstacle_kind, obstacle_price,
-                              p_ok_rr, p_ok_dist, false, through_reject);
+                               obstacle_kind, obstacle_price,
+                               p_ok_rr, p_ok_dist, false, through_reject);
             }
          }
       }
 
       double swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
       if(InpTPUseFibExtension && swing_range > 0){
-         double fib_target = (p.is_buy ? p.po3.swing_high + swing_range * (InpTPFibExtension - 1.0)
-                                       : p.po3.swing_low  - swing_range * (InpTPFibExtension - 1.0));
-         if(_IsRewardSideLevel(p.is_buy, p.entry_est, fib_target)){
+          double fib_target = (p.is_buy ? p.po3.swing_high + swing_range * (InpTPFibExtension - 1.0)
+                                        : p.po3.swing_low  - swing_range * (InpTPFibExtension - 1.0));
+          if(_IsRewardSideLevel(p.is_buy, p.entry_est, fib_target)){
+             // R1(b): the fib extension is a structural candidate like any other -- clamp
+             // it to the RR cap before the obstacle search, same as every collected level.
+             // Kind stays canonical (route identity); the clamp is journaled.
+             bool fib_rrcap = false;
+             fib_target = _ClampTargetPriceToRRCap(p.is_buy, p.entry_est, fib_target,
+                                                   stop_dist, fib_rrcap);
+             if(fib_rrcap && _JournalDetailEnabled(2))
+                _Journal("[target_rr_cap] symbol=" + p.symbol
+                         + " stage=select_fib_extension"
+                         + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                         + " action=clamped");
             string obstacle_kind = "";
             double obstacle_price = 0.0;
             double effective_target = fib_target;
@@ -12012,13 +12634,13 @@ private:
                                         ? MathAbs(obstacle_price - p.entry_est) / stop_dist : 0.0);
                double fib_severity = (StringLen(obstacle_kind) > 0
                                       ? _ObstacleSeverity(obstacle_kind, fib_obstacle_r) : 0.0);
-               bool fib_ok_dist = (min_target_dist <= 0 || reward >= min_target_dist);
-               bool fib_ok_rr = _RRMeetsFloor(fib_rr, min_rr);
-               if(!fib_ok_dist || !fib_ok_rr) saw_too_near = true;
-               _RankAddTarget(ranked, "fib_extension", effective_target, 0.0, 0.0, true, fib_rr, false,
-                              fib_severity, obstacle_kind, obstacle_price,
-                              fib_ok_rr, fib_ok_dist, false,
-                              ((fib_ok_rr && fib_ok_dist) ? "" : "below_rr_floor"));
+                bool fib_ok_dist = (min_target_dist <= 0 || reward >= min_target_dist);
+                bool fib_ok_rr = _RRMeetsFloor(fib_rr, min_rr);
+                if(!fib_ok_dist || !fib_ok_rr) saw_too_near = true;
+                _RankAddTarget(ranked, "fib_extension", effective_target, 0.0, 0.0, true, fib_rr, false,
+                               fib_severity, obstacle_kind, obstacle_price,
+                               fib_ok_rr, fib_ok_dist, false,
+                               ((fib_ok_rr && fib_ok_dist) ? "" : "below_rr_floor"));
             }
          }
       }
@@ -12031,8 +12653,18 @@ private:
       // the structural route still wins selection, and the net still exists downstream.
       // (Leaving it unset made the sanitizer report fallback_reason=missing_tp with
       //  reward == entry price, surfacing as no_feasible_target.)
-      double fallback_rr = MathMax(_EffectiveFallbackRR(), min_rr);
-      if(InpMaxPlanRR2 > 0) fallback_rr = MathMin(fallback_rr, InpMaxPlanRR2);
+       double fallback_rr = MathMax(_EffectiveFallbackRR(), min_rr);
+       if(InpMaxPlanRR2 > 0) fallback_rr = MathMin(fallback_rr, InpMaxPlanRR2);
+       // R1(b): the synthetic safety net obeys the same RR cap (numbers carry the cap;
+       // kinds stay canonical).
+       if(_TargetRRCapEnabled() && fallback_rr > InpTargetRRCap){
+          fallback_rr = InpTargetRRCap;
+          _Journal("[target_rr_cap] symbol=" + p.symbol
+                   + " stage=select_synthetic_fallback"
+                   + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                   + " to_rr=" + DoubleToString(fallback_rr, 6)
+                   + " action=clamped");
+       }
       _JournalDetail(2, "[fallback_target] configured_fallback_rr=" + DoubleToString(InpFallbackRR2, 6)
                + " min_live_rr=" + DoubleToString(InpMinLiveRR2, 6)
                + " buffer=" + DoubleToString(InpFallbackRRBufferR, 6)
@@ -12041,21 +12673,44 @@ private:
       double synthetic_target = 0.0;
       bool synthetic_available = (InpAllowSyntheticRRTarget && synthetic_reward > 0
                                   && (saw_valid_target || saw_too_near));
-      if(synthetic_available){
-         synthetic_target = (p.is_buy ? p.entry_est + synthetic_reward : p.entry_est - synthetic_reward);
-         p.fallback_tp = synthetic_target;
-         p.fallback_rr = fallback_rr;
-         p.fallback_source = "synthetic_rr_fallback";
-         _RefreshTargetFeasibility(p, "pre_ai");
-      }
+       if(synthetic_available){
+          synthetic_target = (p.is_buy ? p.entry_est + synthetic_reward : p.entry_est - synthetic_reward);
+          p.fallback_tp = synthetic_target;
+          p.fallback_rr = fallback_rr;
+          p.fallback_source = "synthetic_rr_fallback";
+          _RefreshTargetFeasibility(p, "pre_ai");
+       }
 
       // PLAN A step 3 / PLAN B step 5: a structural route that merely got clamped is
       // still a real route.  Take the best ranked one now, so a crossing fallback can
       // never outrank a clean target -- the fallback published above stays a fallback.
-      int structural_best = _PickBestRankedTarget(ranked);
-      if(structural_best >= 0 && !_TargetRankCrossesMajor(ranked[structural_best])){
-         _LogTargetRank(p, ranked, structural_best);
-         _Journal("[rr_floor_decision] symbol=" + p.symbol
+       int structural_best = _PickBestRankedTarget(ranked);
+       // R1: with the gate on, a through-level route must never win here while a
+       // before-level route reaches the floor -- the ranker already orders it that
+       // way, and this condition pins it: only a non-crossing route takes the early
+       // return. A surviving crossing route falls through to the synthetic
+       // comparison below, where crossing-vs-crossing is decided on equal terms.
+       // With the gate off the pre-R1 major-only condition runs byte-identically.
+       bool structural_usable = false;
+       if(structural_best >= 0){
+          if(InpPreferTargetBeforeObstacle)
+             structural_usable = !ranked[structural_best].crosses_obstacle;
+          else
+             structural_usable = !_TargetRankCrossesMajor(ranked[structural_best]);
+       }
+       if(structural_usable){
+          _LogTargetRank(p, ranked, structural_best);
+          // R1: the TP stops before the level while a through-level alternative may
+          // have paid more -- audit the foregone crossing RR against the banked
+          // truncated RR. The helper stays silent when no level is in play.
+          if(InpPreferTargetBeforeObstacle)
+             _JournalTargetBeforeObstacle(p, ranked, min_rr,
+                                          ranked[structural_best].obstacle_kind,
+                                          ranked[structural_best].obstacle_severity,
+                                          _BestRankedCrossingRR(ranked),
+                                          _BestRankedTruncatedRR(ranked),
+                                          "truncated");
+          _Journal("[rr_floor_decision] symbol=" + p.symbol
                   + " chosen=" + ranked[structural_best].kind
                   + " rr=" + DoubleToString(ranked[structural_best].rr, 4)
                   + " floor=" + DoubleToString(min_rr, 4)
@@ -12088,15 +12743,23 @@ private:
             if(capped_reward > 0 &&
                (min_target_dist <= 0 || capped_reward >= min_target_dist) &&
                _RRMeetsFloor(capped_rr, min_rr)){
-               p.tp2 = capped_target;
-               p.tp_model = "capped_before_" + obstacle_kind;
-               p.target_source = "capped_before_" + obstacle_kind;
-               p.target_model = "capped_before_" + obstacle_kind;
-               p.obstacle_price = obstacle_price;
-               p.obstacle_r = capped_rr;
-               p.effective_rr2 = capped_rr;
-               _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
-               return true;
+                p.tp2 = capped_target;
+                p.tp_model = "capped_before_" + obstacle_kind;
+                p.target_source = "capped_before_" + obstacle_kind;
+                p.target_model = "capped_before_" + obstacle_kind;
+                p.obstacle_price = obstacle_price;
+                p.obstacle_r = capped_rr;
+                p.effective_rr2 = capped_rr;
+                _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
+                // R1: the capped-before-obstacle route met the floor and won over the
+                // through-level synthetic (priced honestly at obstacle +/- buffer by
+                // the existing convention above). crossing_rr is the refused through
+                // measurement; truncated_rr the banked capped leg.
+                if(InpPreferTargetBeforeObstacle)
+                   _JournalTargetBeforeObstacle(p, ranked, min_rr, obstacle_kind,
+                                                _ObstacleSeverity(obstacle_kind, p.obstacle_distance_r),
+                                                fallback_rr, capped_rr, "truncated");
+                return true;
             }
             if(_SyntheticTargetBlockedByObstacle(obstacle_kind) && !_CanAskAiForTargetArbitration(p)){
                reason = "synthetic_fallback_crossed_obstacle_blocked";
@@ -12116,7 +12779,17 @@ private:
             // clean route existed when none did.  With no clean route the synthetic is
             // the only remaining option, so fall through to the normal capped/max-distance
             // handling below instead of rejecting.
-            if(_RankedListHasCleanRoute(ranked)){
+             // R1: with the gate on, "a non-crossing route was available" must mean a
+             // route that stops BEFORE the level -- the pre-R1 helper counts a minor
+             // crossing as clean, which would hand the win to a through-level route.
+             // With the gate off the original helper runs byte-identically.
+             // (With the gate on this branch is unreachable: an eligible before-level
+             // route would already have taken the structural early return above. The
+             // gated helpers below pin the preference even so.)
+             bool r1_has_before_obstacle_route = (InpPreferTargetBeforeObstacle
+                ? _RankedListHasBeforeObstacleRoute(ranked)
+                : _RankedListHasCleanRoute(ranked));
+             if(r1_has_before_obstacle_route){
                p.why_not_synthetic_fallback =
                   "Crosses " + obstacle_kind + " at " + DoubleToString(p.obstacle_distance_r, 2)
                   + "R; a non-crossing structural route was available.";
@@ -12126,7 +12799,9 @@ private:
                         + " truncated_rr=" + DoubleToString(capped_rr, 4)
                         + " floor=" + DoubleToString(min_rr, 4)
                         + " binding_constraint=crosses_obstacle_clean_route_exists");
-               int clean_best = _PickBestRankedTarget(ranked);
+                int clean_best = (InpPreferTargetBeforeObstacle
+                   ? _PickBestBeforeObstacleRoute(ranked)
+                   : _PickBestRankedTarget(ranked));
                _LogTargetRank(p, ranked, clean_best);
                // _RankedListHasCleanRoute and _PickBestRankedTarget share _TargetRankEligible,
                // so this is always >= 0 here; the guard stays defensive rather than fatal.
@@ -12175,10 +12850,17 @@ private:
                         + " action=" + (degenerate_obstacle
                                         ? "reject_obstacle_inside_entry_structure"
                                         : "reject_no_route_without_killer_crossing"));
-               _LogTargetRank(p, ranked, -1);
-               reason = (degenerate_obstacle ? "obstacle_inside_entry_structure"
-                                             : "all_routes_cross_killer_obstacle");
-               return false;
+                _LogTargetRank(p, ranked, -1);
+                reason = (degenerate_obstacle ? "obstacle_inside_entry_structure"
+                                              : "all_routes_cross_killer_obstacle");
+                // R1: the crossing was refused at killer severity -- audit the refused
+                // through measurement (truncated_rr is 0: no before-level route met
+                // the floor, else the structural return above would have fired).
+                if(InpPreferTargetBeforeObstacle)
+                   _JournalTargetBeforeObstacle(p, ranked, min_rr, obstacle_kind,
+                                                synthetic_severity, fallback_rr,
+                                                _BestRankedTruncatedRR(ranked), "rejected");
+                return false;
             }
 
             // 2. Crossing is permitted, so it is now purely a question of which crossing
@@ -12191,15 +12873,25 @@ private:
                   "A structural route through the same " + obstacle_kind + " pays "
                   + DoubleToString(ranked[crossing_best].rr, 2) + "R versus "
                   + DoubleToString(fallback_rr, 2) + "R for the synthetic.";
-               _Journal("[obstacle_crossing_gate] symbol=" + p.symbol
-                        + " obstacle=" + obstacle_kind
-                        + " severity=" + DoubleToString(synthetic_severity, 2)
-                        + " class=" + _ObstacleSeverityClass(synthetic_severity)
-                        + " chosen=" + ranked[crossing_best].kind
-                        + " structural_rr=" + DoubleToString(ranked[crossing_best].rr, 4)
-                        + " synthetic_rr=" + DoubleToString(fallback_rr, 4)
-                        + " action=prefer_structural_through_same_obstacle");
-               _LogTargetRank(p, ranked, crossing_best);
+                _Journal("[obstacle_crossing_gate] symbol=" + p.symbol
+                         + " obstacle=" + obstacle_kind
+                         + " severity=" + DoubleToString(synthetic_severity, 2)
+                         + " class=" + _ObstacleSeverityClass(synthetic_severity)
+                         + " chosen=" + ranked[crossing_best].kind
+                         + " structural_rr=" + DoubleToString(ranked[crossing_best].rr, 4)
+                         + " synthetic_rr=" + DoubleToString(fallback_rr, 4)
+                         + " action=prefer_structural_through_same_obstacle");
+                // R1: both survivors cross the same level -- last-resort crossing.
+                // truncated_rr is 0 (no before-level route met the floor, else the
+                // structural return above would have fired); the killer gate above
+                // already refused the do-not-trade case.
+                if(InpPreferTargetBeforeObstacle)
+                   _JournalTargetBeforeObstacle(p, ranked, min_rr, obstacle_kind,
+                                                synthetic_severity,
+                                                ranked[crossing_best].rr,
+                                                _BestRankedTruncatedRR(ranked),
+                                                "crossed_last_resort");
+                _LogTargetRank(p, ranked, crossing_best);
                return _ApplyRankedTarget(p, ranked[crossing_best], stop_dist);
             }
          }
@@ -12223,10 +12915,10 @@ private:
                reason = (StringLen(p.fallback_infeasible_reason) > 0 ? "synthetic_fallback_" + p.fallback_infeasible_reason : "target_too_close_for_swing_duration");
                return false;
             }
-            p.tp2 = synthetic_target;
-            p.tp_model = "synthetic_rr_fallback";
-            p.target_source = "synthetic_rr_fallback";
-            p.target_model = "synthetic_rr_fallback";
+             p.tp2 = synthetic_target;
+             p.tp_model = "synthetic_rr_fallback";
+             p.target_source = "synthetic_rr_fallback";
+             p.target_model = "synthetic_rr_fallback";
             p.obstacle_kind = (obstacle_before ? _CrossedObstacleKind(obstacle_kind) : "");
             p.obstacle_price = (obstacle_before ? obstacle_price : 0.0);
             p.obstacle_r = 0.0;
@@ -12236,16 +12928,24 @@ private:
                // PLAN B step 5: the synthetic is now reachable only when no structural
                // route survived.  Record which of the two it was so every remaining
                // synthetic in the journal carries its own justification.
-               _Journal("[rr_floor_decision] symbol=" + p.symbol
-                        + " chosen=synthetic_rr_fallback"
-                        + " rr=" + DoubleToString(p.effective_rr2, 4)
-                        + " floor=" + DoubleToString(min_rr, 4)
-                        + " structural_routes_seen=" + (saw_valid_target ? "true" : "false")
-                        + " truncated_by_obstacle=" + (saw_truncated_by_obstacle ? "true" : "false")
-                        + " binding_constraint="
-                        + (saw_valid_target ? "structural_routes_below_floor"
-                                            : "no_structural_target_existed"));
-               _LogTargetRank(p, ranked, -1);
+                _Journal("[rr_floor_decision] symbol=" + p.symbol
+                         + " chosen=synthetic_rr_fallback"
+                         + " rr=" + DoubleToString(p.effective_rr2, 4)
+                         + " floor=" + DoubleToString(min_rr, 4)
+                         + " structural_routes_seen=" + (saw_valid_target ? "true" : "false")
+                         + " truncated_by_obstacle=" + (saw_truncated_by_obstacle ? "true" : "false")
+                         + " binding_constraint="
+                         + (saw_valid_target ? "structural_routes_below_floor"
+                                             : "no_structural_target_existed"));
+                // R1: a through-level synthetic won because no before-level route met
+                // the floor -- last-resort crossing (only when an obstacle was
+                // actually crossed; otherwise the preference did not bind).
+                if(InpPreferTargetBeforeObstacle && obstacle_before)
+                   _JournalTargetBeforeObstacle(p, ranked, min_rr, obstacle_kind,
+                                                _ObstacleSeverity(obstacle_kind, p.obstacle_distance_r), p.effective_rr2,
+                                                _BestRankedTruncatedRR(ranked),
+                                                "crossed_last_resort");
+                _LogTargetRank(p, ranked, -1);
                _MaybeRequireTargetArbitration(p, p.tp2, p.target_source);
                return true;
             }
@@ -12256,20 +12956,43 @@ private:
 
       // Last resort: a route that is merely below the floor still beats no plan at all
       // only when it does not cross a major obstacle.  Anything crossing stays rejected.
-      int fallback_best = _PickBestRankedTarget(ranked);
-      if(fallback_best >= 0 && !_TargetRankCrossesMajor(ranked[fallback_best])){
-         _LogTargetRank(p, ranked, fallback_best);
-         return _ApplyRankedTarget(p, ranked[fallback_best], stop_dist);
-      }
-      _LogTargetRank(p, ranked, -1);
+       int fallback_best = _PickBestRankedTarget(ranked);
+       if(fallback_best >= 0 && !_TargetRankCrossesMajor(ranked[fallback_best])){
+          _LogTargetRank(p, ranked, fallback_best);
+          // R1: the tail is a last-resort path -- with the gate on, name which side
+          // of the level the surviving route sits on. A crossing minor here means
+          // no before-level route met the floor (an eligible one would already have
+          // taken the structural return); the major/killer exclusion above stays
+          // binding in both modes.
+          if(InpPreferTargetBeforeObstacle)
+             _JournalTargetBeforeObstacle(p, ranked, min_rr,
+                                          ranked[fallback_best].obstacle_kind,
+                                          ranked[fallback_best].obstacle_severity,
+                                          _BestRankedCrossingRR(ranked),
+                                          _BestRankedTruncatedRR(ranked),
+                                          (ranked[fallback_best].crosses_obstacle
+                                             ? "crossed_last_resort" : "truncated"));
+          return _ApplyRankedTarget(p, ranked[fallback_best], stop_dist);
+       }
+       _LogTargetRank(p, ranked, -1);
 
-      // PLAN B step 1: report truncation distinctly so the funnel can tell a target that
-      // was blocked by structure from one that was simply too close to be worth taking.
-      if(saw_truncated_by_obstacle) reason = "liquidity_target_truncated_by_obstacle";
-      else if(saw_liquidity_too_near) reason = "liquidity_target_too_near";
-      else if(saw_too_near) reason = "target_too_close_for_swing_duration";
-      else reason = "liquidity_target_too_near";
-      return false;
+       // PLAN B step 1: report truncation distinctly so the funnel can tell a target that
+       // was blocked by structure from one that was simply too close to be worth taking.
+       // R1: a clamped-then-below-floor route is still a below-floor route -- the
+       // reject stands (no weakening of the floor). What R1 changes is only that a
+       // floor-meeting truncated route outranks every crossing route above.
+       if(saw_truncated_by_obstacle) reason = "liquidity_target_truncated_by_obstacle";
+       else if(saw_liquidity_too_near) reason = "liquidity_target_too_near";
+       else if(saw_too_near) reason = "target_too_close_for_swing_duration";
+       else reason = "liquidity_target_too_near";
+       // R1: the only before-level candidates were below the floor and no crossing
+       // route survived either -- audit the blocker (attributed from the menu by
+       // the helper) with both floor-meeting sides at 0.
+       if(InpPreferTargetBeforeObstacle && saw_truncated_by_obstacle)
+          _JournalTargetBeforeObstacle(p, ranked, min_rr, "", 0.0,
+                                       _BestRankedCrossingRR(ranked),
+                                       _BestRankedTruncatedRR(ranked), "rejected");
+       return false;
    }
 
    bool _SelectObstacleAwareTarget(TradePlan &p, const double stop_dist) {
@@ -12324,14 +13047,220 @@ private:
          cap = (cap > 0 ? MathMin(cap, adr_cap) : adr_cap);
       }
 
-      double atr_abs = _ApproxAtrAbs(p, entry_price);
-      if(atr_abs > 0 && InpMaxTargetAtrMult > 0){
-         double atr_cap = atr_abs * InpMaxTargetAtrMult;
-         cap = (cap > 0 ? MathMin(cap, atr_cap) : atr_cap);
-      }
+       double atr_abs = _ApproxAtrAbs(p, entry_price);
+       if(atr_abs > 0 && InpMaxTargetAtrMult > 0){
+          double atr_cap = atr_abs * InpMaxTargetAtrMult;
+          cap = (cap > 0 ? MathMin(cap, atr_cap) : atr_cap);
+       }
 
-      return cap;
-   }
+       return cap;
+    }
+
+    //+---------------------------------------------------------------+
+    //| R1 final-target RR cap: the owning clamp for InpTargetRRCap.   |
+    //|                                                                |
+    //| No plan may be built, sent to AI, placed, or have a broker TP  |
+    //| set with TP2 reward above InpTargetRRCap * stop_dist. Targets  |
+    //| beyond the cap are CLAMPED to exactly the cap, never rejected  |
+    //| for distance. At/inside the cap everything is unchanged;       |
+    //| <= 0 disables. InpMaxPlanRR2 keeps its current meaning.        |
+    //+---------------------------------------------------------------+
+   bool _TargetRRCapEnabled() const {
+       return (InpTargetRRCap > 0.0);
+    }
+
+   double _TargetRRCapReward(const double stop_dist) const {
+       if(!_TargetRRCapEnabled() || stop_dist <= 0.0) return 0.0;
+       return stop_dist * InpTargetRRCap;
+    }
+
+    // Clamp a candidate price to exactly the cap. Returns the input unchanged when the
+    // cap is disabled, unusable, off-side, or not breached. was_clamped is strict: a
+    // target exactly at the cap is "inside", never marked.
+   double _ClampTargetPriceToRRCap(const bool is_buy, const double entry_price,
+                                    const double target_price, const double stop_dist,
+                                    bool &was_clamped) const {
+       was_clamped = false;
+       if(!_TargetRRCapEnabled() || stop_dist <= 0.0 || entry_price <= 0.0 || target_price <= 0.0)
+          return target_price;
+       double reward = (is_buy ? target_price - entry_price : entry_price - target_price);
+       if(reward <= 0.0) return target_price;
+       double cap_reward = _TargetRRCapReward(stop_dist);
+       if(cap_reward <= 0.0 || reward <= cap_reward) return target_price;
+       was_clamped = true;
+       return (is_buy ? entry_price + cap_reward : entry_price - cap_reward);
+    }
+
+    // Final-guard clamp for a fully-applied plan: non-locked plans never leave with
+    // reward > cap. Locked (assessed/approved) plans keep their approved TP2 untouched --
+    // they were built under the cap and their identity must not be rewritten.
+    // Labels stay truthful via the "_rrcap" marker, which _NormalizeTargetLabels preserves
+    // and Python's _target_model_aliases already classifies by substring.
+   void _EnforceTargetRRCap(TradePlan &p, const double stop_dist, const string stage) {
+       if(!_TargetRRCapEnabled() || p.assessed_plan_locked) return;
+       if(stop_dist <= 0.0 || p.entry_est <= 0.0 || p.tp2 <= 0.0) return;
+       if(!_IsRewardSideLevel(p.is_buy, p.entry_est, p.tp2)) return;
+        double cap_reward = _TargetRRCapReward(stop_dist);
+        double reward = (p.is_buy ? p.tp2 - p.entry_est : p.entry_est - p.tp2);
+        if(reward <= 0.0 || cap_reward <= 0.0 || reward <= cap_reward) return;
+        double old_tp2 = p.tp2;
+        double from_rr = reward / stop_dist;
+        p.tp2 = (p.is_buy ? p.entry_est + cap_reward : p.entry_est - cap_reward);
+        p.effective_rr2 = cap_reward / stop_dist;
+        if(StringFind(p.tp_model, "_rrcap") < 0) p.tp_model += "_rrcap";
+        if(StringLen(p.target_model) == 0) p.target_model = p.tp_model;
+        else if(StringFind(p.target_model, "_rrcap") < 0) p.target_model += "_rrcap";
+        // A clamp that moves TP2 must not leave stale mirrors behind: any mirror that
+        // carried the pre-clamp TP2 (assignment lineage, epsilon-tolerant to survive a
+        // NormalizeDouble rounding between copy and clamp) follows to the clamped price
+        // with its paired RR, and feasibility is recomputed so the menu, the guards and
+        // the stored carriers agree. Mirrors that held a DIFFERENT level are untouched.
+        double mirror_tol = MathMax(1e-12, MathAbs(old_tp2) * 1e-9);
+        if(MathAbs(p.fallback_tp - old_tp2) <= mirror_tol){
+           p.fallback_tp = p.tp2;
+           p.fallback_rr = p.effective_rr2;
+        }
+        if(MathAbs(p.liquidity_target_preserved - old_tp2) <= mirror_tol){
+           p.liquidity_target_preserved = p.tp2;
+           p.liquidity_rr = p.effective_rr2;
+        }
+        _RefreshTargetFeasibility(p, stage);
+       _Journal("[target_rr_cap] symbol=" + p.symbol
+                + " stage=" + stage
+                + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                + " stop_dist=" + _FmtPrice(p.symbol, stop_dist)
+                + " from_rr=" + DoubleToString(from_rr, 6)
+                + " to_rr=" + DoubleToString(p.effective_rr2, 6)
+                + " tp_model=" + p.tp_model
+                + " action=clamped");
+    }
+
+    //+---------------------------------------------------------------+
+    //| R2 half-target first leg: the ONE definition of TP1 in half    |
+    //| mode. After TP2 is final, tp1 = entry +/- 0.5 * tp2_reward for |
+    //| every family and target model. The engine owns the leg -- even |
+    //| routes that owned their first leg are overwritten (non-locked  |
+    //| only). No geometry floor (the leg is defined, not searched);   |
+    //| the live spread floor still binds and fails closed with the    |
+    //| existing reason. Locked plans never reach here: they are       |
+    //| validated, never rewritten.                                    |
+    //+---------------------------------------------------------------+
+    //+---------------------------------------------------------------+
+    //| R4: no first leg when the final RR2 is below InpTP1MinRR.        |
+    //| The predicate reads the same _ExecutionRR2 the acceptance gate   |
+    //| enforces, so suppression and acceptance can never disagree on    |
+    //| the number.  A suppressed plan carries tp1 == 0.0 AND            |
+    //| tp1_suppressed == true -- the single explicit no-first-leg       |
+    //| representation.  InpTP1MinRR <= 0 disables the gate (always      |
+    //| build TP1), preserving today's behaviour byte-identically.       |
+    //+---------------------------------------------------------------+
+    bool _TP1SuppressedByMinRR(const TradePlan &p) const {
+       if(InpTP1MinRR <= 0.0) return false;
+       return !_RRMeetsFloor(_ExecutionRR2(p), InpTP1MinRR);
+    }
+
+    // Applies the R4 gate and latches the representation both ways, so a reused
+    // plan object can never carry a stale flag.  Journals the decision exactly
+    // once per distinct message via _JournalOnChange (the existing journal-level
+    // convention).  Callers skip every leg build AND the first-leg finalizer
+    // when this returns true; _FinalizeFirstLeg additionally passes a suppressed
+    // plan on its own so locked restores (which never rebuild) stay valid.
+    bool _ApplyTP1Suppression(TradePlan &p, const string stage) {
+       bool suppressed = _TP1SuppressedByMinRR(p);
+       if(suppressed){
+          p.tp1 = 0.0;
+          p.tp1_from_target_model = false;
+          p.tp1_suppressed = true;
+          // Keep the arbitrated-outcome mirror consistent, mirroring the
+          // _SetHalfTargetFirstLeg rule below: never carry a first-leg price
+          // the engine will not place.
+          if(p.ai_chosen_tp1 > 0.0) p.ai_chosen_tp1 = 0.0;
+          _JournalOnChange("tp1_suppressed|" + p.symbol,
+                           "[tp1_suppressed] symbol=" + p.symbol
+                           + " rr2=" + DoubleToString(_ExecutionRR2(p), 4)
+                           + " min_rr=" + DoubleToString(InpTP1MinRR, 4)
+                           + " action=no_first_leg");
+       } else {
+          p.tp1_suppressed = false;
+       }
+       return suppressed;
+    }
+
+    // Generic R-multiple TP1 builder: the leg a plan carries when no target model
+    // owns one and half-target mode is off.  Single definition shared by
+    // _BuildPlanPrices and the R4 post-sanitizer un-suppress rebuild, so the two
+    // cannot diverge.
+    void _BuildGenericFirstLeg(TradePlan &p, const double stop_dist, const double tp2_reward, const double min_tp1_reward) {
+       double tp1_reward = stop_dist * MathMax(0.40, p.tp1_r_multiple);
+       if(InpTP1UseFibExtension){
+          double tp1_swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
+          if(tp1_swing_range > 0.0 && InpTP1FibExtension > 1.0){
+             double fib_tp1 = (p.is_buy
+                               ? p.po3.swing_high + tp1_swing_range * (InpTP1FibExtension - 1.0)
+                               : p.po3.swing_low - tp1_swing_range * (InpTP1FibExtension - 1.0));
+             double fib_tp1_reward = _RewardToTarget(p.is_buy, p.entry_est, fib_tp1);
+             if(fib_tp1_reward > 0.0 && fib_tp1_reward < tp2_reward)
+                tp1_reward = fib_tp1_reward;
+          }
+       }
+       if(min_tp1_reward > 0) tp1_reward = MathMax(tp1_reward, min_tp1_reward);
+       if(tp2_reward > 0) tp1_reward = MathMin(tp1_reward, tp2_reward * 0.70);
+       if(tp1_reward <= 0) tp1_reward = MathMin(tp2_reward, stop_dist);
+       if(p.is_buy) p.tp1 = p.entry_est + tp1_reward;
+       else         p.tp1 = p.entry_est - tp1_reward;
+    }
+
+    bool _SetHalfTargetFirstLeg(TradePlan &p, const double stop_dist, const string stage, string &reason) {
+       reason = "ok";
+       double tp2_reward = (p.is_buy ? p.tp2 - p.entry_est : p.entry_est - p.tp2);
+       double epsilon = MathMax(stop_dist, 0.00000001) * 0.00000001;
+       if(stop_dist <= 0.0 || tp2_reward <= 0.0){
+          reason = "target_model_tp1_wrong_side_of_entry";
+          return false;
+       }
+       double half_reward = tp2_reward * 0.5;
+       double spread_floor = _MinTp1SpreadReward(p);
+       if(half_reward <= 0.0 || half_reward + epsilon >= tp2_reward){
+          reason = "target_model_tp1_beyond_target";
+          return false;
+       }
+       if(spread_floor > 0.0 && half_reward + epsilon < spread_floor){
+          reason = "target_model_tp1_below_min_reward";
+          _Journal("[tp1_half_target] symbol=" + p.symbol
+                   + " stage=" + stage
+                   + " tp2_reward=" + _FmtPrice(p.symbol, tp2_reward)
+                   + " half_reward=" + _FmtPrice(p.symbol, half_reward)
+                   + " spread_floor=" + _FmtPrice(p.symbol, spread_floor)
+                   + " action=reject_fail_closed");
+          return false;
+       }
+       p.tp1 = (p.is_buy ? p.entry_est + half_reward : p.entry_est - half_reward);
+       // Engine-owned: blocks the generic R-multiple rebuild downstream, same as a
+       // route-owned leg, so the shipped leg is exactly the defined one.
+       p.tp1_from_target_model = true;
+       // R4 latches BOTH ways in _ApplyTP1Suppression; a leg builder that only
+       // sets the price leaves the other half of the representation stale.  Every
+       // caller inside _BuildPlanPrices and _ApplyAiTargetArbitration is already
+       // guarded by !suppressed, so this is a no-op there.  _DowngradeRunnerToStandard
+       // is the one caller that rebuilds a leg on a plan whose flag was latched
+       // before the downgrade moved TP2, and it shipped tp1 > 0 together with
+       // tp1_suppressed == true -- the contradiction that killed the live EURCAD
+       // approval of 2026-09-23 20:43 as approval_rr1_mismatch, 224 plans that day.
+       p.tp1_suppressed = false;
+       // Keep the arbitrated-outcome mirror consistent when one already exists (stored
+       // arbitration, model leg); never invent an AI choice on a pre-AI plan, which
+       // stays 0 until arbitration runs.
+       if(p.ai_chosen_tp1 > 0.0) p.ai_chosen_tp1 = p.tp1;
+       if(InpVerboseJournal)
+          _Journal("[tp1_half_target] symbol=" + p.symbol
+                   + " stage=" + stage
+                   + " tp1=" + _FmtPrice(p.symbol, p.tp1)
+                   + " half_reward=" + _FmtPrice(p.symbol, half_reward)
+                   + " tp2_reward=" + _FmtPrice(p.symbol, tp2_reward)
+                   + " spread_floor=" + _FmtPrice(p.symbol, spread_floor)
+                   + " owner=engine_half_target action=set");
+       return true;
+    }
 
    double _RewardToTarget(const bool is_buy, const double entry_price, const double target_price) {
       return (is_buy ? target_price - entry_price : entry_price - target_price);
@@ -12397,19 +13326,40 @@ private:
       else if(!rr_pass) p.fallback_infeasible_reason = "rr_below_min";
       else p.fallback_feasible_for_tp2 = true;
 
-      if(exceeds_max && risk > 0.0 && max_dist > 0.0){
-         double capped_rr = max_dist / risk;
-         double capped_tp = _TpFromReward(p, max_dist);
-         if(capped_tp > 0.0 && _RRMeetsFloor(capped_rr, min_rr) && !_PriceAlreadyReachedTarget(p, capped_tp, risk)){
-            if(_TargetCrossesKnownMajorObstacle(p, capped_tp)){
-               p.synthetic_capped_to_max_distance_reason = "crosses_known_major_obstacle";
-            } else {
-               p.synthetic_capped_to_max_distance_tp = capped_tp;
-               p.synthetic_capped_to_max_distance_rr = capped_rr;
-               p.synthetic_capped_to_max_distance_feasible = true;
-               p.synthetic_capped_to_max_distance_reason = "fallback_capped_by_max_distance";
-               m_total_target_feasibility_synthetic_capped_to_max_distance++;
-            }
+       if(exceeds_max && risk > 0.0 && max_dist > 0.0){
+          // R1: the capped-synthetic lineage obeys the RR cap too -- the effective ceiling
+          // is the stricter of max-distance and the RR cap. Disabled cap => max_dist alone,
+          // byte-identical to before.
+          double effective_cap = max_dist;
+          bool rr_cap_binds = false;
+          if(_TargetRRCapEnabled()){
+             // risk here IS the plan stop distance (MathAbs(entry-sl) above).
+             double rr_cap_reward = risk * InpTargetRRCap;
+             if(rr_cap_reward > 0.0 && rr_cap_reward < effective_cap){
+                effective_cap = rr_cap_reward;
+                rr_cap_binds = true;
+             }
+          }
+          double capped_rr = effective_cap / risk;
+          double capped_tp = _TpFromReward(p, effective_cap);
+          if(capped_tp > 0.0 && _RRMeetsFloor(capped_rr, min_rr) && !_PriceAlreadyReachedTarget(p, capped_tp, risk)){
+             if(_TargetCrossesKnownMajorObstacle(p, capped_tp)){
+                p.synthetic_capped_to_max_distance_reason = "crosses_known_major_obstacle";
+             } else {
+                p.synthetic_capped_to_max_distance_tp = capped_tp;
+                p.synthetic_capped_to_max_distance_rr = capped_rr;
+                p.synthetic_capped_to_max_distance_feasible = true;
+                p.synthetic_capped_to_max_distance_reason = (rr_cap_binds
+                   ? "fallback_capped_by_target_rr_cap"
+                   : "fallback_capped_by_max_distance");
+                if(rr_cap_binds)
+                   _Journal("[target_rr_cap] symbol=" + p.symbol
+                            + " stage=target_feasibility"
+                            + " cap_r=" + DoubleToString(InpTargetRRCap, 4)
+                            + " to_rr=" + DoubleToString(capped_rr, 6)
+                            + " action=clamped");
+                m_total_target_feasibility_synthetic_capped_to_max_distance++;
+             }
          }
          m_total_target_feasibility_synthetic_infeasible_max_distance++;
       }
@@ -12650,8 +13600,13 @@ private:
          return false;
       }
 
-      if(InpAllowPartialBeforeObstacle &&
-         p.capped_before_obstacle_tp > 0.0 &&
+       // R2: in half-target mode the sanitizer must not substitute a partial route for
+       // TP2 while keeping a capped first leg -- the engine overwrites that leg to half
+       // of TP2 right after validation, so the partial label would name a leg that never
+       // ships. The plain liquidity branch below still covers the same runner.
+       if(!InpTP1AtHalfTarget &&
+          InpAllowPartialBeforeObstacle &&
+          p.capped_before_obstacle_tp > 0.0 &&
          p.liquidity_target_preserved > 0.0 &&
          _TargetPriceFeasibleForTp(p, p.capped_before_obstacle_tp, false) &&
          _TargetPriceFeasibleForTp(p, p.liquidity_target_preserved, true)){
@@ -12710,13 +13665,13 @@ private:
          }
       }
 
-      if(p.fallback_feasible_for_tp2 &&
-         p.fallback_tp > 0.0 &&
-         _TargetPriceFeasibleForTp(p, p.fallback_tp, true)){
-         p.tp2 = p.fallback_tp;
-         p.target_source = "ai_selected_synthetic_rr_fallback";
-         p.target_model = "synthetic_rr_fallback";
-         p.tp_model = "synthetic_rr_fallback";
+       if(p.fallback_feasible_for_tp2 &&
+          p.fallback_tp > 0.0 &&
+          _TargetPriceFeasibleForTp(p, p.fallback_tp, true)){
+          p.tp2 = p.fallback_tp;
+          p.target_source = "ai_selected_synthetic_rr_fallback";
+          p.target_model = "synthetic_rr_fallback";
+          p.tp_model = "synthetic_rr_fallback";
          p.effective_rr2 = _TargetRR(p, p.tp2);
          p.ai_chosen_target_model = "synthetic_rr_fallback";
          p.ai_chosen_tp2 = p.tp2;
@@ -12920,28 +13875,58 @@ private:
                      + " chosen=" + p.target_model
                      + " reward=" + _FmtPrice(p.symbol, reward)
                      + " cap=" + _FmtPrice(p.symbol, target_cap));
-         } else {
-            reward = target_cap;
-            if(p.is_buy) p.tp2 = p.entry_est + reward;
-            else         p.tp2 = p.entry_est - reward;
-            p.effective_rr2 = (stop_dist > 0 ? reward / stop_dist : 0.0);
-            if(StringFind(p.tp_model, "_capped") < 0) p.tp_model += "_capped";
-            if(StringLen(p.target_model) == 0 || StringFind(p.target_model, "_capped") < 0) p.target_model = p.tp_model;
-         }
-      }
+          } else {
+             reward = target_cap;
+             if(p.is_buy) p.tp2 = p.entry_est + reward;
+             else         p.tp2 = p.entry_est - reward;
+             p.effective_rr2 = (stop_dist > 0 ? reward / stop_dist : 0.0);
+             if(StringFind(p.tp_model, "_capped") < 0) p.tp_model += "_capped";
+             if(StringLen(p.target_model) == 0 || StringFind(p.target_model, "_capped") < 0) p.target_model = p.tp_model;
+          }
+       }
+
+       // R1(c): final RR-cap guard after every target-application path above (selection,
+       // assessed restore, stored arbitration, AI arbitration + synthetic recompute).
+       // A non-locked plan never leaves with reward > cap (clamped + journaled with
+       // from_rr/to_rr); a locked plan keeps its approved TP2 untouched.
+       _EnforceTargetRRCap(p, stop_dist, "plan_prices_post_apply");
 
       double tp2_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
       if(tp2_reward <= 0){
          reject_reason = "liquidity_target_too_near";
          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
       }
-      if(min_target_dist > 0 && tp2_reward < min_target_dist){
-         reject_reason = "target_too_close_for_swing_duration";
-         return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
-      }
+       if(min_target_dist > 0 && tp2_reward < min_target_dist){
+          reject_reason = "target_too_close_for_swing_duration";
+          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+       }
 
-      double min_tp1_reward = _MinTp1Reward(p, stop_dist);
-      if(p.tp1_from_target_model && p.tp1 > 0.0){
+       // R4: decide the first leg from the final RR2 BEFORE any leg is built, so a
+       // spread-floor failure cannot kill a plan whose economics call for no first
+       // leg.  Re-checked after the sanitizer below because it may move TP2.
+       // Locked plans skip this entirely -- their approved legs are restored by
+       // _ApplyAssessedTargetUnderContract above, never rebuilt here.
+       bool tp1_suppressed_build = false;
+       if(!p.assessed_plan_locked)
+          tp1_suppressed_build = _ApplyTP1Suppression(p, "plan_prices");
+
+        double min_tp1_reward = _MinTp1Reward(p, stop_dist);
+       // R2: in half-target mode the engine owns the first leg for every family and target
+       // model (non-locked only): tp1 = entry +/- 0.5 * tp2_reward, including routes that
+       // owned their first leg. Locked plans skip this entirely -- their approved leg is
+       // validated below, never rewritten. When the mode is off the two branches below
+       // run byte-identically to before.
+       // R4: a suppressed plan keeps tp1 == 0.0 with tp1_suppressed latched above --
+       // no leg is built, and the position will run to TP2 in full size.  Every
+       // branch below is skipped, not failed.
+       if(tp1_suppressed_build){
+       } else if(InpTP1AtHalfTarget && !p.assessed_plan_locked){
+          string half_reason = "";
+          if(!_SetHalfTargetFirstLeg(p, stop_dist, "plan_prices", half_reason)){
+             reject_reason = half_reason;
+             return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+          }
+       } else if(p.tp1_from_target_model && p.tp1 > 0.0){
          // A target model that defines its own first leg is the authority on it.  This
          // builder used to overwrite that leg unconditionally: for
          // partial_before_obstacle_then_liquidity the 0.65R floor moved a partial sitting
@@ -12965,11 +13950,13 @@ private:
          // 2026-09-05 approvals: the geometry floor rose with the widened stop
          // while the frozen leg's reward fell with the drifted entry, so a plan
          // needed TP1 at 1.31R at approval to survive its own execution.
-         double geometry_floor      = _MinTp1GeometryReward(p, stop_dist);
-         double geometry_leg_reward = _Tp1GeometryLegReward(p, route_tp1_reward);
-         double spread_floor        = _MinTp1SpreadReward(p);
-         bool geometry_fail = (geometry_floor > 0.0 && geometry_leg_reward < geometry_floor);
-         bool spread_fail   = (spread_floor > 0.0 && route_tp1_reward < spread_floor);
+          double geometry_floor      = _MinTp1GeometryReward(p, stop_dist);
+          double geometry_leg_reward = _Tp1GeometryLegReward(p, route_tp1_reward);
+          double spread_floor        = _MinTp1SpreadReward(p);
+          // R2: no geometry floor in half-target mode (locked approved legs and any
+          // surviving route-owned leg are validated against the spread half only).
+          bool geometry_fail = (!InpTP1AtHalfTarget && geometry_floor > 0.0 && geometry_leg_reward < geometry_floor);
+          bool spread_fail   = (spread_floor > 0.0 && route_tp1_reward < spread_floor);
          if(geometry_fail || spread_fail){
             reject_reason = "target_model_tp1_below_min_reward";
             _Journal("[tp1_authority] symbol=" + p.symbol
@@ -12998,23 +13985,8 @@ private:
                      + " obstacle=" + (StringLen(p.obstacle_kind) > 0 ? p.obstacle_kind : "none")
                      + " action=preserved");
       } else {
-         double tp1_reward = stop_dist * MathMax(0.40, p.tp1_r_multiple);
-         if(InpTP1UseFibExtension){
-            double tp1_swing_range = MathAbs(p.po3.swing_high - p.po3.swing_low);
-            if(tp1_swing_range > 0.0 && InpTP1FibExtension > 1.0){
-               double fib_tp1 = (p.is_buy
-                                 ? p.po3.swing_high + tp1_swing_range * (InpTP1FibExtension - 1.0)
-                                 : p.po3.swing_low - tp1_swing_range * (InpTP1FibExtension - 1.0));
-               double fib_tp1_reward = _RewardToTarget(p.is_buy, p.entry_est, fib_tp1);
-               if(fib_tp1_reward > 0.0 && fib_tp1_reward < tp2_reward)
-                  tp1_reward = fib_tp1_reward;
-            }
-         }
-         if(min_tp1_reward > 0) tp1_reward = MathMax(tp1_reward, min_tp1_reward);
-         if(tp2_reward > 0) tp1_reward = MathMin(tp1_reward, tp2_reward * 0.70);
-         if(tp1_reward <= 0) tp1_reward = MathMin(tp2_reward, stop_dist);
-         if(p.is_buy) p.tp1 = p.entry_est + tp1_reward;
-         else         p.tp1 = p.entry_est - tp1_reward;
+         // Generic R-multiple leg (single definition in _BuildGenericFirstLeg).
+         _BuildGenericFirstLeg(p, stop_dist, tp2_reward, min_tp1_reward);
       }
 
       if(!_StopsDistanceOk(p.symbol, p.is_buy, p.entry_est, p.sl, p.tp2)){
@@ -13030,12 +14002,54 @@ private:
       _NormalizeTargetLabels(p);
       string ai_target_validation_reason = "";
       string ai_target_validation_detail = "";
-      if(!ValidateAiChosenTargetBeforeWatchlist(p, ai_target_validation_reason, ai_target_validation_detail)){
-         reject_reason = ai_target_validation_reason;
-         return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
-      }
-      if(!_FinalizeFirstLeg(p, true, reject_reason))
-         return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+       if(!ValidateAiChosenTargetBeforeWatchlist(p, ai_target_validation_reason, ai_target_validation_detail)){
+          reject_reason = ai_target_validation_reason;
+          return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+       }
+       // R1(c)+R2: the sanitizer inside validation may substitute TP2
+       // (liquidity/capped/synthetic). Re-enforce the RR cap on the substituted target,
+       // then re-assert the defined first leg from the final TP2 (non-locked only).
+       // Both are no-ops when nothing moved; locked plans are validated, never rewritten.
+       _EnforceTargetRRCap(p, stop_dist, "plan_prices_post_sanitizer");
+       // R4 late reconcile: the sanitizer may have substituted TP2, so the economics
+       // the early gate measured may have moved.  Re-decide from the final TP2: a
+       // newly suppressed plan drops whatever leg was built, while a plan the
+       // sanitizer lifted back over the threshold rebuilds its defined leg instead
+       // of running legless.  Locked plans are exempt -- approved identity is kept.
+       if(!p.assessed_plan_locked){
+          if(_TP1SuppressedByMinRR(p)){
+             _ApplyTP1Suppression(p, "plan_prices_post_sanitizer");
+             tp1_suppressed_build = true;
+          } else if(tp1_suppressed_build){
+             tp1_suppressed_build = false;
+             p.tp1_suppressed = false;
+             p.tp1_from_target_model = false;
+             if(InpTP1AtHalfTarget){
+                string unsuppress_reason = "";
+                if(!_SetHalfTargetFirstLeg(p, stop_dist, "plan_prices_post_sanitizer", unsuppress_reason)){
+                   reject_reason = unsuppress_reason;
+                   return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+                }
+             } else {
+                double unsuppress_tp2_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
+                _BuildGenericFirstLeg(p, stop_dist, unsuppress_tp2_reward, min_tp1_reward);
+             }
+          }
+       }
+       if(InpTP1AtHalfTarget && !p.assessed_plan_locked && !tp1_suppressed_build){
+          string post_half_reason = "";
+          if(!_SetHalfTargetFirstLeg(p, stop_dist, "plan_prices_post_sanitizer", post_half_reason)){
+             reject_reason = post_half_reason;
+             return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+          }
+       }
+       // R4: a suppressed plan has no leg to finalize; anything else -- including a
+       // locked suppressed restore -- is validated by _FinalizeFirstLeg, whose
+       // suppressed early-pass accepts the explicit no-first-leg state.
+       if(!tp1_suppressed_build){
+          if(!_FinalizeFirstLeg(p, true, reject_reason))
+             return _BuildPlanReject(p, reject_reason, p.entry_est, p.sl, p.tp2);
+       }
       _LogBuildPlanAccepted(p, min_target_dist);
 
       return true;
@@ -13096,9 +14110,12 @@ private:
       double rr = _ExecutionRR2(p);
       double min_rr = MathMax(_FamilyMinRR(p), InpStandardTradeLiquidityRRFloor);
       double total_cost_r = p.execution_cost_r + p.slippage_r + p.commission_r;
-      if(!_RRMeetsFloor(rr, min_rr) || total_cost_r > InpStandardTradeCostRCeiling){
-         double fallback_rr = MathMax(min_rr, _EffectiveFallbackRR());
-         if(InpMaxPlanRR2 > 0.0) fallback_rr = MathMin(fallback_rr, InpMaxPlanRR2);
+       if(!_RRMeetsFloor(rr, min_rr) || total_cost_r > InpStandardTradeCostRCeiling){
+          double fallback_rr = MathMax(min_rr, _EffectiveFallbackRR());
+          if(InpMaxPlanRR2 > 0.0) fallback_rr = MathMin(fallback_rr, InpMaxPlanRR2);
+          // R1(b): same cap on the downgrade synthetic rr.
+          if(_TargetRRCapEnabled() && fallback_rr > InpTargetRRCap)
+             fallback_rr = InpTargetRRCap;
          double reward = risk * fallback_rr;
          if(reward <= 0.0) return false;
          p.tp2 = (p.is_buy ? p.entry_est + reward : p.entry_est - reward);
@@ -13106,16 +14123,37 @@ private:
          p.target_source = "runner_downgrade_synthetic_rr";
          p.effective_rr2 = fallback_rr;
       }
-      p.standard_target_after_downgrade = p.tp2;
-      _EstimateExecutionCosts(p);
-      p.heuristic_quality_estimate_gross = _HeuristicQualityEstimateGrossDiagnostic(p);
-      p.heuristic_quality_estimate = _HeuristicQualityEstimateDiagnostic(p);
-      _FinalizePlanEconomics(p, "runner_downgrade", false);
-      p.gross_expected_r = p.heuristic_quality_estimate_gross;
-      p.net_expected_r = p.heuristic_quality_estimate;
-      p.expected_value_r = p.heuristic_quality_estimate;
-      return (_RRMeetsFloor(_ExecutionRR2(p), min_rr) &&
-              (p.execution_cost_r + p.slippage_r + p.commission_r) <= InpStandardTradeCostRCeiling);
+       p.standard_target_after_downgrade = p.tp2;
+       _EstimateExecutionCosts(p);
+       p.heuristic_quality_estimate_gross = _HeuristicQualityEstimateGrossDiagnostic(p);
+       p.heuristic_quality_estimate = _HeuristicQualityEstimateDiagnostic(p);
+       _FinalizePlanEconomics(p, "runner_downgrade", false);
+       p.gross_expected_r = p.heuristic_quality_estimate_gross;
+       p.net_expected_r = p.heuristic_quality_estimate;
+       p.expected_value_r = p.heuristic_quality_estimate;
+       // R4 reconcile: this function replaces TP2, so the economics the earlier
+       // suppression gate measured no longer hold.  Re-decide from the final TP2,
+       // exactly as the post-sanitizer reconcile in _BuildPlanPrices does, so the
+       // plan can never leave here carrying tp1 > 0 beside tp1_suppressed == true,
+       // nor run legless on an RR2 the downgrade lifted back over the threshold.
+       // Locked plans are exempt -- their approved identity is restored, never rewritten.
+       bool downgrade_suppressed = false;
+       if(!p.assessed_plan_locked){
+          downgrade_suppressed = _ApplyTP1Suppression(p, "runner_downgrade");
+          if(!downgrade_suppressed && !InpTP1AtHalfTarget && p.tp1 <= 0.0 && p.tp2 > 0.0){
+             double downgrade_tp2_reward = _RewardToTarget(p.is_buy, p.entry_est, p.tp2);
+             _BuildGenericFirstLeg(p, risk, downgrade_tp2_reward, _MinTp1Reward(p, risk));
+          }
+       }
+       // R2: a replaced TP2 needs its defined first leg re-asserted (non-locked only).
+       // A leg below the live spread floor fails the downgrade closed.
+       if(InpTP1AtHalfTarget && !p.assessed_plan_locked && !downgrade_suppressed && p.tp2 > 0.0){
+          string downgrade_half_reason = "";
+          if(!_SetHalfTargetFirstLeg(p, risk, "runner_downgrade", downgrade_half_reason))
+             return false;
+       }
+       return (_RRMeetsFloor(_ExecutionRR2(p), min_rr) &&
+               (p.execution_cost_r + p.slippage_r + p.commission_r) <= InpStandardTradeCostRCeiling);
    }
 
    bool _DeterministicExecutionGate(TradePlan &p, string &reason, const bool execution_stage=true) {
@@ -13175,10 +14213,27 @@ private:
                   + " t_disp=" + IntegerToString((long)p.po3.t_disp)
                   + " context_tier=" + p.po3.context_tier
                   + " po3_state=" + p.po3.po3_state
-                  + " action=reject_before_provider_call");
-         return false;
-      }
-      if(execution_stage && InpRequireFvgAfterDisp && p.fvg.t_form <= p.po3.t_disp){
+                   + " action=reject_before_provider_call");
+          return false;
+       }
+       // R1 FOLLOW-THROUGH GATE.  Live week 2026-09-14..18: every trade whose
+       // HTF PO3 context had po3.has_follow_through=false lost.  has_follow_through
+       // is set at PO3.mqh:1032 via _HasDisplacementFollowThrough; running tier-C
+       // contexts force it false (PO3.mqh:1201).  Nothing consulted it before, so
+       // this check is intentionally stage-independent: the request-stage call in
+       // _TryBuildCandidateFromBranch runs before any provider request is queued,
+       // and the execution-stage calls in _PlaceMarket run before any order.
+       if(InpRequireDisplacementFollowThrough && !p.po3.has_follow_through){
+          reason = "displacement_follow_through_missing";
+          _Journal("[follow_through_gate] symbol=" + p.symbol
+                   + " family=" + (StringLen(p.setup_family) > 0 ? p.setup_family : _DeriveSetupFamily(p))
+                   + " has_follow_through=false"
+                   + " t_disp=" + IntegerToString((long)p.po3.t_disp)
+                   + " execution_stage=" + (execution_stage ? "true" : "false")
+                   + " action=" + (execution_stage ? "reject_before_execution" : "reject_before_provider_call"));
+          return false;
+       }
+       if(execution_stage && InpRequireFvgAfterDisp && p.fvg.t_form <= p.po3.t_disp){
          reason = "fvg_not_after_impulse";
          return false;
       }
@@ -13268,6 +14323,19 @@ private:
          reason = "setup_score=" + DoubleToString(p.setup_score, 2) + "<" + DoubleToString(floor, 2);
          return false;
       }
+      double ceiling = 0.0;
+      string ceiling_input = "";
+      if(_SetupScoreAboveCeiling(p, ceiling, ceiling_input)){
+         reason = "setup_score_above_ceiling setup_score=" + DoubleToString(p.setup_score, 2)
+                  + ">" + DoubleToString(ceiling, 2) + " ceiling_input=" + ceiling_input;
+         _Journal("[setup_ceiling_gate] stage=execution symbol=" + p.symbol
+                  + " family=" + p.setup_family
+                  + " setup_score=" + DoubleToString(p.setup_score, 2)
+                  + " ceiling=" + DoubleToString(ceiling, 2)
+                  + " ceiling_input=" + ceiling_input
+                  + " action=reject");
+         return false;
+      }
       if(p.runner_trade){
          string runner_reason = "";
          if(!_RunnerFiltersPass(p, runner_reason)){
@@ -13349,7 +14417,7 @@ private:
       double planned_risk = MathAbs(p.entry_est - p.sl);
       double stop_floor = _MinPlanStopDistance(p, p.entry_est);
       if(stop_floor > 0 && planned_risk < stop_floor * 1.01) score -= 2.0;
-      if(p.tp_model == "liquidity_target") score += 4.0;
+       if(p.tp_model == "liquidity_target" || p.tp_model == "liquidity_target_rrcap") score += 4.0;
       if(StringFind(p.tp_model, "htf_opposing_imbalance") >= 0) score += 2.5;
       if(StringFind(p.tp_model, "opposing_imbalance") >= 0) score += 1.8;
       if(p.po3.liquidity_kind == "equal_high_cluster" || p.po3.liquidity_kind == "equal_low_cluster") score += 4.0;
@@ -13864,9 +14932,26 @@ private:
          for(int i=0; i<count; i++){
             string cand_floor_input = "";
             double cand_floor = _DeterministicSetupScoreFloor(cands[i], cand_floor_input);
-            if(cands[i].setup_score >= cand_floor){
+            double cand_ceiling = 0.0;
+            string cand_ceiling_input = "";
+            bool cand_above_ceiling = _SetupScoreAboveCeiling(cands[i], cand_ceiling, cand_ceiling_input);
+            if(cands[i].setup_score >= cand_floor && !cand_above_ceiling){
                if(kept != i) cands[kept] = cands[i];
                kept++;
+               continue;
+            }
+            if(cands[i].setup_score >= cand_floor && cand_above_ceiling){
+               _Journal("[setup_ceiling_gate] stage=pre_ai_queue symbol=" + cands[i].symbol
+                        + " branch=" + cands[i].entry_branch
+                        + " family=" + cands[i].setup_family
+                        + " taxonomy=" + cands[i].setup_taxonomy_enum
+                        + " setup_score=" + DoubleToString(cands[i].setup_score, 2)
+                        + " ceiling=" + DoubleToString(cand_ceiling, 2)
+                        + " ceiling_input=" + cand_ceiling_input
+                        + " action=reject");
+               _LogSetupReject(cands[i].symbol, "setup_ceiling", "setup_score_above_ceiling",
+                               "stage=pre_ai_queue candidate=" + IntegerToString(cands[i].candidate_index)
+                               + " ceiling_input=" + cand_ceiling_input);
                continue;
             }
             string cand_reason = (cand_floor_input == "unmapped_family" ? "setup_floor_family_unmapped" : "setup_score_below_floor");
@@ -16761,6 +17846,9 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       string rollover_reason = "";
       if(PO3EntryBlockedByRolloverForSymbol(p.symbol, _NowServerOrLocal(), rollover_reason))
          return _RejectPlacement(p, rollover_reason);
+      string behavior_reason = "";
+      if(PO3BehaviorStopEntryBlockActive(_NowServerOrLocal(), behavior_reason))
+         return _RejectPlacement(p, behavior_reason);
       if(!_ExclusiveModelPreExecutionOk(p)) return false;
       if(_ShouldSkipForGlobalOpenPositions()) return _RejectPlacement(p, "another managed position is already open");
       if(m_force_one_managed_trade_per_symbol && _SymbolHasOpenPosition(p.symbol))
@@ -16931,7 +18019,11 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
          live.execution_identity_quarantined = false;
          _SetExecutionAuthority(live, "MQL_PRE_SUBMISSION_ELIGIBLE", false,
                                 "all_final_market_execution_gates_passed_broker_not_yet_called");
-         live.tp1_done = false;
+           live.tp1_done = false;
+           live.half_stop_penalty_done = false;
+           live.half_stop_penalty_attempts = 0;
+           live.tp1_stop_lock_done = false;
+           live.tp1_stop_lock_attempts = 0;
          live.account_position_mode = m_account_position_mode;
          _WriteTradeMeta(live);
          _Journal("[decision_authority] model_raw_allow=" + (live.model_raw_allow ? "true" : "false")
@@ -17201,7 +18293,11 @@ bool _PlaceMarket(const TradePlan &p, const bool ignore_symbol_pending=false, co
       pending.initial_volume = vol;
       _CaptureEntryRiskContext(pending, vol, pending_entry, pending.sl);
       pending.narrative_state = "pending_order";
-      pending.tp1_done = false;
+        pending.tp1_done = false;
+        pending.half_stop_penalty_done = false;
+        pending.half_stop_penalty_attempts = 0;
+        pending.tp1_stop_lock_done = false;
+        pending.tp1_stop_lock_attempts = 0;
       pending.bars_waited = 0;
       pending.last_confirm_bar_time = _LastClosedBarTime(pending.symbol, pending.confirm_tf);
       ulong order_ticket = pending.result_order_ticket;
@@ -18044,7 +19140,12 @@ public:
       _ResolveOverdueShadowTrackersOnInit();
       PenaltyState penalty_tmp[];
       if(m_state.LoadPenaltyStates(m_state.PenaltyPath(), penalty_tmp)) { m_penalty.RestoreStates(penalty_tmp); }
+      // R6: consumed-sweep memory must be loaded BEFORE recovery (recovery appends
+      // via _RememberConsumedSweep, which persists) and history-seeded AFTER, so
+      // the _SweepTradeCapReached / predetermined-outcome gate works across restarts.
+      _LoadConsumedSweepsOnInit();
       _RecoverManagedExposureOnInit();
+      _SeedConsumedSweepsFromHistory();
       m_live_state_restored = true;
       _Journal("ENGINE_VERSION=" + ENGINE_VERSION
                + " input_schema=" + ENGINE_INPUT_SCHEMA
@@ -18154,6 +19255,7 @@ public:
       _PersistResearchQueues();
       _PersistPenaltyStates();
       _PersistRolloverSuspendedPending();
+      _PersistConsumedSweeps();
       // Released only after every write above, so a successor cannot load this
       // magic's state while it is still being saved.
       _ReleaseInstanceOwnership();
@@ -18579,6 +19681,10 @@ public:
       string gate_reason = "";
       if(PO3EntryBlockedByRolloverForSymbol(rec.symbol, now, gate_reason)){
          reason = "rollover_entry_block:" + gate_reason;
+         return 0;
+      }
+      if(PO3BehaviorStopEntryBlockActive(now, gate_reason)){
+         reason = "behavior_stop_entry_block:" + gate_reason;
          return 0;
       }
       if(!_ApplyBrokerSessionEntryGate(rec, gate_reason)){
@@ -19276,7 +20382,11 @@ public:
       base.bars_waited = 0;
       base.last_confirm_bar_time = _LastClosedBarTime(symbol, base.confirm_tf);
       base.armed_at = 0;
-      base.tp1_done = false;
+        base.tp1_done = false;
+        base.half_stop_penalty_done = false;
+        base.half_stop_penalty_attempts = 0;
+        base.tp1_stop_lock_done = false;
+        base.tp1_stop_lock_attempts = 0;
       base.created_at = TimeLocal();
       base.ai_requested_at = 0;
       base.last_score_refresh = base.created_at;
@@ -19963,15 +21073,40 @@ public:
             if(tick_size <= 0.0) tick_size = SymbolInfoDouble(selected.symbol, SYMBOL_POINT);
             if(tick_size <= 0.0) tick_size = 0.00001;
             double assessed_price_tolerance = 2.0 * tick_size;
+            // R2: in half-target mode no party owns tp1 by echo -- it is DEFINED as half of
+            // TP2 by _SetHalfTargetFirstLeg, while Python's assessed_tp1 echoes the menu/model
+            // leg (or the pre-arbitration candidate leg when the model is silent). Comparing
+            // that echo after the engine deliberately overwrote it would reject every approval
+            // whose model emitted a nonzero leg or whose arbitration moved TP2 -- genuine
+            // approvals killed as fingerprint mismatches. Check the mode invariant instead:
+            // the live leg IS half of the live TP2 within the same tick tolerance, while TP2
+            // itself must still equal the approved TP2 exactly. Same shipped-economics
+            // strength, no echo to drift. Mode off => the echo comparison, byte-identical.
+            bool tp1_echo_match = (MathAbs(selected.tp1 - dec.assessed_tp1) <= assessed_price_tolerance);
+            if(InpTP1AtHalfTarget){
+               double bind_tp2_reward = (selected.is_buy ? selected.tp2 - selected.entry_est
+                                                         : selected.entry_est - selected.tp2);
+               double bind_live_leg = (selected.is_buy ? selected.tp1 - selected.entry_est
+                                                       : selected.entry_est - selected.tp1);
+               tp1_echo_match = (bind_tp2_reward > 0.0 &&
+                                 MathAbs(bind_live_leg - bind_tp2_reward * 0.5) <= assessed_price_tolerance);
+               if(!tp1_echo_match)
+                  _Journal("[tp1_half_target] symbol=" + selected.symbol
+                           + " stage=response_binding"
+                           + " live_tp1=" + _FmtPrice(selected.symbol, selected.tp1)
+                           + " live_tp2=" + _FmtPrice(selected.symbol, selected.tp2)
+                           + " echo_assessed_tp1=" + _FmtPrice(selected.symbol, dec.assessed_tp1)
+                           + " action=reject_not_half_of_tp2");
+            }
             if(MathAbs(selected.entry_est - dec.assessed_entry) > assessed_price_tolerance ||
                MathAbs(selected.sl - dec.assessed_sl) > assessed_price_tolerance ||
-               MathAbs(selected.tp1 - dec.assessed_tp1) > assessed_price_tolerance ||
+               !tp1_echo_match ||
                MathAbs(selected.tp2 - dec.assessed_tp2) > assessed_price_tolerance ||
                MathAbs(selected.tp2 - dec.selected_target_price) > assessed_price_tolerance){
                string changed = "";
                if(MathAbs(selected.entry_est - dec.assessed_entry) > assessed_price_tolerance) _AppendChangedComponent(changed, "entry");
                if(MathAbs(selected.sl - dec.assessed_sl) > assessed_price_tolerance) _AppendChangedComponent(changed, "sl");
-               if(MathAbs(selected.tp1 - dec.assessed_tp1) > assessed_price_tolerance) _AppendChangedComponent(changed, "tp1");
+               if(!tp1_echo_match) _AppendChangedComponent(changed, "tp1");
                if(MathAbs(selected.tp2 - dec.assessed_tp2) > assessed_price_tolerance) _AppendChangedComponent(changed, "tp2");
                _WriteShadowDecisionUpdate(selected, dec, "mql_rejected_execution_fingerprint",
                                           "execution_fingerprint_mismatch:" + changed, false);
@@ -20464,6 +21599,15 @@ public:
          if(now <= 0) now = TimeLocal();
 
          string rollover_reason = "";
+         string behavior_block_reason = "";
+         if(PO3BehaviorStopEntryBlockActive(now, behavior_block_reason)){
+            // A pending fill is a new entry: delete outright, never suspend
+            // for restore, while the behavioral entry block is active.
+            _Journal(sym + " deleting pending order ticket=" + IntegerToString((int)ticket)
+                     + " reason=" + behavior_block_reason);
+            if(m_trade.OrderDelete(ticket)) _TrackPendingOrderDelete("behavior_stop_entry_block");
+            continue;
+         }
          if(PO3EntryBlockedByRolloverForSymbol(sym, now, rollover_reason)){
             string freeze_reason = "";
             if(PO3TradingFreezeActive(now, freeze_reason)){
@@ -20530,7 +21674,230 @@ public:
       m_mp_calls++;
    }
 
-   void _MaintainPositionsBody() {
+    // R3: deterministic half-stop penalty. When an open managed position's loss
+    // reaches InpHalfStopPenaltyTriggerR in R of the ORIGINAL risk
+    // (original_entry_for_risk / original_sl_for_risk -- never a moved SL),
+    // close InpHalfStopPenaltyCutPct of the current volume exactly once per
+    // position. No minimum-minutes wait, no management-AI review. Volume goes
+    // through NormalizeClosingVolume with InpClosingVolumeAllowCloseAllBelowMinimum,
+    // the same policy as TP1. A broker failure leaves the done flag clear so the
+    // next tick retries, bounded by InpManagementActionMaxRetries; every attempt
+    // is journaled. Recovered positions without original-risk fields are skipped
+    // with reason=original_risk_unavailable -- the rule never guesses R.
+    void _MaintainHalfStopPenalty(TradePlan &meta,
+                                  const ulong ticket,
+                                  const string sym,
+                                  const bool is_buy,
+                                  const double px,
+                                  const double vol) {
+       if(!InpHalfStopPenaltyEnable) return;
+       if(meta.half_stop_penalty_done) return;
+       if(meta.half_stop_penalty_attempts > InpManagementActionMaxRetries) return;
+       if(meta.half_stop_penalty_attempts == InpManagementActionMaxRetries){
+          meta.half_stop_penalty_attempts++;
+          _Journal("[half_stop_penalty] position_id=" + IntegerToString(meta.position_id)
+                   + " ticket=" + IntegerToString((long)ticket)
+                   + " symbol=" + sym
+                   + " action=skip reason=max_retries_exhausted"
+                   + " attempts=" + IntegerToString(meta.half_stop_penalty_attempts));
+          return;
+       }
+       double orig_entry = meta.original_entry_for_risk;
+       double orig_sl = meta.original_sl_for_risk;
+       bool orig_ok = (orig_entry > 0.0 && orig_sl > 0.0
+                       && ((is_buy && orig_sl < orig_entry) || (!is_buy && orig_sl > orig_entry)));
+       if(!orig_ok){
+          meta.half_stop_penalty_attempts++;
+          _Journal("[half_stop_penalty] position_id=" + IntegerToString(meta.position_id)
+                   + " ticket=" + IntegerToString((long)ticket)
+                   + " symbol=" + sym
+                   + " action=skip reason=original_risk_unavailable"
+                   + " attempts=" + IntegerToString(meta.half_stop_penalty_attempts));
+          return;
+       }
+       double orig_risk = MathAbs(orig_entry - orig_sl);
+       double cur_r = (is_buy ? (px - orig_entry) : (orig_entry - px)) / orig_risk;
+       if(cur_r > InpHalfStopPenaltyTriggerR) return;
+       double cut_pct = MathMax(0.0, MathMin(1.0, InpHalfStopPenaltyCutPct));
+       if(cut_pct <= 0.0){
+          meta.half_stop_penalty_attempts++;
+          _Journal("[half_stop_penalty] position_id=" + IntegerToString(meta.position_id)
+                   + " ticket=" + IntegerToString((long)ticket)
+                   + " symbol=" + sym
+                   + " cur_r=" + DoubleToString(cur_r, 2)
+                   + " trigger_r=" + DoubleToString(InpHalfStopPenaltyTriggerR, 2)
+                   + " action=skip reason=invalid_cut_pct"
+                   + " attempts=" + IntegerToString(meta.half_stop_penalty_attempts));
+          return;
+       }
+       double requested = vol * cut_pct;
+       VolumeNormalizationResult close_norm = NormalizeClosingVolume(sym,
+                                                                      requested,
+                                                                      vol,
+                                                                      InpClosingVolumeAllowCloseAllBelowMinimum);
+       if(close_norm.action == "skip"){
+          meta.half_stop_penalty_attempts++;
+          _Journal("[half_stop_penalty] position_id=" + IntegerToString(meta.position_id)
+                   + " ticket=" + IntegerToString((long)ticket)
+                   + " symbol=" + sym
+                   + " cur_r=" + DoubleToString(cur_r, 2)
+                   + " trigger_r=" + DoubleToString(InpHalfStopPenaltyTriggerR, 2)
+                   + " requested=" + DoubleToString(close_norm.requested_volume, 8)
+                   + " normalized=" + DoubleToString(close_norm.normalized_volume, 8)
+                   + " action=skip reason=" + close_norm.reason
+                   + " attempts=" + IntegerToString(meta.half_stop_penalty_attempts));
+          return;
+       }
+       bool cut_ok = false;
+       string action = "partial_close";
+       if(close_norm.action == "close_all"){
+          action = "close_all";
+          cut_ok = m_trade.PositionClose(ticket);
+       } else if(close_norm.normalized_volume > 0.0){
+          cut_ok = m_trade.PositionClosePartial(ticket, close_norm.normalized_volume);
+       }
+       if(cut_ok){
+          meta.half_stop_penalty_done = true;
+          _Journal("[half_stop_penalty] position_id=" + IntegerToString(meta.position_id)
+                   + " ticket=" + IntegerToString((long)ticket)
+                   + " symbol=" + sym
+                   + " cur_r=" + DoubleToString(cur_r, 2)
+                   + " trigger_r=" + DoubleToString(InpHalfStopPenaltyTriggerR, 2)
+                   + " requested=" + DoubleToString(close_norm.requested_volume, 8)
+                   + " normalized=" + DoubleToString(close_norm.normalized_volume, 8)
+                   + " action=" + action
+                   + " retcode=" + _TradeRetcodeText());
+       } else {
+          meta.half_stop_penalty_attempts++;
+          _Journal("[half_stop_penalty] position_id=" + IntegerToString(meta.position_id)
+                   + " ticket=" + IntegerToString((long)ticket)
+                   + " symbol=" + sym
+                   + " cur_r=" + DoubleToString(cur_r, 2)
+                   + " trigger_r=" + DoubleToString(InpHalfStopPenaltyTriggerR, 2)
+                   + " requested=" + DoubleToString(close_norm.requested_volume, 8)
+                   + " normalized=" + DoubleToString(close_norm.normalized_volume, 8)
+                   + " action=" + action
+                   + " result=failed retcode=" + _TradeRetcodeText()
+                   + " attempts=" + IntegerToString(meta.half_stop_penalty_attempts));
+        }
+     }
+
+     // R3: TP1 stop lock. Once meta.tp1_done is true and the position is still open,
+     // move the broker SL exactly once per position to orig_entry - frac*orig_risk
+     // (buy) / orig_entry + frac*orig_risk (sell), where orig_entry/orig_risk come
+     // from original_entry_for_risk / original_sl_for_risk -- never a moved SL.
+     // Only ever tightens: a current SL already at or better than the lock level
+     // latches done with action=skip (no path in this EA ever loosens a stop, so
+     // the invariant then holds permanently). The existing TP is passed through
+     // untouched. Independent of InpBEEnable and of every time gate. Missing
+     // original risk skips with reason=original_risk_unavailable -- the rule never
+     // guesses R. A lock level that violates the broker stop/freeze distance right
+     // now defers to a later tick without consuming a retry attempt (transient
+     // spread widening must not burn the bounded budget) and journals once per
+     // position per reason via _JournalOnChange. Broker failures retry on later
+     // ticks bounded by InpManagementActionMaxRetries; every attempt is journaled
+     // under [tp1_stop_lock]. retcode is reported only on paths that actually
+     // called the broker (modified/failed) -- skip lines carry no broker result.
+     void _MaintainTP1StopLock(TradePlan &meta,
+                               const ulong ticket,
+                               const string sym,
+                               const bool is_buy,
+                               const double px) {
+        if(!InpTP1StopLockEnable) return;
+        if(!meta.tp1_done) return;
+        if(meta.tp1_stop_lock_done) return;
+        if(meta.tp1_stop_lock_attempts > InpManagementActionMaxRetries) return;
+        if(meta.tp1_stop_lock_attempts == InpManagementActionMaxRetries){
+           meta.tp1_stop_lock_attempts++;
+           _Journal("[tp1_stop_lock] position_id=" + IntegerToString(meta.position_id)
+                    + " ticket=" + IntegerToString((long)ticket)
+                    + " symbol=" + sym
+                    + " action=skip reason=max_retries_exhausted"
+                    + " attempt=" + IntegerToString(meta.tp1_stop_lock_attempts));
+           return;
+        }
+        double orig_entry = meta.original_entry_for_risk;
+        double orig_sl = meta.original_sl_for_risk;
+        bool orig_ok = (orig_entry > 0.0 && orig_sl > 0.0
+                        && ((is_buy && orig_sl < orig_entry) || (!is_buy && orig_sl > orig_entry)));
+        if(!orig_ok){
+           // Never recoverable for this position (originals are latched at fill), so
+           // this skip must NOT consume the bounded retry budget -- same as the
+           // stop/freeze defer path below. Burning attempts here would let a
+           // permanently-unavailable original starve genuine broker retries.
+           _Journal("[tp1_stop_lock] position_id=" + IntegerToString(meta.position_id)
+                    + " ticket=" + IntegerToString((long)ticket)
+                    + " symbol=" + sym
+                    + " action=skip reason=original_risk_unavailable"
+                    + " attempt=" + IntegerToString(meta.tp1_stop_lock_attempts));
+           return;
+        }
+        double orig_risk = MathAbs(orig_entry - orig_sl);
+        double frac = MathMax(0.0, MathMin(1.0, InpTP1StopLockRiskFrac));
+        double lock_sl = (is_buy ? orig_entry - frac * orig_risk
+                                 : orig_entry + frac * orig_risk);
+        int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+        if(digits < 0) digits = 0;
+        double new_sl = NormalizeDouble(lock_sl, digits);
+        double cur_sl = PositionGetDouble(POSITION_SL);
+        double cur_tp = PositionGetDouble(POSITION_TP);
+        // Only-tighten gate, evaluated AFTER digit normalization so rounding can
+        // never turn the lock into a loosening. A zero live SL (no stop on the
+        // broker) always proceeds -- there is nothing to be better than.
+        bool already_tighter = (is_buy ? (cur_sl > 0.0 && cur_sl >= new_sl)
+                                       : (cur_sl > 0.0 && cur_sl <= new_sl));
+        if(already_tighter){
+           meta.tp1_stop_lock_done = true;
+           _Journal("[tp1_stop_lock] position_id=" + IntegerToString(meta.position_id)
+                    + " ticket=" + IntegerToString((long)ticket)
+                    + " symbol=" + sym
+                    + " old_sl=" + _FmtPrice(sym, cur_sl)
+                    + " new_sl=" + _FmtPrice(sym, new_sl)
+                    + " action=skip reason=already_at_or_better_than_lock"
+                    + " attempt=" + IntegerToString(meta.tp1_stop_lock_attempts));
+           return;
+        }
+        // Broker stop/freeze distance is a live, transient constraint: illegal right
+        // now means defer to a later tick, not a consumed attempt and not a tick
+        // journal. _JournalOnChange keys on position+reason, so the line prints on
+        // the transition and repeats are suppressed with counts (see
+        // _LogJournalDedupSummary), never dropped silently.
+        if(!_StopsDistanceOk(sym, is_buy, px, new_sl, cur_tp)){
+           _JournalOnChange("tp1_stop_lock_skip:stop_freeze:" + IntegerToString(meta.position_id),
+                            "[tp1_stop_lock] position_id=" + IntegerToString(meta.position_id)
+                            + " ticket=" + IntegerToString((long)ticket)
+                            + " symbol=" + sym
+                            + " old_sl=" + _FmtPrice(sym, cur_sl)
+                            + " new_sl=" + _FmtPrice(sym, new_sl)
+                            + " action=skip reason=stop_level_freeze_level"
+                            + " attempt=" + IntegerToString(meta.tp1_stop_lock_attempts));
+           return;
+        }
+        bool lock_ok = m_trade.PositionModify(ticket, new_sl, cur_tp);
+        if(lock_ok){
+           meta.tp1_stop_lock_done = true;
+           _Journal("[tp1_stop_lock] position_id=" + IntegerToString(meta.position_id)
+                    + " ticket=" + IntegerToString((long)ticket)
+                    + " symbol=" + sym
+                    + " old_sl=" + _FmtPrice(sym, cur_sl)
+                    + " new_sl=" + _FmtPrice(sym, new_sl)
+                    + " action=modified"
+                    + " attempt=" + IntegerToString(meta.tp1_stop_lock_attempts)
+                    + " retcode=" + _TradeRetcodeText());
+        } else {
+           meta.tp1_stop_lock_attempts++;
+           _Journal("[tp1_stop_lock] position_id=" + IntegerToString(meta.position_id)
+                    + " ticket=" + IntegerToString((long)ticket)
+                    + " symbol=" + sym
+                    + " old_sl=" + _FmtPrice(sym, cur_sl)
+                    + " new_sl=" + _FmtPrice(sym, new_sl)
+                    + " action=failed"
+                    + " attempt=" + IntegerToString(meta.tp1_stop_lock_attempts)
+                    + " retcode=" + _TradeRetcodeText());
+        }
+     }
+
+     void _MaintainPositionsBody() {
       // TP1 partial + BE; penalty watcher tick.
       // TP1 partial logic (basic; extend with per-position state to avoid repeat)
       for(int i=PositionsTotal()-1; i>=0; i--){
@@ -20592,7 +21959,11 @@ public:
 
           double risk_dist = _RiskDistanceForMeta(meta);
           double tp1_price = meta.tp1;
-          if(tp1_price <= 0 && risk_dist > 0){
+          // R4: a suppressed plan's tp1 == 0 is the explicit no-first-leg state, not
+          // a missing leg to reconstruct -- rebuilding one here would schedule a
+          // partial close the plan was approved without.  Only a non-suppressed
+          // zero leg keeps the legacy reconstruction.
+          if(tp1_price <= 0 && risk_dist > 0 && !meta.tp1_suppressed){
              double tp1_r = MathMax(0.40, meta.tp1_r_multiple);
              tp1_price = (is_buy ? entry + risk_dist * tp1_r : entry - risk_dist * tp1_r);
           }
@@ -20626,14 +21997,23 @@ public:
                 meta.tp1_done = true;
                 _Journal(sym + " TP1 handled ticket=" + IntegerToString((int)ticket)
                          + " partial=" + (partial_ok ? "true" : "false"));
-             } else {
-                _Journal(sym + " TP1 action failed ticket=" + IntegerToString((int)ticket)
-                         + " partial=" + (partial_ok ? "true" : "false")
-                         + " retcode=" + _TradeRetcodeText());
-             }
-          }
+              } else {
+                 _Journal(sym + " TP1 action failed ticket=" + IntegerToString((int)ticket)
+                          + " partial=" + (partial_ok ? "true" : "false")
+                          + " retcode=" + _TradeRetcodeText());
+              }
+           }
 
-          if(InpBEEnable && meta.be_rule != "off"){
+            // M1: TP1 may have partially closed above, so re-read live volume;
+            // the penalty cuts from post-TP1 size, not the loop-top snapshot.
+            double vol_after_tp1 = PositionGetDouble(POSITION_VOLUME);
+            // R3 TP1 stop lock: one-time broker-SL move to half ORIGINAL risk once
+            // TP1 is done. Independent of BE/time gates; keeps the existing TP.
+            _MaintainTP1StopLock(meta, ticket, sym, is_buy, px);
+            // R3 half-stop penalty: original-risk one-time cut (no AI review).
+            _MaintainHalfStopPenalty(meta, ticket, sym, is_buy, px, vol_after_tp1);
+
+           if(InpBEEnable && meta.be_rule != "off"){
              datetime now = TimeTradeServer();
              if(now <= 0) now = TimeLocal();
              int minutes_open = (opened > 0 ? (int)((now - opened) / 60) : 0);

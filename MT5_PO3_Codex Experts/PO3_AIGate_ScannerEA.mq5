@@ -316,14 +316,18 @@ void OnTimer() {
    // Scan scheduler
    datetime now = TimeLocal();
    string rollover_reason = "";
-   if(g_engine.EntryFreezeActive(rollover_reason)){
+   string behavior_pause_reason = "";
+   bool behavior_entry_block = PO3BehaviorStopEntryBlockActive(now, behavior_pause_reason);
+   if(g_engine.EntryFreezeActive(rollover_reason) || behavior_entry_block){
+      string pause_why = (behavior_entry_block ? behavior_pause_reason : rollover_reason);
       if(g_scan_active){
-         g_engine.AbortScan(rollover_reason);
+         g_engine.AbortScan(pause_why);
          g_scan_active = false;
       }
       g_next_scan_time = now + MathMax(1, InpScanIntervalMinutes) * 60;
       if(g_last_busy_pause_log <= 0 || (now - g_last_busy_pause_log) >= 60){
-         _JournalEA("scan paused by server-time rollover guard reason=" + rollover_reason);
+         _JournalEA("scan paused by " + (behavior_entry_block ? "behavior-stop entry block" : "server-time rollover guard")
+                    + " reason=" + pause_why);
          g_last_busy_pause_log = now;
       }
       return;

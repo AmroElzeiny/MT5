@@ -72,6 +72,9 @@ private:
       // whether the AI payload may advertise a partial route.  Losing them on reload
       // silently reinstates the pre-fix permissive behaviour.
       j += JsonKVBool("tp1_from_target_model", p.tp1_from_target_model) + ",";
+      // R4: the explicit no-first-leg flag round-trips with the price, so a restore
+      // can never reinterpret a suppressed tp1 == 0 as a leg to rebuild.
+      j += JsonKVBool("tp1_suppressed", p.tp1_suppressed) + ",";
       j += JsonKVNum("min_tp1_reward", p.min_tp1_reward, 8) + ",";
       j += JsonKVNum("tp2", p.tp2, 8) + ",";
       j += JsonKVNum("atr_pct", p.atr_pct, 6) + ",";
@@ -240,6 +243,7 @@ private:
       j += JsonKVNum("broker_min_stop_distance", p.broker_min_stop_distance, 8) + ",";
       j += JsonKVBool("stop_microstructure_distortion", p.stop_microstructure_distortion) + ",";
       j += JsonKVNum("stop_quality_score", p.stop_quality_score, 6) + ",";
+      j += JsonKVStr("stop_score_terms", p.stop_score_terms) + ",";
       j += JsonKVNum("realized_stop_quality", p.realized_stop_quality, 6) + ",";
       j += JsonKVNum("realized_stop_buffer_r", p.realized_stop_buffer_r, 6) + ",";
       j += JsonKVNum("ote_distance_frac", p.ote_distance_frac, 6) + ",";
@@ -511,6 +515,10 @@ private:
       j += JsonKVNum("penalty_fvg_invalid_cut_pct", p.penalty_fvg_invalid_cut_pct, 4) + ",";
       j += JsonKVInt("penalty_close_strikes", p.penalty_close_strikes) + ",";
       j += JsonKVBool("tp1_done", p.tp1_done) + ",";
+      j += JsonKVBool("half_stop_penalty_done", p.half_stop_penalty_done) + ",";
+      j += JsonKVInt("half_stop_penalty_attempts", p.half_stop_penalty_attempts) + ",";
+      j += JsonKVBool("tp1_stop_lock_done", p.tp1_stop_lock_done) + ",";
+      j += JsonKVInt("tp1_stop_lock_attempts", p.tp1_stop_lock_attempts) + ",";
       j += JsonKVNum("planned_entry", p.planned_entry, 8) + ",";
       j += JsonKVNum("planned_sl", p.planned_sl, 8) + ",";
       j += JsonKVNum("planned_tp1", p.planned_tp1, 8) + ",";
@@ -1012,6 +1020,9 @@ private:
       p.sl = JsonGetNumber(json, "sl", 0);
       p.tp1 = JsonGetNumber(json, "tp1", 0);
       p.tp1_from_target_model = JsonGetBool(json, "tp1_from_target_model", false);
+      // R4: absent in pre-fix state files, which restores to false (a leg existed);
+      // a suppressed plan always writes true beside tp1 == 0.
+      p.tp1_suppressed = JsonGetBool(json, "tp1_suppressed", false);
       p.min_tp1_reward = JsonGetNumber(json, "min_tp1_reward", 0);
       p.tp2 = JsonGetNumber(json, "tp2", 0);
       p.atr_pct = JsonGetNumber(json, "atr_pct", 0);
@@ -1179,6 +1190,7 @@ private:
       p.broker_min_stop_distance = JsonGetNumber(json, "broker_min_stop_distance", 0);
       p.stop_microstructure_distortion = JsonGetBool(json, "stop_microstructure_distortion", false);
       p.stop_quality_score = JsonGetNumber(json, "stop_quality_score", 0);
+      p.stop_score_terms = JsonGetString(json, "stop_score_terms", "");
       p.realized_stop_quality = JsonGetNumber(json, "realized_stop_quality", 0);
       p.realized_stop_buffer_r = JsonGetNumber(json, "realized_stop_buffer_r", 0);
       p.ote_distance_frac = JsonGetNumber(json, "ote_distance_frac", 0);
@@ -1543,6 +1555,10 @@ private:
       p.penalty_fvg_invalid_cut_pct = JsonGetNumber(json, "penalty_fvg_invalid_cut_pct", 0);
       p.penalty_close_strikes = (int)JsonGetNumber(json, "penalty_close_strikes", 0);
       p.tp1_done = JsonGetBool(json, "tp1_done", false);
+      p.half_stop_penalty_done = JsonGetBool(json, "half_stop_penalty_done", false);
+      p.half_stop_penalty_attempts = (int)JsonGetNumber(json, "half_stop_penalty_attempts", 0);
+      p.tp1_stop_lock_done = JsonGetBool(json, "tp1_stop_lock_done", false);
+      p.tp1_stop_lock_attempts = (int)JsonGetNumber(json, "tp1_stop_lock_attempts", 0);
       p.planned_entry = JsonGetNumber(json, "planned_entry", 0);
       p.planned_sl = JsonGetNumber(json, "planned_sl", 0);
       p.planned_tp1 = JsonGetNumber(json, "planned_tp1", 0);
@@ -2064,6 +2080,7 @@ public:
    string PendingAiPath() const { return _ScopedPath("pending_ai.ndjson"); }
    string RolloverSuspendedPendingPath() const { return _ScopedPath("rollover_suspended_pending.ndjson"); }
    string PenaltyPath() const { return _ScopedPath("penalty.ndjson"); }
+   string ConsumedSweepsPath() const { return _ScopedPath("consumed_sweeps.ndjson"); }
    string CounterfactualPendingPath() const { return _ScopedPath("counterfactual_pending.ndjson"); }
    string ShadowPendingPath() const { return _ScopedPath("shadow_candidate_pending.ndjson"); }
    //--- Terminal-once and observe-once identities.  Kept out of the pending file

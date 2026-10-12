@@ -291,25 +291,25 @@ input double InpContextAgePenaltyPerBar = 0.2;
 input int    InpMinSweepStrengthTicks = 1;
 input bool   InpUseAutoServerUtcOffset = true;
 input int    InpServerUtcOffsetHours = 0;
-input int    InpAsiaSessionStartHour = 0;
-input int    InpAsiaSessionEndHour   = 10;
-input int    InpLondonSessionStartHour = 10;
+input int    InpAsiaSessionStartHour = 9;
+input int    InpAsiaSessionEndHour   = 18;
+input int    InpLondonSessionStartHour = 8;
 input int    InpLondonSessionEndHour   = 17;
-input int    InpNewYorkSessionStartHour = 16;
-input int    InpNewYorkSessionEndHour   = 0;
-input int    InpLondonKillzoneStartHour = 10;
+input int    InpNewYorkSessionStartHour = 8;
+input int    InpNewYorkSessionEndHour   = 17;
+input int    InpLondonKillzoneStartHour = 8;
 input int    InpLondonKillzoneEndHour   = 11;
-input int    InpNewYorkKillzoneStartHour = 16;
-input int    InpNewYorkKillzoneEndHour   = 17;
+input int    InpNewYorkKillzoneStartHour = 7;
+input int    InpNewYorkKillzoneEndHour   = 10;
 input bool   InpTradeOnlyKillzones = false;
 input int    InpLondonKillzoneStartMinute = 0;
 input int    InpLondonKillzoneEndMinute = 0;
 input int    InpNewYorkKillzoneStartMinute = 0;
 input int    InpNewYorkKillzoneEndMinute = 0;
 input bool   InpEnableAsiaKillzone = false;
-input int    InpAsiaKillzoneStartHour = 0;
+input int    InpAsiaKillzoneStartHour = 9;
 input int    InpAsiaKillzoneStartMinute = 0;
-input int    InpAsiaKillzoneEndHour = 2;
+input int    InpAsiaKillzoneEndHour = 11;
 input int    InpAsiaKillzoneEndMinute = 0;
 input int    InpLiquidityLookbackBars = 120;
 input int    InpLiquiditySwingSpan    = 2;
@@ -318,6 +318,7 @@ input int    InpLiquidityClusterMinCount = 2;
 
 // --- Displacement / BOS ---
 input bool   InpRequireDisplacement  = true;
+input bool   InpRequireDisplacementFollowThrough = true; // R1: reject candidates with po3.has_follow_through=false
 input int    InpDispSearchBars       = 60;
 input int    InpBOSLookbackBars      = 16;
 input double InpDispBodyATRMin       = 0.14;
@@ -447,8 +448,15 @@ input double InpMaxEntryDriftR       = 0.4;
 input double InpMarketEntryToleranceR = 0.55;
 input double InpEntryZoneToleranceR  = 0.35;
 input int    InpPendingEntryRelaxAfterBars = 3;
-input double InpMinLiveRR2           = 0.90;
+input double InpMinLiveRR2           = 0.35;
 input double InpMaxPlanRR2           = 5.0;
+// R1 final-target RR cap: no plan may be built, sent to AI, placed, or have a
+// broker TP set with TP2 reward above InpTargetRRCap * stop_dist. Targets beyond
+// the cap are CLAMPED to exactly the cap, never rejected for distance.
+// At/inside the cap everything is unchanged. <= 0 disables the cap entirely
+// (then only InpMaxPlanRR2/ADR/ATR caps bind, exactly as before).
+// InpMaxPlanRR2 keeps its current meaning.
+input double InpTargetRRCap          = 1.1;
 input double InpMaxTargetAdrFrac     = 1.50;
 input double InpMaxTargetAtrMult     = 8.00;
 input double InpMinTargetAtrMult     = 0.08;
@@ -539,6 +547,12 @@ input bool   InpRequeueAiOnSemanticPlanChange = true;
 input bool   InpHardRejectCrossedObstacleTarget = false;
 input bool   InpAllowAIToUseLiquidityTargetBehindMinorBlocker = true;
 input bool   InpAllowPartialBeforeObstacle = true;
+// R1 target-before-obstacle gate: when true, a route that stops BEFORE a level
+// (clean or truncated-by-obstacle) and meets the minimum RR outranks every route
+// that passes THROUGH a level; crossing is taken only as a last resort when no
+// before-level route reaches the floor. When false, target ranking is
+// byte-identical to the pre-R1 contract.
+input bool   InpPreferTargetBeforeObstacle = true;
 input double InpBlockerKillSeverity = 9.0;
 input double InpBlockerMajorSeverity = 6.5;
 input double InpBlockerMinorMaxSeverity = 3.5;
@@ -557,9 +571,14 @@ input double InpPortfolioSchedulerSessionPenalty = 0.45;
 input double InpPortfolioSchedulerDiversityBonus = 0.4;
 input double InpRunnerLiquidityRRFloor = 0.9;
 input double InpRunnerSequenceQualityFloor = 4.6;
-input double InpRunnerHtfAlignmentFloor = 4.2;
+// R5: re-derived from the continuous-score distribution over 300 measured bus
+// tuples (2026-09-18): q30(htf_alignment)=6.39, q75(adverse_context)=2.83.
+// The old 4.2/4.8 were tuned against the collapsed fixed-step lattice and have
+// no meaning on the graded 0-10 scales. Kept identical to the
+// expectancy_report.py no-data fallbacks by contract (see _derive_active_policy).
+input double InpRunnerHtfAlignmentFloor = 6.39;
 input double InpRunnerCostRCeiling = 0.3;
-input double InpRunnerAdverseContextCeiling = 4.8;
+input double InpRunnerAdverseContextCeiling = 2.83;
 input bool   InpAllowRunnerDowngrade = true;
 input double InpStandardTradeLiquidityRRFloor = 1.10;
 input double InpStandardTradeCostRCeiling = 0.24;
@@ -641,7 +660,21 @@ input bool   InpTPPreferLiquidityTarget = true;
 
 input bool   InpTP1UseFibExtension   = false;
 input double InpTP1FibExtension      = 1.61;
-input double InpTP1PartialPct        = 0.2;
+input double InpTP1PartialPct        = 0.25;
+// R2: when true the engine owns the first leg -- after TP2 is final,
+// tp1 = entry +/- 0.5 * tp2_reward for EVERY family and target model,
+// including routes that owned their first leg (partial_before_obstacle).
+// The 0.65R geometry floor does NOT apply in this mode (the leg is defined,
+// not searched); the live spread floor still applies and a leg below it fails
+// closed. When false, TP1 behaves byte-identically to before.
+input bool   InpTP1AtHalfTarget      = true;
+// R4: when the plan's final RR2 (the same RR the acceptance gate uses) is below
+// InpTP1MinRR, no first leg is built at all -- the position runs to TP2 in full
+// size (tp1 == 0.0 with tp1_suppressed latched, read identically by the partial
+// close, tp1_done/stop-lock, bridge payload and StateStore paths).
+// InpTP1MinRR <= 0 disables the suppression (always build TP1), preserving
+// today's behaviour byte-identically.
+input double InpTP1MinRR              = 0.75;
 
 // --- Deterministic setup floors ---
 input double InpSetupFloorReversal = 171.0;
@@ -658,18 +691,33 @@ input double InpAiScoreRange = 7.0;
 input double InpAiScoreFailedBreakout = 7.2;
 input bool   InpGlobalAiScoreAsHardFloor = false;
 
+// InpSetupFloorFullPO3 governs full_po3_continuation only (2026-09-27);
+// full_po3_reversal owns InpSetupFloorFullPO3Reversal.
 input double InpSetupFloorFullPO3 = 171.0;
+input double InpSetupFloorFullPO3Reversal = 171.0;
 input double InpSetupFloorMicroPO3 = 149.0;
 input double InpSetupFloorMicroBisiSibi = 170.0;
 input double InpSetupFloorContinuationFamily = 169.0;
 input double InpSetupFloorRangeFamily = 28.0;
 input double InpSetupFloorFailedBreakout = 29.0;
 
-input double InpMinRRFullPO3 = 0.85;
-input double InpMinRRMicroPO3 = 0.85;
-input double InpMinRRContinuation = 0.85;
-input double InpMinRRRange = 0.8;
-input double InpMinRRFailedBreakout = 0.85;
+// --- Per-family setup-score ceilings ---
+// 0 = no ceiling; a setup whose score is ABOVE a positive ceiling is rejected
+// before the AI and can never execute. Mapping mirrors the family floors.
+input double InpSetupCeilingFullPO3Reversal = 0.0;
+input double InpSetupCeilingFullPO3Continuation = 0.0;
+input double InpSetupCeilingMicroPO3 = 0.0;
+input double InpSetupCeilingContinuationFamily = 0.0;
+input double InpSetupCeilingFailedBreakout = 0.0;
+input double InpSetupCeilingMicroBisiSibi = 0.0;
+input double InpSetupCeilingRangeFamily = 0.0;
+input double InpSetupCeilingSession = 0.0;
+
+input double InpMinRRFullPO3 = 0.35;
+input double InpMinRRMicroPO3 = 0.35;
+input double InpMinRRContinuation = 0.35;
+input double InpMinRRRange = 0.35;
+input double InpMinRRFailedBreakout = 0.35;
 
 input int InpTargetTradesPerDayMin = 8;
 input int InpTargetTradesPerDayMax = 16;
@@ -700,6 +748,22 @@ input double InpPenaltyGivebackFloorR   = 0.6;
 input int    InpPenaltyStuckMinutes  = 120;
 input double InpPenaltyStuckMinMfeR  = 0.35;
 
+// --- Half-stop deterministic penalty (R3): one-time cut at -0.50R of ORIGINAL risk ---
+input bool   InpHalfStopPenaltyEnable    = true;
+input double InpHalfStopPenaltyTriggerR  = -0.50;
+input double InpHalfStopPenaltyCutPct    = 0.25;
+
+// --- TP1 stop lock (R3): after TP1, move broker SL to half ORIGINAL risk ---
+// Once meta.tp1_done is true and the position is still open, the broker SL is
+// moved exactly once per position to orig_entry -/+ frac*orig_risk (buy/sell),
+// where orig_entry/orig_risk come from original_entry_for_risk/original_sl_for_risk
+// (never a moved SL). The move only ever tightens: a current SL already at or
+// better than the lock level is left alone. Independent of InpBEEnable and of
+// every time gate. frac is clamped to [0,1] (0.0 locks at breakeven); the enable
+// flag is the single on/off switch.
+input bool   InpTP1StopLockEnable        = true;
+input double InpTP1StopLockRiskFrac      = 0.5;
+
 input double InpPenaltyDrInvalidCutPct  = 0.35;
 input double InpPenaltyFvgInvalidCutPct = 0.15;
 input int    InpPenaltyInvalidEpsBps    = 15;
@@ -709,7 +773,7 @@ input int    InpInvalidationPersistenceSeconds = 15;
 input double InpInvalidationSpreadBufferMult = 1.0;
 input bool   InpInvalidationAssetClassPolicyEnable = false;
 input string InpInvalidationAssetClassPolicyFile = "PO3_AI_BUS\\config\\invalidation_policy.v1.json";
-input bool   InpClosingVolumeAllowCloseAllBelowMinimum = false;
+input bool   InpClosingVolumeAllowCloseAllBelowMinimum = true;
 input int    InpCounterfactualHorizonMinutes = 1440;
 
 // --- Broker symbol sessions / pre-close governance ---

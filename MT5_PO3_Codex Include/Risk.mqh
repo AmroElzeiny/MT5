@@ -711,6 +711,36 @@ bool PO3EntryBlockedByRollover(const datetime now, string &reason) {
    return false;
 }
 
+// R5: the behavioral stop is an ENTRY block, not a flatten.  A
+// behavioral-only cooldown must never close open positions; it only refuses
+// NEW exposure.  Daily-loss and absolute stops keep their flatten-everything
+// behavior inside EnforceGlobalStops below.  This query is consulted wherever
+// the rollover entry block is consulted for new exposure (placement, pending
+// restore, pending maintenance) and by the scan scheduler.
+int _CountManagedOpenPositions() {
+   int retained = 0;
+   for(int i=PositionsTotal()-1; i>=0; i--){
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionMatchesMagic(ticket)) continue;
+      retained++;
+   }
+   return retained;
+}
+
+bool PO3BehaviorStopEntryBlockActive(const datetime now, string &reason) {
+   datetime until = _BehaviorStopUntil();
+   if(until > now){
+      reason = "behavior_stop_entry_block"
+               + " reason=" + _BehaviorStopCodeName(_BehaviorStopCode())
+               + " count=" + IntegerToString(_BehaviorStopCount())
+               + " until=" + TimeToString(until, TIME_DATE|TIME_MINUTES)
+               + " remaining_min=" + IntegerToString((int)((until - now) / 60));
+      return true;
+   }
+   reason = "";
+   return false;
+}
+
 // ``scope_to_flatten_symbols`` narrows the sweep to the pre-close scope.  It is
 // false for every other caller -- above all the global stop, which is a risk
 // emergency and must keep flattening the whole managed book.
@@ -783,27 +813,14 @@ bool EnforceGlobalStops(CTrade &trade) {
    datetime now = TimeTradeServer();
    if(now <= 0) now = TimeLocal();
 
-   datetime behavior_stop_until = _BehaviorStopUntil();
-   if(behavior_stop_until > now){
-      // State, not an event: EnforceGlobalStops runs every timer tick, and the
-      // bare timestamp form of this line was 139,192 of one tester log's
-      // 231,961 lines while naming neither the trigger nor how long was left.
-      string stop_log = "[behavior_stop] state=active"
-                        + " reason=" + _BehaviorStopCodeName(_BehaviorStopCode())
-                        + " count=" + IntegerToString(_BehaviorStopCount())
-                        + " streak_anchor=" + TimeToString(_BehaviorStopAnchor(), TIME_DATE|TIME_MINUTES)
-                        + " until=" + TimeToString(behavior_stop_until, TIME_DATE|TIME_MINUTES)
-                        + " remaining_min=" + IntegerToString((int)((behavior_stop_until - now) / 60))
-                        + " cooldown_min=" + IntegerToString(MathMax(1, InpBehaviorStopCooldownMin))
-                        + " journal_mode=once_per_state_change";
-      if(stop_log != g_po3_behavior_stop_last_log){
-         _RiskLog(stop_log);
-         g_po3_behavior_stop_last_log = stop_log;
-      }
-      _FlattenManagedExposure(trade);
-      return true;
-   }
-   g_po3_behavior_stop_last_log = "";
+   // B1: daily-loss / absolute stops are evaluated FIRST so an active
+   // behavioral cooldown can never mask them (previously the behavioral-active
+   // branch below returned false before the emergency code ran: fail-open
+   // while a cooldown was active). hit_behavioral/behavior_reason default here
+   // so the emergency log keeps its shape; the fresh behavioral trigger is
+   // evaluated further below, after this emergency gate.
+   bool hit_behavioral = false;
+   string behavior_reason = "";
 
    datetime day_anchor = 0;
    double balance_anchor = 0.0, equity_anchor = 0.0;
@@ -831,22 +848,7 @@ bool EnforceGlobalStops(CTrade &trade) {
       hit_daily = ((anchor - eq) >= daily_cap);
    }
 
-   string behavior_reason = "";
-   datetime behavior_streak_anchor = 0;
-   int behavior_streak_code = PO3_BEHAVIOR_STOP_CODE_NONE;
-   int behavior_streak_count = 0;
-   bool hit_behavioral = _BehaviorStopTriggered(behavior_reason, behavior_streak_anchor,
-                                                behavior_streak_code, behavior_streak_count);
-   if(hit_behavioral){
-      behavior_stop_until = now + MathMax(1, InpBehaviorStopCooldownMin) * 60;
-      _StoreBehaviorStopUntil(behavior_stop_until);
-      // Record WHICH streak armed it, so the same historical losses cannot arm
-      // it again once the cooldown expires.
-      _StoreBehaviorStopStreak(behavior_streak_anchor, behavior_streak_code, behavior_streak_count);
-      g_po3_behavior_stop_last_log = "";
-   }
-
-   if(hit_absolute || hit_daily || hit_behavioral) {
+   if(hit_absolute || hit_daily) {
       if(hit_daily){
          double anchor = MathMax(balance_anchor, equity_anchor);
          double loss_pct = (anchor > 0.0 ? ((anchor - eq) / anchor) * 100.0 : 0.0);
@@ -862,6 +864,60 @@ bool EnforceGlobalStops(CTrade &trade) {
       _FlattenManagedExposure(trade);
       return true;
    }
+
+   datetime behavior_stop_until = _BehaviorStopUntil();
+   if(behavior_stop_until > now){
+      // R5: a behavioral-only cooldown is an entry block, not a flatten.
+      // Open positions keep full management (TP1, BE, penalties, rollover,
+      // trade completion) through MaintainPositions/MaintainOrders, which
+      // still run because this path returns false.  New exposure is refused
+      // at the placement / pending-restore / pending-maintenance gates and
+      // the scan scheduler via PO3BehaviorStopEntryBlockActive.
+      string stop_log = "[behavior_stop] state=active"
+                        + " reason=" + _BehaviorStopCodeName(_BehaviorStopCode())
+                        + " count=" + IntegerToString(_BehaviorStopCount())
+                        + " streak_anchor=" + TimeToString(_BehaviorStopAnchor(), TIME_DATE|TIME_MINUTES)
+                        + " until=" + TimeToString(behavior_stop_until, TIME_DATE|TIME_MINUTES)
+                        + " remaining_min=" + IntegerToString((int)((behavior_stop_until - now) / 60))
+                        + " cooldown_min=" + IntegerToString(MathMax(1, InpBehaviorStopCooldownMin))
+                        + " open_positions_retained=" + IntegerToString(_CountManagedOpenPositions())
+                        + " journal_mode=once_per_state_change";
+      if(stop_log != g_po3_behavior_stop_last_log){
+         _RiskLog(stop_log);
+         g_po3_behavior_stop_last_log = stop_log;
+      }
+      return false;
+   }
+   if(StringLen(g_po3_behavior_stop_last_log) > 0){
+      _RiskLog("[behavior_stop] state=expired"
+               + " open_positions_retained=" + IntegerToString(_CountManagedOpenPositions()));
+   }
+   g_po3_behavior_stop_last_log = "";
+
+   behavior_reason = "";
+   datetime behavior_streak_anchor = 0;
+   int behavior_streak_code = PO3_BEHAVIOR_STOP_CODE_NONE;
+   int behavior_streak_count = 0;
+   hit_behavioral = _BehaviorStopTriggered(behavior_reason, behavior_streak_anchor,
+                                           behavior_streak_code, behavior_streak_count);
+   if(hit_behavioral){
+      behavior_stop_until = now + MathMax(1, InpBehaviorStopCooldownMin) * 60;
+      _StoreBehaviorStopUntil(behavior_stop_until);
+      // Record WHICH streak armed it, so the same historical losses cannot arm
+      // it again once the cooldown expires.
+      _StoreBehaviorStopStreak(behavior_streak_anchor, behavior_streak_code, behavior_streak_count);
+      // R5: activation deletes managed PENDING orders once -- a pending fill
+      // is a new entry -- but never touches open positions.
+      bool behavior_pendings_deleted = _DeleteManagedPendingOrders(trade, "behavior_stop:" + behavior_reason);
+      _RiskLog("[behavior_stop] state=activated"
+               + " reason=" + behavior_reason
+               + " until=" + TimeToString(behavior_stop_until, TIME_DATE|TIME_MINUTES)
+               + " cooldown_min=" + IntegerToString(MathMax(1, InpBehaviorStopCooldownMin))
+               + " open_positions_retained=" + IntegerToString(_CountManagedOpenPositions())
+               + " pending_deleted=" + (behavior_pendings_deleted ? "true" : "false"));
+      g_po3_behavior_stop_last_log = "";
+   }
+
    return false;
 }
 

@@ -3,6 +3,15 @@
 //| Compile-only harness: builds the REPOSITORY include tree (not the |
 //| deployed terminal copy) so repo changes can be compile-verified   |
 //| before deployment.  Never attach it to a chart: OnInit refuses.   |
+//| REPO-ONLY: compiles ONLY from the repository layout via the       |
+//| quote-relative includes into "MT5_PO3_Codex Include/" below.      |
+//| MUST be excluded from the repo->deployed mirror (deployed path    |
+//| "MQL5\Experts\MT5_PO3_Codex\"): the relative path does not exist  |
+//| there and breaks the final compile step (error 106 class).        |
+//| Compile it in place in the repo with the FxPro MetaEditor.        |
+//| Do NOT convert to angle-bracket includes (<MT5_PO3_Codex/...>):   |
+//| that would silently compile the deployed copies under             |
+//| "MQL5\Include\MT5_PO3_Codex\" and destroy the repo check.         |
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade/Trade.mqh>

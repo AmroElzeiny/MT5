@@ -152,7 +152,10 @@ private:
          double reward = (p.is_buy ? fallback_tp - p.entry_est : p.entry_est - fallback_tp);
          if(reward > 0.0) fallback_rr = reward / risk_dist;
       }
-      double effective_fallback_rr = MathMax(InpFallbackRR2, InpMinLiveRR2 + MathMax(0.0, InpFallbackRRBufferR));
+       double effective_fallback_rr = MathMax(InpFallbackRR2, InpMinLiveRR2 + MathMax(0.0, InpFallbackRRBufferR));
+       // R1(b): the menu must show the fallback rr the engine actually builds (RR-capped),
+       // not the configured one -- otherwise the model reasons about a target that never ships.
+       if(InpTargetRRCap > 0.0) effective_fallback_rr = MathMin(effective_fallback_rr, InpTargetRRCap);
       double obstacle_to_liquidity_r = 0.0;
       if(risk_dist > 0.0 && p.obstacle_price > 0.0 && liquidity_tp > 0.0)
          obstacle_to_liquidity_r = MathAbs(liquidity_tp - p.obstacle_price) / risk_dist;
@@ -167,15 +170,22 @@ private:
       double capped_tp1_reward = (capped_tp > 0.0
                                   ? (p.is_buy ? capped_tp - p.entry_est : p.entry_est - capped_tp)
                                   : 0.0);
-      // p.min_tp1_reward is MathMax(stop_dist * 0.65, spread * mult) and is therefore
-      // strictly positive for any plan that reached target selection.  Zero means the
-      // floor was never computed -- a plan restored from a pre-fix state file -- and an
-      // unmeasured leg must not be advertised as placeable.  Fail closed on unknown.
-      bool capped_tp1_clears_floor = (capped_tp1_reward > 0.0 &&
-                                      p.min_tp1_reward > 0.0 &&
-                                      capped_tp1_reward >= p.min_tp1_reward);
+       // p.min_tp1_reward is MathMax(stop_dist * 0.65, spread * mult) in normal mode and
+       // the spread half alone in half-target mode (CTradeEngine::_MinTp1Reward is the one
+       // definition both read), and is therefore strictly positive for any plan that
+       // reached target selection.  Zero means the
+       // floor was never computed -- a plan restored from a pre-fix state file -- and an
+       // unmeasured leg must not be advertised as placeable.  Fail closed on unknown.
+       bool capped_tp1_clears_floor = (capped_tp1_reward > 0.0 &&
+                                       p.min_tp1_reward > 0.0 &&
+                                       capped_tp1_reward >= p.min_tp1_reward);
       bool tp1_before_obstacle_possible = (InpAllowPartialBeforeObstacle && capped_tp > 0.0 &&
                                            capped_rr > 0.0 && capped_tp1_clears_floor);
+       // R2: in half-target mode the engine defines TP1 as 0.5 * TP2 and ignores the
+       // obstacle for the first leg, so no capped leg is "possible" to advertise -- the
+       // model must not be offered a partial route whose leg never ships. Gated on its
+       // own line so the contracted expression above stays verbatim.
+       tp1_before_obstacle_possible = (tp1_before_obstacle_possible && !InpTP1AtHalfTarget);
 
       // Every route must be measured against the SAME cap the target sanitizer
       // will apply to whatever the model picks.  Offering a route that clears
@@ -287,22 +297,27 @@ private:
       j += JsonKVBool("exceeds_max_target_distance", !capped_within_max) + ",";
       j += JsonKVBool("min_rr_pass", capped_rr_ok) + ",";
       j += JsonKVBool("max_rr_pass", capped_within_max) + ",";
-      j += JsonKVBool("feasible_for_tp2", capped_feasible) + ",";
-      j += JsonKVBool("feasible_for_tp1_only", (capped_tp > 0.0 && InpAllowPartialBeforeObstacle && capped_tp1_clears_floor)) + ",";
+       j += JsonKVBool("feasible_for_tp2", capped_feasible) + ",";
+       // R2: in half-target mode the capped level is never placed as TP1 (the engine
+       // defines TP1 as half of TP2), so advertising it "for_tp1_only" would contradict
+       // the execution layer. TP2 feasibility above is unaffected.
+       j += JsonKVBool("feasible_for_tp1_only", (!InpTP1AtHalfTarget && capped_tp > 0.0 && InpAllowPartialBeforeObstacle && capped_tp1_clears_floor)) + ",";
       j += JsonKVStr("infeasible_reason", (capped_tp <= 0.0 ? "missing_tp"
                                            : (!capped_within_max ? "exceeds_max_target_distance"
                                               : (capped_rr_ok ? "" : "rr_below_min")))) + ",";
       j += JsonKVBool("partial_allowed", InpAllowPartialBeforeObstacle);
       j += "},";
       j += "\"partial_before_obstacle_then_liquidity\":{";
-      // Availability and feasibility must judge BOTH legs.  They used to judge only the
-      // runner, which is how a route whose first leg the engine cannot place was offered
-      // to the model with an empty infeasible_reason.
-      // The runner leg is the liquidity target, so it carries the liquidity
-      // route's max-distance verdict too: a partial whose tp2 breaches the cap
-      // is refused by the sanitizer exactly like a plain liquidity target.
-      j += JsonKVBool("available", (InpAllowPartialBeforeObstacle && capped_tp > 0.0 && liquidity_tp > 0.0 && capped_tp1_clears_floor && liquidity_within_max)) + ",";
-      j += JsonKVStr("model", "partial_before_obstacle_then_liquidity") + ",";
+       // Availability and feasibility must judge BOTH legs.  They used to judge only the
+       // runner, which is how a route whose first leg the engine cannot place was offered
+       // to the model with an empty infeasible_reason.
+       // The runner leg is the liquidity target, so it carries the liquidity
+       // route's max-distance verdict too: a partial whose tp2 breaches the cap
+       // is refused by the sanitizer exactly like a plain liquidity target.
+       // R2: in half-target mode the engine owns the first leg, so this route is not
+       // offered at all (same justification as the ranking: its partial leg never ships).
+       j += JsonKVBool("available", (!InpTP1AtHalfTarget && InpAllowPartialBeforeObstacle && capped_tp > 0.0 && liquidity_tp > 0.0 && capped_tp1_clears_floor && liquidity_within_max)) + ",";
+       j += JsonKVStr("model", "partial_before_obstacle_then_liquidity") + ",";
       j += JsonKVNum("tp1", capped_tp, 8) + ",";
       j += JsonKVNum("rr1", capped_rr, 4) + ",";
       j += JsonKVNum("tp1_reward_price", capped_tp1_reward, 8) + ",";
@@ -313,9 +328,9 @@ private:
       j += JsonKVNum("max_allowed_distance", max_allowed, 8) + ",";
       j += JsonKVBool("exceeds_max_target_distance", !liquidity_within_max) + ",";
       j += JsonKVBool("max_rr_pass", liquidity_within_max) + ",";
-      j += JsonKVBool("feasible_for_tp2", (InpAllowPartialBeforeObstacle && liquidity_tp > 0.0 && liquidity_rr_ok && liquidity_within_max && capped_tp1_clears_floor)) + ",";
-      j += JsonKVBool("feasible_for_tp1_only", false) + ",";
-      j += JsonKVStr("infeasible_reason", (!InpAllowPartialBeforeObstacle ? "partial_disabled" : (liquidity_tp <= 0.0 ? "missing_liquidity_tp2" : (!capped_tp1_clears_floor ? "partial_leg_below_tp1_floor" : (!liquidity_within_max ? "tp2_exceeds_max_target_distance" : (liquidity_rr_ok ? "" : "tp2_rr_below_min"))))));
+       j += JsonKVBool("feasible_for_tp2", (!InpTP1AtHalfTarget && InpAllowPartialBeforeObstacle && liquidity_tp > 0.0 && liquidity_rr_ok && liquidity_within_max && capped_tp1_clears_floor)) + ",";
+       j += JsonKVBool("feasible_for_tp1_only", false) + ",";
+       j += JsonKVStr("infeasible_reason", (!InpAllowPartialBeforeObstacle ? "partial_disabled" : (InpTP1AtHalfTarget ? "half_target_mode_engine_owns_first_leg" : (liquidity_tp <= 0.0 ? "missing_liquidity_tp2" : (!capped_tp1_clears_floor ? "partial_leg_below_tp1_floor" : (!liquidity_within_max ? "tp2_exceeds_max_target_distance" : (liquidity_rr_ok ? "" : "tp2_rr_below_min")))))));
       j += "},";
       j += "\"synthetic_rr_fallback\":{";
       j += JsonKVBool("available", p.fallback_feasible_for_tp2) + ",";
@@ -491,8 +506,11 @@ private:
       s += (InpRejectSyntheticFallbackAfterCrossedObstacle ? "1" : "0") + "|";
       s += (InpRequireAITargetArbitrationOnObstacle ? "1" : "0") + "|" + (InpHardRejectCrossedObstacleTarget ? "1" : "0") + "|" + (InpAllowAIToUseLiquidityTargetBehindMinorBlocker ? "1" : "0") + "|" + (InpAllowPartialBeforeObstacle ? "1" : "0") + "|";
       s += DoubleToString(InpBlockerKillSeverity, 4) + "|" + DoubleToString(InpBlockerMajorSeverity, 4) + "|" + DoubleToString(InpBlockerMinorMaxSeverity, 4) + "|";
-      s += DoubleToString(InpStandardTradeLiquidityRRFloor, 4) + "|" + DoubleToString(InpMaxTargetAdrFrac, 4) + "|" + DoubleToString(InpMaxTargetAtrMult, 4) + "|";
-      s += (InpRequireDisplacement ? "1" : "0") + "|" + (InpAllowSyntheticRRTarget ? "1" : "0") + "|" + DoubleToString(InpMinLiveRR2, 4) + "|" + DoubleToString(InpFallbackRR2, 4) + "|" + DoubleToString(InpFallbackRRBufferR, 4) + "|" + DoubleToString(InpObstacleRejectR, 4) + "|";
+       s += DoubleToString(InpStandardTradeLiquidityRRFloor, 4) + "|" + DoubleToString(InpMaxTargetAdrFrac, 4) + "|" + DoubleToString(InpMaxTargetAtrMult, 4) + "|";
+       s += (InpRequireDisplacement ? "1" : "0") + "|" + (InpAllowSyntheticRRTarget ? "1" : "0") + "|" + DoubleToString(InpMinLiveRR2, 4) + "|" + DoubleToString(InpFallbackRR2, 4) + "|" + DoubleToString(InpFallbackRRBufferR, 4) + "|" + DoubleToString(InpObstacleRejectR, 4) + "|";
+       // R1+R2 inputs change every target price: they must key identity, or two different
+       // economics share one hash and retire/wrongly-hit each other's replay artifacts.
+       s += DoubleToString(InpTargetRRCap, 4) + "|" + (InpTP1AtHalfTarget ? "1" : "0") + "|";
       s += (InpTesterAiCache ? "1" : "0") + "|" + IntegerToString((int)InpTesterAiMode) + "|" + (InpTesterAllowLiveWaitDebugTrading ? "1" : "0") + "|";
       s += (InpUseAI ? "1" : "0") + "|" + (InpAiStrict ? "1" : "0") + "|" + DoubleToString(InpMinAiScoreTrend, 4) + "|";
       s += (InpAiVetoEnable ? "1" : "0") + "|" + DoubleToString(InpAiMinFollowThroughProb, 4) + "|" + DoubleToString(InpAiMaxInvalidationRisk, 4) + "|" + DoubleToString(InpAiMaxChopRisk, 4) + "|" + DoubleToString(InpAiMaxPostEntryFailureRisk, 4) + "|" + DoubleToString(InpAiMinFinalExpectancyScore, 4) + "|";
@@ -538,8 +556,10 @@ private:
       s += (InpAllowAIToUseLiquidityTargetBehindMinorBlocker ? "1" : "0") + "|" + (InpAllowPartialBeforeObstacle ? "1" : "0") + "|";
       s += DoubleToString(InpStandardTradeLiquidityRRFloor, 4) + "|" + DoubleToString(InpMaxTargetAdrFrac, 4) + "|" + DoubleToString(InpMaxTargetAtrMult, 4) + "|";
       s += (InpRequireDisplacement ? "1" : "0") + "|" + (InpAllowSyntheticRRTarget ? "1" : "0") + "|";
-      s += DoubleToString(InpMinLiveRR2, 4) + "|" + DoubleToString(InpFallbackRR2, 4) + "|" + DoubleToString(InpFallbackRRBufferR, 4) + "|" + DoubleToString(InpObstacleRejectR, 4) + "|";
-      s += (InpAiStrict ? "1" : "0") + "|" + DoubleToString(InpMinAiScoreTrend, 4) + "|";
+       s += DoubleToString(InpMinLiveRR2, 4) + "|" + DoubleToString(InpFallbackRR2, 4) + "|" + DoubleToString(InpFallbackRRBufferR, 4) + "|" + DoubleToString(InpObstacleRejectR, 4) + "|";
+       // R1+R2 inputs change every target price: they must key decision identity too.
+       s += DoubleToString(InpTargetRRCap, 4) + "|" + (InpTP1AtHalfTarget ? "1" : "0") + "|";
+       s += (InpAiStrict ? "1" : "0") + "|" + DoubleToString(InpMinAiScoreTrend, 4) + "|";
       s += (InpAiVetoEnable ? "1" : "0") + "|" + DoubleToString(InpAiMinFollowThroughProb, 4) + "|" + DoubleToString(InpAiMaxInvalidationRisk, 4) + "|" + DoubleToString(InpAiMaxChopRisk, 4) + "|" + DoubleToString(InpAiMaxPostEntryFailureRisk, 4) + "|" + DoubleToString(InpAiMinFinalExpectancyScore, 4) + "|";
       s += DoubleToString(InpAiScoreFullPO3, 4) + "|" + DoubleToString(InpAiScoreMicroPO3, 4) + "|" + DoubleToString(InpAiScoreContinuation, 4) + "|" + DoubleToString(InpAiScoreRange, 4) + "|" + DoubleToString(InpAiScoreFailedBreakout, 4) + "|" + (InpGlobalAiScoreAsHardFloor ? "1" : "0") + "|";
       s += (InpOnlyBreakerRetestVirginStrongOrigin ? "1" : "0") + "|" + AI_TARGET_ARBITRATION_SCHEMA_VERSION + "|" + AI_PROMPT_CONTRACT_VERSION;
@@ -644,9 +664,11 @@ private:
       j += JsonKVNum("micro_scalp_max_cost_frac_of_planned_r", InpMicroScalpMaxCostFracOfPlannedR, 4) + ",";
       j += JsonKVBool("require_displacement", InpRequireDisplacement) + ",";
       j += JsonKVBool("allow_synthetic_rr_target", InpAllowSyntheticRRTarget) + ",";
-      j += JsonKVNum("min_live_rr2", InpMinLiveRR2, 4) + ",";
-      j += JsonKVNum("fallback_rr2", InpFallbackRR2, 4) + ",";
-      j += JsonKVNum("fallback_rr_buffer_r", InpFallbackRRBufferR, 4) + ",";
+       j += JsonKVNum("min_live_rr2", InpMinLiveRR2, 4) + ",";
+       j += JsonKVNum("fallback_rr2", InpFallbackRR2, 4) + ",";
+       j += JsonKVNum("fallback_rr_buffer_r", InpFallbackRRBufferR, 4) + ",";
+       j += JsonKVNum("target_rr_cap", InpTargetRRCap, 4) + ",";
+       j += JsonKVBool("tp1_at_half_target", InpTP1AtHalfTarget) + ",";
       j += JsonKVBool("tester_ai_cache", InpTesterAiCache) + ",";
       j += JsonKVInt("tester_ai_mode", (int)InpTesterAiMode) + ",";
       j += JsonKVBool("tester_allow_live_wait_debug_trading", InpTesterAllowLiveWaitDebugTrading) + ",";
@@ -1375,6 +1397,9 @@ public:
        j += JsonKVStr("target_source", p.target_source) + ",";
        j += JsonKVNum("sl", p.sl, 8) + ",";
        j += JsonKVNum("tp1", p.tp1, 8) + ",";
+       // R4: explicit no-first-leg flag beside the price, so Python reads a
+       // suppressed tp1 == 0 as "no first leg" instead of a missing leg.
+       j += JsonKVBool("tp1_suppressed", p.tp1_suppressed) + ",";
        j += JsonKVNum("tp2", p.tp2, 8) + ",";
        j += JsonKVNum("rr2", rr2, 4) + ",";
        j += JsonKVNum("effective_rr2", p.effective_rr2, 4) + ",";
@@ -1639,6 +1664,8 @@ public:
           j += JsonKVNum("entry_est", c.entry_est, 8) + ",";
           j += JsonKVNum("sl", c.sl, 8) + ",";
           j += JsonKVNum("tp1", c.tp1, 8) + ",";
+          // R4: explicit no-first-leg flag beside the price (see the plan block).
+          j += JsonKVBool("tp1_suppressed", c.tp1_suppressed) + ",";
           j += JsonKVNum("tp2", c.tp2, 8) + ",";
           j += JsonKVNum("rr2", c_rr2, 4) + ",";
           j += JsonKVNum("effective_rr2", c.effective_rr2, 4) + ",";

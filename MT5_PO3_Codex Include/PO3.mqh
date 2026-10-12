@@ -134,11 +134,12 @@ private:
       return (utc_time >= start && utc_time < finish);
    }
 
-   int _MarketUtcOffsetHours(const string market, const datetime utc_time) const {
-      if(market == "LONDON") return (_IsLondonDst(utc_time) ? 1 : 0);
-      if(market == "NEW_YORK") return (_IsNewYorkDst(utc_time) ? -4 : -5);
-      return 0;
-   }
+    int _MarketUtcOffsetHours(const string market, const datetime utc_time) const {
+       if(market == "ASIA") return 9;
+       if(market == "LONDON") return (_IsLondonDst(utc_time) ? 1 : 0);
+       if(market == "NEW_YORK") return (_IsNewYorkDst(utc_time) ? -4 : -5);
+       return 0;
+    }
 
    int _ClampMinute(const int value) const {
       if(value < 0) return 0;
@@ -182,7 +183,17 @@ private:
       return (utc_time >= start_utc && utc_time < end_utc);
    }
 
-   bool _SessionWindow(const string session_name, const datetime utc_time,
+    //--- Single shared weekend predicate (UTC).  MqlDateTime.day_of_week:
+    //--- 0=Sunday .. 6=Saturday (same field the DST helpers use).  Weekend is
+    //--- judged on the resolved window's START instant in UTC, and every
+    //--- session/killzone resolver below must use this predicate (no copies).
+    bool _IsWeekendUtc(const datetime utc_time) const {
+       MqlDateTime wts;
+       TimeToStruct(utc_time, wts);
+       return (wts.day_of_week == 0 || wts.day_of_week == 6);
+    }
+
+    bool _SessionWindow(const string session_name, const datetime utc_time,
                        datetime &start_utc, datetime &end_utc) const {
       if(session_name == "ASIA")
          return _ResolveMarketWindow("ASIA", utc_time, InpAsiaSessionStartHour, InpAsiaSessionEndHour, start_utc, end_utc);
@@ -214,14 +225,23 @@ private:
       return false;
    }
 
-   string _SessionName(const datetime server_time) const {
-      datetime utc_time = _ToUtc(server_time);
-      datetime start_utc, end_utc;
-      if(_SessionWindow("ASIA", utc_time, start_utc, end_utc)) return "ASIA";
-      if(_SessionWindow("LONDON", utc_time, start_utc, end_utc)) return "LONDON";
-      if(_SessionWindow("NEW_YORK", utc_time, start_utc, end_utc)) return "NEW_YORK";
-      return "OFF_HOURS";
-   }
+    string _SessionName(const datetime server_time) const {
+       datetime utc_time = _ToUtc(server_time);
+       datetime start_utc, end_utc;
+       if(_SessionWindow("ASIA", utc_time, start_utc, end_utc)){
+          if(_IsWeekendUtc(start_utc)) return "OFF_HOURS";
+          return "ASIA";
+       }
+       if(_SessionWindow("LONDON", utc_time, start_utc, end_utc)){
+          if(_IsWeekendUtc(start_utc)) return "OFF_HOURS";
+          return "LONDON";
+       }
+       if(_SessionWindow("NEW_YORK", utc_time, start_utc, end_utc)){
+          if(_IsWeekendUtc(start_utc)) return "OFF_HOURS";
+          return "NEW_YORK";
+       }
+       return "OFF_HOURS";
+    }
 
    string _SessionCode(const string session_name) const {
       if(session_name == "ASIA") return "ASIA";
@@ -230,22 +250,23 @@ private:
       return "OFF";
    }
 
-   bool _IsKillZone(const datetime server_time) const {
-      datetime utc_time = _ToUtc(server_time);
-      datetime start_utc, end_utc;
-      return (_KillzoneWindow("ASIA", utc_time, start_utc, end_utc) ||
-              _KillzoneWindow("LONDON", utc_time, start_utc, end_utc) ||
-              _KillzoneWindow("NEW_YORK", utc_time, start_utc, end_utc));
-   }
+    bool _IsKillZone(const datetime server_time) const {
+       datetime utc_time = _ToUtc(server_time);
+       datetime start_utc, end_utc;
+       if(_KillzoneWindow("ASIA", utc_time, start_utc, end_utc) && !_IsWeekendUtc(start_utc)) return true;
+       if(_KillzoneWindow("LONDON", utc_time, start_utc, end_utc) && !_IsWeekendUtc(start_utc)) return true;
+       if(_KillzoneWindow("NEW_YORK", utc_time, start_utc, end_utc) && !_IsWeekendUtc(start_utc)) return true;
+       return false;
+    }
 
-   string _KillzoneName(const datetime server_time) const {
-      datetime utc_time = _ToUtc(server_time);
-      datetime start_utc, end_utc;
-      if(_KillzoneWindow("ASIA", utc_time, start_utc, end_utc)) return "ASIA";
-      if(_KillzoneWindow("LONDON", utc_time, start_utc, end_utc)) return "LONDON";
-      if(_KillzoneWindow("NEW_YORK", utc_time, start_utc, end_utc)) return "NEW_YORK";
-      return "NONE";
-   }
+    string _KillzoneName(const datetime server_time) const {
+       datetime utc_time = _ToUtc(server_time);
+       datetime start_utc, end_utc;
+       if(_KillzoneWindow("ASIA", utc_time, start_utc, end_utc) && !_IsWeekendUtc(start_utc)) return "ASIA";
+       if(_KillzoneWindow("LONDON", utc_time, start_utc, end_utc) && !_IsWeekendUtc(start_utc)) return "LONDON";
+       if(_KillzoneWindow("NEW_YORK", utc_time, start_utc, end_utc) && !_IsWeekendUtc(start_utc)) return "NEW_YORK";
+       return "NONE";
+    }
 
    double _AverageRecentRange(const MqlRates &rates[], const int got, const int idx, const int count) const {
       double sum = 0.0;
@@ -857,9 +878,47 @@ public:
       return _IsKillZone(t);
    }
 
-   string KillzoneCodeAt(const datetime server_time) const {
-      return (IsKillzoneAt(server_time) ? "K" : "NK");
-   }
+    string KillzoneCodeAt(const datetime server_time) const {
+       return (IsKillzoneAt(server_time) ? "K" : "NK");
+    }
+
+    //--- Diagnostic body for the TradeEngine [session_window] journal line.
+    //--- Pure formatter: window resolution stays in this authority (no copies
+    //--- in TradeEngine), emission + rate-limiting live at the call site.
+    //--- Market offset is evaluated at the resolved window START instant; the
+    //--- server offset is the same _ServerUtcOffsetSeconds() _ToUtc() uses;
+    //--- weekday is day_of_week of the window start (the T4 weekend instant),
+    //--- or of utc_now when no session window resolved (OFF_HOURS).
+    string SessionWindowDiagAt(const datetime server_time) const {
+       datetime t = (server_time > 0 ? server_time : TimeCurrent());
+       datetime utc_time = _ToUtc(t);
+       string session = _SessionName(t);
+       string kz = _KillzoneName(t);
+       datetime start_utc = 0, end_utc = 0;
+       bool has_window = false;
+       if(session == "ASIA" || session == "LONDON" || session == "NEW_YORK")
+          has_window = _SessionWindow(session, utc_time, start_utc, end_utc);
+       int mkt_off_h = 0;
+       if(has_window) mkt_off_h = _MarketUtcOffsetHours(session, start_utc);
+       int srv_off_sec = _ServerUtcOffsetSeconds();
+       MqlDateTime wts;
+       TimeToStruct((has_window ? start_utc : utc_time), wts);
+       string win_utc = "none";
+       string win_local = "none";
+       if(has_window){
+          win_utc = TimeToString(start_utc, TIME_DATE|TIME_SECONDS) + "->" + TimeToString(end_utc, TIME_DATE|TIME_SECONDS);
+          datetime ls = start_utc + mkt_off_h * 3600;
+          datetime le = end_utc + mkt_off_h * 3600;
+          win_local = TimeToString(ls, TIME_DATE|TIME_SECONDS) + "->" + TimeToString(le, TIME_DATE|TIME_SECONDS) + " " + session;
+       }
+       return ("session=" + session
+               + " killzone=" + kz
+               + " window_utc=" + win_utc
+               + " window_market_local=" + win_local
+               + " market_offset_h=" + IntegerToString(mkt_off_h)
+               + " server_utc_offset_sec=" + IntegerToString(srv_off_sec)
+               + " weekday=" + IntegerToString(wts.day_of_week));
+    }
 
    void PopulateSessionContext(const string symbol, const datetime server_time, PO3Context &ctx) const {
       datetime anchor = (server_time > 0 ? server_time : TimeCurrent());

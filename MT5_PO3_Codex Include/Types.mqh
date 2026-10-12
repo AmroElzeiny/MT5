@@ -513,11 +513,18 @@ struct TradePlan {
    // partial that existed to stop *in front of* an obstacle to a price *beyond* it,
    // so the shipped plan contradicted its own tp_model and its own target_candidates.
    bool   tp1_from_target_model;
-   // Minimum reward the execution layer will accept for a first leg, published by
-   // _MinTp1Reward so route selection, price building AND the AI target-candidate
-   // payload all judge a partial leg by the same number.  Three independent places
-   // used to decide this; only one of them actually measured the leg.
-   double min_tp1_reward;
+    // Minimum reward the execution layer will accept for a first leg, published by
+    // _MinTp1Reward so route selection, price building AND the AI target-candidate
+    // payload all judge a partial leg by the same number.  Three independent places
+    // used to decide this; only one of them actually measured the leg.
+    double min_tp1_reward;
+    // R4: explicit no-first-leg state.  A suppressed plan carries tp1 == 0.0 AND
+    // tp1_suppressed == true -- one representation read identically by the
+    // partial-close block (no tp1 price, so no hit), meta.tp1_done (stays false,
+    // so the R3 stop lock never arms), the AIGateBridge payload (tp1_suppressed
+    // flag, so Python skips the chosen_rr1 missing-leg demotion), and the
+    // StateStore save/restore pair (both fields round-trip).
+    bool   tp1_suppressed;
 
    // Context
    PO3Context po3;
@@ -707,6 +714,11 @@ struct TradePlan {
    double stop_quality_score;
    double realized_stop_quality;
    double realized_stop_buffer_r;
+   // R5: build-time stop-score audit terms, formatted by _ApplyStopAudit for the
+   // [score_breakdown] line (the initial stop distance is transient at audit
+   // time). Journal-only: carried by StateStore so restores keep build-time
+   // truth; never bridged to Python (the scores themselves already are).
+   string stop_score_terms;
    double ote_distance_frac;
    double ote_softness_frac;
    string ote_state;
@@ -881,8 +893,17 @@ struct TradePlan {
    double penalty_fvg_invalid_cut_pct;
    int    penalty_close_strikes;
 
-   // Position lifecycle
-   bool   tp1_done;
+    // Position lifecycle
+    bool   tp1_done;
+    // R3 half-stop penalty: one-time cut at InpHalfStopPenaltyTriggerR of ORIGINAL risk.
+    bool   half_stop_penalty_done;
+    int    half_stop_penalty_attempts;
+    // R3 TP1 stop lock: one-time broker-SL move to InpTP1StopLockRiskFrac of ORIGINAL
+    // risk after TP1. done latches only on a successful PositionModify (or when the
+    // live SL is already at/better than the lock level); attempts bounds broker
+    // retries via InpManagementActionMaxRetries and persists through StateStore.
+    bool   tp1_stop_lock_done;
+    int    tp1_stop_lock_attempts;
 
    // Analytics / empirical validation
    double planned_entry;
